@@ -1,0 +1,391 @@
+{
+  "users": [
+    {
+      "id": "96c666d0-c0e5-4a0a-b554-f4622a1023b2",
+      "name": "Rajesh Kumar Singh",
+      "email": "rajesh.kumar@email.com",
+      "mobile": "9876543210",
+      "password": "$2a$10$/WDfnZBOZsc5Dj6Tw1.0gOVCCfY1lObakHnNATZfTefYzjS2vS2R2",
+      "dateOfBirth": "1990-05-15",
+      "panNumber": "ABCDE1234F",
+      "kycStatus": "completed",
+      "isEmailVerified": true,
+      "isMobileVerified": true,
+      "creditScore": 720,
+      "riskCategory": "low",
+      "memberLevel": "silver",
+      "personalInfo": {
+        "fatherName": "Mohan Kumar Singh",
+        "motherName": "Sunita Singh",
+        "spouseName": "Priya Singh",
+        "address": "123, MG Road, Koramangala",
+        "city": "Bangalore",
+        "state": "Karnataka",
+        "pincode": "560034",
+        "maritalStatus": "married",
+        "education": "B.Tech Computer Science",
+        "employment": "Software Engineer",
+        "company": "TCS Limited",
+        "monthlyIncome": 75000,
+        "workExperience": "5 years"
+      },
+      "isActive": true,
+      "createdAt": "2025-09-10T17:19:31.566Z",
+      "updatedAt": "2025-09-10T17:19:31.566Z"
+    },
+    {
+      "id": "592e6bdf-db63-4148-85ad-d9c25b7cdb52",
+      "name": "Anjali Sharma",
+      "email": "anjali.sharma@email.com",
+      "mobile": "9876543211",
+      "password": "$2a$10$SgPWNCyxu2q9RDNrWtUbbOiAqYqjde/hRYqhCU2oJ.9PT96nSoapK",
+      "dateOfBirth": "1988-08-22",
+      "panNumber": "FGHIJ5678K",
+      "kycStatus": "pending",
+      "isEmailVerified": true,
+      "isMobileVerified": true,
+      "creditScore": 650,
+      "riskCategory": "medium",
+      "memberLevel": "bronze",
+      "personalInfo": {
+        "fatherName": "Ramesh Sharma",
+        "motherName": "Kavita Sharma",
+        "address": "456, Park Street, Sector 18",
+        "city": "Noida",
+        "state": "Uttar Pradesh",
+        "pincode": "201301",
+        "maritalStatus": "single",
+        "education": "MBA Finance",
+        "employment": "Business Analyst",
+        "company": "Infosys Limited",
+        "monthlyIncome": 85000,
+        "workExperience": "6 years"
+      },
+      "isActive": true,
+      "createdAt": "2025-09-10T17:19:31.703Z",
+      "updatedAt": "2025-09-10T17:19:31.703Z"
+    }
+  ],
+  "admins": [
+    {
+      "id": "f91a9d02-1a36-4f9a-b5a5-3458a56a0e29",
+      "name": "Sarah Johnson",
+      "email": "admin@pocketcredit.com",
+      "password": "$2a$10$rP2.auy/S8YvAeoI2HD4S.FkgyCDjOerHDBtJRsWMWORl/JECIPpu",
+      "role": "superadmin",
+      "permissions": [
+        "*"
+      ],
+      "isActive": true,
+      "createdAt": "2025-09-10T17:19:31.236Z",
+      "updatedAt": "2025-09-10T17:19:31.236Z"
+    },
+    {
+      "id": "1eb634c5-c858-4826-91ef-12fab2c83f34",
+      "name": "Raj Patel",
+      "email": "manager@pocketcredit.com",
+      "password": "$2a$10$unyzFVRebtk5RKqxwdYbU.XNmARjkBSaByqoWIAxCh9MEQOEM4VLe",
+      "role": "manager",
+      "permissions": [
+        "approve_loans",
+        "reject_loans",
+        "view_users",
+        "edit_loans",
+        "manage_documents"
+      ],
+      "isActive": true,
+      "createdAt": "2025-09-10T17:19:31.347Z",
+      "updatedAt": "2025-09-10T17:19:31.348Z"
+    },
+    {
+      "id": "3a7d029a-8798-4e6f-b0c0-2438f1d043a7",
+      "name": "Priya Singh",
+      "email": "officer@pocketcredit.com",
+      "password": "$2a$10$5lp3jSToBKG50zLm1triS.WKolPgixWefzcqcCRKoajMw.sImdR46",
+      "role": "officer",
+      "permissions": [
+        "view_loans",
+        "view_users",
+        "add_notes",
+        "verify_documents"
+      ],
+      "isActive": true,
+      "createdAt": "2025-09-10T17:19:31.456Z",
+      "updatedAt": "2025-09-10T17:19:31.456Z"
+    }
+  ],
+  "loans": [
+    {
+      "id": "ea6c80a2-7483-4101-b913-4a3e212fedad",
+      "loanId": "CL250912",
+      "userId": "96c666d0-c0e5-4a0a-b554-f4622a1023b2",
+      "type": "personal",
+      "amount": 500000,
+      "tenure": 36,
+      "purpose": "Home Renovation",
+      "interestRate": 14,
+      "emi": 17094,
+      "status": "under_review",
+      "applicationData": {
+        "monthlyIncome": 75000,
+        "employmentType": "salaried",
+        "companyName": "TCS Limited",
+        "workExperience": "5 years",
+        "existingLoans": 0,
+        "cibilScore": 720
+      },
+      "processingFee": 5000,
+      "insurance": 2500,
+      "createdAt": "2025-01-09T10:00:00.000Z",
+      "updatedAt": "2025-01-09T10:00:00.000Z"
+    },
+    {
+      "id": "7499b95f-75b1-4783-9c8e-1fa713209f48",
+      "loanId": "CL240815",
+      "userId": "96c666d0-c0e5-4a0a-b554-f4622a1023b2",
+      "type": "personal",
+      "amount": 200000,
+      "tenure": 24,
+      "purpose": "Medical Emergency",
+      "interestRate": 16,
+      "emi": 9578,
+      "status": "closed",
+      "applicationData": {
+        "monthlyIncome": 75000,
+        "employmentType": "salaried",
+        "companyName": "TCS Limited",
+        "workExperience": "4 years",
+        "existingLoans": 0,
+        "cibilScore": 710
+      },
+      "processingFee": 2000,
+      "insurance": 1000,
+      "disbursalDate": "2024-08-20T10:00:00.000Z",
+      "closedDate": "2024-12-05T10:00:00.000Z",
+      "createdAt": "2024-08-15T10:00:00.000Z",
+      "updatedAt": "2024-12-05T10:00:00.000Z"
+    }
+  ],
+  "documents": [
+    {
+      "id": "45e3d680-0203-4010-8d12-4eb460caa581",
+      "userId": "96c666d0-c0e5-4a0a-b554-f4622a1023b2",
+      "name": "PAN Card",
+      "type": "identity",
+      "status": "verified",
+      "fileName": "pan_card.pdf",
+      "fileSize": "1.2 MB",
+      "uploadPath": "/uploads/documents/",
+      "verifiedBy": "1eb634c5-c858-4826-91ef-12fab2c83f34",
+      "verificationDate": "2025-01-09T10:00:00.000Z",
+      "remarks": "Clear and valid PAN card",
+      "createdAt": "2025-01-09T09:00:00.000Z",
+      "updatedAt": "2025-01-09T10:00:00.000Z"
+    },
+    {
+      "id": "f0e9e4db-64e1-43d4-aa62-b5a532550c2e",
+      "userId": "96c666d0-c0e5-4a0a-b554-f4622a1023b2",
+      "name": "Aadhaar Card",
+      "type": "identity",
+      "status": "verified",
+      "fileName": "aadhaar_card.pdf",
+      "fileSize": "0.8 MB",
+      "uploadPath": "/uploads/documents/",
+      "verifiedBy": "1eb634c5-c858-4826-91ef-12fab2c83f34",
+      "verificationDate": "2025-01-09T10:00:00.000Z",
+      "remarks": "Address matches with application",
+      "createdAt": "2025-01-09T09:00:00.000Z",
+      "updatedAt": "2025-01-09T10:00:00.000Z"
+    }
+  ],
+  "transactions": [
+    {
+      "id": "ffe2328c-acfb-43e9-9100-68e5cd787ff9",
+      "userId": "96c666d0-c0e5-4a0a-b554-f4622a1023b2",
+      "loanId": "CL250912",
+      "type": "debit",
+      "amount": -999,
+      "description": "Application Fee",
+      "status": "completed",
+      "reference": "APP_FEE_CL250912",
+      "method": "UPI",
+      "createdAt": "2025-01-09T10:30:00.000Z",
+      "updatedAt": "2025-01-09T10:30:00.000Z"
+    },
+    {
+      "id": "621a122d-eccc-4c09-86bb-2efb5dc75f1e",
+      "userId": "96c666d0-c0e5-4a0a-b554-f4622a1023b2",
+      "loanId": "CL240815",
+      "type": "debit",
+      "amount": -9578,
+      "description": "Final EMI Payment",
+      "status": "completed",
+      "reference": "EMI_24_CL240815",
+      "method": "Auto Debit",
+      "createdAt": "2024-12-05T10:00:00.000Z",
+      "updatedAt": "2024-12-05T10:00:00.000Z"
+    }
+  ],
+  "notes": [
+    {
+      "id": "a98b8339-5413-4a11-9c51-0d1d1d853e6d",
+      "userId": "96c666d0-c0e5-4a0a-b554-f4622a1023b2",
+      "adminId": "1eb634c5-c858-4826-91ef-12fab2c83f34",
+      "note": "Customer has good employment history and stable income. CIBIL score is satisfactory. Previous loan repayment record is excellent.",
+      "type": "assessment",
+      "category": "positive",
+      "visibility": "internal",
+      "createdAt": "2025-01-09T10:00:00.000Z",
+      "updatedAt": "2025-01-09T10:00:00.000Z"
+    }
+  ],
+  "followUps": [],
+  "smsLog": [],
+  "loginHistory": [],
+  "references": [
+    {
+      "id": "364e07d6-b168-4521-aaf5-f17dc9aafa2c",
+      "userId": "96c666d0-c0e5-4a0a-b554-f4622a1023b2",
+      "name": "Amit Sharma",
+      "relationship": "friend",
+      "phone": "9988776655",
+      "email": "amit.sharma@email.com",
+      "address": "HSR Layout, Bangalore",
+      "verificationStatus": "verified",
+      "contactedDate": "2025-01-09T10:00:00.000Z",
+      "feedback": "Confirmed employment and character. Positive reference.",
+      "createdAt": "2025-09-10T17:19:31.704Z",
+      "updatedAt": "2025-09-10T17:19:31.704Z"
+    }
+  ],
+  "bankInfo": [
+    {
+      "id": "f4117d10-b51c-4b22-9df0-3e29da5c5405",
+      "userId": "96c666d0-c0e5-4a0a-b554-f4622a1023b2",
+      "bankName": "HDFC Bank",
+      "accountNumber": "50100123456789",
+      "ifscCode": "HDFC0001234",
+      "accountType": "savings",
+      "accountHolderName": "Rajesh Kumar Singh",
+      "branchName": "Koramangala Branch",
+      "averageBalance": 125000,
+      "relationshipLength": "5 years",
+      "isVerified": true,
+      "createdAt": "2025-09-10T17:19:31.704Z",
+      "updatedAt": "2025-09-10T17:19:31.704Z"
+    }
+  ],
+  "cibilData": [
+    {
+      "id": "b94aa8f3-c43d-43bd-981b-a5b8fc4239f3",
+      "userId": "96c666d0-c0e5-4a0a-b554-f4622a1023b2",
+      "score": 720,
+      "lastUpdated": "2024-12-15T10:00:00.000Z",
+      "trend": "improving",
+      "factors": {
+        "paymentHistory": {
+          "score": 85,
+          "status": "good"
+        },
+        "creditUtilization": {
+          "score": 78,
+          "status": "fair"
+        },
+        "creditLength": {
+          "score": 82,
+          "status": "good"
+        },
+        "creditMix": {
+          "score": 75,
+          "status": "fair"
+        },
+        "newCredit": {
+          "score": 88,
+          "status": "excellent"
+        }
+      },
+      "accounts": [
+        {
+          "type": "Credit Card",
+          "bank": "HDFC Bank",
+          "limit": 500000,
+          "outstanding": 125000,
+          "utilization": 25,
+          "status": "active",
+          "monthsReported": 36
+        }
+      ],
+      "inquiries": [
+        {
+          "date": "2025-01-07",
+          "type": "Personal Loan",
+          "inquiredBy": "Pocket Credit"
+        }
+      ],
+      "createdAt": "2025-09-10T17:19:31.704Z",
+      "updatedAt": "2025-09-10T17:19:31.704Z"
+    }
+  ],
+  "panData": [
+    {
+      "id": "d45bb52d-e4a4-44f3-b439-c4b2eaa06cef",
+      "userId": "96c666d0-c0e5-4a0a-b554-f4622a1023b2",
+      "panNumber": "ABCDE1234F",
+      "name": "RAJESH KUMAR SINGH",
+      "dateOfBirth": "15/05/1990",
+      "status": "valid",
+      "lastVerified": "2025-01-09T10:00:00.000Z",
+      "linkingStatus": {
+        "aadhaar": true,
+        "bank": true,
+        "mobile": true,
+        "email": false
+      },
+      "filings": [
+        {
+          "year": "2023-24",
+          "status": "filed",
+          "income": 900000
+        },
+        {
+          "year": "2022-23",
+          "status": "filed",
+          "income": 850000
+        },
+        {
+          "year": "2021-22",
+          "status": "filed",
+          "income": 750000
+        }
+      ],
+      "createdAt": "2025-09-10T17:19:31.704Z",
+      "updatedAt": "2025-09-10T17:19:31.704Z"
+    }
+  ],
+  "otpCodes": [],
+  "settings": {
+    "smsEnabled": true,
+    "emailEnabled": true,
+    "maxLoanAmount": 5000000,
+    "minCreditScore": 600,
+    "interestRates": {
+      "personal": {
+        "min": 12,
+        "max": 24
+      },
+      "business": {
+        "min": 14,
+        "max": 28
+      }
+    }
+  },
+  "metadata": {
+    "lastUpdated": "2025-09-14T06:30:37.658Z",
+    "version": "1.0.0"
+  },
+  "sequences": {
+    "loanId": 250912,
+    "applicationId": 100001,
+    "transactionId": 200001
+  }
+}
