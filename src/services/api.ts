@@ -70,7 +70,7 @@ class ApiService {
 
   constructor() {
     this.api = axios.create({
-      baseURL: 'http://localhost:3002/api', // Use full URL instead of proxy
+      baseURL: process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:3002/api',
       timeout: 30000, // Increased timeout to 30 seconds
       withCredentials: true, // Important: Send cookies for session management
       headers: {
