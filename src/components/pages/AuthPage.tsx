@@ -42,7 +42,7 @@ export function AuthPage() {
     
     try {
       // Call the API service directly to avoid context loading state conflicts
-      const response = await fetch('http://localhost:3002/api/auth/send-otp', {
+      const response = await fetch('/api/auth/send-otp', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
