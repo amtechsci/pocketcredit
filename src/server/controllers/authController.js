@@ -47,11 +47,22 @@ const sendOtp = async (req, res) => {
       // In production, you might want to fail here or use an alternative storage
     }
 
-    // Log OTP to console for testing (remove in production)
-    console.log(`📱 OTP for ${mobile}: ${otp} (Valid for 5 minutes)`);
-
-    // In production, integrate with SMS service like Twilio
-    // await sendSMS(mobile, `Your Pocket Credit OTP is: ${otp}. Valid for 5 minutes.`);
+    // Send SMS using your SMS service
+    const message = `${otp} is OTP for Creditlab login verification & valid till 2min. Don't share this OTP with anyone.`;
+    const template_id = '1407174844163241940';
+    const sender = 'CREDLB';
+    
+    const smsUrl = `https://sms.smswala.in/app/smsapi/index.php?key=2683C705E7CB39&campaign=16613&routeid=30&type=text&contacts=${mobile}&senderid=${sender}&msg=${encodeURIComponent(message)}&template_id=${template_id}&pe_id=1401337620000065797`;
+    
+    try {
+      const response = await fetch(smsUrl);
+      const result = await response.text();
+      console.log(`📱 SMS sent to ${mobile}: ${result}`);
+    } catch (error) {
+      console.error('SMS sending failed:', error);
+      // Log OTP to console as fallback
+      console.log(`📱 OTP for ${mobile}: ${otp} (Valid for 5 minutes) - SMS failed`);
+    }
 
     res.json({
       status: 'success',

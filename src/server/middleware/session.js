@@ -24,7 +24,7 @@ const sessionConfig = {
   saveUninitialized: false,
   rolling: true, // Reset expiry on each request
   cookie: {
-    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+    secure: false, // Allow HTTP for now (set to true when using HTTPS)
     httpOnly: true, // Prevent XSS attacks
     maxAge: 24 * 60 * 60 * 1000, // 24 hours in milliseconds
     sameSite: 'lax' // CSRF protection
