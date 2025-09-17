@@ -61,24 +61,24 @@ export function GrievanceRedressalPage() {
   const escalationProcess = [
     {
       level: "Level 1",
-      handler: "Branch/Place of Business",
+      handler: "Branch / Place where Business is transacted",
       timeline: "7 days",
-      description: "Initial complaint review and resolution attempt at branch level",
+      description: "Customers can make a written complaint to the relevant Branch Manager. The branch will aim to provide an initial response to the complaint within 7 days.",
       contact: {
         method: "Written complaint to Branch Manager",
-        email: "support@creditlab.in",
+        email: "support@pocketcredit.in",
         phone: "+91 9346551691",
-        address: "#30 2nd Floor 1st Main BHCS Layout BTM 2nd Stage Opp Gopalan Innovation Mall, Bengaluru, Karnataka 560076"
+        address: "Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI MAHARASHTRA , MUMBAI, Maharashtra, India - 421001"
       }
     },
     {
       level: "Level 2", 
       handler: "Grievance Redressal Officer",
       timeline: "7 working days",
-      description: "Escalated review by dedicated grievance redressal officer",
+      description: "If a customer is not satisfied with the response from the branch, they can escalate the complaint to the Grievance Redressal Officer.",
       contact: {
         name: "Mr. Kowshik",
-        email: "grievance@creditlab.in",
+        email: "grievance@pocketcredit.in",
         phone: "+91 9346551691"
       }
     },
@@ -86,10 +86,10 @@ export function GrievanceRedressalPage() {
       level: "Level 3",
       handler: "Chief Nodal Officer",
       timeline: "15 working days",
-      description: "Final internal escalation to Chief Nodal Officer",
+      description: "If the customer is still not satisfied with the response or has not received one from the Grievance Redressal Officer within 15 days of their initial complaint, they can contact the Company's Chief Nodal Officer.",
       contact: {
         name: "MR. Abhishek M R",
-        email: "abhi@creditlab.in",
+        email: "abhi@pocketcredit.in",
         phone: "+91 7259333111"
       }
     },
@@ -97,7 +97,7 @@ export function GrievanceRedressalPage() {
       level: "Level 4",
       handler: "Reserve Bank of India",
       timeline: "After 1 month",
-      description: "External escalation to RBI if not satisfied with internal resolution",
+      description: "If a complaint does not receive a response from the Company within one month, or if a customer is dissatisfied with the response at all levels, they may approach the Reserve Bank of India.",
       contact: {
         address: "Reserve Bank of India, 15, Netaji Subhas Rd, Fairley Place, B.B.D. Bagh, Kolkata, West Bengal 700001",
         phone: "033 2230 3299",
@@ -181,7 +181,7 @@ export function GrievanceRedressalPage() {
                 <div className="mt-4 p-4 bg-blue-50 rounded-lg max-w-2xl mx-auto">
                   <p className="text-sm text-blue-700">
                     <strong>Note:</strong> For immediate assistance, you can also call our Customer Care at 
-                    <strong> +91 9346551691</strong> or email <strong>support@creditlab.in</strong>
+                    <strong> +91 9346551691</strong> or email <strong>support@pocketcredit.in</strong>
                   </p>
                 </div>
               </div>
@@ -313,7 +313,7 @@ export function GrievanceRedressalPage() {
                       <div className="text-center p-4 rounded-lg" style={{ backgroundColor: '#F0F4F8' }}>
                         <Mail className="h-8 w-8 mx-auto mb-2" style={{ color: '#0052FF' }} />
                         <div style={{ color: '#1E2A3B' }}>Email Support</div>
-                        <div style={{ color: '#1E2A3B' }}>support@creditlab.in</div>
+                        <div style={{ color: '#1E2A3B' }}>support@pocketcredit.in</div>
                         <div className="text-sm" style={{ color: '#1E2A3B' }}>Initial response within 7 days</div>
                       </div>
 
@@ -455,7 +455,7 @@ export function GrievanceRedressalPage() {
                         </div>
                         <div className="flex items-center gap-3">
                           <Mail className="h-5 w-5" style={{ color: '#0052FF' }} />
-                          <div style={{ color: '#1E2A3B' }}>grievance@creditlab.in</div>
+                          <div style={{ color: '#1E2A3B' }}>grievance@pocketcredit.in</div>
                         </div>
                         <div className="flex items-center gap-3">
                           <Phone className="h-5 w-5" style={{ color: '#0052FF' }} />
@@ -464,9 +464,9 @@ export function GrievanceRedressalPage() {
                         <div className="flex items-start gap-3">
                           <Building className="h-5 w-5 mt-1" style={{ color: '#0052FF' }} />
                           <div className="text-sm" style={{ color: '#1E2A3B' }}>
-                            #30 2nd Floor 1st Main BHCS Layout<br />
-                            BTM 2nd Stage Opp Gopalan Innovation Mall<br />
-                            Bengaluru, Karnataka 560076
+                            Mahadev Compound Gala No. A7, Dhobi Ghat Road<br />
+                            Ulhasnagar MUMBAI MAHARASHTRA , MUMBAI<br />
+                            Maharashtra, India - 421001
                           </div>
                         </div>
                       </div>
@@ -491,7 +491,7 @@ export function GrievanceRedressalPage() {
                         </div>
                         <div className="flex items-center gap-3">
                           <Mail className="h-5 w-5" style={{ color: '#0052FF' }} />
-                          <div style={{ color: '#1E2A3B' }}>abhi@creditlab.in</div>
+                          <div style={{ color: '#1E2A3B' }}>abhi@pocketcredit.in</div>
                         </div>
                         <div className="flex items-center gap-3">
                           <Phone className="h-5 w-5" style={{ color: '#0052FF' }} />

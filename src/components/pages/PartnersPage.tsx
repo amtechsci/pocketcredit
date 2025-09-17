@@ -103,7 +103,7 @@ export function PartnersPage() {
             </p>
             <div className="max-w-2xl mx-auto p-4 bg-blue-50 rounded-lg">
               <p className="text-sm text-blue-700">
-                <strong>Corporate Address:</strong> #30 2nd Floor 1st Main BHCS Layout BTM 2nd Stage Opp Gopalan Innovation Mall, Bengaluru, Karnataka 560076
+                <strong>Corporate Address:</strong> Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI MAHARASHTRA , MUMBAI, Maharashtra, India - 421001
               </p>
             </div>
           </div>
@@ -320,9 +320,9 @@ export function PartnersPage() {
                     <div>
                       <div className="font-medium" style={{ color: '#1E2A3B' }}>Corporate Office</div>
                       <div className="text-sm text-gray-600">
-                        #30 2nd Floor 1st Main BHCS Layout<br />
-                        BTM 2nd Stage Opp Gopalan Innovation Mall<br />
-                        Bengaluru, Karnataka 560076
+                        Mahadev Compound Gala No. A7, Dhobi Ghat Road<br />
+                        Ulhasnagar MUMBAI MAHARASHTRA , MUMBAI<br />
+                        Maharashtra, India - 421001
                       </div>
                     </div>
                   </div>

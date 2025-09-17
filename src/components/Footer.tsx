@@ -21,7 +21,7 @@ export function Footer() {
     { label: 'Terms & Conditions', path: '/terms' },
     { label: 'Fair Practice Code', path: '/fair-practice' },
     { label: 'Grievance Redressal', path: '/grievance' },
-    { label: 'Disclaimer & Disclosure', path: '/disclaimer' },
+    { label: 'IT, Fees & Fair Practice Policy', path: '/it-fees-fair-practice-policy' },
   ];
 
   return (

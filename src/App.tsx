@@ -254,7 +254,7 @@ function AppContent() {
           </LayoutWithHeaderFooter>
         } />
         
-        <Route path="/disclaimer" element={
+        <Route path="/it-fees-fair-practice-policy" element={
           <LayoutWithHeaderFooter>
             <DisclaimerPage />
           </LayoutWithHeaderFooter>

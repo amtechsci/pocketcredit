@@ -1,118 +1,174 @@
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Shield, FileText, Eye, Info, Clock, Building2, Scale } from 'lucide-react';
+import { FileText, Clock, Scale, CheckCircle, DollarSign, Settings } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { Alert, AlertDescription } from '../ui/alert';
+import { Button } from '../ui/button';
 
 export function DisclaimerPage() {
   const navigate = useNavigate();
-  const disclaimerSections = [
+
+  useEffect(() => {
+    document.title = 'IT, Fees & Fair Practice Policy - Pocket Credit';
+  }, []);
+
+  // IT Policy Content
+  const itPolicySections = [
     {
-      title: "General Disclaimer",
+      title: "Information Security",
       content: [
-        "The information provided on this website is for general informational purposes only and should not be construed as financial, legal, or investment advice.",
-        "While we strive to provide accurate and up-to-date information, we make no representations or warranties of any kind, express or implied, about the completeness, accuracy, reliability, suitability, or availability of the information, products, services, or related graphics contained on this website.",
-        "Any reliance you place on such information is strictly at your own risk. In no event will we be liable for any loss or damage arising from the use of this website."
+        "We implement industry-standard security measures to protect customer data and information.",
+        "All data transmission is encrypted using 256-bit SSL encryption technology.",
+        "Access to customer data is restricted to authorized personnel only.",
+        "Regular security audits and penetration testing are conducted to ensure system integrity.",
+        "We comply with the Information Technology Act, 2000 and related regulations."
       ]
     },
     {
-      title: "Loan Products Disclaimer",
+      title: "Data Collection and Usage",
       content: [
-        "Loan approval is subject to verification of documents, credit score assessment, and meeting our eligibility criteria.",
-        "Interest rates, processing fees, and other charges are subject to change without prior notice and may vary based on individual risk profiles.",
-        "The actual loan amount sanctioned may differ from the amount applied for, based on our internal assessment and risk evaluation.",
-        "All loan products are subject to the terms and conditions of the respective partner lending institutions."
+        "We collect only necessary information required for loan processing and verification.",
+        "Customer data is used solely for legitimate business purposes and regulatory compliance.",
+        "We do not sell or share customer data with third parties without explicit consent.",
+        "Data retention policies are in place to ensure data is not kept longer than necessary.",
+        "Customers have the right to access, modify, or delete their personal information."
       ]
     },
     {
-      title: "Third-Party Services",
+      title: "System Availability",
       content: [
-        "We partner with various NBFCs and financial institutions to provide loan products. We are not responsible for the services, terms, or policies of these third-party lenders.",
-        "Credit scores and reports are provided by third-party agencies. We do not guarantee the accuracy of these reports.",
-        "External links on our website may direct you to third-party sites. We are not responsible for the content or practices of these external sites."
-      ]
-    },
-    {
-      title: "Technology and System Availability",
-      content: [
-        "While we strive to maintain system availability 24/7, we do not guarantee uninterrupted access to our services.",
-        "Technical issues, maintenance, or other factors beyond our control may result in temporary service interruptions.",
-        "We are not liable for any losses or damages resulting from system downtime or technical issues."
+        "We strive to maintain 99.9% system uptime for our digital platform.",
+        "Scheduled maintenance windows are communicated in advance to minimize disruption.",
+        "We have backup systems and disaster recovery procedures in place.",
+        "Technical support is available 24/7 for critical issues.",
+        "System performance is continuously monitored and optimized."
       ]
     }
   ];
 
-  const disclosures = [
+  // Fees Policy Content
+  const feesPolicySections = [
     {
-      title: "Company Information",
-      items: [
-        "Company Name: Pocket Credit Technologies Private Limited",
-        "CIN: U65921MH2019PTC325847",
-        "Registered Office: 15th Floor, Tower A, Peninsula Business Park, Mumbai - 400013",
-        "Email: info@pocketcredit.in",
-        "Phone: 1800-123-4567"
+      title: "Processing Fees",
+      content: [
+        "Processing fees range from 1% to 3% of the loan amount, depending on the loan product and risk profile.",
+        "Fees are calculated and displayed upfront before loan approval.",
+        "No hidden charges or surprise fees are levied.",
+        "Processing fees are non-refundable once the loan is disbursed.",
+        "GST at applicable rates is charged on all fees."
       ]
     },
     {
-      title: "Regulatory Information",
-      items: [
-        "We are a digital lending platform that facilitates loans through our partner NBFCs and banks.",
-        "We are not a Non-Banking Financial Company (NBFC) and do not lend money directly.",
-        "All lending activities are conducted by our partner institutions who are duly licensed by the Reserve Bank of India.",
-        "We comply with all applicable laws and regulations including the Information Technology Act, 2000 and RBI guidelines."
+      title: "Interest Rates",
+      content: [
+        "Interest rates range from 12% to 36% per annum, based on creditworthiness and loan tenure.",
+        "Rates are fixed for the entire loan tenure and communicated clearly upfront.",
+        "No prepayment penalties for early loan closure.",
+        "Interest is calculated on a reducing balance basis.",
+        "Late payment charges of 2% per month may apply for delayed payments."
       ]
     },
     {
-      title: "Data and Privacy",
-      items: [
-        "We collect and process personal data in accordance with our Privacy Policy and applicable data protection laws.",
-        "Credit bureau data is accessed only with customer consent and for legitimate lending purposes.",
-        "Customer data is shared with partner lenders only after proper consent and for loan processing purposes.",
-        "We implement industry-standard security measures to protect customer data."
-      ]
-    },
-    {
-      title: "Fees and Charges",
-      items: [
-        "We may charge convenience fees for certain services as disclosed during the application process.",
-        "Partner lenders may charge processing fees, administrative charges, and other fees as per their terms.",
-        "All fees and charges are transparently disclosed before loan agreement execution.",
-        "GST and other applicable taxes will be charged extra on all fees and charges."
+      title: "Other Charges",
+      content: [
+        "Documentation charges: ₹500 (one-time, non-refundable)",
+        "EMI bounce charges: ₹500 per instance",
+        "Legal charges: As per actuals (only in case of recovery proceedings)",
+        "All charges are clearly disclosed in the loan agreement.",
+        "No charges for loan closure or prepayment."
       ]
     }
   ];
 
-  const risks = [
+  // Fair Practice Code Content
+  const fairPracticeSections = [
     {
-      icon: AlertTriangle,
-      title: "Credit Risk",
-      description: "Loan defaults can impact your credit score and future borrowing ability. Ensure you can comfortably repay before borrowing."
+      title: "Transparency in Lending",
+      content: [
+        "All terms and conditions are clearly communicated in simple language.",
+        "Interest rates, fees, and charges are disclosed upfront before loan approval.",
+        "No hidden charges or surprise fees are levied.",
+        "Loan agreements are provided in both English and local language.",
+        "Customers are given adequate time to review and understand loan terms."
+      ]
     },
     {
-      icon: Clock,
-      title: "Interest Rate Risk",
-      description: "Interest rates may vary based on market conditions and your credit profile. Fixed rates may be higher than floating rates initially."
+      title: "Responsible Lending",
+      content: [
+        "We assess customer's repayment capacity before sanctioning loans.",
+        "We do not encourage over-borrowing or multiple simultaneous loans.",
+        "Clear communication about loan obligations and consequences of default.",
+        "Flexible repayment options are offered based on customer's financial situation.",
+        "We provide financial literacy resources to help customers make informed decisions."
+      ]
+    },
+    {
+      title: "Customer Rights",
+      content: [
+        "Right to receive all loan-related documents and information.",
+        "Right to grievance redressal through our multi-level complaint mechanism.",
+        "Right to privacy and data protection as per applicable laws.",
+        "Right to fair treatment and non-discrimination.",
+        "Right to transparent communication about loan status and terms."
+      ]
+    }
+  ];
+
+  // FAQ Content
+  const faqItems = [
+    {
+      question: "What is the eligibility to apply for loan?",
+      answer: "A person with monthly net income of Rs.25000 • Applying from Any city in India."
+    },
+    {
+      question: "What is the maximum loan amount I am eligible for?",
+      answer: "We give loans upto Rs 6000 - Rs 1 lakh. The sanctioned loan amount depends on your financial and credit history information."
+    },
+    {
+      question: "What are the steps involved to get a loan?",
+      answer: "The steps involved are: 1. Loan application. 2. KYC verification. 3. Fill bank account details. 4. Loan disbursal."
+    },
+    {
+      question: "How much time does it take to get money in the account?",
+      answer: "Loan sanction is instant on the website. After that we verify the information from submitted documents. Once approved, money is disbursed in 30min"
+    }
+  ];
+
+  // Service Features
+  const serviceFeatures = [
+    {
+      icon: CheckCircle,
+      title: "100% online",
+      description: "Complete digital process from application to disbursal"
     },
     {
       icon: FileText,
-      title: "Documentation Risk",
-      description: "Incomplete or incorrect documentation may lead to loan rejection or delays in processing."
+      title: "Minimum Documentation",
+      description: "Simple and quick document verification process"
     },
     {
-      icon: Scale,
-      title: "Legal Risk",
-      description: "Loan agreements are legally binding contracts. Ensure you understand all terms and conditions before signing."
+      icon: Clock,
+      title: "Disbursal in 30 minutes",
+      description: "Fast approval and quick fund transfer"
     }
   ];
 
-  const importantNotes = [
-    "This platform is designed for users aged 18 years and above.",
-    "Loans are subject to individual eligibility and creditworthiness assessment.",
-    "We recommend borrowing only what you can comfortably repay to avoid financial stress.",
-    "Always read and understand the loan agreement terms before signing.",
-    "Contact our customer support for any clarifications before applying for a loan."
+  const processSteps = [
+    {
+      step: "1",
+      title: "Simple Registration",
+      description: "Quick and easy account creation with basic details"
+    },
+    {
+      step: "2", 
+      title: "Quick verification",
+      description: "Fast KYC and document verification process"
+    },
+    {
+      step: "3",
+      title: "Instant Fund Transfer",
+      description: "Money credited to your account within 30 minutes"
+    }
   ];
 
   return (
@@ -129,94 +185,102 @@ export function DisclaimerPage() {
             </div>
           </div>
           <h1 className="text-4xl md:text-5xl mb-6 text-white">
-            Disclaimer & Disclosure
+            IT, Fees & Fair Practice Policy
           </h1>
           <p className="text-xl text-gray-300 mb-8 max-w-3xl mx-auto">
-            Important information about our services, risks, and regulatory compliance. 
+            Comprehensive information about our IT policy, fees policy, fair practice code, and loan services. 
             Please read carefully before using our platform.
           </p>
         </div>
       </section>
 
-      {/* Alert Banner */}
-      <section className="py-6 px-4">
+      {/* Service Features Section */}
+      <section className="py-16 px-4">
         <div className="max-w-6xl mx-auto">
-          <Alert className="border-orange-200 bg-orange-50">
-            <AlertTriangle className="h-4 w-4 text-orange-600" />
-            <AlertDescription className="text-orange-800">
-              <strong>Important:</strong> This document contains critical information about risks, limitations, and regulatory aspects of our services. 
-              Please read all sections carefully. If you have any questions, contact our customer support before proceeding.
-            </AlertDescription>
-          </Alert>
+          <div className="text-center mb-12">
+            <h2 className="text-3xl mb-4" style={{ color: '#1E2A3B' }}>
+              We Are Fully Dedicated To Support You
+            </h2>
+            <p className="text-lg text-gray-600 mb-8">
+              How it works? Simple Registration • Quick verification • Instant Fund Transfer
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-16">
+            {processSteps.map((step, index) => (
+              <Card key={index} className="text-center">
+                <CardContent className="p-8">
+                  <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style={{ backgroundColor: '#0052FF' }}>
+                    <span className="text-2xl font-bold text-white">{step.step}</span>
+                  </div>
+                  <h3 className="text-xl mb-3" style={{ color: '#1E2A3B' }}>
+                    {step.title}
+                  </h3>
+                  <p className="text-gray-600">
+                    {step.description}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          <div className="text-center mb-12">
+            <h2 className="text-3xl mb-4" style={{ color: '#1E2A3B' }}>
+              Our Loans
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-16">
+            {serviceFeatures.map((feature, index) => (
+              <Card key={index} className="text-center">
+                <CardContent className="p-8">
+                  <feature.icon className="h-12 w-12 mx-auto mb-4" style={{ color: '#00C49A' }} />
+                  <h3 className="text-xl mb-3" style={{ color: '#1E2A3B' }}>
+                    {feature.title}
+                  </h3>
+                  <p className="text-gray-600">
+                    {feature.description}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       </section>
 
       {/* Main Content */}
       <section className="py-16 px-4">
         <div className="max-w-6xl mx-auto">
-          <Tabs defaultValue="disclaimers" className="space-y-8">
+          <Tabs defaultValue="it-policy" className="space-y-8">
             <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="disclaimers">Disclaimers</TabsTrigger>
-              <TabsTrigger value="disclosures">Disclosures</TabsTrigger>
-              <TabsTrigger value="risks">Risk Factors</TabsTrigger>
-              <TabsTrigger value="notes">Important Notes</TabsTrigger>
+              <TabsTrigger value="it-policy">IT Policy</TabsTrigger>
+              <TabsTrigger value="fees-policy">Fees Policy</TabsTrigger>
+              <TabsTrigger value="fair-practice">Fair Practice Code</TabsTrigger>
+              <TabsTrigger value="faq">FAQ</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="disclaimers" className="space-y-6">
+            <TabsContent value="it-policy" className="space-y-6">
               <div className="text-center mb-8">
                 <h2 className="text-3xl mb-4" style={{ color: '#1E2A3B' }}>
-                  Legal Disclaimers
+                  IT Policy
                 </h2>
                 <p style={{ color: '#1E2A3B' }}>
-                  Important disclaimers regarding our services and platform usage.
+                  Information technology policies and security measures for our digital platform.
                 </p>
               </div>
 
               <div className="space-y-6">
-                {disclaimerSections.map((section, index) => (
+                {itPolicySections.map((section, index) => (
                   <Card key={index}>
                     <CardHeader>
                       <CardTitle className="flex items-center gap-3" style={{ color: '#1E2A3B' }}>
-                        <FileText className="h-5 w-5" style={{ color: '#0052FF' }} />
+                        <Settings className="h-5 w-5" style={{ color: '#0052FF' }} />
                         {section.title}
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="space-y-3">
-                        {section.content.map((item, idx) => (
-                          <p key={idx} style={{ color: '#1E2A3B' }}>
-                            {item}
-                          </p>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </TabsContent>
-
-            <TabsContent value="disclosures" className="space-y-6">
-              <div className="text-center mb-8">
-                <h2 className="text-3xl mb-4" style={{ color: '#1E2A3B' }}>
-                  Regulatory Disclosures
-                </h2>
-                <p style={{ color: '#1E2A3B' }}>
-                  Mandatory disclosures as per regulatory requirements and industry standards.
-                </p>
-              </div>
-
-              <div className="space-y-6">
-                {disclosures.map((disclosure, index) => (
-                  <Card key={index}>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-3" style={{ color: '#1E2A3B' }}>
-                        <Info className="h-5 w-5" style={{ color: '#0052FF' }} />
-                        {disclosure.title}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
                       <ul className="space-y-2">
-                        {disclosure.items.map((item, idx) => (
+                        {section.content.map((item, idx) => (
                           <li key={idx} className="flex items-start gap-2" style={{ color: '#1E2A3B' }}>
                             <div className="w-2 h-2 rounded-full mt-2 flex-shrink-0" style={{ backgroundColor: '#00C49A' }}></div>
                             {item}
@@ -229,145 +293,120 @@ export function DisclaimerPage() {
               </div>
             </TabsContent>
 
-            <TabsContent value="risks" className="space-y-6">
+            <TabsContent value="fees-policy" className="space-y-6">
               <div className="text-center mb-8">
                 <h2 className="text-3xl mb-4" style={{ color: '#1E2A3B' }}>
-                  Risk Factors
+                  Fees Policy
                 </h2>
                 <p style={{ color: '#1E2A3B' }}>
-                  Important risks to consider before availing our loan services.
+                  Transparent fee structure and charges for all our loan products.
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {risks.map((risk, index) => (
+              <div className="space-y-6">
+                {feesPolicySections.map((section, index) => (
+                  <Card key={index}>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-3" style={{ color: '#1E2A3B' }}>
+                        <DollarSign className="h-5 w-5" style={{ color: '#0052FF' }} />
+                        {section.title}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-2">
+                        {section.content.map((item, idx) => (
+                          <li key={idx} className="flex items-start gap-2" style={{ color: '#1E2A3B' }}>
+                            <div className="w-2 h-2 rounded-full mt-2 flex-shrink-0" style={{ backgroundColor: '#00C49A' }}></div>
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="fair-practice" className="space-y-6">
+              <div className="text-center mb-8">
+                <h2 className="text-3xl mb-4" style={{ color: '#1E2A3B' }}>
+                  Fair Practice Code
+                </h2>
+                <p style={{ color: '#1E2A3B' }}>
+                  Our commitment to fair and transparent lending practices.
+                </p>
+              </div>
+
+              <div className="space-y-6">
+                {fairPracticeSections.map((section, index) => (
+                  <Card key={index}>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-3" style={{ color: '#1E2A3B' }}>
+                        <Scale className="h-5 w-5" style={{ color: '#0052FF' }} />
+                        {section.title}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-2">
+                        {section.content.map((item, idx) => (
+                          <li key={idx} className="flex items-start gap-2" style={{ color: '#1E2A3B' }}>
+                            <div className="w-2 h-2 rounded-full mt-2 flex-shrink-0" style={{ backgroundColor: '#00C49A' }}></div>
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="faq" className="space-y-6">
+              <div className="text-center mb-8">
+                <h2 className="text-3xl mb-4" style={{ color: '#1E2A3B' }}>
+                  Need Help? Read Popular Questions
+                </h2>
+                <p style={{ color: '#1E2A3B' }}>
+                  Common questions about our loan products and services.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                {faqItems.map((faq, index) => (
                   <Card key={index}>
                     <CardContent className="p-6">
-                      <div className="flex items-start gap-4">
-                        <div 
-                          className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0"
-                          style={{ backgroundColor: '#FEF3C7' }}
-                        >
-                          <risk.icon className="h-6 w-6 text-yellow-600" />
-                        </div>
-                        <div>
-                          <h3 className="text-lg mb-2" style={{ color: '#1E2A3B' }}>
-                            {risk.title}
-                          </h3>
-                          <p style={{ color: '#1E2A3B' }}>
-                            {risk.description}
-                          </p>
-                        </div>
-                      </div>
+                      <h3 className="text-lg mb-3" style={{ color: '#1E2A3B' }}>
+                        {faq.question}
+                      </h3>
+                      <p style={{ color: '#1E2A3B' }}>
+                        {faq.answer}
+                      </p>
                     </CardContent>
                   </Card>
                 ))}
               </div>
 
-              <Card className="border-red-200 bg-red-50">
-                <CardContent className="p-6">
-                  <div className="flex items-start gap-4">
-                    <AlertTriangle className="h-6 w-6 text-red-600 flex-shrink-0 mt-1" />
-                    <div>
-                      <h3 className="text-lg mb-2 text-red-800">
-                        High Risk Warning
-                      </h3>
-                      <p className="text-red-700">
-                        Borrowing money involves financial risk. Only borrow what you can afford to repay. 
-                        Defaulting on loan payments can severely impact your credit score and legal action may be taken. 
-                        Consider alternative sources of funding and ensure you have a repayment plan before borrowing.
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="notes" className="space-y-6">
-              <div className="text-center mb-8">
-                <h2 className="text-3xl mb-4" style={{ color: '#1E2A3B' }}>
-                  Important Notes
-                </h2>
-                <p style={{ color: '#1E2A3B' }}>
-                  Key points to remember while using our platform and services.
-                </p>
-              </div>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-3" style={{ color: '#1E2A3B' }}>
-                    <Eye className="h-5 w-5" style={{ color: '#0052FF' }} />
-                    Key Reminders
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-3">
-                    {importantNotes.map((note, index) => (
-                      <li key={index} className="flex items-start gap-3" style={{ color: '#1E2A3B' }}>
-                        <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-1" style={{ backgroundColor: '#0052FF' }}>
-                          <span className="text-white text-xs">{index + 1}</span>
-                        </div>
-                        {note}
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <Card className="text-center">
-                  <CardContent className="p-6">
-                    <Shield className="h-10 w-10 mx-auto mb-3" style={{ color: '#00C49A' }} />
-                    <h3 className="text-lg mb-2" style={{ color: '#1E2A3B' }}>
-                      Secure Platform
-                    </h3>
-                    <p className="text-sm" style={{ color: '#1E2A3B' }}>
-                      Bank-grade security with 256-bit SSL encryption for all transactions.
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card className="text-center">
-                  <CardContent className="p-6">
-                    <Building2 className="h-10 w-10 mx-auto mb-3" style={{ color: '#00C49A' }} />
-                    <h3 className="text-lg mb-2" style={{ color: '#1E2A3B' }}>
-                      RBI Compliant
-                    </h3>
-                    <p className="text-sm" style={{ color: '#1E2A3B' }}>
-                      All partner lenders are RBI registered and compliant with regulations.
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card className="text-center">
-                  <CardContent className="p-6">
-                    <FileText className="h-10 w-10 mx-auto mb-3" style={{ color: '#00C49A' }} />
-                    <h3 className="text-lg mb-2" style={{ color: '#1E2A3B' }}>
-                      Transparent Terms
-                    </h3>
-                    <p className="text-sm" style={{ color: '#1E2A3B' }}>
-                      All fees, charges, and terms are clearly disclosed before agreement.
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
-
               <Card className="border-blue-200 bg-blue-50">
                 <CardContent className="p-6 text-center">
                   <h3 className="text-lg mb-3 text-blue-800">
-                    Need Clarification?
+                    Still have questions?
                   </h3>
                   <p className="text-blue-700 mb-4">
-                    If you have any questions about these disclaimers, disclosures, or our services, 
-                    please don't hesitate to contact our customer support team.
+                    Contact our customer support team for any additional assistance.
                   </p>
                   <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                    <Badge variant="outline" className="text-blue-800 border-blue-300">
-                      Phone: 1800-123-4567
-                    </Badge>
-                    <Badge variant="outline" className="text-blue-800 border-blue-300">
-                      Email: support@pocketcredit.in
-                    </Badge>
+                    <Button 
+                      onClick={() => navigate('/contact')}
+                      style={{ backgroundColor: '#0052FF' }}
+                    >
+                      Contact Support
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      onClick={() => navigate('/grievance')}
+                    >
+                      Grievance Redressal
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -380,7 +419,7 @@ export function DisclaimerPage() {
       <section className="py-8 px-4" style={{ backgroundColor: 'white' }}>
         <div className="max-w-6xl mx-auto text-center">
           <p className="text-sm" style={{ color: '#1E2A3B' }}>
-            <strong>Last Updated:</strong> January 15, 2024
+            <strong>Last Updated:</strong> January 10, 2025
           </p>
           <p className="text-sm mt-2" style={{ color: '#1E2A3B' }}>
             This document is subject to periodic updates. Please review regularly for any changes.
