@@ -63,19 +63,19 @@ export function GrievanceRedressalPage() {
       level: "Level 1",
       handler: "Branch / Place where Business is transacted",
       timeline: "7 days",
-      description: "Customers can make a written complaint to the relevant Branch Manager. The branch will aim to provide an initial response to the complaint within 7 days.",
+      description: "A customer should either make a written complaint addressed to the relevant Branch Manager at address: spheeti fintech private Limited, Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI MAHARASHTRA , MUMBAI, Maharashtra, India - 421001 (or) call at the Customer care no. +91 9346551691 or email the Company at contact us at: support@pocketcredit.in. The Branch / places where business is transacted will strive to provide an initial response to the customer's complaint within 7 days of the complaint being lodged.",
       contact: {
         method: "Written complaint to Branch Manager",
         email: "support@pocketcredit.in",
         phone: "+91 9346551691",
-        address: "Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI MAHARASHTRA , MUMBAI, Maharashtra, India - 421001"
+        address: "spheeti fintech private Limited, Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI MAHARASHTRA , MUMBAI, Maharashtra, India - 421001"
       }
     },
     {
       level: "Level 2", 
       handler: "Grievance Redressal Officer",
       timeline: "7 working days",
-      description: "If a customer is not satisfied with the response from the branch, they can escalate the complaint to the Grievance Redressal Officer.",
+      description: "In case the customer is not satisfied with the response received at Step 1, i.e., the Branch, he /she can escalate the complaint to the Grievance Redressal Officer, whom the Company has appointed for the implementation of customer service and complaint handling. Once the complaint is escalated, the complaint will receive a response within 7 working days of it reaching the Grievance Redressal Officer.",
       contact: {
         name: "Mr. Kowshik",
         email: "grievance@pocketcredit.in",
@@ -84,9 +84,9 @@ export function GrievanceRedressalPage() {
     },
     {
       level: "Level 3",
-      handler: "Chief Nodal Officer",
+      handler: "Chief Nodal officer",
       timeline: "15 working days",
-      description: "If the customer is still not satisfied with the response or has not received one from the Grievance Redressal Officer within 15 days of their initial complaint, they can contact the Company's Chief Nodal Officer.",
+      description: "In case the customer is still not satisfied with the response or has not received a response from the Grievance Redressal Officer within 15 days from the date of his/her initial complaint, he/she may contact the Company's Chief nodal officer. Once the complaint is escalated, the complaint will receive a response within 15 working days of it reaching the Grievance Redressal officer.",
       contact: {
         name: "MR. Abhishek M R",
         email: "abhi@pocketcredit.in",
@@ -97,7 +97,7 @@ export function GrievanceRedressalPage() {
       level: "Level 4",
       handler: "Reserve Bank of India",
       timeline: "After 1 month",
-      description: "If a complaint does not receive a response from the Company within one month, or if a customer is dissatisfied with the response at all levels, they may approach the Reserve Bank of India.",
+      description: "If the complaint does not receive a response from the Company within a period of 1 month or if a customer is dissatisfied with the response received at all levels, the complainant may approach the Reserve Bank of India.",
       contact: {
         address: "Reserve Bank of India, 15, Netaji Subhas Rd, Fairley Place, B.B.D. Bagh, Kolkata, West Bengal 700001",
         phone: "033 2230 3299",
@@ -139,8 +139,9 @@ export function GrievanceRedressalPage() {
             Grievance Redressal Mechanism
           </h1>
           <p className="text-xl text-gray-300 mb-8 max-w-3xl mx-auto">
-            Multi-level grievance redressal mechanism established by Spheeti Fintech Private Limited 
-            for resolving disputes and complaints arising from the company's decisions.
+            All disputes / complaints arising out of the decisions of the Company's functionaries would
+            be heard and disposed of at least at the next higher level after it is brought to their notice.
+            Therefore, the following 'Grievances Redressal Mechanism' is put in place.
           </p>
           <div className="flex flex-wrap justify-center gap-8 text-center">
             <div>
@@ -464,6 +465,7 @@ export function GrievanceRedressalPage() {
                         <div className="flex items-start gap-3">
                           <Building className="h-5 w-5 mt-1" style={{ color: '#0052FF' }} />
                           <div className="text-sm" style={{ color: '#1E2A3B' }}>
+                            spheeti fintech private Limited<br />
                             Mahadev Compound Gala No. A7, Dhobi Ghat Road<br />
                             Ulhasnagar MUMBAI MAHARASHTRA , MUMBAI<br />
                             Maharashtra, India - 421001
@@ -477,7 +479,7 @@ export function GrievanceRedressalPage() {
                 {/* Level 3 Contact */}
                 <Card>
                   <CardHeader>
-                    <CardTitle style={{ color: '#1E2A3B' }}>Chief Nodal Officer (Level 3)</CardTitle>
+                    <CardTitle style={{ color: '#1E2A3B' }}>Chief Nodal officer (Level 3)</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div>
@@ -486,7 +488,7 @@ export function GrievanceRedressalPage() {
                           <User className="h-5 w-5" style={{ color: '#0052FF' }} />
                           <div>
                             <div style={{ color: '#1E2A3B' }}>MR. Abhishek M R</div>
-                            <div className="text-sm text-gray-600">Chief Nodal Officer</div>
+                            <div className="text-sm text-gray-600">Chief Nodal officer</div>
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
