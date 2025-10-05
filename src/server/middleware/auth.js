@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { readDatabase } = require('../utils/database');
+const { executeQuery, initializeDatabase } = require('../config/database');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'pocket-credit-secret-key-2025';
 
@@ -43,23 +43,29 @@ const authenticateAdmin = async (req, res, next) => {
 
     const decoded = jwt.verify(token, JWT_SECRET);
     
-    // Check if user exists in admin database
-    const db = readDatabase();
-    const admin = db.admins.find(a => a.id === decoded.id);
+    // Check if admin exists in MySQL database
+    const { executeQuery, initializeDatabase } = require('../config/database');
+    await initializeDatabase();
     
-    if (!admin) {
+    const admins = await executeQuery(
+      'SELECT id, name, email, role, permissions, is_active FROM admins WHERE id = ?',
+      [decoded.id]
+    );
+    
+    if (admins.length === 0 || !admins[0].is_active) {
       return res.status(403).json({
         status: 'error',
         message: 'Admin access required'
       });
     }
 
+    const admin = admins[0];
     req.admin = {
       id: admin.id,
       name: admin.name,
       email: admin.email,
       role: admin.role,
-      permissions: admin.permissions
+      permissions: Array.isArray(admin.permissions) ? admin.permissions : JSON.parse(admin.permissions || '[]')
     };
 
     next();

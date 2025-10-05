@@ -18,6 +18,8 @@ const userRoutes = require('./routes/userRoutes');
 const loanApplicationRoutes = require('./routes/loanApplicationRoutes');
 const loanRoutes = require('./routes/loans');
 const adminRoutes = require('./routes/admin');
+const adminAuthRoutes = require('./routes/adminAuth');
+const adminManagementRoutes = require('./routes/adminManagement');
 const documentRoutes = require('./routes/documents');
 const dashboardRoutes = require('./routes/dashboard');
 const calculatorRoutes = require('./routes/calculators');
@@ -27,6 +29,13 @@ const notificationRoutes = require('./routes/notifications');
 const employmentRoutes = require('./routes/employment');
 const bankDetailsRoutes = require('./routes/bankDetails');
 const loanReferencesRoutes = require('./routes/loanReferences');
+const userProfileRoutes = require('./routes/userProfile');
+const adminApplicationsRoutes = require('./routes/adminApplications');
+const adminDashboardRoutes = require('./routes/adminDashboard');
+const adminUsersRoutes = require('./routes/adminUsers');
+const activityLogsRoutes = require('./routes/activityLogsSimple');
+const { activityLoggerMiddleware } = require('./middleware/activityLogger');
+const activityProcessor = require('./workers/activityProcessor');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -71,6 +80,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Cookie parser middleware
 app.use(cookieParser());
 
+// Activity logging middleware
+app.use(activityLoggerMiddleware());
+
 // Session middleware
 app.use(initializeSession());
 
@@ -98,6 +110,8 @@ app.use('/api/user', userRoutes);
 app.use('/api/loan-applications', loanApplicationRoutes);
 app.use('/api/loans', loanRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/auth', adminAuthRoutes);
+app.use('/api/admin', adminManagementRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/calculators', calculatorRoutes);
@@ -107,6 +121,11 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/employment-details', employmentRoutes);
 app.use('/api/bank-details', bankDetailsRoutes);
 app.use('/api/loan-references', loanReferencesRoutes);
+app.use('/api/admin/user-profile', userProfileRoutes);
+app.use('/api/admin/applications', adminApplicationsRoutes);
+app.use('/api/admin/dashboard', adminDashboardRoutes);
+app.use('/api/admin/users', adminUsersRoutes);
+app.use('/api/admin/activities', activityLogsRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -153,6 +172,9 @@ const startServer = async () => {
     
     // Initialize Redis connection
     await initializeRedis();
+    
+    // Start activity processor
+    await activityProcessor.start();
     
     // Start the server
     app.listen(PORT, () => {

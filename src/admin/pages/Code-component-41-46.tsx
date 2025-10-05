@@ -4,7 +4,7 @@ import {
   FileText, 
   Users, 
   Building, 
-  DollarSign, 
+  IndianRupee, 
   Star, 
   AlertTriangle, 
   Calendar,
@@ -192,7 +192,7 @@ export function AdminReports({ onNavigate, currentUser }: AdminReportsProps) {
           <div className="bg-gradient-to-r from-purple-50 to-purple-100 p-6 rounded-lg">
             <div className="flex items-center justify-between mb-4">
               <div className="w-12 h-12 bg-purple-200 rounded-full flex items-center justify-center">
-                <DollarSign className="w-6 h-6 text-purple-600" />
+                <IndianRupee className="w-6 h-6 text-purple-600" />
               </div>
               <TrendingUp className="w-5 h-5 text-purple-600" />
             </div>
@@ -357,7 +357,7 @@ export function AdminReports({ onNavigate, currentUser }: AdminReportsProps) {
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <div className="flex items-center gap-3 mb-6">
             <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-              <DollarSign className="w-6 h-6 text-green-600" />
+              <IndianRupee className="w-6 h-6 text-green-600" />
             </div>
             <div>
               <h3 className="text-lg font-semibold text-gray-900">Financial & Transaction Reports</h3>

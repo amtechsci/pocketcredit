@@ -48,6 +48,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       localStorage.setItem('pocket_user', JSON.stringify(newUser));
     } else {
       localStorage.removeItem('pocket_user');
+      localStorage.removeItem('pocket_user_token'); // Also clear JWT token
     }
   };
 

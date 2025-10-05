@@ -29,12 +29,72 @@ const getCachedOrFetch = async (key, fetchFunction, ttl = CACHE_TTL) => {
  */
 const getDashboardSummary = async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = req.userId; // JWT middleware provides this
     
     if (!userId) {
       return res.status(401).json({
         status: 'error',
         message: 'Not authenticated'
+      });
+    }
+
+    // Check if user has completed their profile
+    const userQuery = `
+      SELECT profile_completed, profile_completion_step, first_name, last_name, email, date_of_birth
+      FROM users 
+      WHERE id = ? AND status = 'active'
+    `;
+    const users = await executeQuery(userQuery, [userId]);
+    
+    if (!users || users.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+
+    const user = users[0];
+
+    // Check if user needs to complete profile
+    if (!user.profile_completed || user.profile_completion_step < 5) {
+      // Check what specific data is missing
+      const addresses = await executeQuery('SELECT * FROM addresses WHERE user_id = ?', [userId]);
+      const employment = await executeQuery('SELECT * FROM employment_details WHERE user_id = ?', [userId]);
+      const verification = await executeQuery('SELECT * FROM verification_records WHERE user_id = ?', [userId]);
+      
+      let nextStep = 'basic_details';
+      let stepName = 'Basic Information';
+      
+      if (user.first_name && user.last_name && user.email && user.date_of_birth) {
+        nextStep = 'additional_details';
+        stepName = 'Address & PAN Details';
+      }
+      
+      if (addresses.length > 0 && verification.length > 0) {
+        nextStep = 'employment_details';
+        stepName = 'Employment Details';
+      }
+      
+      if (employment.length > 0) {
+        nextStep = 'complete';
+        stepName = 'Profile Complete';
+      }
+
+      return res.status(200).json({
+        status: 'profile_incomplete',
+        message: 'Profile completion required',
+        data: {
+          profile_completion_required: true,
+          current_step: user.profile_completion_step,
+          next_step: nextStep,
+          step_name: stepName,
+          missing_data: {
+            addresses: addresses.length === 0,
+            employment: employment.length === 0,
+            verification: verification.length === 0
+          },
+          redirect_to: '/profile-completion'
+        }
       });
     }
 
@@ -77,45 +137,44 @@ const fetchDashboardData = async (userId) => {
 
   const user = users[0];
 
-  // Get financial details (credit score, etc.)
+  // Get financial details from employment_details (since financial_details doesn't exist)
   const financialQuery = `
-    SELECT credit_score, monthly_income, monthly_expenses, existing_loans
-    FROM financial_details 
+    SELECT monthly_salary as monthly_income, 0 as credit_score, 0 as monthly_expenses, 0 as existing_loans
+    FROM employment_details 
     WHERE user_id = ?
   `;
   const financialDetails = await executeQuery(financialQuery, [userId]);
   console.log('💰 Financial details result:', financialDetails);
   const financial = financialDetails && financialDetails[0] ? financialDetails[0] : {};
 
-  // Get loan statistics
+  // Get loan statistics from loan_applications
   const loanStatsQuery = `
     SELECT 
       COUNT(*) as total_loans,
-      SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_loans,
-      SUM(CASE WHEN status = 'active' THEN loan_amount ELSE 0 END) as total_loan_amount,
-      SUM(CASE WHEN status = 'active' THEN loan_amount ELSE 0 END) as outstanding_amount
-    FROM loans 
+      SUM(CASE WHEN status IN ('approved', 'disbursed') THEN 1 ELSE 0 END) as active_loans,
+      SUM(CASE WHEN status IN ('approved', 'disbursed') THEN loan_amount ELSE 0 END) as total_loan_amount,
+      SUM(CASE WHEN status IN ('approved', 'disbursed') THEN loan_amount ELSE 0 END) as outstanding_amount
+    FROM loan_applications 
     WHERE user_id = ?
   `;
   const loanStats = await executeQuery(loanStatsQuery, [userId]);
   const stats = loanStats && loanStats[0] ? loanStats[0] : {};
 
-  // Get active loans with details
+  // Get active loans with details from loan_applications
   const activeLoansQuery = `
     SELECT 
-      l.id,
-      l.loan_number,
-      l.loan_amount,
-      l.interest_rate,
-      l.tenure_months,
-      l.status,
-      l.disbursed_at,
-      la.loan_purpose,
-      DATEDIFF(CURDATE(), l.disbursed_at) as days_since_disbursement
-    FROM loans l
-    LEFT JOIN loan_applications la ON l.loan_application_id = la.id
-    WHERE l.user_id = ? AND l.status = 'active'
-    ORDER BY l.created_at DESC
+      id,
+      application_number as loan_number,
+      loan_amount,
+      interest_rate,
+      tenure_months,
+      status,
+      disbursed_at,
+      loan_purpose,
+      DATEDIFF(CURDATE(), disbursed_at) as days_since_disbursement
+    FROM loan_applications
+    WHERE user_id = ? AND status IN ('approved', 'disbursed')
+    ORDER BY created_at DESC
   `;
   const activeLoans = await executeQuery(activeLoansQuery, [userId]);
 
@@ -136,15 +195,8 @@ const fetchDashboardData = async (userId) => {
   // Get upcoming payments (simplified - no EMI data available)
   const upcomingPayments = []; // No EMI tracking available
 
-  // Get recent notifications
-  const notificationsQuery = `
-    SELECT id, title, message, notification_type, created_at
-    FROM notifications 
-    WHERE user_id = ? 
-    ORDER BY created_at DESC 
-    LIMIT 5
-  `;
-  const notifications = await executeQuery(notificationsQuery, [userId]);
+  // Get recent notifications (notifications table doesn't exist yet)
+  const notifications = [];
 
   // Calculate available credit (simplified calculation without EMI data)
   const monthlyIncome = financial.monthly_income || 0;
@@ -199,7 +251,7 @@ const fetchDashboardData = async (userId) => {
  */
 const getLoanDetails = async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = req.userId; // JWT middleware provides this
     const { loanId } = req.params;
     
     if (!userId) {

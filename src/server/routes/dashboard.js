@@ -1,9 +1,9 @@
 const express = require('express');
 const { getDashboardSummary, getLoanDetails } = require('../controllers/dashboardController');
-const { requireAuth } = require('../middleware/sessionAuth');
+const { requireAuth } = require('../middleware/jwtAuth');
 const router = express.Router();
 
-// Apply authentication middleware to all dashboard routes
+// Apply JWT authentication middleware to all dashboard routes
 router.use(requireAuth);
 
 // Dashboard summary endpoint

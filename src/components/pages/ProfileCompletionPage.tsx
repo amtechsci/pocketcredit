@@ -326,7 +326,21 @@ export function ProfileCompletionPage() {
                   <Input
                     id="date_of_birth"
                     type="date"
-                    {...basicForm.register('date_of_birth', { required: 'Date of birth is required' })}
+                    {...basicForm.register('date_of_birth', { 
+                      required: 'Date of birth is required',
+                      validate: (value) => {
+                        const today = new Date();
+                        const birthDate = new Date(value);
+                        const age = today.getFullYear() - birthDate.getFullYear();
+                        const monthDiff = today.getMonth() - birthDate.getMonth();
+                        const actualAge = monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate()) ? age - 1 : age;
+                        
+                        if (actualAge < 18) {
+                          return 'You must be at least 18 years old';
+                        }
+                        return true;
+                      }
+                    })}
                   />
                   {basicForm.formState.errors.date_of_birth && (
                     <p className="text-sm text-red-600">{basicForm.formState.errors.date_of_birth.message}</p>

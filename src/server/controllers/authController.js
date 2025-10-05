@@ -167,10 +167,19 @@ const verifyOtp = async (req, res) => {
       console.log(`✅ User login: ${mobile}`);
     }
 
-    // Create session
-    req.session.userId = user.id;
-    req.session.mobile = user.phone;
-    req.session.authenticated = true;
+    // Generate JWT token (like admin authentication)
+    const jwt = require('jsonwebtoken');
+    const JWT_SECRET = process.env.JWT_SECRET || 'pocket-credit-secret-key-2025';
+    
+    const token = jwt.sign(
+      {
+        id: user.id,
+        mobile: user.phone,
+        role: 'user'
+      },
+      JWT_SECRET,
+      { expiresIn: '30d' } // 30 days expiry
+    );
 
     // Get profile summary
     const profileSummary = getProfileSummary(user);
@@ -186,6 +195,7 @@ const verifyOtp = async (req, res) => {
       message,
       data: {
         user: profileSummary,
+        token, // Include JWT token
         requires_profile_completion: isNewUser,
         session_created: true
       }
@@ -207,16 +217,33 @@ const verifyOtp = async (req, res) => {
  */
 const getProfile = async (req, res) => {
   try {
-    const userId = req.session.userId;
+    // Get JWT token from Authorization header
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
-    if (!userId) {
+    if (!token) {
       return res.status(401).json({
         status: 'error',
-        message: 'Not authenticated'
+        message: 'Access token required'
       });
     }
 
-    const user = await findUserById(userId);
+    // Verify JWT token
+    const jwt = require('jsonwebtoken');
+    const JWT_SECRET = process.env.JWT_SECRET || 'pocket-credit-secret-key-2025';
+    
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (jwtError) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Invalid or expired token'
+      });
+    }
+
+    // Get user from database
+    const user = await findUserById(decoded.id);
     
     if (!user) {
       return res.status(404).json({

@@ -2,6 +2,7 @@ const Joi = require('joi');
 const { updateProfileById, getProfileSummary } = require('../models/user');
 const { createOrUpdateAddress, getPrimaryAddress } = require('../models/address');
 const { createOrUpdateVerificationRecord } = require('../models/verification');
+const { executeQuery } = require('../config/database');
 
 /**
  * User Controller
@@ -94,7 +95,7 @@ const additionalProfileSchema = Joi.object({
  */
 const updateBasicProfile = async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = req.userId; // JWT middleware provides this
 
     if (!userId) {
       return res.status(401).json({
@@ -110,6 +111,34 @@ const updateBasicProfile = async (req, res) => {
         status: 'error',
         message: 'Validation failed',
         details: error.details.map(detail => detail.message)
+      });
+    }
+
+    // Check email uniqueness
+    const emailCheckQuery = 'SELECT id FROM users WHERE email = ? AND id != ?';
+    const existingEmail = await executeQuery(emailCheckQuery, [value.email, userId]);
+    if (existingEmail.length > 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Email address is already registered with another account'
+      });
+    }
+
+    // Check age requirement (18+)
+    const birthDate = new Date(value.date_of_birth);
+    const today = new Date();
+    const age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      // Haven't had birthday this year yet
+      age--;
+    }
+    
+    if (age < 18) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'You must be at least 18 years old to register'
       });
     }
 
@@ -158,7 +187,7 @@ const updateBasicProfile = async (req, res) => {
  */
 const updateAdditionalProfile = async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = req.userId; // JWT middleware provides this
 
     if (!userId) {
       return res.status(401).json({
@@ -174,6 +203,16 @@ const updateAdditionalProfile = async (req, res) => {
         status: 'error',
         message: 'Validation failed',
         details: error.details.map(detail => detail.message)
+      });
+    }
+
+    // Check PAN number uniqueness
+    const panCheckQuery = 'SELECT id FROM verification_records WHERE document_number = ? AND user_id != ?';
+    const existingPAN = await executeQuery(panCheckQuery, [value.pan_number, userId]);
+    if (existingPAN.length > 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'PAN number is already registered with another account'
       });
     }
 
@@ -274,7 +313,7 @@ const updateAdditionalProfile = async (req, res) => {
  */
 const getProfileStatus = async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = req.userId; // JWT middleware provides this
 
     if (!userId) {
       return res.status(401).json({

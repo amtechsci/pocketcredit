@@ -11,7 +11,7 @@ const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'pocket',
+  database: process.env.DB_NAME || 'pocket_credit',
   port: process.env.DB_PORT || 3306,
   // Connection pool settings
   waitForConnections: true,

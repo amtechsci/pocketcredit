@@ -20,14 +20,22 @@ export function Footer() {
     { label: 'Privacy Policy', path: '/privacy' },
     { label: 'Terms & Conditions', path: '/terms' },
     { label: 'Fair Practice Code', path: '/fair-practice' },
+    { label: 'Fees Policy', path: '/fees-policy' },
+    { label: 'IT Policy', path: '/it-policy' },
+    { label: 'Refund & Cancellation', path: '/refund-cancellation-policy' },
     { label: 'Grievance Redressal', path: '/grievance' },
-    { label: 'IT, Fees & Fair Practice Policy', path: '/it-fees-fair-practice-policy' },
+  ];
+
+  const contactInfo = [
+    { icon: Mail, text: 'support@pocketcredit.com' },
+    { icon: Phone, text: '1800-123-4567' },
+    { icon: MapPin, text: 'Mumbai, Maharashtra, India' },
   ];
 
   return (
     <footer className="bg-white border-t">
       <div className="container mx-auto mobile-container py-6 sm:py-8">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 sm:gap-6">
           {/* Company Info */}
           <div>
             <div className="flex items-center gap-2 mb-4">
@@ -95,29 +103,28 @@ export function Footer() {
             </ul>
           </div>
 
-          {/* Contact & Legal */}
+          {/* Contact */}
           <div>
-            <h3 className="font-semibold mb-4" style={{ color: '#1E2A3B' }}>Contact & Legal</h3>
-            <div className="space-y-2 mb-4">
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <Mail className="h-4 w-4" />
-                support@pocketcredit.com
-              </div>
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <Phone className="h-4 w-4" />
-                1800-123-4567
-              </div>
-              <div className="flex items-start gap-2 text-sm text-gray-600">
-                <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                Mumbai, Maharashtra, India
-              </div>
+            <h3 className="font-semibold mb-4" style={{ color: '#1E2A3B' }}>Contact</h3>
+            <div className="space-y-2">
+              {contactInfo.map((contact, index) => (
+                <div key={index} className="flex items-start gap-2 text-sm text-gray-600">
+                  <contact.icon className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <span>{contact.text}</span>
+                </div>
+              ))}
             </div>
+          </div>
+
+          {/* Legal */}
+          <div>
+            <h3 className="font-semibold mb-4" style={{ color: '#1E2A3B' }}>Legal</h3>
             <ul className="space-y-2">
               {legalLinks.map((link) => (
                 <li key={link.path}>
                   <Link
                     to={link.path}
-                    className="text-sm text-gray-500 hover:text-blue-600 transition-colors py-1 touch-manipulation text-left"
+                    className="text-sm text-gray-600 hover:text-blue-600 transition-colors py-1 touch-manipulation text-left"
                   >
                     {link.label}
                   </Link>

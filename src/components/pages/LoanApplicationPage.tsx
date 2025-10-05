@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, Lock, ChevronRight, IndianRupee, User, FileText, Shield, DollarSign } from 'lucide-react';
+import { ArrowLeft, Check, Lock, ChevronRight, IndianRupee, User, FileText, Shield } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Input } from '../ui/input';
@@ -51,7 +51,7 @@ interface LoanApplicationData {
 
 const steps = [
   { id: 'eligibility', title: 'Eligibility', icon: Check },
-  { id: 'amount', title: 'Loan Amount', icon: DollarSign },
+  { id: 'amount', title: 'Loan Amount', icon: IndianRupee },
   { id: 'personal', title: 'Personal Details', icon: User },
   { id: 'address', title: 'Address', icon: FileText },
   { id: 'bank', title: 'Bank Details', icon: Shield },

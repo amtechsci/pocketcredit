@@ -56,61 +56,143 @@ export function DashboardPage() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [pendingApplications, setPendingApplications] = useState<any[]>([]);
+  const [userLoans, setUserLoans] = useState<any[]>([]);
+  const [userStats, setUserStats] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [fetchingPending, setFetchingPending] = useState(false);
 
-  // Create mock user profile from AuthContext user data (no API call needed)
-  const createMockUserProfile = useCallback((user: UserType) => {
-    return {
-      user: user,
-      addresses: [],
-      employment: null,
-      bankAccounts: [],
-      kycStatus: {
-        id: 1,
-        user_id: user.id,
-        overall_status: 'not_started' as const,
-        completion_percentage: 0,
-        pan_verified: false,
-        aadhaar_verified: false,
-        address_verified: false,
-        bank_account_verified: false,
-        employment_verified: false,
-        video_kyc_verified: false,
-        pan_score: 0,
-        aadhaar_score: 0,
-        address_score: 0,
-        bank_score: 0,
-        employment_score: 0,
-        video_kyc_score: 0,
-        overall_score: 0,
-        risk_level: 'medium' as const,
-        risk_score: 50,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+  // Fetch real user profile data from API
+  const fetchUserProfile = useCallback(async () => {
+    try {
+      setLoading(true);
+      const response = await apiService.getUserProfile();
+      
+      if (response.status === 'success' && response.data) {
+        setUserProfile(response.data);
+      } else {
+        // Fallback to basic user data if profile fetch fails
+        setUserProfile({
+          user: user!,
+          addresses: [],
+          employment: null,
+          bankAccounts: [],
+          kycStatus: {
+            id: 1,
+            user_id: user!.id,
+            overall_status: 'not_started' as const,
+            completion_percentage: user!.profile_completion_step * 20,
+            pan_verified: false,
+            aadhaar_verified: false,
+            address_verified: false,
+            bank_account_verified: false,
+            employment_verified: false,
+            video_kyc_verified: false,
+            pan_score: 0,
+            aadhaar_score: 0,
+            address_score: 0,
+            bank_score: 0,
+            employment_score: 0,
+            video_kyc_score: 0,
+            overall_score: 0,
+            risk_level: 'medium' as const,
+            risk_score: 50,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        });
       }
-    };
-  }, []);
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+      // Fallback to basic user data
+      setUserProfile({
+        user: user!,
+        addresses: [],
+        employment: null,
+        bankAccounts: [],
+        kycStatus: {
+          id: 1,
+          user_id: user!.id,
+          overall_status: 'not_started' as const,
+          completion_percentage: user!.profile_completion_step * 20,
+          pan_verified: false,
+          aadhaar_verified: false,
+          address_verified: false,
+          bank_account_verified: false,
+          employment_verified: false,
+          video_kyc_verified: false,
+          pan_score: 0,
+          aadhaar_score: 0,
+          address_score: 0,
+          bank_score: 0,
+          employment_score: 0,
+          video_kyc_score: 0,
+          overall_score: 0,
+          risk_level: 'medium' as const,
+          risk_score: 50,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
 
   const fetchPendingApplications = useCallback(async () => {
+    if (fetchingPending) {
+      console.log('Already fetching pending applications, skipping...');
+      return;
+    }
+    
     try {
+      setFetchingPending(true);
       console.log('Fetching pending applications...');
-      console.log('Current user:', user);
-      console.log('User ID:', user?.id);
       const response = await apiService.getPendingLoanApplications();
-      console.log('Pending applications response:', response);
-      console.log('Response status:', response.status);
-      console.log('Response success:', response.success);
-      console.log('Response data:', response.data);
       
       if (response.status === 'success' || response.success === true) {
-        console.log('Setting pending applications:', response.data.applications);
-        setPendingApplications(response.data.applications);
+        const applications = response.data.applications || [];
+        // Remove duplicates based on application ID
+        const uniqueApplications = applications.filter((app: any, index: number, self: any[]) => 
+          index === self.findIndex((a: any) => a.id === app.id)
+        );
+        setPendingApplications(uniqueApplications);
       } else {
         console.log('API call failed or no data:', response.message);
+        setPendingApplications([]);
       }
     } catch (error) {
       console.error('Error fetching pending applications:', error);
+      setPendingApplications([]);
+    } finally {
+      setFetchingPending(false);
     }
-  }, [user]);
+  }, [user, fetchingPending]);
+
+  // Fetch user loans data
+  const fetchUserLoans = useCallback(async () => {
+    try {
+      const response = await apiService.getUserLoans();
+      if (response.status === 'success' && response.data) {
+        setUserLoans(response.data.loans || []);
+      }
+    } catch (error) {
+      console.error('Error fetching user loans:', error);
+      setUserLoans([]);
+    }
+  }, []);
+
+  // Fetch user dashboard stats
+  const fetchUserStats = useCallback(async () => {
+    try {
+      const response = await apiService.getUserDashboard();
+      if (response.status === 'success' && response.data) {
+        setUserStats(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching user stats:', error);
+      setUserStats(null);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -118,13 +200,14 @@ export function DashboardPage() {
       return;
     }
 
-    // Use user data from AuthContext instead of making API call
+    // Fetch real user profile data
     if (user) {
-      const mockProfile = createMockUserProfile(user);
-      setUserProfile(mockProfile);
-      setLoading(false);
+      fetchUserProfile();
+      fetchPendingApplications();
+      fetchUserLoans();
+      fetchUserStats();
     }
-  }, [isAuthenticated, navigate, user, createMockUserProfile]);
+  }, [isAuthenticated, navigate, user, fetchUserProfile, fetchPendingApplications, fetchUserLoans, fetchUserStats]);
 
   // Check if user needs to complete profile based on profile_completion_step
   useEffect(() => {
@@ -134,18 +217,7 @@ export function DashboardPage() {
     }
   }, [user, navigate]);
 
-  // Fetch pending loan applications
-  useEffect(() => {
-    console.log('Dashboard: useEffect for fetchPendingApplications triggered');
-    console.log('Dashboard: isAuthenticated:', isAuthenticated);
-    console.log('Dashboard: user:', user);
-    if (isAuthenticated && user) {
-      console.log('Dashboard: Calling fetchPendingApplications');
-      fetchPendingApplications();
-    } else {
-      console.log('Dashboard: Not authenticated or no user, skipping fetchPendingApplications');
-    }
-  }, [isAuthenticated, user, fetchPendingApplications]);
+  // Removed duplicate useEffect - fetchPendingApplications is already called in the main useEffect above
 
   const handleLogout = async () => {
     try {
@@ -167,6 +239,23 @@ export function DashboardPage() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-red-100 rounded-full mx-auto mb-4 flex items-center justify-center">
+            <AlertCircle className="w-8 h-8 text-red-600" />
+          </div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Something went wrong</h2>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <Button onClick={() => window.location.reload()}>
+            Try Again
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   if (!user || !userProfile) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -182,52 +271,28 @@ export function DashboardPage() {
 
   // User data from API
   const userData = {
-    name: `${user.first_name} ${user.last_name}`,
-    phone: user.phone,
-    email: user.email,
-    kycStatus: userProfile.kycStatus?.overall_status || 'not_started',
-    creditScore: userProfile.kycStatus?.overall_score || 0,
-    availableCredit: 500000,
-    totalLoans: 2,
-    activeLoans: 1
+    name: `${user?.first_name || ''} ${user?.last_name || ''}`.trim() || 'User',
+    phone: user?.phone || '',
+    email: user?.email || '',
+    kycStatus: userProfile?.kycStatus?.overall_status || 'not_started',
+    creditScore: userProfile?.kycStatus?.overall_score || userStats?.credit_score || 0,
+    availableCredit: userStats?.available_credit || 0,
+    totalLoans: userStats?.total_loans || userLoans.length,
+    activeLoans: userStats?.active_loans || userLoans.filter(loan => loan.status === 'active').length
   };
 
-  const activeLoans = [
-    {
-      id: 'PL001',
-      type: 'Personal Loan',
-      amount: 300000,
-      disbursedAmount: 300000,
-      outstandingAmount: 245000,
-      emiAmount: 15000,
-      nextEmiDate: '2024-01-15',
-      tenure: 24,
-      completedTenure: 4,
-      interestRate: 12.5,
-      status: 'active'
-    }
-  ];
+  // Use real loan data from API
+  const activeLoans = userLoans.filter(loan => loan.status === 'active' || loan.status === 'disbursed');
+  const completedLoans = userLoans.filter(loan => loan.status === 'completed' || loan.status === 'closed');
 
-  const completedLoans = [
-    {
-      id: 'BL001',
-      type: 'Business Loan',
-      amount: 500000,
-      disbursedAmount: 500000,
-      completedDate: '2023-12-20',
-      status: 'completed'
-    }
-  ];
-
-  const upcomingPayments = [
-    {
-      loanId: 'PL001',
-      amount: 15000,
-      dueDate: '2024-01-15',
-      type: 'EMI',
-      status: 'pending'
-    }
-  ];
+  // Calculate upcoming payments from active loans
+  const upcomingPayments = activeLoans.map(loan => ({
+    loanId: loan.id,
+    amount: loan.emi_amount || 0,
+    dueDate: loan.next_payment_date || new Date().toISOString().split('T')[0],
+    type: 'EMI',
+    status: 'pending'
+  }));
 
   const documents = [
     { name: 'Loan Agreement - PL001', type: 'PDF', uploadDate: '2023-08-15', status: 'verified' },

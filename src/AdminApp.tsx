@@ -4,8 +4,11 @@ import { AdminLogin } from './admin/AdminLogin';
 import { AdminDashboard } from './admin/pages/AdminDashboard';
 import { LoanApplicationsQueue } from './admin/pages/LoanApplicationsQueue';
 import { UserProfileDetail } from './admin/pages/UserProfileDetail';
+import { AdminUsersPage } from './admin/pages/AdminUsersPage';
+import { ActivityLogsPage } from './admin/pages/ActivityLogsPage';
 import { AdminTeamManagement } from './admin/pages/AdminTeamManagement';
 import { AdminReports } from './admin/pages/AdminReports';
+import { AdminSettings } from './admin/pages/AdminSettings';
 import { AdminProvider } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
 
@@ -55,7 +58,6 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-2">
                 <Logo size="sm" variant="default" />
-                <span className="font-semibold text-gray-900">Pocket Credit Admin</span>
               </div>
               <nav className="hidden md:flex items-center gap-6">
                 <button
@@ -79,6 +81,26 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                   Applications
                 </button>
                 <button
+                  onClick={() => navigate('/admin/users')}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive('/admin/users') 
+                      ? 'bg-blue-100 text-blue-700' 
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  Users
+                </button>
+                <button
+                  onClick={() => navigate('/admin/activity-logs')}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive('/admin/activity-logs') 
+                      ? 'bg-blue-100 text-blue-700' 
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  Activity Logs
+                </button>
+                <button
                   onClick={() => navigate('/admin/reports')}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     isActive('/admin/reports') 
@@ -98,6 +120,18 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                     }`}
                   >
                     Team Management
+                  </button>
+                )}
+                {currentUser?.role === 'superadmin' && (
+                  <button
+                    onClick={() => navigate('/admin/settings')}
+                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive('/admin/settings') 
+                        ? 'bg-blue-100 text-blue-700' 
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    Settings
                   </button>
                 )}
               </nav>
@@ -179,6 +213,16 @@ export default function AdminApp() {
           <UserProfileDetail />
         </ProtectedRoute>
       } />
+      <Route path="users" element={
+        <ProtectedRoute>
+          <AdminUsersPage />
+        </ProtectedRoute>
+      } />
+      <Route path="activity-logs" element={
+        <ProtectedRoute>
+          <ActivityLogsPage />
+        </ProtectedRoute>
+      } />
       <Route path="team-management" element={
         <ProtectedRoute>
           <AdminTeamManagement />
@@ -187,6 +231,11 @@ export default function AdminApp() {
       <Route path="reports" element={
         <ProtectedRoute>
           <AdminReports />
+        </ProtectedRoute>
+      } />
+      <Route path="settings" element={
+        <ProtectedRoute>
+          <AdminSettings />
         </ProtectedRoute>
       } />
       <Route path="*" element={<Navigate to="login" replace />} />

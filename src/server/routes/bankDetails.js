@@ -1,6 +1,6 @@
 const express = require('express');
-const { getConnection } = require('../utils/mysqlDatabase');
-const { requireAuth } = require('../middleware/session');
+const { executeQuery, initializeDatabase } = require('../config/database');
+const { requireAuth } = require('../middleware/jwtAuth');
 const router = express.Router();
 
 // =====================================================
@@ -10,14 +10,8 @@ const router = express.Router();
 // POST /api/bank-details - Save Bank Details for Loan Application
 router.post('/', requireAuth, async (req, res) => {
   try {
-    const userId = req.session.userId;
-
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentication required'
-      });
-    }
+    await initializeDatabase();
+    const userId = req.userId;
 
     const { 
       application_id,
@@ -42,15 +36,13 @@ router.post('/', requireAuth, async (req, res) => {
       });
     }
 
-    const connection = await getConnection();
-
     // Verify that the loan application belongs to the user
-    const [applications] = await connection.execute(
+    const applications = await executeQuery(
       'SELECT id, user_id FROM loan_applications WHERE id = ? AND user_id = ?',
       [application_id, userId]
     );
 
-    if (applications.length === 0) {
+    if (!applications || applications.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Loan application not found or does not belong to you'
@@ -58,12 +50,12 @@ router.post('/', requireAuth, async (req, res) => {
     }
 
     // Get user details for account holder name
-    const [users] = await connection.execute(
+    const users = await executeQuery(
       'SELECT first_name, last_name FROM users WHERE id = ?',
       [userId]
     );
 
-    if (users.length === 0) {
+    if (!users || users.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
@@ -93,62 +85,60 @@ router.post('/', requireAuth, async (req, res) => {
       'CANB': 'Canara Bank',
       'INDB': 'IndusInd Bank',
       'YESB': 'Yes Bank',
+      'FDRL': 'Federal Bank',
       'IDFB': 'IDFC First Bank',
-      'RBLB': 'RBL Bank',
-      'FEDR': 'Federal Bank',
-      'SIBL': 'South Indian Bank',
-      'KARB': 'Karnataka Bank'
+      'RATN': 'RBL Bank',
+      'BAND': 'Bandhan Bank',
+      'DCBL': 'DCB Bank'
     };
 
-    const bankName = bankNames[bankCode] || `Bank (${bankCode})`;
+    const bankName = bankNames[bankCode] || `${bankCode} Bank`;
 
-    // Check if bank details already exist for this loan application
-    const [existingBankDetails] = await connection.execute(
+    // Check if bank details already exist for this application
+    const existingBankDetails = await executeQuery(
       'SELECT id FROM bank_details WHERE loan_application_id = ?',
       [application_id]
     );
 
-    let result;
-    if (existingBankDetails.length > 0) {
+    let bankDetailsId;
+
+    if (existingBankDetails && existingBankDetails.length > 0) {
       // Update existing bank details
-      [result] = await connection.execute(
-        `UPDATE bank_details 
-         SET account_number = ?, ifsc_code = ?, bank_name = ?, 
-             account_holder_name = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE loan_application_id = ?`,
-        [account_number, ifsc_code.toUpperCase(), bankName, accountHolderName, application_id]
+      await executeQuery(
+        'UPDATE bank_details SET account_number = ?, ifsc_code = ?, bank_name = ?, account_holder_name = ?, updated_at = NOW() WHERE loan_application_id = ?',
+        [account_number, ifsc_code, bankName, accountHolderName, application_id]
       );
+      bankDetailsId = existingBankDetails[0].id;
     } else {
       // Insert new bank details
-      [result] = await connection.execute(
-        `INSERT INTO bank_details 
-         (user_id, loan_application_id, bank_name, account_number, ifsc_code, 
-          account_holder_name, account_type, is_primary, is_verified) 
-         VALUES (?, ?, ?, ?, ?, ?, 'savings', TRUE, FALSE)`,
-        [userId, application_id, bankName, account_number, ifsc_code.toUpperCase(), accountHolderName]
+      const result = await executeQuery(
+        'INSERT INTO bank_details (loan_application_id, account_number, ifsc_code, bank_name, account_holder_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())',
+        [application_id, account_number, ifsc_code, bankName, accountHolderName]
       );
+      bankDetailsId = result.insertId;
     }
 
-    // Get the bank details ID (either from insert or existing)
-    const bankDetailsId = result.insertId || existingBankDetails[0].id;
-
-    // Update loan application with bank_id (keep status as submitted)
-    await connection.execute(
-      'UPDATE loan_applications SET bank_id = ? WHERE id = ?',
-      [bankDetailsId, application_id]
+    // Update loan application status if needed
+    await executeQuery(
+      'UPDATE loan_applications SET status = ? WHERE id = ?',
+      ['under_review', application_id]
     );
 
-    res.status(201).json({
+    res.json({
       success: true,
       message: 'Bank details saved successfully',
       data: {
-        bank_details_id: result.insertId || existingBankDetails[0].id,
-        status: 'saved'
+        id: bankDetailsId,
+        application_id,
+        account_number,
+        ifsc_code,
+        bank_name: bankName,
+        account_holder_name: accountHolderName
       }
     });
 
   } catch (error) {
-    console.error('Bank details error:', error);
+    console.error('Error saving bank details:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error while saving bank details'
@@ -159,31 +149,32 @@ router.post('/', requireAuth, async (req, res) => {
 // GET /api/bank-details/:applicationId - Get Bank Details for Loan Application
 router.get('/:applicationId', requireAuth, async (req, res) => {
   try {
-    const userId = req.session.userId;
+    await initializeDatabase();
+    const userId = req.userId;
     const { applicationId } = req.params;
 
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentication required'
-      });
-    }
-
-    const connection = await getConnection();
-
-    // Get bank details for the specific loan application
-    const [bankDetails] = await connection.execute(
-      `SELECT bd.*, la.application_number, la.loan_amount, la.loan_purpose
-       FROM bank_details bd
-       JOIN loan_applications la ON bd.loan_application_id = la.id
-       WHERE bd.loan_application_id = ? AND bd.user_id = ?`,
+    // Verify that the loan application belongs to the user
+    const applications = await executeQuery(
+      'SELECT id, user_id FROM loan_applications WHERE id = ? AND user_id = ?',
       [applicationId, userId]
     );
 
-    if (bankDetails.length === 0) {
+    if (!applications || applications.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Bank details not found for this loan application'
+        message: 'Loan application not found or does not belong to you'
+      });
+    }
+
+    const bankDetails = await executeQuery(
+      'SELECT * FROM bank_details WHERE loan_application_id = ? ORDER BY created_at DESC LIMIT 1',
+      [applicationId]
+    );
+
+    if (!bankDetails || bankDetails.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Bank details not found for this application'
       });
     }
 
@@ -193,7 +184,7 @@ router.get('/:applicationId', requireAuth, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Get bank details error:', error);
+    console.error('Error fetching bank details:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error while fetching bank details'
@@ -204,43 +195,34 @@ router.get('/:applicationId', requireAuth, async (req, res) => {
 // GET /api/bank-details/user/:userId - Get All Bank Details for User
 router.get('/user/:userId', requireAuth, async (req, res) => {
   try {
-    const userId = req.session.userId;
+    await initializeDatabase();
+    const userId = req.userId;
     const { userId: paramUserId } = req.params;
 
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentication required'
-      });
-    }
-
-    // Verify user can only access their own bank details
-    if (parseInt(paramUserId) !== userId) {
+    // Verify that the user is accessing their own data
+    if (userId !== parseInt(paramUserId)) {
       return res.status(403).json({
         success: false,
         message: 'Access denied'
       });
     }
 
-    const connection = await getConnection();
-
-    // Get all bank details for the user
-    const [bankDetails] = await connection.execute(
-      `SELECT bd.*, la.application_number, la.loan_amount, la.loan_purpose
+    const bankDetails = await executeQuery(
+      `SELECT bd.*, la.application_number, la.loan_amount, la.status as application_status
        FROM bank_details bd
-       LEFT JOIN loan_applications la ON bd.loan_application_id = la.id
-       WHERE bd.user_id = ?
+       JOIN loan_applications la ON bd.loan_application_id = la.id
+       WHERE la.user_id = ?
        ORDER BY bd.created_at DESC`,
       [userId]
     );
 
     res.json({
       success: true,
-      data: bankDetails
+      data: bankDetails || []
     });
 
   } catch (error) {
-    console.error('Get user bank details error:', error);
+    console.error('Error fetching user bank details:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error while fetching bank details'
@@ -251,15 +233,9 @@ router.get('/user/:userId', requireAuth, async (req, res) => {
 // POST /api/bank-details/choose - Choose Existing Bank Details for Loan Application
 router.post('/choose', requireAuth, async (req, res) => {
   try {
-    const userId = req.session.userId;
+    await initializeDatabase();
+    const userId = req.userId;
     const { application_id, bank_details_id } = req.body;
-
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentication required'
-      });
-    }
 
     if (!application_id || !bank_details_id) {
       return res.status(400).json({
@@ -268,54 +244,70 @@ router.post('/choose', requireAuth, async (req, res) => {
       });
     }
 
-    const connection = await getConnection();
-
     // Verify that the loan application belongs to the user
-    const [applications] = await connection.execute(
-      'SELECT id FROM loan_applications WHERE id = ? AND user_id = ?',
+    const applications = await executeQuery(
+      'SELECT id, user_id FROM loan_applications WHERE id = ? AND user_id = ?',
       [application_id, userId]
     );
 
-    if (applications.length === 0) {
+    if (!applications || applications.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Loan application not found or does not belong to you'
       });
     }
 
-    // Verify that the bank details belong to the user
-    const [bankDetails] = await connection.execute(
-      'SELECT id FROM bank_details WHERE id = ? AND user_id = ?',
-      [bank_details_id, userId]
+    // Get the bank details to copy
+    const bankDetails = await executeQuery(
+      'SELECT * FROM bank_details WHERE id = ?',
+      [bank_details_id]
     );
 
-    if (bankDetails.length === 0) {
+    if (!bankDetails || bankDetails.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Bank details not found or does not belong to you'
+        message: 'Bank details not found'
       });
     }
 
-    // Update loan application with chosen bank_id
-    await connection.execute(
-      'UPDATE loan_applications SET bank_id = ? WHERE id = ?',
-      [bank_details_id, application_id]
+    const bankDetail = bankDetails[0];
+
+    // Check if bank details already exist for this application
+    const existingBankDetails = await executeQuery(
+      'SELECT id FROM bank_details WHERE loan_application_id = ?',
+      [application_id]
     );
+
+    let result;
+
+    if (existingBankDetails && existingBankDetails.length > 0) {
+      // Update existing bank details
+      result = await executeQuery(
+        'UPDATE bank_details SET account_number = ?, ifsc_code = ?, bank_name = ?, account_holder_name = ?, updated_at = NOW() WHERE loan_application_id = ?',
+        [bankDetail.account_number, bankDetail.ifsc_code, bankDetail.bank_name, bankDetail.account_holder_name, application_id]
+      );
+    } else {
+      // Insert new bank details
+      result = await executeQuery(
+        'INSERT INTO bank_details (loan_application_id, account_number, ifsc_code, bank_name, account_holder_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())',
+        [application_id, bankDetail.account_number, bankDetail.ifsc_code, bankDetail.bank_name, bankDetail.account_holder_name]
+      );
+    }
 
     res.json({
       success: true,
-      message: 'Bank details selected successfully',
+      message: 'Bank details applied successfully',
       data: {
-        bank_details_id: bank_details_id,
-        status: 'selected'
+        application_id,
+        bank_details_id
       }
     });
 
   } catch (error) {
-    console.error('Choose bank details error:', error);
+    console.error('Error choosing bank details:', error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error while selecting bank details'
+      message: 'Internal server error while choosing bank details'
     });
   }
 });

@@ -9,9 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Progress } from '../ui/progress';
 import { 
   CreditCard, 
-  FileText, 
   User, 
-  Bell, 
   TrendingUp, 
   Calendar,
   IndianRupee,
@@ -19,23 +17,10 @@ import {
   Clock,
   AlertCircle,
   Download,
-  Eye,
-  Phone,
-  MessageCircle,
-  Settings,
-  LogOut,
-  BarChart3,
-  PieChart,
-  Activity,
   Wallet,
   CreditCard as CreditCardIcon,
-  Calculator,
   Home,
-  FileSpreadsheet,
-  HelpCircle,
-  ChevronRight,
   ArrowUpRight,
-  ArrowDownRight,
   Target,
   Shield
 } from 'lucide-react';
@@ -48,6 +33,9 @@ interface DashboardData {
     id: number;
     name: string;
     phone: string;
+    eligibility_status?: 'eligible' | 'not_eligible' | 'pending';
+    eligibility_reason?: string;
+    eligibility_retry_date?: string;
     email: string;
     member_since: string;
   };
@@ -119,6 +107,11 @@ export function DynamicDashboardPage() {
       
       if (response.status === 'success' && response.data) {
         setDashboardData(response.data);
+      } else if (response.status === 'profile_incomplete') {
+        // User needs to complete their profile
+        console.log('Profile incomplete, redirecting to profile completion:', response.data);
+        navigate('/profile-completion');
+        return;
       } else {
         setError('Failed to load dashboard data');
       }
@@ -128,18 +121,33 @@ export function DynamicDashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [navigate]);
 
   // Fetch pending loan applications
   const fetchPendingApplications = useCallback(async () => {
     try {
+      console.log('🔄 Fetching pending applications...');
       const response = await apiService.getPendingLoanApplications();
       
+      console.log('📊 Pending applications response:', response);
+      
       if (response.status === 'success' || response.success === true) {
-        setPendingApplications(response.data.applications);
+        const applications = response.data?.applications || [];
+        console.log('📋 Raw applications:', applications);
+        
+        // Remove duplicates based on application ID
+        const uniqueApplications = applications.filter((app: any, index: number, self: any[]) => 
+          index === self.findIndex((a: any) => a.id === app.id)
+        );
+        
+        console.log('✅ Unique applications:', uniqueApplications);
+        setPendingApplications(uniqueApplications);
+      } else {
+        console.log('❌ Response not successful:', response);
+        setPendingApplications([]);
       }
     } catch (error: any) {
-      console.error('Error fetching pending applications:', error);
+      console.error('❌ Error fetching pending applications:', error);
       
       // Handle timeout errors specifically
       if (error.message?.includes('timeout')) {
@@ -153,7 +161,7 @@ export function DynamicDashboardPage() {
       // Set empty array to prevent UI issues
       setPendingApplications([]);
     }
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -161,18 +169,16 @@ export function DynamicDashboardPage() {
       return;
     }
 
-    // Only load data if we don't have it yet or if it's the first load
+    // Load all dashboard data in one go
     if (!dashboardData) {
       loadDashboardData();
     }
-  }, [isAuthenticated]);
-
-  // Fetch pending loan applications
-  useEffect(() => {
-    if (isAuthenticated && user) {
+    
+    // Fetch pending applications
+    if (user) {
       fetchPendingApplications();
     }
-  }, [isAuthenticated, user, fetchPendingApplications]);
+  }, [isAuthenticated, user]);
 
   const handleLogout = async () => {
     try {
@@ -253,7 +259,24 @@ export function DynamicDashboardPage() {
     );
   }
 
-  const { user: userData, summary, active_loans, upcoming_payments, notifications, alerts } = dashboardData;
+  const { user: userData, summary, active_loans, upcoming_payments, alerts } = dashboardData;
+
+  // Check if user has any active or pending loans
+  const hasActiveOrPendingLoans = () => {
+    const hasActiveLoans = active_loans && active_loans.length > 0;
+    const hasPendingApplications = pendingApplications && pendingApplications.length > 0;
+    
+    // Debug logging
+    console.log('🔍 Loan Status Check:', {
+      activeLoans: active_loans?.length || 0,
+      pendingApplications: pendingApplications?.length || 0,
+      hasActiveLoans,
+      hasPendingApplications,
+      result: hasActiveLoans || hasPendingApplications
+    });
+    
+    return hasActiveLoans || hasPendingApplications;
+  };
 
   const renderOverview = () => (
     <div className="space-y-6">
@@ -270,17 +293,19 @@ export function DynamicDashboardPage() {
                 <p className="text-blue-100">Manage your loans and track payments</p>
               </div>
             </div>
-            <Button 
-              onClick={() => {
-                      console.log('Apply for a Loan button clicked');
-                      navigate('/application');
-                    }}
-              className="bg-white/20 hover:bg-white/30 text-white border-white/30"
-              variant="outline"
-              type="button"
-            >
-              Apply New Loan
-            </Button>
+            {!hasActiveOrPendingLoans() && (
+              <Button 
+                onClick={() => {
+                        console.log('Apply for a Loan button clicked');
+                        navigate('/application');
+                      }}
+                className="bg-white/20 hover:bg-white/30 text-white border-white/30"
+                variant="outline"
+                type="button"
+              >
+                Apply New Loan
+              </Button>
+            )}
           </div>
           
           <div className="grid grid-cols-4 gap-6">
@@ -380,45 +405,16 @@ export function DynamicDashboardPage() {
             </Badge>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {pendingApplications.map((application) => (
-              <div key={application.id} className="bg-white rounded-lg p-4 border border-yellow-200 hover:shadow-md transition-shadow">
-                <div className="flex justify-between items-start mb-3">
-                  <div>
-                    <h4 className="font-semibold text-gray-900">{application.loan_purpose || 'Personal Loan'}</h4>
-                    <p className="text-sm text-gray-600">App: {application.application_number}</p>
-                  </div>
-                  <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
-                    {application.status}
-                  </Badge>
-                </div>
-                
-                <div className="space-y-2 mb-4">
-                  <div className="flex justify-between">
-                    <span className="text-sm text-gray-600">Amount</span>
-                    <span className="font-semibold">₹{Number(application.loan_amount).toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-sm text-gray-600">Current Step</span>
-                    <span className="text-sm font-medium capitalize">{application.current_step.replace('_', ' ')}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-sm text-gray-600">Applied</span>
-                    <span className="text-sm">{formatDate(application.created_at)}</span>
-                  </div>
-                </div>
-                
-                <div className="mt-4">
-                  <button 
-                    onClick={() => navigate(`/loan-application/steps?applicationId=${application.id}`)}
-                    className="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-medium py-2 px-4 rounded-md border-0 cursor-pointer transition-colors"
-                    style={{ backgroundColor: '#D97706', color: 'white' }}
-                  >
-                    Continue Application
-                  </button>
-                </div>
-              </div>
-            ))}
+          <div className="text-center py-4">
+            <p className="text-gray-600 mb-4">
+              You have {pendingApplications.length} pending loan application{pendingApplications.length !== 1 ? 's' : ''} that need your attention.
+            </p>
+            <Button 
+              onClick={() => setActiveTab('loans')}
+              className="bg-yellow-600 hover:bg-yellow-700 text-white"
+            >
+              View All Applications
+            </Button>
           </div>
         </div>
       )}
@@ -551,15 +547,17 @@ export function DynamicDashboardPage() {
                   <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Loans</h3>
                   <p className="text-gray-600 mb-4">You don't have any active loans at the moment.</p>
-                  <Button 
-                    onClick={() => {
-                      console.log('Apply for a Loan button clicked');
-                      navigate('/application');
-                    }}
-                    style={{ backgroundColor: '#0052FF' }}
-                  >
-                    Apply for a Loan
-                  </Button>
+                  {!hasActiveOrPendingLoans() && (
+                    <Button 
+                      onClick={() => {
+                        console.log('Apply for a Loan button clicked');
+                        navigate('/application');
+                      }}
+                      style={{ backgroundColor: '#0052FF' }}
+                    >
+                      Apply for a Loan
+                    </Button>
+                  )}
                 </div>
               )}
             </Card>
@@ -635,61 +633,7 @@ export function DynamicDashboardPage() {
               )}
             </Card>
 
-            {/* Quick Actions */}
-            <Card className="p-6">
-              <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
-              <div className="space-y-3">
-                <Button variant="ghost" className="w-full justify-start hover:bg-blue-50">
-                  <Calculator className="w-4 h-4 mr-3 text-blue-600" />
-                  EMI Calculator
-                  <ChevronRight className="w-4 h-4 ml-auto" />
-                </Button>
-                <Button variant="ghost" className="w-full justify-start hover:bg-blue-50">
-                  <FileSpreadsheet className="w-4 h-4 mr-3 text-blue-600" />
-                  Download Statement
-                  <ChevronRight className="w-4 h-4 ml-auto" />
-                </Button>
-                <Button variant="ghost" className="w-full justify-start hover:bg-blue-50">
-                  <Settings className="w-4 h-4 mr-3 text-blue-600" />
-                  Account Settings
-                  <ChevronRight className="w-4 h-4 ml-auto" />
-                </Button>
-                <Button variant="ghost" className="w-full justify-start hover:bg-blue-50">
-                  <HelpCircle className="w-4 h-4 mr-3 text-blue-600" />
-                  Support Center
-                  <ChevronRight className="w-4 h-4 ml-auto" />
-                </Button>
-              </div>
-            </Card>
 
-            {/* Quick Apply */}
-            <Card className="p-6 bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
-              <h3 className="text-lg font-semibold mb-2 text-gray-900">Need More Funds?</h3>
-              <p className="text-gray-600 mb-4 text-sm">Get instant approval with your excellent credit score</p>
-              
-              <div className="space-y-3">
-                <Button 
-                  onClick={() => {
-                      console.log('Apply for a Loan button clicked');
-                      navigate('/application');
-                    }}
-                  className="w-full"
-                  style={{ backgroundColor: '#0052FF' }}
-                >
-                  Apply Personal Loan
-                </Button>
-                <Button 
-                  onClick={() => {
-                      console.log('Apply for a Loan button clicked');
-                      navigate('/application');
-                    }}
-                  variant="outline" 
-                  className="w-full border-blue-300 text-blue-700 hover:bg-blue-50"
-                >
-                  Apply Business Loan
-                </Button>
-              </div>
-            </Card>
           </div>
         </div>
       </div>
@@ -862,38 +806,6 @@ export function DynamicDashboardPage() {
               </button>
             </nav>
             
-            <div className="mt-8">
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">Quick Actions</h3>
-              <div className="space-y-2">
-                <Button 
-                  variant="outline" 
-                  className="w-full justify-start"
-                  onClick={() => navigate('/pay-emi')}
-                >
-                  <IndianRupee className="w-4 h-4 mr-2" />
-                  Pay EMI
-                </Button>
-                <Button 
-                  variant="outline" 
-                  className="w-full justify-start"
-                  onClick={() => navigate('/emi-calculator')}
-                >
-                  <Calculator className="w-4 h-4 mr-2" />
-                  EMI Calculator
-                </Button>
-                <Button 
-                  variant="outline" 
-                  className="w-full justify-start"
-                  onClick={() => {
-                      console.log('Apply for a Loan button clicked');
-                      navigate('/application');
-                    }}
-                >
-                  <CreditCard className="w-4 h-4 mr-2" />
-                  Apply Loan
-                </Button>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -912,6 +824,28 @@ export function DynamicDashboardPage() {
           </div>
           
           <div className="container mx-auto px-4 py-6">
+            {/* Eligibility Status Check */}
+            {userData.eligibility_status === 'not_eligible' && (
+              <div className="mb-6 p-6 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-start">
+                  <AlertCircle className="w-6 h-6 text-red-600 mt-1 mr-3" />
+                  <div className="flex-1">
+                    <h3 className="text-lg font-semibold text-red-800 mb-2">
+                      You are not eligible for loans at this time
+                    </h3>
+                    <p className="text-red-700 mb-3">
+                      {userData.eligibility_reason || 'Your current profile does not meet our eligibility criteria.'}
+                    </p>
+                    {userData.eligibility_retry_date && (
+                      <p className="text-sm text-red-600">
+                        You can reapply after: {formatDate(userData.eligibility_retry_date)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           
           <TabsContent value="overview">
@@ -922,15 +856,17 @@ export function DynamicDashboardPage() {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <h3 className="text-xl font-semibold">My Loans</h3>
-                <Button 
-                  onClick={() => {
-                      console.log('Apply for a Loan button clicked');
-                      navigate('/application');
-                    }}
-                  style={{ backgroundColor: '#0052FF' }}
-                >
-                  Apply New Loan
-                </Button>
+                {!hasActiveOrPendingLoans() && (
+                  <Button 
+                    onClick={() => {
+                        console.log('Apply for a Loan button clicked');
+                        navigate('/application');
+                      }}
+                    style={{ backgroundColor: '#0052FF' }}
+                  >
+                    Apply New Loan
+                  </Button>
+                )}
               </div>
 
               {/* Pending Loan Applications */}
@@ -957,7 +893,7 @@ export function DynamicDashboardPage() {
                           </div>
                           <div>
                             <p className="text-sm text-gray-500">Current Step</p>
-                            <p className="text-sm font-medium capitalize">{application.current_step.replace('_', ' ')}</p>
+                            <p className="text-sm font-medium capitalize">{(application.current_step || 'bank_details').replace('_', ' ')}</p>
                           </div>
                         </div>
                         
@@ -1047,15 +983,17 @@ export function DynamicDashboardPage() {
                   <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Loans</h3>
                   <p className="text-gray-600 mb-4">You don't have any active loans at the moment.</p>
-                  <Button 
-                    onClick={() => {
-                      console.log('Apply for a Loan button clicked');
-                      navigate('/application');
-                    }}
-                    style={{ backgroundColor: '#0052FF' }}
-                  >
-                    Apply for a Loan
-                  </Button>
+                  {!hasActiveOrPendingLoans() && (
+                    <Button 
+                      onClick={() => {
+                        console.log('Apply for a Loan button clicked');
+                        navigate('/application');
+                      }}
+                      style={{ backgroundColor: '#0052FF' }}
+                    >
+                      Apply for a Loan
+                    </Button>
+                  )}
                 </Card>
               )}
             </div>
@@ -1169,43 +1107,6 @@ export function DynamicDashboardPage() {
                 </Card>
               </div>
               
-              <Card className="p-6">
-                <h4 className="text-lg font-semibold mb-4">Quick Actions</h4>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <Button 
-                    variant="outline"
-                    onClick={() => navigate('/documents')}
-                    className="h-20 flex-col gap-2"
-                  >
-                    <FileText className="w-6 h-6" />
-                    Documents
-                  </Button>
-                  <Button 
-                    variant="outline"
-                    onClick={() => navigate('/payment-history')}
-                    className="h-20 flex-col gap-2"
-                  >
-                    <Calendar className="w-6 h-6" />
-                    Payment History
-                  </Button>
-                  <Button 
-                    variant="outline"
-                    onClick={() => navigate('/dashboard')}
-                    className="h-20 flex-col gap-2"
-                  >
-                    <CreditCard className="w-6 h-6" />
-                    Loan Details
-                  </Button>
-                  <Button 
-                    variant="outline"
-                    onClick={handleLogout}
-                    className="h-20 flex-col gap-2 text-red-600 hover:text-red-700"
-                  >
-                    <LogOut className="w-6 h-6" />
-                    Sign Out
-                  </Button>
-                </div>
-              </Card>
             </div>
               </TabsContent>
             </Tabs>

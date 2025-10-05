@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAdmin } from '../context/AdminContext';
+import { adminApiService } from '../../services/adminApi';
 import { 
   Search, 
   Bell,
@@ -8,13 +9,16 @@ import {
   TrendingDown,
   Users,
   CreditCard,
-  DollarSign,
+  IndianRupee,
   AlertCircle,
   CheckCircle,
   Clock,
   XCircle,
-  Filter,
-  MoreVertical
+  Settings,
+  Activity,
+  ArrowUpRight,
+  FileText,
+  Shield
 } from 'lucide-react';
 
 
@@ -22,109 +26,123 @@ import {
 
 export function AdminDashboard() {
   const navigate = useNavigate();
-  const params = useParams();
   const { currentUser } = useAdmin();
   const [searchQuery, setSearchQuery] = useState('');
+  const [dashboardData, setDashboardData] = useState<any>(null);
 
-  // Mock data
-  const keyMetrics = [
+  // Fetch dashboard data
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        const [statsResponse, activityResponse, chartResponse] = await Promise.all([
+          adminApiService.getDashboardStats('30d'),
+          adminApiService.getRecentActivities(10),
+          adminApiService.getChartData('30d')
+        ]);
+        
+        if (statsResponse.status === 'success' && statsResponse.data) {
+          console.log('📊 Dashboard data received:', {
+            stats: statsResponse.data,
+            activities: activityResponse.data,
+            charts: chartResponse.data
+          });
+          
+          setDashboardData({
+            ...statsResponse.data,
+            recentActivity: activityResponse.data || [],
+            chartData: chartResponse.data || {}
+          });
+        }
+      } catch (err) {
+        console.error('Dashboard data fetch error:', err);
+      }
+    };
+
+    fetchDashboardData();
+  }, []);
+
+  // Real data from API
+  const keyMetrics = dashboardData ? [
     {
-      title: 'New Applications',
-      subtitle: 'Today',
-      value: '47',
-      change: '+12%',
+      title: 'Total Users',
+      subtitle: 'Registered',
+      value: dashboardData.totalUsers?.toLocaleString() || '0',
+      change: dashboardData.newUsers ? `+${dashboardData.newUsers}` : '+0',
       trend: 'up',
       icon: Users,
       color: 'blue'
     },
     {
-      title: 'Pending Review',
-      subtitle: 'Waiting',
-      value: '23',
-      change: '+5%',
-      trend: 'up',
-      icon: Clock,
-      color: 'orange'
-    },
-    {
-      title: 'Amount Disbursed',
-      subtitle: 'Month-to-Date',
-      value: '₹2.4Cr',
-      change: '+18%',
-      trend: 'up',
-      icon: DollarSign,
-      color: 'green'
-    },
-    {
-      title: 'Active EMIs',
-      subtitle: 'This Month',
-      value: '1,847',
-      change: '+7%',
+      title: 'Total Applications',
+      subtitle: 'All Time',
+      value: dashboardData.totalApplications?.toLocaleString() || '0',
+      change: dashboardData.newApplications ? `+${dashboardData.newApplications}` : '+0',
       trend: 'up',
       icon: CreditCard,
       color: 'purple'
     },
     {
-      title: 'Default Rate',
-      subtitle: 'Current',
-      value: '2.3%',
-      change: '-0.5%',
+      title: 'Pending Review',
+      subtitle: 'Under Review',
+      value: dashboardData.pendingApplications?.toLocaleString() || '0',
+      change: dashboardData.pendingApplications > 0 ? 'Needs Review' : 'All Clear',
+      trend: dashboardData.pendingApplications > 0 ? 'up' : 'down',
+      icon: Clock,
+      color: 'orange'
+    },
+    {
+      title: 'Approved Loans',
+      subtitle: 'Successfully Approved',
+      value: dashboardData.approvedApplications?.toLocaleString() || '0',
+      change: dashboardData.approvedApplications > 0 ? `${Math.round((dashboardData.approvedApplications / dashboardData.totalApplications) * 100)}%` : '0%',
+      trend: 'up',
+      icon: CheckCircle,
+      color: 'green'
+    },
+    {
+      title: 'Amount Disbursed',
+      subtitle: 'Total Disbursed',
+      value: dashboardData.totalDisbursed ? `₹${(dashboardData.totalDisbursed / 10000000).toFixed(1)}Cr` : '₹0',
+      change: dashboardData.averageLoanAmount ? `Avg: ₹${Math.round(dashboardData.averageLoanAmount / 1000)}K` : 'No Data',
+      trend: 'up',
+      icon: IndianRupee,
+      color: 'green'
+    },
+    {
+      title: 'Rejected Applications',
+      subtitle: 'Not Approved',
+      value: dashboardData.rejectedApplications?.toLocaleString() || '0',
+      change: dashboardData.rejectedApplications > 0 ? `${Math.round((dashboardData.rejectedApplications / dashboardData.totalApplications) * 100)}%` : '0%',
       trend: 'down',
-      icon: AlertCircle,
+      icon: XCircle,
       color: 'red'
     }
-  ];
+  ] : [];
 
-  const funnelData = [
-    { stage: 'Applied', count: 1247, percentage: 100 },
-    { stage: 'Under Review', count: 894, percentage: 72 },
-    { stage: 'Approved', count: 623, percentage: 50 },
-    { stage: 'Disbursed', count: 587, percentage: 47 }
-  ];
 
-  const recentActivity = [
-    {
-      id: 1,
-      action: 'Loan CL250912 approved',
-      user: 'Raj Patel',
-      time: '2 minutes ago',
-      type: 'approval'
-    },
-    {
-      id: 2,
-      action: 'New application CL250913 submitted',
-      user: 'System',
-      time: '5 minutes ago',
-      type: 'application'
-    },
-    {
-      id: 3,
-      action: 'Document verification completed for CL250910',
-      user: 'Priya Singh',
-      time: '12 minutes ago',
-      type: 'verification'
-    },
-    {
-      id: 4,
-      action: 'Loan CL250908 rejected - Low CIBIL',
-      user: 'Sarah Johnson',
-      time: '18 minutes ago',
-      type: 'rejection'
-    },
-    {
-      id: 5,
-      action: 'EMI payment received for CL250745',
-      user: 'System',
-      time: '25 minutes ago',
-      type: 'payment'
-    }
-  ];
+  const recentActivity = dashboardData?.recentActivity || [];
 
   const quickActions = [
-    { title: 'Pending Approvals', count: '23', action: () => navigate('/admin/applications') },
-    { title: 'KYC Verification', count: '15', action: () => navigate('/admin/applications') },
-    { title: 'Document Review', count: '8', action: () => navigate('/admin/applications') },
-    { title: 'Follow-ups Due', count: '12', action: () => navigate('/admin/applications') }
+    { 
+      title: 'Pending Approvals', 
+      count: dashboardData?.pendingApplications?.toString() || '0', 
+      action: () => navigate('/admin/applications?status=under_review') 
+    },
+    { 
+      title: 'New Applications', 
+      count: dashboardData?.newApplications?.toString() || '0', 
+      action: () => navigate('/admin/applications?status=submitted') 
+    },
+    { 
+      title: 'Approved Loans', 
+      count: dashboardData?.approvedApplications?.toString() || '0', 
+      action: () => navigate('/admin/applications?status=approved') 
+    },
+    { 
+      title: 'Total Users', 
+      count: dashboardData?.totalUsers?.toString() || '0', 
+      action: () => navigate('/admin/users') 
+    }
   ];
 
   const getMetricColor = (color: string) => {
@@ -140,19 +158,34 @@ export function AdminDashboard() {
 
   const getActivityIcon = (type: string) => {
     switch (type) {
+      case 'user_action':
+        return <Users className="w-4 h-4 text-blue-500" />;
+      case 'admin_action':
+        return <Settings className="w-4 h-4 text-purple-500" />;
+      case 'system_event':
+        return <Activity className="w-4 h-4 text-gray-500" />;
+      case 'api_call':
+        return <ArrowUpRight className="w-4 h-4 text-indigo-500" />;
+      case 'error':
+        return <AlertCircle className="w-4 h-4 text-red-500" />;
       case 'approval':
         return <CheckCircle className="w-4 h-4 text-green-500" />;
       case 'rejection':
         return <XCircle className="w-4 h-4 text-red-500" />;
       case 'application':
-        return <Users className="w-4 h-4 text-blue-500" />;
+        return <FileText className="w-4 h-4 text-blue-500" />;
       case 'verification':
-        return <AlertCircle className="w-4 h-4 text-orange-500" />;
+        return <Shield className="w-4 h-4 text-orange-500" />;
       case 'payment':
-        return <DollarSign className="w-4 h-4 text-green-500" />;
+        return <IndianRupee className="w-4 h-4 text-green-500" />;
       default:
         return <Clock className="w-4 h-4 text-gray-500" />;
     }
+  };
+
+  const getReadableAction = (action: string, _metadata?: any) => {
+    // Return the action as-is since middleware now provides business-friendly descriptions
+    return action;
   };
 
   return (
@@ -161,7 +194,7 @@ export function AdminDashboard() {
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600">Welcome back, {currentUser.name}</p>
+          <p className="text-gray-600">Welcome back, {currentUser?.name || 'Admin'}</p>
         </div>
         
         <div className="flex items-center gap-4">
@@ -184,77 +217,48 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-        {keyMetrics.map((metric, index) => {
-          const Icon = metric.icon;
-          return (
-            <div key={index} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className={`p-2 rounded-lg ${getMetricColor(metric.color)}`}>
-                  <Icon className="w-5 h-5 text-white" />
-                </div>
-                <div className={`flex items-center text-sm ${
-                  metric.trend === 'up' ? 'text-green-600' : 'text-red-600'
-                }`}>
-                  {metric.trend === 'up' ? (
-                    <TrendingUp className="w-4 h-4 mr-1" />
-                  ) : (
-                    <TrendingDown className="w-4 h-4 mr-1" />
-                  )}
-                  {metric.change}
-                </div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-2xl font-bold text-gray-900">{metric.value}</div>
-                <div className="text-sm font-medium text-gray-600">{metric.title}</div>
-                <div className="text-xs text-gray-500">{metric.subtitle}</div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Loan Application Funnel */}
-        <div className="lg:col-span-2 bg-white rounded-lg shadow-sm border border-gray-200">
+      <div className="grid grid-cols-1 lg:grid-cols-10 gap-6">
+        {/* Dashboard Cards - 70% width */}
+        <div className="lg:col-span-7 bg-white rounded-lg shadow-sm border border-gray-200">
           <div className="p-6 border-b border-gray-200">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Loan Application Funnel</h2>
-              <button className="text-gray-400 hover:text-gray-600">
-                <MoreVertical className="w-5 h-5" />
-              </button>
-            </div>
+            <h2 className="text-lg font-semibold text-gray-900">Dashboard Overview</h2>
           </div>
           <div className="p-6">
-            <div className="space-y-4">
-              {funnelData.map((stage, index) => (
-                <div key={index} className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4 flex-1">
-                    <div className="w-24 text-sm font-medium text-gray-700">
-                      {stage.stage}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {keyMetrics.map((metric, index) => {
+                const Icon = metric.icon;
+                return (
+                  <div key={index} className="bg-gray-50 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className={`p-2 rounded-lg ${getMetricColor(metric.color)}`}>
+                        <Icon className="w-5 h-5 text-white" />
+                      </div>
+                      <div className={`flex items-center text-sm ${
+                        metric.trend === 'up' ? 'text-green-600' : 'text-red-600'
+                      }`}>
+                        {metric.trend === 'up' ? (
+                          <TrendingUp className="w-4 h-4 mr-1" />
+                        ) : (
+                          <TrendingDown className="w-4 h-4 mr-1" />
+                        )}
+                        {metric.change}
+                      </div>
                     </div>
-                    <div className="flex-1 bg-gray-200 rounded-full h-3">
-                      <div
-                        className="bg-blue-600 h-3 rounded-full transition-all duration-300"
-                        style={{ width: `${stage.percentage}%` }}
-                      />
+                    <div className="text-2xl font-bold text-gray-900 mb-1">
+                      {metric.value}
                     </div>
-                    <div className="text-sm text-gray-600 w-16 text-right">
-                      {stage.percentage}%
-                    </div>
+                    <div className="text-sm font-medium text-gray-600">{metric.title}</div>
+                    <div className="text-xs text-gray-500">{metric.subtitle}</div>
                   </div>
-                  <div className="ml-4 text-lg font-semibold text-gray-900 w-16 text-right">
-                    {stage.count.toLocaleString()}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
 
-        {/* Quick Actions */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        {/* Quick Actions - 30% width */}
+        <div className="lg:col-span-3 bg-white rounded-lg shadow-sm border border-gray-200">
           <div className="p-6 border-b border-gray-200">
             <h2 className="text-lg font-semibold text-gray-900">Quick Actions</h2>
           </div>
@@ -280,26 +284,42 @@ export function AdminDashboard() {
         <div className="p-6 border-b border-gray-200">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Recent Activity</h2>
-            <button className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+            <button 
+              onClick={() => navigate('/admin/activity-logs')}
+              className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+            >
               View All
             </button>
           </div>
         </div>
         <div className="divide-y divide-gray-200">
-          {recentActivity.map((activity) => (
+          {recentActivity.length > 0 ? recentActivity.map((activity: any) => (
             <div key={activity.id} className="p-6 flex items-center space-x-4">
               <div className="flex-shrink-0">
                 {getActivityIcon(activity.type)}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900">{activity.action}</p>
-                <p className="text-sm text-gray-500">by {activity.user}</p>
+                <p className="text-sm font-medium text-gray-900">
+                  {getReadableAction(activity.action, activity.metadata)}
+                </p>
+                <p className="text-sm text-gray-500">
+                  {activity.user ? `👤 ${activity.user.name || `User #${activity.user.id}`}` : 
+                   activity.admin ? `⚙️ Admin ${activity.admin.name || activity.admin.email || `#${activity.admin.id}`}` : 
+                   '🔧 System'}
+                  {activity.metadata?.phone && ` • ${activity.metadata.phone}`}
+                  {activity.metadata?.amount && ` • ₹${activity.metadata.amount}`}
+                  {activity.metadata?.newStatus && ` • ${activity.metadata.newStatus}`}
+                </p>
               </div>
               <div className="flex-shrink-0 text-sm text-gray-500">
-                {activity.time}
+                {new Date(activity.timestamp).toLocaleString()}
               </div>
             </div>
-          ))}
+          )) : (
+            <div className="p-6 text-center text-gray-500">
+              No recent activity found
+            </div>
+          )}
         </div>
       </div>
     </div>

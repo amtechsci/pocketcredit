@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { Calculator, DollarSign, AlertTriangle, Info, TrendingUp, FileText, ExternalLink, Download, CreditCard } from 'lucide-react';
+import { Calculator, IndianRupee, AlertTriangle, Info, TrendingUp, FileText, ExternalLink, Download, CreditCard } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -168,7 +168,7 @@ export function FeesPolicy() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <DollarSign className="w-5 h-5" />
+                  <IndianRupee className="w-5 h-5" />
                   5. Product-wise Fees and Charges
                 </CardTitle>
               </CardHeader>

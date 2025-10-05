@@ -3,3 +3,4 @@ src/server/node_modules
 src/server/.env
 src/build/
 src/dist/
+node_modules

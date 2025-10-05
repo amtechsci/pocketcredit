@@ -55,6 +55,104 @@ const schemas = {
     password: Joi.string().required()
   }),
 
+  // User Profile Detail schemas
+  userDocument: Joi.object({
+    type: Joi.string().min(2).max(100).required(),
+    description: Joi.string().min(5).max(500).required(),
+    fileName: Joi.string().min(1).max(255).required(),
+    fileSize: Joi.string().min(1).max(50).required(),
+    priority: Joi.string().valid('low', 'medium', 'high').default('medium')
+  }),
+
+  userBankDetail: Joi.object({
+    bankName: Joi.string().min(2).max(100).required(),
+    accountNumber: Joi.string().min(9).max(20).required(),
+    ifscCode: Joi.string().pattern(/^[A-Z]{4}0[A-Z0-9]{6}$/).required(),
+    accountType: Joi.string().valid('savings', 'current', 'salary').required(),
+    branchName: Joi.string().min(2).max(100).required(),
+    accountHolderName: Joi.string().min(2).max(100).required(),
+    averageBalance: Joi.number().min(0).default(0),
+    relationshipLength: Joi.string().min(1).max(50).default('0 years'),
+    loanAccounts: Joi.number().min(0).default(0),
+    overdueAmount: Joi.number().min(0).default(0),
+    currentEMIs: Joi.number().min(0).default(0),
+    networth: Joi.number().min(0).default(0),
+    notes: Joi.string().max(1000).allow('')
+  }),
+
+  userReference: Joi.object({
+    name: Joi.string().min(2).max(100).required(),
+    relationship: Joi.string().min(2).max(50).required(),
+    phone: Joi.string().pattern(/^[6-9]\d{9}$/).required(),
+    email: Joi.string().email().allow(''),
+    address: Joi.string().min(5).max(200).required(),
+    occupation: Joi.string().min(2).max(100).allow(''),
+    company: Joi.string().min(2).max(100).allow(''),
+    contactPreference: Joi.string().valid('phone', 'email', 'both').default('phone'),
+    notes: Joi.string().max(1000).allow('')
+  }),
+
+  userTransaction: Joi.object({
+    type: Joi.string().valid('loan_disbursement', 'emi_payment', 'processing_fee', 'penalty', 'refund', 'other').required(),
+    amount: Joi.number().min(0).required(),
+    description: Joi.string().min(5).max(200).required(),
+    category: Joi.string().min(2).max(50).required(),
+    paymentMethod: Joi.string().valid('bank_transfer', 'upi', 'cheque', 'cash', 'card').required(),
+    referenceNumber: Joi.string().min(1).max(100).required(),
+    status: Joi.string().valid('pending', 'completed', 'failed', 'cancelled').default('pending'),
+    priority: Joi.string().valid('low', 'medium', 'high').default('medium'),
+    bankDetails: Joi.string().max(200).allow(''),
+    notes: Joi.string().max(1000).allow('')
+  }),
+
+  userFollowUp: Joi.object({
+    type: Joi.string().valid('call', 'email', 'sms', 'meeting', 'other').required(),
+    priority: Joi.string().valid('low', 'medium', 'high').required(),
+    subject: Joi.string().min(5).max(200).required(),
+    description: Joi.string().min(10).max(1000).required(),
+    assignedTo: Joi.string().min(2).max(100).required(),
+    dueDate: Joi.date().min('now').required(),
+    scheduledTime: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).allow(''),
+    estimatedDuration: Joi.number().min(5).max(480).allow(null),
+    contactMethod: Joi.string().valid('phone', 'email', 'sms', 'meeting', 'other').required(),
+    status: Joi.string().valid('pending', 'in_progress', 'completed', 'cancelled').default('pending'),
+    reminderSettings: Joi.object({
+      enabled: Joi.boolean().default(true),
+      reminderTime: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).allow(''),
+      reminderType: Joi.string().valid('email', 'sms', 'both').default('email')
+    }).allow(null),
+    notes: Joi.string().max(1000).allow('')
+  }),
+
+  userNote: Joi.object({
+    category: Joi.string().valid('general', 'loan', 'payment', 'follow_up', 'document', 'other').required(),
+    priority: Joi.string().valid('low', 'medium', 'high').required(),
+    subject: Joi.string().min(5).max(200).required(),
+    content: Joi.string().min(10).max(2000).required(),
+    visibility: Joi.string().valid('private', 'team', 'public').default('private'),
+    status: Joi.string().valid('active', 'archived', 'deleted').default('active')
+  }),
+
+  userSms: Joi.object({
+    message: Joi.string().min(10).max(160).required(),
+    templateId: Joi.string().min(1).max(100).allow(''),
+    scheduledTime: Joi.date().min('now').allow(null),
+    priority: Joi.string().valid('low', 'medium', 'high').default('medium')
+  }),
+
+  // Admin Applications schemas
+  updateApplicationStatus: Joi.object({
+    status: Joi.string().valid('applied', 'under_review', 'approved', 'rejected', 'disbursed', 'pending_documents').required(),
+    reason: Joi.string().max(500).allow(''),
+    assignedManager: Joi.string().min(2).max(100).allow(''),
+    recoveryOfficer: Joi.string().min(2).max(100).allow('')
+  }),
+
+  assignApplication: Joi.object({
+    assignedManager: Joi.string().min(2).max(100).required(),
+    recoveryOfficer: Joi.string().min(2).max(100).required()
+  }),
+
   // Admin note
   adminNote: Joi.object({
     note: Joi.string().min(5).max(1000).required(),

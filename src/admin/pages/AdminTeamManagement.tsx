@@ -12,11 +12,33 @@ import {
   UserCheck,
   UserX,
   MoreHorizontal,
-  Calendar
+  Calendar,
+  X,
+  Eye,
+  Settings,
+  Users,
+  Activity,
+  Clock,
+  CheckCircle,
+  AlertCircle,
+  Download,
+  Upload,
+  Filter,
+  RefreshCw
 } from 'lucide-react';
 
-
-
+interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  role: 'superadmin' | 'manager' | 'officer';
+  permissions: string[];
+  status?: 'active' | 'inactive';
+  lastLogin?: string;
+  createdAt?: string;
+  phone?: string;
+  department?: string;
+}
 
 export function AdminTeamManagement() {
     const navigate = useNavigate();
@@ -24,7 +46,14 @@ export function AdminTeamManagement() {
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [showPermissionsModal, setShowPermissionsModal] = useState(false);
+  const [showBulkActionsModal, setShowBulkActionsModal] = useState(false);
+  const [showActivityModal, setShowActivityModal] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
+  const [viewingUser, setViewingUser] = useState<AdminUser | null>(null);
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
 
   const [newUser, setNewUser] = useState({
     name: '',
@@ -39,42 +68,72 @@ export function AdminTeamManagement() {
       name: 'Sarah Johnson',
       email: 'sarah.johnson@pocketcredit.com',
       role: 'superadmin',
-      permissions: ['*']
+      permissions: ['*'],
+      status: 'active',
+      lastLogin: '2025-01-09T10:30:00Z',
+      createdAt: '2024-01-15T09:00:00Z',
+      phone: '+1 555-0123',
+      department: 'IT'
     },
     {
       id: 'manager1',
       name: 'Raj Patel',
       email: 'raj.patel@pocketcredit.com',
       role: 'manager',
-      permissions: ['approve_loans', 'reject_loans', 'view_users', 'edit_loans', 'manage_officers']
+      permissions: ['approve_loans', 'reject_loans', 'view_users', 'edit_loans', 'manage_officers'],
+      status: 'active',
+      lastLogin: '2025-01-09T09:15:00Z',
+      createdAt: '2024-03-20T10:00:00Z',
+      phone: '+91 98765 43210',
+      department: 'Operations'
     },
     {
       id: 'manager2',
       name: 'Priya Singh',
       email: 'priya.singh@pocketcredit.com',
       role: 'manager',
-      permissions: ['approve_loans', 'reject_loans', 'view_users', 'edit_loans', 'manage_officers']
+      permissions: ['approve_loans', 'reject_loans', 'view_users', 'edit_loans', 'manage_officers'],
+      status: 'active',
+      lastLogin: '2025-01-08T16:45:00Z',
+      createdAt: '2024-05-10T14:30:00Z',
+      phone: '+91 87654 32109',
+      department: 'Risk Management'
     },
     {
       id: 'officer1',
       name: 'Amit Sharma',
       email: 'amit.sharma@pocketcredit.com',
       role: 'officer',
-      permissions: ['view_loans', 'view_users', 'add_notes', 'follow_up']
+      permissions: ['view_loans', 'view_users', 'add_notes', 'follow_up'],
+      status: 'active',
+      lastLogin: '2025-01-09T08:20:00Z',
+      createdAt: '2024-07-15T11:00:00Z',
+      phone: '+91 76543 21098',
+      department: 'Customer Service'
     },
     {
       id: 'officer2',
       name: 'Vikram Singh',
       email: 'vikram.singh@pocketcredit.com',
       role: 'officer',
-      permissions: ['view_loans', 'view_users', 'add_notes', 'follow_up']
+      permissions: ['view_loans', 'view_users', 'add_notes', 'follow_up'],
+      status: 'inactive',
+      lastLogin: '2025-01-05T17:30:00Z',
+      createdAt: '2024-09-01T13:15:00Z',
+      phone: '+91 65432 10987',
+      department: 'Collections'
     },
     {
       id: 'officer3',
       name: 'Neha Gupta',
       email: 'neha.gupta@pocketcredit.com',
       role: 'officer',
-      permissions: ['view_loans', 'view_users', 'add_notes', 'follow_up']
+      permissions: ['view_loans', 'view_users', 'add_notes', 'follow_up'],
+      status: 'active',
+      lastLogin: '2025-01-09T11:45:00Z',
+      createdAt: '2024-11-20T09:30:00Z',
+      phone: '+91 54321 09876',
+      department: 'Verification'
     }
   ];
 
@@ -143,6 +202,26 @@ export function AdminTeamManagement() {
 
   const handleEditUser = (user: AdminUser) => {
     setEditingUser(user);
+    setShowEditModal(true);
+  };
+
+  const handleViewUser = (user: AdminUser) => {
+    setViewingUser(user);
+    setShowViewModal(true);
+  };
+
+  const handleManagePermissions = (user: AdminUser) => {
+    setEditingUser(user);
+    setShowPermissionsModal(true);
+  };
+
+  const handleBulkActions = () => {
+    setShowBulkActionsModal(true);
+  };
+
+  const handleViewActivity = (user: AdminUser) => {
+    setViewingUser(user);
+    setShowActivityModal(true);
   };
 
   const handleDeleteUser = (userId: string) => {
@@ -163,13 +242,22 @@ export function AdminTeamManagement() {
           <h1 className="text-2xl font-bold text-gray-900">Team Management</h1>
           <p className="text-gray-600">Manage admin accounts, roles, and permissions</p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Add Team Member
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleBulkActions}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+          >
+            <Users className="w-4 h-4" />
+            Bulk Actions
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add Team Member
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -248,25 +336,52 @@ export function AdminTeamManagement() {
               </div>
             </div>
 
-            <div className="flex gap-2 mt-4 pt-4 border-t border-gray-200">
+            <div className="flex gap-1 mt-4 pt-4 border-t border-gray-200">
+              <button
+                onClick={() => handleViewUser(member)}
+                className="px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 text-xs"
+                title="View Details"
+              >
+                <Eye className="w-3 h-3" />
+              </button>
               <button
                 onClick={() => handleEditUser(member)}
-                className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm flex items-center justify-center gap-1"
+                className="px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 text-xs"
+                title="Edit User"
               >
                 <Edit className="w-3 h-3" />
-                Edit
+              </button>
+              <button
+                onClick={() => handleManagePermissions(member)}
+                className="px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 text-xs"
+                title="Manage Permissions"
+              >
+                <Settings className="w-3 h-3" />
+              </button>
+              <button
+                onClick={() => handleViewActivity(member)}
+                className="px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 text-xs"
+                title="View Activity"
+              >
+                <Activity className="w-3 h-3" />
               </button>
               <button
                 onClick={() => handleToggleUserStatus(member.id)}
-                className="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm"
+                className={`px-2 py-1 rounded text-xs ${
+                  member.status === 'active' 
+                    ? 'bg-orange-100 text-orange-700 hover:bg-orange-200' 
+                    : 'bg-green-100 text-green-700 hover:bg-green-200'
+                }`}
+                title={member.status === 'active' ? 'Deactivate' : 'Activate'}
               >
-                <UserCheck className="w-4 h-4" />
+                {member.status === 'active' ? <UserX className="w-3 h-3" /> : <UserCheck className="w-3 h-3" />}
               </button>
               <button
                 onClick={() => handleDeleteUser(member.id)}
-                className="px-3 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 text-sm"
+                className="px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 text-xs"
+                title="Delete User"
               >
-                <Trash2 className="w-4 h-4" />
+                <Trash2 className="w-3 h-3" />
               </button>
             </div>
           </div>
@@ -275,52 +390,90 @@ export function AdminTeamManagement() {
 
       {/* Add User Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-gray-900">Add Team Member</h2>
-              <button
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-lg font-semibold text-gray-900">Add Team Member</h4>
+              <button 
                 onClick={() => setShowAddModal(false)}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
-                <input
-                  type="text"
-                  value={newUser.name}
-                  onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Enter full name"
-                />
+            <form className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
+                  <input
+                    type="text"
+                    value={newUser.name}
+                    onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter full name"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Email *</label>
+                  <input
+                    type="email"
+                    value={newUser.email}
+                    onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter email address"
+                    required
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
-                <input
-                  type="email"
-                  value={newUser.email}
-                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Enter email address"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
+                  <input
+                    type="tel"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter phone number"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
+                  <select className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Select Department</option>
+                    <option value="IT">IT</option>
+                    <option value="Operations">Operations</option>
+                    <option value="Risk Management">Risk Management</option>
+                    <option value="Customer Service">Customer Service</option>
+                    <option value="Collections">Collections</option>
+                    <option value="Verification">Verification</option>
+                    <option value="Finance">Finance</option>
+                    <option value="HR">HR</option>
+                  </select>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Role</label>
-                <select
-                  value={newUser.role}
-                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value as 'superadmin' | 'manager' | 'officer' })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="officer">Officer</option>
-                  <option value="manager">Manager</option>
-                  <option value="superadmin">Super Admin</option>
-                </select>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Role *</label>
+                  <select
+                    value={newUser.role}
+                    onChange={(e) => setNewUser({ ...newUser, role: e.target.value as 'superadmin' | 'manager' | 'officer' })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  >
+                    <option value="officer">Officer</option>
+                    <option value="manager">Manager</option>
+                    <option value="superadmin">Super Admin</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                  <select className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                </div>
               </div>
 
               <div>
@@ -341,12 +494,12 @@ export function AdminTeamManagement() {
                   </div>
                 </div>
               </div>
-            </div>
+            </form>
 
-            <div className="flex gap-3 mt-6">
+            <div className="flex gap-3 pt-4">
               <button
                 onClick={() => setShowAddModal(false)}
-                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
               >
                 Cancel
               </button>
@@ -418,6 +571,442 @@ export function AdminTeamManagement() {
           </div>
         </div>
       </div>
+
+      {/* Edit User Modal */}
+      {showEditModal && editingUser && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-lg font-semibold text-gray-900">Edit Team Member</h4>
+              <button 
+                onClick={() => setShowEditModal(false)}
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <form className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
+                  <input 
+                    type="text" 
+                    defaultValue={editingUser.name}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Email *</label>
+                  <input 
+                    type="email" 
+                    defaultValue={editingUser.email}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
+                  <input 
+                    type="tel" 
+                    defaultValue={editingUser.phone || ''}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
+                  <select 
+                    defaultValue={editingUser.department || ''}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select Department</option>
+                    <option value="IT">IT</option>
+                    <option value="Operations">Operations</option>
+                    <option value="Risk Management">Risk Management</option>
+                    <option value="Customer Service">Customer Service</option>
+                    <option value="Collections">Collections</option>
+                    <option value="Verification">Verification</option>
+                    <option value="Finance">Finance</option>
+                    <option value="HR">HR</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Role *</label>
+                  <select 
+                    defaultValue={editingUser.role}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  >
+                    <option value="officer">Officer</option>
+                    <option value="manager">Manager</option>
+                    <option value="superadmin">Super Admin</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                  <select 
+                    defaultValue={editingUser.status || 'active'}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="submit"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    alert('User updated successfully!');
+                    setShowEditModal(false);
+                  }}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                >
+                  Update User
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* View User Details Modal */}
+      {showViewModal && viewingUser && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-lg font-semibold text-gray-900">User Details</h4>
+              <button 
+                onClick={() => setShowViewModal(false)}
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-6">
+              {/* User Info */}
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 bg-gray-300 rounded-full flex items-center justify-center">
+                  <User className="w-8 h-8 text-gray-600" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-semibold text-gray-900">{viewingUser.name}</h3>
+                  <p className="text-gray-600">{viewingUser.email}</p>
+                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getRoleColor(viewingUser.role)}`}>
+                    {viewingUser.role.replace('_', ' ').toUpperCase()}
+                  </span>
+                </div>
+              </div>
+
+              {/* Details Grid */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Phone</label>
+                  <p className="text-gray-900">{viewingUser.phone || 'Not provided'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Department</label>
+                  <p className="text-gray-900">{viewingUser.department || 'Not assigned'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Status</label>
+                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                    viewingUser.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                  }`}>
+                    {viewingUser.status?.toUpperCase() || 'UNKNOWN'}
+                  </span>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Last Login</label>
+                  <p className="text-gray-900">
+                    {viewingUser.lastLogin ? new Date(viewingUser.lastLogin).toLocaleString() : 'Never'}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Created</label>
+                  <p className="text-gray-900">
+                    {viewingUser.createdAt ? new Date(viewingUser.createdAt).toLocaleDateString() : 'Unknown'}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">User ID</label>
+                  <p className="text-gray-900 font-mono text-sm">{viewingUser.id}</p>
+                </div>
+              </div>
+
+              {/* Permissions */}
+              <div>
+                <label className="text-sm font-medium text-gray-500 mb-2">Permissions</label>
+                <div className="flex flex-wrap gap-2">
+                  {viewingUser.permissions.includes('*') ? (
+                    <span className="px-2 py-1 bg-purple-100 text-purple-800 text-xs rounded">
+                      All Permissions
+                    </span>
+                  ) : (
+                    viewingUser.permissions.map(permission => (
+                      <span key={permission} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
+                        {availablePermissions.find(p => p.id === permission)?.label || permission}
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manage Permissions Modal */}
+      {showPermissionsModal && editingUser && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-3xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-lg font-semibold text-gray-900">Manage Permissions - {editingUser.name}</h4>
+              <button 
+                onClick={() => setShowPermissionsModal(false)}
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-5 h-5 text-yellow-600" />
+                  <p className="text-sm text-yellow-800">
+                    <strong>Warning:</strong> Changing permissions will affect what this user can access. 
+                    Make sure to review all changes before saving.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {availablePermissions.map(permission => (
+                  <label key={permission.id} className="flex items-start gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
+                    <input 
+                      type="checkbox" 
+                      defaultChecked={editingUser.permissions.includes(permission.id) || editingUser.permissions.includes('*')}
+                      disabled={editingUser.permissions.includes('*')}
+                      className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900">{permission.label}</div>
+                      <div className="text-sm text-gray-500">{permission.description}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-4 mt-6 border-t border-gray-200">
+              <button
+                onClick={() => setShowPermissionsModal(false)}
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  alert('Permissions updated successfully!');
+                  setShowPermissionsModal(false);
+                }}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              >
+                Save Permissions
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Actions Modal */}
+      {showBulkActionsModal && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-lg font-semibold text-gray-900">Bulk Actions</h4>
+              <button 
+                onClick={() => setShowBulkActionsModal(false)}
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center gap-2">
+                  <Users className="w-5 h-5 text-blue-600" />
+                  <p className="text-sm text-blue-800">
+                    Select team members and choose an action to apply to all selected users.
+                  </p>
+                </div>
+              </div>
+
+              {/* User Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">Select Team Members</label>
+                <div className="space-y-2 max-h-40 overflow-y-auto">
+                  {teamMembers.map(member => (
+                    <label key={member.id} className="flex items-center gap-3 p-2 border border-gray-200 rounded-lg hover:bg-gray-50">
+                      <input 
+                        type="checkbox" 
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedUsers([...selectedUsers, member.id]);
+                          } else {
+                            setSelectedUsers(selectedUsers.filter(id => id !== member.id));
+                          }
+                        }}
+                      />
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-900">{member.name}</div>
+                        <div className="text-sm text-gray-500">{member.email} • {member.role}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">Choose Action</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button className="flex items-center gap-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 text-left">
+                    <UserCheck className="w-4 h-4 text-green-600" />
+                    <span className="text-sm">Activate Users</span>
+                  </button>
+                  <button className="flex items-center gap-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 text-left">
+                    <UserX className="w-4 h-4 text-orange-600" />
+                    <span className="text-sm">Deactivate Users</span>
+                  </button>
+                  <button className="flex items-center gap-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 text-left">
+                    <Settings className="w-4 h-4 text-purple-600" />
+                    <span className="text-sm">Change Role</span>
+                  </button>
+                  <button className="flex items-center gap-2 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 text-left">
+                    <Download className="w-4 h-4 text-blue-600" />
+                    <span className="text-sm">Export Data</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-4 mt-6 border-t border-gray-200">
+              <button
+                onClick={() => setShowBulkActionsModal(false)}
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  alert(`Bulk action applied to ${selectedUsers.length} users!`);
+                  setShowBulkActionsModal(false);
+                  setSelectedUsers([]);
+                }}
+                disabled={selectedUsers.length === 0}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Apply to {selectedUsers.length} Users
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* User Activity Modal */}
+      {showActivityModal && viewingUser && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-4xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-lg font-semibold text-gray-900">Activity Log - {viewingUser.name}</h4>
+              <button 
+                onClick={() => setShowActivityModal(false)}
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              {/* Activity Stats */}
+              <div className="grid grid-cols-3 gap-4 mb-6">
+                <div className="bg-blue-50 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-blue-600">24</div>
+                  <div className="text-sm text-blue-800">Actions Today</div>
+                </div>
+                <div className="bg-green-50 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-green-600">156</div>
+                  <div className="text-sm text-green-800">This Week</div>
+                </div>
+                <div className="bg-purple-50 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-purple-600">1,234</div>
+                  <div className="text-sm text-purple-800">This Month</div>
+                </div>
+              </div>
+
+              {/* Activity Timeline */}
+              <div className="space-y-3">
+                <h5 className="font-medium text-gray-900">Recent Activity</h5>
+                <div className="space-y-2">
+                  {[
+                    { action: 'Approved loan application CL250912', time: '2 minutes ago', type: 'success' },
+                    { action: 'Viewed user profile for Rajesh Kumar', time: '15 minutes ago', type: 'info' },
+                    { action: 'Added note to loan application CL250913', time: '1 hour ago', type: 'info' },
+                    { action: 'Rejected loan application CL250914', time: '2 hours ago', type: 'warning' },
+                    { action: 'Logged in to admin panel', time: '3 hours ago', type: 'info' },
+                    { action: 'Exported user data report', time: '1 day ago', type: 'info' },
+                    { action: 'Updated permissions for Amit Sharma', time: '2 days ago', type: 'info' },
+                    { action: 'Created new team member account', time: '3 days ago', type: 'success' }
+                  ].map((activity, index) => (
+                    <div key={index} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
+                      <div className={`w-2 h-2 rounded-full ${
+                        activity.type === 'success' ? 'bg-green-500' :
+                        activity.type === 'warning' ? 'bg-orange-500' :
+                        'bg-blue-500'
+                      }`} />
+                      <div className="flex-1">
+                        <div className="text-sm text-gray-900">{activity.action}</div>
+                        <div className="text-xs text-gray-500 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {activity.time}
+                        </div>
+                      </div>
+                      <div className={`px-2 py-1 text-xs rounded ${
+                        activity.type === 'success' ? 'bg-green-100 text-green-800' :
+                        activity.type === 'warning' ? 'bg-orange-100 text-orange-800' :
+                        'bg-blue-100 text-blue-800'
+                      }`}>
+                        {activity.type}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

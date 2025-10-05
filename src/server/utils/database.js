@@ -20,6 +20,16 @@ const defaultDatabase = {
   cibilData: [],
   panData: [],
   otpCodes: [],
+  // New collections for User Profile Detail
+  userDocuments: [],
+  userBankDetails: [],
+  userReferences: [],
+  userTransactions: [],
+  userFollowUps: [],
+  userNotes: [],
+  userSmsHistory: [],
+  userLoginHistory: [],
+  userLoans: [],
   settings: {
     smsEnabled: true,
     emailEnabled: true,
@@ -132,6 +142,11 @@ class DatabaseModel {
     }
     
     return records;
+  }
+
+  // Alias for findAll for compatibility
+  find(filter = {}) {
+    return this.findAll(filter);
   }
 
   // Find one record by ID
@@ -321,6 +336,20 @@ const cleanupExpiredRecords = () => {
 // Run cleanup every hour
 setInterval(cleanupExpiredRecords, 60 * 60 * 1000);
 
+// New models for User Profile Detail
+const UserDocument = new DatabaseModel('userDocuments');
+const UserBankDetail = new DatabaseModel('userBankDetails');
+const UserReference = new DatabaseModel('userReferences');
+const UserTransaction = new DatabaseModel('userTransactions');
+const UserFollowUp = new DatabaseModel('userFollowUps');
+const UserNote = new DatabaseModel('userNotes');
+const UserSmsHistory = new DatabaseModel('userSmsHistory');
+const UserLoginHistory = new DatabaseModel('userLoginHistory');
+const UserLoan = new DatabaseModel('userLoans');
+
+// Loan Application model
+const LoanApplication = new DatabaseModel('loanApplications');
+
 module.exports = {
   readDatabase,
   writeDatabase,
@@ -339,6 +368,18 @@ module.exports = {
   CibilData,
   PanData,
   OtpCode,
+  // New exports for User Profile Detail
+  UserDocument,
+  UserBankDetail,
+  UserReference,
+  UserTransaction,
+  UserFollowUp,
+  UserNote,
+  UserSmsHistory,
+  UserLoginHistory,
+  UserLoan,
+  // Loan Application
+  LoanApplication,
   generateId,
   getNextSequence,
   cleanupExpiredRecords

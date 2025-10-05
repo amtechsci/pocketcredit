@@ -1,6 +1,6 @@
 const express = require('express');
-const { getConnection } = require('../utils/mysqlDatabase');
-const { requireAuth } = require('../middleware/session');
+const { executeQuery, initializeDatabase } = require('../config/database');
+const { requireAuth } = require('../middleware/jwtAuth');
 const router = express.Router();
 
 // =====================================================
@@ -10,14 +10,8 @@ const router = express.Router();
 // POST /api/loan-references - Save Reference Details for Loan Application
 router.post('/', requireAuth, async (req, res) => {
   try {
-    const userId = req.session.userId;
-
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentication required'
-      });
-    }
+    await initializeDatabase();
+    const userId = req.userId;
 
     const { 
       application_id,
@@ -33,43 +27,33 @@ router.post('/', requireAuth, async (req, res) => {
     }
 
     // Validate each reference
-    const phoneRegex = /^[6-9]\d{9}$/;
-    for (let i = 0; i < references.length; i++) {
-      const ref = references[i];
-      if (!ref.name || !ref.phone || !ref.relation) {
+    for (const ref of references) {
+      // Accept both 'relationship' and 'relation' field names for backward compatibility
+      const relationship = ref.relationship || ref.relation;
+      if (!ref.name || !ref.phone || !relationship) {
         return res.status(400).json({
           success: false,
-          message: `Reference ${i + 1}: Name, phone, and relation are required`
+          message: 'Each reference must have name, phone, and relationship'
         });
       }
-      
+
+      // Validate phone number format
+      const phoneRegex = /^[6-9]\d{9}$/;
       if (!phoneRegex.test(ref.phone)) {
         return res.status(400).json({
           success: false,
-          message: `Reference ${i + 1}: Please enter a valid 10-digit mobile number starting with 6-9`
+          message: 'Invalid phone number format for reference'
         });
       }
     }
 
-    // Check for duplicate phone numbers
-    const phoneNumbers = references.map(ref => ref.phone);
-    const uniquePhones = [...new Set(phoneNumbers)];
-    if (uniquePhones.length !== phoneNumbers.length) {
-      return res.status(400).json({
-        success: false,
-        message: 'All reference phone numbers must be different'
-      });
-    }
-
-    const connection = await getConnection();
-
     // Verify that the loan application belongs to the user
-    const [applications] = await connection.execute(
+    const applications = await executeQuery(
       'SELECT id, user_id FROM loan_applications WHERE id = ? AND user_id = ?',
       [application_id, userId]
     );
 
-    if (applications.length === 0) {
+    if (!applications || applications.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Loan application not found or does not belong to you'
@@ -77,37 +61,38 @@ router.post('/', requireAuth, async (req, res) => {
     }
 
     // Delete existing references for this application
-    await connection.execute(
-      'DELETE FROM `references` WHERE loan_application_id = ?',
+    await executeQuery(
+      'DELETE FROM loan_references WHERE application_id = ?',
       [application_id]
     );
 
     // Insert new references
-    const insertPromises = references.map(ref => 
-      connection.execute(
-        `INSERT INTO \`references\` 
-         (user_id, loan_application_id, name, phone, relation, status) 
-         VALUES (?, ?, ?, ?, ?, 'pending')`,
-        [userId, application_id, ref.name, ref.phone, ref.relation]
-      )
-    );
+    const referenceIds = [];
+    for (const ref of references) {
+      // Use the normalized relationship value
+      const relationship = ref.relationship || ref.relation;
+      const result = await executeQuery(
+        'INSERT INTO loan_references (application_id, name, phone, relationship, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
+        [application_id, ref.name, ref.phone, relationship]
+      );
+      referenceIds.push(result.insertId);
+    }
 
-    await Promise.all(insertPromises);
-
-    res.status(201).json({
+    res.json({
       success: true,
       message: 'Reference details saved successfully',
       data: {
-        references_count: references.length,
-        status: 'saved'
+        application_id,
+        reference_ids: referenceIds,
+        references_count: references.length
       }
     });
 
   } catch (error) {
-    console.error('Reference details error:', error);
+    console.error('Error saving loan references:', error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error while saving reference details'
+      message: 'Internal server error while saving loan references'
     });
   }
 });
@@ -115,45 +100,38 @@ router.post('/', requireAuth, async (req, res) => {
 // GET /api/loan-references/:applicationId - Get Reference Details for Loan Application
 router.get('/:applicationId', requireAuth, async (req, res) => {
   try {
-    const userId = req.session.userId;
+    await initializeDatabase();
+    const userId = req.userId;
     const { applicationId } = req.params;
 
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentication required'
-      });
-    }
-
-    const connection = await getConnection();
-
-    // Get reference details for the specific loan application
-    const [references] = await connection.execute(
-      `SELECT ref.*, la.application_number, la.loan_amount, la.loan_purpose
-       FROM \`references\` ref
-       JOIN loan_applications la ON ref.loan_application_id = la.id
-       WHERE ref.loan_application_id = ? AND ref.user_id = ?
-       ORDER BY ref.created_at ASC`,
+    // Verify that the loan application belongs to the user
+    const applications = await executeQuery(
+      'SELECT id, user_id FROM loan_applications WHERE id = ? AND user_id = ?',
       [applicationId, userId]
     );
 
-    if (references.length === 0) {
+    if (!applications || applications.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Reference details not found for this loan application'
+        message: 'Loan application not found or does not belong to you'
       });
     }
 
+    const references = await executeQuery(
+      'SELECT * FROM loan_references WHERE application_id = ? ORDER BY created_at DESC',
+      [applicationId]
+    );
+
     res.json({
       success: true,
-      data: references
+      data: references || []
     });
 
   } catch (error) {
-    console.error('Get reference details error:', error);
+    console.error('Error fetching loan references:', error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error while fetching reference details'
+      message: 'Internal server error while fetching loan references'
     });
   }
 });

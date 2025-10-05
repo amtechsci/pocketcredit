@@ -1,6 +1,6 @@
 const express = require('express');
 const { updateBasicProfile, updateAdditionalProfile, getProfileStatus } = require('../controllers/userController');
-const { requireAuth } = require('../middleware/session');
+const { requireAuth } = require('../middleware/jwtAuth');
 
 const router = express.Router();
 

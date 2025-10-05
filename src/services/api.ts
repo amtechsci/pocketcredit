@@ -78,6 +78,20 @@ class ApiService {
       },
     });
 
+    // Add JWT token to requests
+    this.api.interceptors.request.use(
+      (config: any) => {
+        const token = localStorage.getItem('pocket_user_token');
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+      },
+      (error: any) => {
+        return Promise.reject(error);
+      }
+    );
+
     // Request interceptor for logging (reduced for production)
     this.api.interceptors.request.use(
       (config: any) => {
@@ -145,8 +159,15 @@ class ApiService {
     return this.request<SendOTPResponse>('POST', '/auth/send-otp', { mobile });
   }
 
-  async verifyOTP(mobile: string, otp: string): Promise<ApiResponse<LoginResponse>> {
-    return this.request<LoginResponse>('POST', '/auth/verify-otp', { mobile, otp });
+  async verifyOTP(mobile: string, otp: string): Promise<ApiResponse<LoginResponse & { token?: string }>> {
+    const response = await this.request<LoginResponse & { token?: string }>('POST', '/auth/verify-otp', { mobile, otp });
+    
+    // Store JWT token if provided
+    if (response.status === 'success' && response.data?.token) {
+      localStorage.setItem('pocket_user_token', response.data.token);
+    }
+    
+    return response;
   }
 
   async getUserProfile(): Promise<ApiResponse<{ user: User }>> {
@@ -154,7 +175,12 @@ class ApiService {
   }
 
   async logout(): Promise<ApiResponse> {
-    return this.request('POST', '/auth/logout');
+    const response = await this.request('POST', '/auth/logout');
+    
+    // Clear JWT token from localStorage
+    localStorage.removeItem('pocket_user_token');
+    
+    return response;
   }
 
   // Profile Management APIs

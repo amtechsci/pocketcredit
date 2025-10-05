@@ -167,7 +167,7 @@ export function LoanApplicationStepsPage() {
         ifsc_code: bankDetails.ifscCode
       });
 
-      if (response.status === 'success') {
+      if (response.success === true) {
         toast.success('Bank details saved successfully!');
         // Refresh loan application to get updated step
         await fetchLoanApplication(applicationId);
@@ -241,7 +241,7 @@ export function LoanApplicationStepsPage() {
         ]
       });
 
-      if (response.status === 'success') {
+      if (response.success === true) {
         toast.success('Reference details saved successfully!');
         // Refresh loan application to get updated step
         await fetchLoanApplication(applicationId);

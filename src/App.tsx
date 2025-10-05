@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { getAuthenticatedRedirect } from './utils/navigation';
 import { Header } from './components/Header';
@@ -8,7 +8,7 @@ import { HomePage } from './components/pages/HomePage';
 import { PersonalLoanPage } from './components/pages/PersonalLoanPage';
 import { BusinessLoanPage } from './components/pages/BusinessLoanPage';
 import { AuthPage } from './components/pages/AuthPage';
-import { AdminLoginPage } from './components/pages/AdminLoginPage';
+import { AdminLogin } from './admin/AdminLogin';
 import { ProfileCompletionPageSimple as ProfileCompletionPage } from './components/pages/ProfileCompletionPageSimple';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DynamicDashboardPage as DashboardPage } from './components/pages/DynamicDashboardPage';
@@ -28,8 +28,9 @@ import { ContactPage } from './components/pages/ContactPage';
 import { PrivacyPolicyPage } from './components/pages/PrivacyPolicyPage';
 import { TermsConditionsPage } from './components/pages/TermsConditionsPage';
 import { FairPracticeCodePage } from './components/pages/FairPracticeCodePage';
-import { ITPolicy } from './components/pages/ITPolicy';
-import { FeesPolicy } from './components/pages/FeesPolicy';
+import { ITPolicyNew as ITPolicy } from './components/pages/ITPolicyNew';
+import { FeesPolicyPage as FeesPolicy } from './components/pages/FeesPolicyPage';
+import { RefundCancellationPolicyPage } from './components/pages/RefundCancellationPolicyPage';
 import { PartnersPage } from './components/pages/PartnersPage';
 import { MediaPage } from './components/pages/MediaPage';
 import { CareersPage } from './components/pages/CareersPage';
@@ -74,7 +75,7 @@ function AdminAccessPage() {
                 </div>
                 <h1 className="text-2xl mb-4 font-bold" style={{ color: '#1E2A3B' }}>Admin Access</h1>
                 <p className="mb-6 text-gray-600">
-                  Access the Pocket Credit Admin Panel to manage loans, users, and system operations.
+                  Access the Admin Panel to manage loans, users, and system operations.
                 </p>
                 <div className="space-y-4">
             <a 
@@ -127,9 +128,36 @@ function NotFoundPage() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <Routes>
+      {/* Admin routes - no AuthProvider needed */}
+      <Route path="/admin/login" element={<AdminLoginPage />} />
+      <Route path="/admin/*" element={<AdminApp />} />
+      
+      {/* All other routes - wrapped with AuthProvider */}
+      <Route path="*" element={
+        <AuthProvider>
+          <AppContent />
+        </AuthProvider>
+      } />
+    </Routes>
+  );
+}
+
+// Admin Login Page Component
+function AdminLoginPage() {
+  const navigate = useNavigate();
+
+  console.log('AdminLoginPage rendered - no AuthProvider');
+
+  const handleLogin = (user: any) => {
+    localStorage.setItem('adminUser', JSON.stringify(user));
+    navigate('/admin/dashboard');
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AdminLogin onLogin={handleLogin} />
+    </div>
   );
 }
 
@@ -227,6 +255,12 @@ function AppContent() {
         <Route path="/fees-policy" element={
           <LayoutWithHeaderFooter>
             <FeesPolicy />
+          </LayoutWithHeaderFooter>
+        } />
+        
+        <Route path="/refund-cancellation-policy" element={
+          <LayoutWithHeaderFooter>
+            <RefundCancellationPolicyPage />
           </LayoutWithHeaderFooter>
         } />
         
@@ -383,8 +417,7 @@ function AppContent() {
           </DashboardLayout>
         } />
         
-        {/* Admin Panel */}
-        <Route path="/admin/*" element={<AdminApp />} />
+        {/* Admin Panel - moved to top level routes */}
         
         {/* 404 Page */}
         <Route path="*" element={<NotFoundPage />} />

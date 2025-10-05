@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Clock, Scale, CheckCircle, DollarSign, Settings } from 'lucide-react';
+import { FileText, Clock, Scale, CheckCircle, IndianRupee, Settings } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Button } from '../ui/button';
@@ -308,7 +308,7 @@ export function DisclaimerPage() {
                   <Card key={index}>
                     <CardHeader>
                       <CardTitle className="flex items-center gap-3" style={{ color: '#1E2A3B' }}>
-                        <DollarSign className="h-5 w-5" style={{ color: '#0052FF' }} />
+                        <IndianRupee className="h-5 w-5" style={{ color: '#0052FF' }} />
                         {section.title}
                       </CardTitle>
                     </CardHeader>

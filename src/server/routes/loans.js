@@ -1,6 +1,6 @@
 const express = require('express');
-const { getConnection } = require('../utils/mysqlDatabase');
-const { requireAuth } = require('../middleware/session');
+const { executeQuery, initializeDatabase } = require('../config/database');
+const { requireAuth } = require('../middleware/jwtAuth');
 const router = express.Router();
 
 // =====================================================
@@ -15,7 +15,7 @@ router.get('/test', (req, res) => {
 // POST /api/loans/apply - Create New Loan Application
 router.post('/apply', requireAuth, async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = req.userId; // JWT middleware provides this
 
     if (!userId) {
       return res.status(401).json({
@@ -44,15 +44,15 @@ router.post('/apply', requireAuth, async (req, res) => {
       });
     }
 
-    const connection = await getConnection();
+    await initializeDatabase();
 
     // Check if user already has an active loan
-    const [activeLoans] = await connection.execute(
-      `SELECT id, status FROM loans WHERE user_id = ? AND status IN ('active')`,
+    const activeLoans = await executeQuery(
+      `SELECT id, status FROM loan_applications WHERE user_id = ? AND status IN ('approved', 'disbursed')`,
       [userId]
     );
 
-    if (activeLoans.length > 0) {
+    if (activeLoans && activeLoans.length > 0) {
       return res.status(400).json({
         success: false,
         message: 'You already have an active loan. Please complete or close your existing loan before applying for a new one.'
@@ -60,13 +60,13 @@ router.post('/apply', requireAuth, async (req, res) => {
     }
 
     // Check if user has any pending loan applications
-    const [pendingApplications] = await connection.execute(
+    const pendingApplications = await executeQuery(
       `SELECT id, status FROM loan_applications 
-       WHERE user_id = ? AND status IN ('submitted', 'under_review', 'approved', 'disbursed')`,
+       WHERE user_id = ? AND status IN ('submitted', 'under_review')`,
       [userId]
     );
 
-    if (pendingApplications.length > 0) {
+    if (pendingApplications && pendingApplications.length > 0) {
       return res.status(400).json({
         success: false,
         message: 'You already have a pending loan application. Please complete your existing application before applying for a new one.'
@@ -74,7 +74,7 @@ router.post('/apply', requireAuth, async (req, res) => {
     }
 
     // Get user profile and employment details for eligibility checks
-    const [users] = await connection.execute(
+    const users = await executeQuery(
       `SELECT u.*, ed.monthly_salary, ed.employment_type, ed.company_name
        FROM users u 
        LEFT JOIN employment_details ed ON u.id = ed.user_id
@@ -82,58 +82,45 @@ router.post('/apply', requireAuth, async (req, res) => {
       [userId]
     );
 
-    if (users.length === 0) {
+    if (!users || users.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'User not found'
+        message: 'User profile not found'
       });
     }
 
     const user = users[0];
 
-    // Check if user has completed profile setup
-    if (!user.profile_completed) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please complete your profile setup before applying for a loan'
-      });
-    }
+    // Generate unique application number
+    const applicationNumber = `LA${Date.now()}${Math.floor(Math.random() * 1000000)}`;
+    const currentDate = new Date();
 
-    // Basic eligibility check using employment details
-    if (!user.monthly_salary || user.monthly_salary < 25000) {
-      return res.status(400).json({
-        success: false,
-        message: 'Minimum monthly income of ₹25,000 required for loan application'
-      });
-    }
-
-    // Generate application number
-    const applicationNumber = `LA${Date.now()}${Math.floor(Math.random() * 1000)}`;
-
-    // Default tenure is 30 months as per requirements
-    const tenureMonths = 30;
-
-    // Insert loan application
-    const [result] = await connection.execute(
-      `INSERT INTO loan_applications 
-       (user_id, application_number, loan_amount, loan_purpose, tenure_months, status) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [userId, applicationNumber, desired_amount, purpose, tenureMonths, 'submitted']
+    // Create loan application
+    const result = await executeQuery(
+      `INSERT INTO loan_applications (
+        user_id, application_number, loan_amount, loan_purpose, 
+        status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'submitted', NOW(), NOW())`,
+      [userId, applicationNumber, desired_amount, purpose]
     );
+
+    const applicationId = result.insertId;
 
     res.status(201).json({
       success: true,
-      message: 'Loan application submitted successfully',
+      message: 'Loan application created successfully',
       data: {
-        application_id: result.insertId,
+        id: applicationId,
         application_number: applicationNumber,
+        desired_amount: desired_amount,
+        purpose: purpose,
         status: 'submitted',
-        current_step: 'bank_details'
+        created_at: currentDate.toISOString()
       }
     });
 
   } catch (error) {
-    console.error('Loan application error:', error);
+    console.error('Create loan application error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error while creating loan application'
@@ -143,142 +130,77 @@ router.post('/apply', requireAuth, async (req, res) => {
 
 // GET /api/loans/pending - Get Pending Loan Applications for Dashboard
 router.get('/pending', requireAuth, async (req, res) => {
-  let connection;
   const startTime = Date.now();
-  
   try {
-    console.log('Pending applications API: Starting...');
-    const userId = req.session.userId;
-    console.log('Pending applications API called for user ID:', userId);
+    await initializeDatabase(); // Initialize DB
+    const userId = req.userId;
 
-    if (!userId) {
-      console.log('No user ID in session');
-      return res.status(401).json({
-        success: false,
-        message: 'Authentication required'
-      });
-    }
-
-    // Set a longer timeout for the entire operation
+    // Create a timeout promise (5 seconds)
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Database query timeout')), 30000);
+      setTimeout(() => reject(new Error('Query timeout')), 5000);
     });
 
     const queryPromise = (async () => {
-      connection = await getConnection();
-      console.log('Database connection established');
+      console.log('Database connection established'); // This log is now less relevant as connection is managed by executeQuery
 
-      // First check if user has any active loans
-      const [activeLoans] = await connection.execute(
-        `SELECT id, loan_amount, status, created_at FROM loans 
-         WHERE user_id = ? AND status IN ('active')`,
+      // Query for pending loan applications
+      const applications = await executeQuery(
+        `SELECT DISTINCT
+          la.id,
+          la.application_number,
+          la.loan_amount,
+          la.loan_purpose,
+          la.status,
+          la.created_at
+        FROM loan_applications la
+        WHERE la.user_id = ? AND la.status IN ('submitted', 'under_review', 'approved', 'disbursed')
+        ORDER BY la.created_at DESC
+        LIMIT 10`,
         [userId]
       );
 
-      if (activeLoans.length > 0) {
-        // Return active loans as "pending" for dashboard display
-        return res.json({
-          success: true,
-          data: {
-            applications: activeLoans.map(loan => ({
-              id: loan.id,
-              application_number: `LOAN-${loan.id}`,
-              loan_amount: loan.loan_amount,
-              loan_purpose: 'Active Loan',
-              status: loan.status,
-              current_step: 'active_loan',
-              created_at: loan.created_at
-            }))
-          }
-        });
-      }
+      // Transform data to avoid nested objects
+      const responseData = applications.map(app => ({
+        id: app.id,
+        application_number: app.application_number,
+        loan_amount: parseFloat(app.loan_amount) || 0,
+        loan_purpose: app.loan_purpose || 'Not specified',
+        status: app.status || 'submitted',
+        created_at: app.created_at ? new Date(app.created_at).toISOString() : new Date().toISOString(),
+        days_pending: 0 // Simplified calculation
+      }));
 
-      // If no active loans, check for pending loan applications with optimized query
-      console.log('Querying pending loan applications...');
-      const [applications] = await connection.execute(
-        'SELECT\n' +
-        '  la.id,\n' +
-        '  la.application_number,\n' +
-        '  la.loan_amount,\n' +
-        '  la.loan_purpose,\n' +
-        '  la.status,\n' +
-        '  la.created_at,\n' +
-        '  CASE\n' +
-        "    WHEN bd.id IS NOT NULL AND ref.id IS NOT NULL THEN 'completed'\n" +
-        "    WHEN bd.id IS NOT NULL THEN 'references'\n" +
-        "    ELSE 'bank_details'\n" +
-        '  END as current_step\n' +
-        'FROM loan_applications la\n' +
-        'LEFT JOIN bank_details bd ON la.id = bd.loan_application_id\n' +
-        'LEFT JOIN `references` ref ON la.id = ref.loan_application_id\n' +
-        "WHERE la.user_id = ? AND la.status IN ('submitted', 'under_review', 'approved', 'disbursed')\n" +
-        'ORDER BY la.created_at DESC\n' +
-        'LIMIT 10',
-        [userId]
-      );
-
-      console.log(`Found ${applications.length} pending applications`);
-
-      const responseData = {
-        success: true,
-        data: {
-          applications: applications.map(app => ({
-            id: app.id,
-            application_number: app.application_number,
-            loan_amount: app.loan_amount,
-            loan_purpose: app.loan_purpose,
-            status: app.status,
-            current_step: app.current_step,
-            created_at: app.created_at
-          }))
-        }
-      };
-
-      console.log('Returning pending applications:', responseData);
-      res.json(responseData);
+      console.log(`Processed ${responseData.length} applications successfully`);
+      return responseData;
     })();
 
-    // Race between query and timeout
-    await Promise.race([queryPromise, timeoutPromise]);
-    
-    // Log performance metrics
-    const duration = Date.now() - startTime;
-    console.log(`Pending applications API completed in ${duration}ms`);
+    const finalData = await Promise.race([queryPromise, timeoutPromise]);
+    const endTime = Date.now();
+    console.log(`⏱️ Pending applications query completed in ${endTime - startTime}ms`);
+
+    res.json({
+      success: true,
+      data: {
+        applications: finalData || [],
+        total_count: finalData ? finalData.length : 0
+      }
+    });
 
   } catch (error) {
-    console.error('Get pending loan applications error:', error);
+    const endTime = Date.now();
+    console.error(`❌ Pending applications error after ${endTime - startTime}ms:`, error.message);
     
-    if (error.message === 'Database query timeout') {
-      res.status(408).json({
-        success: false,
-        message: 'Request timeout - please try again'
-      });
-    } else if (error.code === 'ECONNRESET' || error.code === 'PROTOCOL_CONNECTION_LOST') {
-      res.status(503).json({
-        success: false,
-        message: 'Database connection lost - please try again'
-      });
-    } else {
-      res.status(500).json({
-        success: false,
-        message: 'Internal server error while fetching pending loan applications'
-      });
-    }
-  } finally {
-    if (connection) {
-      try {
-        connection.release();
-      } catch (releaseError) {
-        console.warn('Error releasing database connection:', releaseError.message);
-      }
-    }
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while fetching pending loan applications'
+    });
   }
 });
 
 // GET /api/loans/:applicationId - Get Loan Application Details
 router.get('/:applicationId', requireAuth, async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = req.userId; // JWT middleware provides this
     const { applicationId } = req.params;
 
     if (!userId) {
@@ -288,41 +210,42 @@ router.get('/:applicationId', requireAuth, async (req, res) => {
       });
     }
 
-    const connection = await getConnection();
+    await initializeDatabase();
 
     // Get loan application details - simplified query to avoid timeout
-    const [applications] = await connection.execute(
+    const applications = await executeQuery(
       `SELECT id, application_number, loan_amount, loan_purpose, status, created_at
        FROM loan_applications 
        WHERE id = ? AND user_id = ?`,
       [applicationId, userId]
     );
 
-    if (applications.length === 0) {
+    if (!applications || applications.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Loan application not found'
       });
     }
 
+
     const application = applications[0];
 
     // Get current step separately to avoid complex joins
     let currentStep = 'bank_details';
     try {
-      const [bankDetails] = await connection.execute(
+      const bankDetails = await executeQuery(
         'SELECT id FROM bank_details WHERE loan_application_id = ? LIMIT 1',
         [applicationId]
       );
       
-      const [references] = await connection.execute(
-        'SELECT id FROM `references` WHERE loan_application_id = ? LIMIT 1',
+      const references = await executeQuery(
+        'SELECT id FROM loan_references WHERE application_id = ? LIMIT 1',
         [applicationId]
       );
       
-      if (bankDetails.length > 0 && references.length > 0) {
+      if (bankDetails && bankDetails.length > 0 && references && references.length > 0) {
         currentStep = 'completed';
-      } else if (bankDetails.length > 0) {
+      } else if (bankDetails && bankDetails.length > 0) {
         currentStep = 'references';
       } else {
         currentStep = 'bank_details';

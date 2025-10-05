@@ -176,77 +176,7 @@ router.post('/login', validate(schemas.userLogin), async (req, res) => {
   }
 });
 
-// Admin Login
-router.post('/admin/login', validate(schemas.adminLogin), async (req, res) => {
-  try {
-    const { email, password } = req.validatedData;
-
-    // Find admin
-    const admin = Admin.findOne({ email });
-    if (!admin) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Invalid admin credentials'
-      });
-    }
-
-    // Check if admin is active
-    if (!admin.isActive) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'Admin account is deactivated'
-      });
-    }
-
-    // Verify password
-    const isValidPassword = await bcrypt.compare(password, admin.password);
-    if (!isValidPassword) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Invalid admin credentials'
-      });
-    }
-
-    // Generate token
-    const token = generateToken({
-      id: admin.id,
-      email: admin.email,
-      role: admin.role
-    }, '8h'); // Admin tokens expire in 8 hours
-
-    // Log admin login
-    LoginHistory.create({
-      userId: admin.id,
-      userType: 'admin',
-      ip: req.ip || req.connection.remoteAddress,
-      userAgent: req.get('User-Agent'),
-      loginTime: new Date().toISOString(),
-      status: 'success'
-    });
-
-    res.json({
-      status: 'success',
-      message: 'Admin login successful',
-      data: {
-        admin: {
-          id: admin.id,
-          name: admin.name,
-          email: admin.email,
-          role: admin.role,
-          permissions: admin.permissions
-        },
-        token
-      }
-    });
-
-  } catch (error) {
-    console.error('Admin login error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Admin login failed'
-    });
-  }
-});
+// Admin login moved to separate admin routes
 
 // Send OTP
 router.post('/send-otp', async (req, res) => {
@@ -318,20 +248,63 @@ router.post('/verify-otp', validate(schemas.otpVerification), async (req, res) =
       });
     }
 
-    // Mark mobile as verified if user exists
-    if (otpRecord.userId) {
-      User.update(otpRecord.userId, { isMobileVerified: true });
+    // Check if user exists, if not create one
+    let user = await findUserByMobileNumber(mobile);
+    
+    if (!user) {
+      // Create new user with mobile number
+      user = await createUser({
+        phone: mobile,
+        first_name: '',
+        last_name: '',
+        email: '',
+        password_hash: '', // No password for mobile-only users
+        date_of_birth: null,
+        gender: null,
+        member_id: 1, // Default member tier
+        profile_completion_step: 2, // Start at step 2 (Basic Information)
+        profile_completed: false,
+        phone_verified: true,
+        email_verified: false,
+        kyc_completed: false,
+        status: 'active'
+      });
+      
+      console.log('Created new user:', user.id);
+    } else {
+      // Mark mobile as verified if user exists
+      User.update(user.id, { phone_verified: true });
     }
 
     // Delete used OTP
     OtpCode.delete(otpRecord.id);
 
+    // Generate token
+    const token = generateToken({
+      id: user.id,
+      email: user.email || '',
+      role: 'user'
+    });
+
     res.json({
       status: 'success',
       message: 'OTP verified successfully',
       data: {
-        mobile,
-        verified: true
+        user: {
+          id: user.id,
+          phone: user.phone,
+          first_name: user.first_name,
+          last_name: user.last_name,
+          email: user.email,
+          profile_completion_step: user.profile_completion_step,
+          profile_completed: user.profile_completed,
+          phone_verified: user.phone_verified,
+          email_verified: user.email_verified,
+          kyc_completed: user.kyc_completed,
+          status: user.status
+        },
+        token,
+        requires_profile_completion: !user.profile_completed
       }
     });
 

@@ -6,7 +6,7 @@ import {
   FileText, 
   Users, 
   Building, 
-  DollarSign, 
+  IndianRupee, 
   Star, 
   AlertTriangle, 
   Calendar,
@@ -166,49 +166,60 @@ export function AdminReports() {
 
       <div className="p-6 space-y-8">
         {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-6 rounded-lg">
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-12 h-12 bg-blue-200 rounded-full flex items-center justify-center">
-                <Users className="w-6 h-6 text-blue-600" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-4 rounded-lg">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-10 h-10 bg-blue-200 rounded-full flex items-center justify-center">
+                <Users className="w-5 h-5 text-blue-600" />
               </div>
-              <TrendingUp className="w-5 h-5 text-blue-600" />
+              <TrendingUp className="w-4 h-4 text-blue-600" />
             </div>
-            <div className="text-2xl font-bold text-blue-600 mb-1">2,543</div>
-            <div className="text-sm text-gray-600">Total Users</div>
+            <div className="text-xl font-bold text-blue-600 mb-1">2,543</div>
+            <div className="text-xs text-gray-600">Total Users</div>
           </div>
 
-          <div className="bg-gradient-to-r from-green-50 to-green-100 p-6 rounded-lg">
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-12 h-12 bg-green-200 rounded-full flex items-center justify-center">
-                <Building className="w-6 h-6 text-green-600" />
+          <div className="bg-gradient-to-r from-green-50 to-green-100 p-4 rounded-lg">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-10 h-10 bg-green-200 rounded-full flex items-center justify-center">
+                <Building className="w-5 h-5 text-green-600" />
               </div>
-              <TrendingUp className="w-5 h-5 text-green-600" />
+              <TrendingUp className="w-4 h-4 text-green-600" />
             </div>
-            <div className="text-2xl font-bold text-green-600 mb-1">1,234</div>
-            <div className="text-sm text-gray-600">Active Loans</div>
+            <div className="text-xl font-bold text-green-600 mb-1">1,234</div>
+            <div className="text-xs text-gray-600">Active Loans</div>
           </div>
 
-          <div className="bg-gradient-to-r from-purple-50 to-purple-100 p-6 rounded-lg">
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-12 h-12 bg-purple-200 rounded-full flex items-center justify-center">
-                <DollarSign className="w-6 h-6 text-purple-600" />
+          <div className="bg-gradient-to-r from-purple-50 to-purple-100 p-4 rounded-lg">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-10 h-10 bg-purple-200 rounded-full flex items-center justify-center">
+                <IndianRupee className="w-5 h-5 text-purple-600" />
               </div>
-              <TrendingUp className="w-5 h-5 text-purple-600" />
+              <TrendingUp className="w-4 h-4 text-purple-600" />
             </div>
-            <div className="text-2xl font-bold text-purple-600 mb-1">₹45.2Cr</div>
-            <div className="text-sm text-gray-600">Total Disbursed</div>
+            <div className="text-xl font-bold text-purple-600 mb-1">₹45.2Cr</div>
+            <div className="text-xs text-gray-600">Total Disbursed</div>
           </div>
 
-          <div className="bg-gradient-to-r from-orange-50 to-orange-100 p-6 rounded-lg">
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-12 h-12 bg-orange-200 rounded-full flex items-center justify-center">
-                <Star className="w-6 h-6 text-orange-600" />
+          <div className="bg-gradient-to-r from-orange-50 to-orange-100 p-4 rounded-lg">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-10 h-10 bg-orange-200 rounded-full flex items-center justify-center">
+                <Star className="w-5 h-5 text-orange-600" />
               </div>
-              <TrendingUp className="w-5 h-5 text-orange-600" />
+              <TrendingUp className="w-4 h-4 text-orange-600" />
             </div>
-            <div className="text-2xl font-bold text-orange-600 mb-1">98.5%</div>
-            <div className="text-sm text-gray-600">Collection Rate</div>
+            <div className="text-xl font-bold text-orange-600 mb-1">98.5%</div>
+            <div className="text-xs text-gray-600">Collection Rate</div>
+          </div>
+
+          <div className="bg-gradient-to-r from-red-50 to-red-100 p-4 rounded-lg">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-10 h-10 bg-red-200 rounded-full flex items-center justify-center">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+              </div>
+              <TrendingDown className="w-4 h-4 text-red-600" />
+            </div>
+            <div className="text-xl font-bold text-red-600 mb-1">23</div>
+            <div className="text-xs text-gray-600">Pending Reviews</div>
           </div>
         </div>
 
@@ -357,7 +368,7 @@ export function AdminReports() {
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <div className="flex items-center gap-3 mb-6">
             <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-              <DollarSign className="w-6 h-6 text-green-600" />
+              <IndianRupee className="w-6 h-6 text-green-600" />
             </div>
             <div>
               <h3 className="text-lg font-semibold text-gray-900">Financial & Transaction Reports</h3>

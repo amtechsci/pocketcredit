@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Shield, Eye, EyeOff } from 'lucide-react';
 import { Logo } from '../components/Logo';
+import { adminApiService } from '../services/adminApi';
 import type { AdminUser } from '../AdminApp';
 
 interface AdminLoginProps {
@@ -44,36 +45,34 @@ export function AdminLogin({ onLogin }: AdminLoginProps) {
     setIsLoading(true);
     setError('');
 
-    // Simulate API call
-    setTimeout(() => {
-      const user = demoUsers.find(u => 
-        u.email === email && 
-        (password === 'admin123' || password === 'demo123')
-      );
-
-      if (user) {
-        onLogin(user);
+    try {
+      const response = await adminApiService.login(email, password);
+      
+      if (response.status === 'success' && response.data) {
+        onLogin(response.data.admin);
       } else {
-        setError('Invalid credentials. Try admin@pocketcredit.com with admin123');
+        setError(response.message || 'Invalid credentials');
       }
+    } catch (error: any) {
+      console.error('Login error:', error);
+      setError('Login failed. Please try again.');
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#F5F7FA' }}>
       <div className="w-full max-w-md">
         <div className="bg-white rounded-lg shadow-xl p-8">
+          {/* Header Section */}
           <div className="text-center mb-8">
-            <div className="flex justify-center mb-4">
-              <Logo size="xl" variant="default" />
+            <div className="flex items-center justify-center mb-4">
+              <Shield className="w-8 h-8 text-red-600 mr-3" />
+              <h1 className="text-2xl font-bold text-gray-800">Admin Portal</h1>
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">
-              Admin Dashboard
-            </h1>
-            <p className="text-gray-600">
-              Management Portal
-            </p>
+            <h2 className="text-lg font-semibold text-gray-700 mb-2">Admin & Staff Login</h2>
+            <p className="text-sm text-gray-500">Access the administrative dashboard with your credentials</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-6">
@@ -81,15 +80,22 @@ export function AdminLogin({ onLogin }: AdminLoginProps) {
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
                 Email Address
               </label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter your email"
-                required
-              />
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
+                  </svg>
+                </div>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent transition-colors"
+                  placeholder="admin@pocketcredit.com"
+                  required
+                />
+              </div>
             </div>
 
             <div>
@@ -97,21 +103,26 @@ export function AdminLogin({ onLogin }: AdminLoginProps) {
                 Password
               </label>
               <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                  </svg>
+                </div>
                 <input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent transition-colors"
                   placeholder="Enter your password"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
             </div>
@@ -125,25 +136,27 @@ export function AdminLogin({ onLogin }: AdminLoginProps) {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+              className="w-full bg-red-600 text-white py-3 px-4 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-semibold"
             >
               {isLoading ? 'Signing In...' : 'Sign In'}
             </button>
           </form>
 
-          <div className="mt-8 pt-6 border-t border-gray-200">
-            <h3 className="text-sm font-medium text-gray-700 mb-3">Demo Accounts:</h3>
-            <div className="space-y-2 text-xs">
-              <div className="bg-gray-50 p-2 rounded">
-                <strong>Super Admin:</strong> admin@pocketcredit.com
+          <div className="mt-8">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h3 className="text-sm font-semibold text-blue-800 mb-2">Demo Credentials:</h3>
+              <div className="space-y-1 text-sm">
+                <div className="text-blue-700">Email: admin@pocketcredit.com</div>
+                <div className="text-blue-700">Password: admin123</div>
               </div>
-              <div className="bg-gray-50 p-2 rounded">
-                <strong>Manager:</strong> manager@pocketcredit.com
-              </div>
-              <div className="bg-gray-50 p-2 rounded">
-                <strong>Officer:</strong> officer@pocketcredit.com
-              </div>
-              <p className="text-gray-500 mt-2">Password: <code>admin123</code> or <code>demo123</code></p>
+            </div>
+          </div>
+
+          {/* Security Note */}
+          <div className="mt-6">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-center">
+              <Shield className="w-4 h-4 text-red-600 mr-2" />
+              <span className="text-sm text-red-700">Admin access only - All activities are logged</span>
             </div>
           </div>
         </div>
