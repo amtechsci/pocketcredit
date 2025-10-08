@@ -234,7 +234,7 @@ const getProfileSummary = (user) => {
     last_login_at: user.last_login_at,
     profile_completed: isProfileComplete(user)
   };
-};
+}; 
 
 module.exports = {
   findUserByMobileNumber,
