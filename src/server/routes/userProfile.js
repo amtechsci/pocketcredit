@@ -69,6 +69,16 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       return age;
     };
 
+    // Derive risk category and member level from available data
+    const monthlyIncomeValue = (employment && employment[0])?.monthly_salary ? Number((employment && employment[0])?.monthly_salary) : 0;
+    let riskCategory = 'N/A';
+    if (monthlyIncomeValue > 0) {
+      if (monthlyIncomeValue >= 50000) riskCategory = 'Low';
+      else if (monthlyIncomeValue >= 25000) riskCategory = 'Medium';
+      else riskCategory = 'High';
+    }
+    const memberLevel = riskCategory === 'Low' ? 'gold' : riskCategory === 'Medium' ? 'silver' : (riskCategory === 'High' ? 'bronze' : 'bronze');
+
     // Transform user data to match frontend expectations
     const userProfile = {
       id: user.id,
@@ -81,9 +91,12 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       isEmailVerified: user.email_verified ? true : false,
       isMobileVerified: user.phone_verified ? true : false,
       status: user.status || 'active',
+      registeredDate: user.created_at, // For admin UI compatibility
       createdAt: user.created_at,
       updatedAt: user.updated_at,
       lastLoginAt: user.last_login_at || 'N/A',
+      riskCategory,
+      memberLevel,
       profileCompletionStep: user.profile_completion_step || 1,
       profileCompleted: user.profile_completed ? true : false,
       eligibilityStatus: user.eligibility_status || 'pending',

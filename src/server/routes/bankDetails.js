@@ -118,10 +118,10 @@ router.post('/', requireAuth, async (req, res) => {
       bankDetailsId = result.insertId;
     }
 
-    // Update loan application status if needed
+    // Update loan application status and step
     await executeQuery(
-      'UPDATE loan_applications SET status = ? WHERE id = ?',
-      ['under_review', application_id]
+      'UPDATE loan_applications SET status = ?, current_step = ? WHERE id = ?',
+      ['under_review', 'references', application_id]
     );
 
     res.json({

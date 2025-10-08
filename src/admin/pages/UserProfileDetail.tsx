@@ -876,7 +876,10 @@ export function UserProfileDetail() {
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-IN');
+    if (!dateString) return 'N/A';
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) return 'N/A';
+    return d.toLocaleDateString('en-IN');
   };
 
   // Use real data with fallback to mock data
@@ -4328,7 +4331,7 @@ export function UserProfileDetail() {
           {/* Right: Key Info */}
           <div className="text-right">
             <div className="text-sm text-gray-600 mb-1">Registered: {formatDate(getUserData('registeredDate'))}</div>
-            <div className="text-sm text-gray-600 mb-2">Risk: {getUserData('riskCategory')} | Level: {getUserData('memberLevel')}</div>
+            <div className="text-sm text-gray-600 mb-2">Risk: {getUserData('riskCategory')} | Level: {getUserData('memberLevel')} | Credit Score: {getUserData('credit_score') || 'N/A'}</div>
           </div>
         </div>
       </div>

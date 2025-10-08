@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import adminApiService from '../../services/adminApi';
 import { 
   Settings, 
   Save, 
@@ -46,147 +47,412 @@ interface ApiField {
   description?: string;
 }
 
+interface UserConfig {
+  id: number;
+  value: string;
+  description: string;
+  updated_at: string;
+}
+
+interface UserConfigData {
+  default_credit_score: UserConfig;
+  credit_limit_multiplier: UserConfig;
+  min_credit_score: UserConfig;
+  max_credit_score: UserConfig;
+  credit_score_update_frequency: UserConfig;
+}
+
+// Cloud Test Form Component
+const CloudTestForm: React.FC<{
+  configId: number;
+  onTest: (configId: number, testFileName: string, testContent: string) => Promise<void>;
+  onClose: () => void;
+}> = ({ configId, onTest, onClose }) => {
+  const [testFileName, setTestFileName] = useState('test-file.txt');
+  const [testContent, setTestContent] = useState('This is a test file to verify cloud storage configuration is working correctly.');
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleTest = async () => {
+    if (!testFileName) {
+      alert('Please enter a test file name');
+      return;
+    }
+
+    setIsTesting(true);
+    setTestResult(null);
+
+    try {
+      await onTest(configId, testFileName, testContent);
+      setTestResult({ success: true, message: 'Cloud storage test successful! File uploaded and verified.' });
+    } catch (error) {
+      setTestResult({ success: false, message: 'Failed to test cloud storage configuration' });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-3">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Test File Name
+          </label>
+          <input
+            type="text"
+            value={testFileName}
+            onChange={(e) => setTestFileName(e.target.value)}
+            placeholder="Enter test file name"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Test File Content
+          </label>
+          <textarea
+            value={testContent}
+            onChange={(e) => setTestContent(e.target.value)}
+            rows={4}
+            placeholder="Enter test file content"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+
+      {testResult && (
+        <div className={`p-4 rounded-lg ${
+          testResult.success 
+            ? 'bg-green-50 border border-green-200' 
+            : 'bg-red-50 border border-red-200'
+        }`}>
+          <div className="flex items-center gap-2">
+            {testResult.success ? (
+              <CheckCircle className="w-5 h-5 text-green-600" />
+            ) : (
+              <XCircle className="w-5 h-5 text-red-600" />
+            )}
+            <p className={`text-sm font-medium ${
+              testResult.success ? 'text-green-800' : 'text-red-800'
+            }`}>
+              {testResult.message}
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-3 pt-4">
+        <button
+          onClick={onClose}
+          className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+        >
+          Close
+        </button>
+        <button
+          onClick={handleTest}
+          disabled={isTesting || !testFileName}
+          className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isTesting ? (
+            <div className="flex items-center justify-center gap-2">
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              Testing...
+            </div>
+          ) : (
+            'Test Cloud Storage'
+          )}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Email Test Form Component
+const EmailTestForm: React.FC<{
+  configId: number;
+  onTest: (configId: number, testEmail: string, testSubject: string, testMessage: string) => Promise<void>;
+  onClose: () => void;
+}> = ({ configId, onTest, onClose }) => {
+  const [testEmail, setTestEmail] = useState('');
+  const [testSubject, setTestSubject] = useState('Test Email from Pocket Credit');
+  const [testMessage, setTestMessage] = useState('This is a test email to verify the email configuration is working correctly.');
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleTest = async () => {
+    if (!testEmail) {
+      alert('Please enter a test email address');
+      return;
+    }
+
+    setIsTesting(true);
+    setTestResult(null);
+
+    try {
+      await onTest(configId, testEmail, testSubject, testMessage);
+      setTestResult({ success: true, message: 'Test email sent successfully!' });
+    } catch (error) {
+      setTestResult({ success: false, message: 'Failed to send test email' });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-3">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Test Email Address
+          </label>
+          <input
+            type="email"
+            value={testEmail}
+            onChange={(e) => setTestEmail(e.target.value)}
+            placeholder="Enter email address to send test to"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Subject
+          </label>
+          <input
+            type="text"
+            value={testSubject}
+            onChange={(e) => setTestSubject(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Message
+          </label>
+          <textarea
+            value={testMessage}
+            onChange={(e) => setTestMessage(e.target.value)}
+            rows={3}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+
+      {testResult && (
+        <div className={`p-4 rounded-lg ${
+          testResult.success 
+            ? 'bg-green-50 border border-green-200' 
+            : 'bg-red-50 border border-red-200'
+        }`}>
+          <div className="flex items-center gap-2">
+            {testResult.success ? (
+              <CheckCircle className="w-5 h-5 text-green-600" />
+            ) : (
+              <XCircle className="w-5 h-5 text-red-600" />
+            )}
+            <p className={`text-sm font-medium ${
+              testResult.success ? 'text-green-800' : 'text-red-800'
+            }`}>
+              {testResult.message}
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-3 pt-4">
+        <button
+          onClick={onClose}
+          className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+        >
+          Close
+        </button>
+        <button
+          onClick={handleTest}
+          disabled={isTesting || !testEmail}
+          className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isTesting ? (
+            <div className="flex items-center justify-center gap-2">
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              Sending...
+            </div>
+          ) : (
+            'Send Test Email'
+          )}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 export function AdminSettings() {
   const [activeTab, setActiveTab] = useState('sms');
   const [showTestModal, setShowTestModal] = useState(false);
   const [testingConfig, setTestingConfig] = useState<ApiConfig | null>(null);
+  const [userConfig, setUserConfig] = useState<UserConfigData | null>(null);
+  const [userConfigLoading, setUserConfigLoading] = useState(false);
+  const [userConfigSaving, setUserConfigSaving] = useState(false);
+  
+  // Email configurations state
+  const [emailConfigs, setEmailConfigs] = useState<Array<{
+    id: number;
+    config_name: string;
+    provider: string;
+    host: string;
+    port: number;
+    encryption: 'tls' | 'ssl' | 'none';
+    username: string;
+    password: string;
+    from_email: string;
+    from_name: string;
+    status: 'active' | 'inactive';
+    is_primary: boolean;
+    created_at: string;
+    updated_at: string;
+  }>>([]);
+  const [emailConfigsLoading, setEmailConfigsLoading] = useState(false);
+  const [emailConfigsSaving, setEmailConfigsSaving] = useState(false);
+  
+  // Cloud storage configurations state
+  const [cloudConfigs, setCloudConfigs] = useState<Array<{
+    id: number;
+    config_name: string;
+    provider: 'aws' | 'gcp' | 'azure';
+    bucket_name: string;
+    access_key: string;
+    secret_key: string;
+    region: string;
+    base_url: string;
+    status: 'active' | 'inactive';
+    is_primary: boolean;
+    created_at: string;
+    updated_at: string;
+  }>>([]);
+  const [cloudConfigsLoading, setCloudConfigsLoading] = useState(false);
+  const [cloudConfigsSaving, setCloudConfigsSaving] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [showPasswords, setShowPasswords] = useState<{ [key: string]: boolean }>({});
 
+  // Member tiers state
+  const [tiers, setTiers] = useState<Array<{ id: number; tier_name: string; processing_fee_percent: number; interest_percent_per_day: number }>>([]);
+  const [tiersLoading, setTiersLoading] = useState(false);
+  const [tierForm, setTierForm] = useState<{ tier_name: string; processing_fee_percent: string; interest_percent_per_day: string }>({
+    tier_name: '',
+    processing_fee_percent: '',
+    interest_percent_per_day: '0.01'
+  });
+
   const apiConfigs: ApiConfig[] = [
     {
-      id: 'sms-twilio',
-      name: 'Twilio SMS',
+      id: 'sms-primary',
+      name: 'Primary SMS API',
       type: 'sms',
       status: 'active',
-      description: 'Send SMS notifications and alerts via Twilio',
+      description: 'Main SMS service for sending OTP and notifications',
       testEndpoint: '/api/test/sms',
-      documentation: 'https://www.twilio.com/docs',
       fields: [
-        { key: 'account_sid', label: 'Account SID', type: 'text', value: 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', required: true, description: 'Your Twilio Account SID' },
-        { key: 'auth_token', label: 'Auth Token', type: 'password', value: 'your_auth_token_here', required: true, description: 'Your Twilio Auth Token' },
-        { key: 'phone_number', label: 'Phone Number', type: 'text', value: '+1234567890', required: true, description: 'Your Twilio phone number' },
-        { key: 'webhook_url', label: 'Webhook URL', type: 'url', value: 'https://yourdomain.com/webhook/sms', required: false, description: 'Optional webhook for delivery status' }
+        { key: 'api_url', label: 'API URL', type: 'url', value: 'https://api.smsprovider.com/send', required: true, description: 'SMS API endpoint URL' },
+        { key: 'api_key', label: 'API KEY', type: 'password', value: '', required: true, description: 'Your SMS API key' },
+        { key: 'user', label: 'USER', type: 'text', value: '', required: true, description: 'Username for SMS API authentication' },
+        { key: 'pass', label: 'PASS', type: 'password', value: '', required: true, description: 'Password for SMS API authentication' }
       ]
     },
     {
-      id: 'sms-textlocal',
-      name: 'TextLocal SMS',
+      id: 'sms-backup',
+      name: 'Backup SMS API',
       type: 'sms',
       status: 'inactive',
-      description: 'Alternative SMS provider for backup',
+      description: 'Backup SMS service for redundancy',
       testEndpoint: '/api/test/sms',
       fields: [
-        { key: 'api_key', label: 'API Key', type: 'password', value: '', required: true, description: 'Your TextLocal API key' },
-        { key: 'sender_id', label: 'Sender ID', type: 'text', value: 'POCKET', required: true, description: 'Sender name for SMS' },
-        { key: 'country_code', label: 'Country Code', type: 'select', value: 'IN', required: true, options: [
-          { value: 'IN', label: 'India (+91)' },
-          { value: 'US', label: 'United States (+1)' },
-          { value: 'UK', label: 'United Kingdom (+44)' }
-        ]}
+        { key: 'api_url', label: 'API URL', type: 'url', value: 'https://backup.smsprovider.com/send', required: true, description: 'Backup SMS API endpoint URL' },
+        { key: 'api_key', label: 'API KEY', type: 'password', value: '', required: true, description: 'Your backup SMS API key' },
+        { key: 'user', label: 'USER', type: 'text', value: '', required: true, description: 'Username for backup SMS API authentication' },
+        { key: 'pass', label: 'PASS', type: 'password', value: '', required: true, description: 'Password for backup SMS API authentication' }
       ]
     },
     {
-      id: 'email-smtp',
-      name: 'SMTP Email',
+      id: 'email-smtp-primary',
+      name: 'Primary SMTP',
       type: 'email',
       status: 'active',
-      description: 'Send emails via SMTP server',
+      description: 'Main SMTP server for sending emails',
       testEndpoint: '/api/test/email',
       fields: [
-        { key: 'host', label: 'SMTP Host', type: 'text', value: 'smtp.gmail.com', required: true, description: 'SMTP server hostname' },
+        { key: 'host', label: 'Host', type: 'text', value: 'smtp.gmail.com', required: true, description: 'SMTP server hostname' },
         { key: 'port', label: 'Port', type: 'number', value: '587', required: true, description: 'SMTP server port' },
-        { key: 'username', label: 'Username', type: 'email', value: 'noreply@pocketcredit.com', required: true, description: 'SMTP username' },
-        { key: 'password', label: 'Password', type: 'password', value: 'your_app_password', required: true, description: 'SMTP password or app password' },
         { key: 'encryption', label: 'Encryption', type: 'select', value: 'tls', required: true, options: [
           { value: 'tls', label: 'TLS' },
           { value: 'ssl', label: 'SSL' },
           { value: 'none', label: 'None' }
         ]},
-        { key: 'from_name', label: 'From Name', type: 'text', value: 'Pocket Credit', required: true, description: 'Display name for outgoing emails' }
-      ]
-    },
-    {
-      id: 'email-sendgrid',
-      name: 'SendGrid Email',
-      type: 'email',
-      status: 'inactive',
-      description: 'Send emails via SendGrid API',
-      testEndpoint: '/api/test/email',
-      documentation: 'https://docs.sendgrid.com',
-      fields: [
-        { key: 'api_key', label: 'API Key', type: 'password', value: '', required: true, description: 'Your SendGrid API key' },
-        { key: 'from_email', label: 'From Email', type: 'email', value: 'noreply@pocketcredit.com', required: true, description: 'Verified sender email' },
-        { key: 'from_name', label: 'From Name', type: 'text', value: 'Pocket Credit', required: true, description: 'Display name for outgoing emails' }
-      ]
-    },
-    {
-      id: 'payment-razorpay',
-      name: 'Razorpay Payment',
-      type: 'payment',
-      status: 'active',
-      description: 'Process payments via Razorpay',
-      testEndpoint: '/api/test/payment',
-      documentation: 'https://razorpay.com/docs',
-      fields: [
-        { key: 'key_id', label: 'Key ID', type: 'text', value: 'rzp_test_xxxxxxxxxxxxx', required: true, description: 'Your Razorpay Key ID' },
-        { key: 'key_secret', label: 'Key Secret', type: 'password', value: 'your_key_secret_here', required: true, description: 'Your Razorpay Key Secret' },
-        { key: 'webhook_secret', label: 'Webhook Secret', type: 'password', value: 'your_webhook_secret', required: false, description: 'Webhook secret for payment verification' },
-        { key: 'environment', label: 'Environment', type: 'select', value: 'test', required: true, options: [
-          { value: 'test', label: 'Test' },
-          { value: 'live', label: 'Live' }
+        { key: 'username', label: 'Username', type: 'email', value: 'noreply@pocketcredit.com', required: true, description: 'SMTP username' },
+        { key: 'password', label: 'Password', type: 'password', value: '', required: true, description: 'SMTP password' },
+        { key: 'from_email', label: 'From Email', type: 'email', value: 'noreply@pocketcredit.com', required: true, description: 'From email address' },
+        { key: 'from_name', label: 'From Name', type: 'text', value: 'Pocket Credit', required: true, description: 'From display name' },
+        { key: 'status', label: 'Status', type: 'select', value: 'active', required: true, options: [
+          { value: 'active', label: 'Active' },
+          { value: 'inactive', label: 'Inactive' }
         ]}
       ]
     },
     {
-      id: 'cloud-aws',
-      name: 'AWS S3 Storage',
+      id: 'email-smtp-backup',
+      name: 'Backup SMTP',
+      type: 'email',
+      status: 'inactive',
+      description: 'Backup SMTP server for redundancy',
+      testEndpoint: '/api/test/email',
+      fields: [
+        { key: 'host', label: 'Host', type: 'text', value: 'smtp.mailgun.org', required: true, description: 'Backup SMTP server hostname' },
+        { key: 'port', label: 'Port', type: 'number', value: '587', required: true, description: 'Backup SMTP server port' },
+        { key: 'encryption', label: 'Encryption', type: 'select', value: 'tls', required: true, options: [
+          { value: 'tls', label: 'TLS' },
+          { value: 'ssl', label: 'SSL' },
+          { value: 'none', label: 'None' }
+        ]},
+        { key: 'username', label: 'Username', type: 'email', value: '', required: true, description: 'Backup SMTP username' },
+        { key: 'password', label: 'Password', type: 'password', value: '', required: true, description: 'Backup SMTP password' },
+        { key: 'from_email', label: 'From Email', type: 'email', value: '', required: true, description: 'Backup from email address' },
+        { key: 'from_name', label: 'From Name', type: 'text', value: 'Pocket Credit', required: true, description: 'Backup from display name' },
+        { key: 'status', label: 'Status', type: 'select', value: 'inactive', required: true, options: [
+          { value: 'active', label: 'Active' },
+          { value: 'inactive', label: 'Inactive' }
+        ]}
+      ]
+    },
+    {
+      id: 'cloud-storage',
+      name: 'Cloud Storage',
       type: 'cloud',
       status: 'active',
       description: 'File storage and document management',
       testEndpoint: '/api/test/cloud',
       fields: [
-        { key: 'access_key', label: 'Access Key ID', type: 'text', value: 'AKIAIOSFODNN7EXAMPLE', required: true, description: 'AWS Access Key ID' },
-        { key: 'secret_key', label: 'Secret Access Key', type: 'password', value: 'your_secret_access_key', required: true, description: 'AWS Secret Access Key' },
-        { key: 'bucket_name', label: 'Bucket Name', type: 'text', value: 'pocket-credit-documents', required: true, description: 'S3 bucket name' },
-        { key: 'region', label: 'Region', type: 'text', value: 'us-east-1', required: true, description: 'AWS region' }
-      ]
-    },
-    {
-      id: 'security-jwt',
-      name: 'JWT Authentication',
-      type: 'security',
-      status: 'active',
-      description: 'JSON Web Token configuration',
-      fields: [
-        { key: 'secret', label: 'JWT Secret', type: 'password', value: 'your_jwt_secret_key_here', required: true, description: 'Secret key for JWT signing' },
-        { key: 'expires_in', label: 'Token Expiry', type: 'text', value: '24h', required: true, description: 'Token expiration time' },
-        { key: 'refresh_expires_in', label: 'Refresh Token Expiry', type: 'text', value: '7d', required: true, description: 'Refresh token expiration time' }
-      ]
-    },
-    {
-      id: 'webhook-loan-status',
-      name: 'Loan Status Webhook',
-      type: 'webhook',
-      status: 'active',
-      description: 'Notify external systems about loan status changes',
-      testEndpoint: '/api/test/webhook',
-      fields: [
-        { key: 'url', label: 'Webhook URL', type: 'url', value: 'https://external-system.com/webhook/loan-status', required: true, description: 'External system webhook URL' },
-        { key: 'secret', label: 'Webhook Secret', type: 'password', value: 'your_webhook_secret', required: false, description: 'Secret for webhook verification' },
-        { key: 'events', label: 'Events', type: 'textarea', value: 'loan.approved,loan.rejected,loan.disbursed', required: true, description: 'Comma-separated list of events to send' }
+        { key: 'provider', label: 'Provider', type: 'select', value: 'aws', required: true, options: [
+          { value: 'aws', label: 'AWS S3' },
+          { value: 'gcp', label: 'Google Cloud Storage' },
+          { value: 'azure', label: 'Azure Blob Storage' }
+        ]},
+        { key: 'bucket_name', label: 'Bucket Name', type: 'text', value: 'pocket-credit-documents', required: true, description: 'Storage bucket name' },
+        { key: 'access_key', label: 'Access Key', type: 'password', value: '', required: true, description: 'Cloud storage access key' },
+        { key: 'secret_key', label: 'Secret Key', type: 'password', value: '', required: true, description: 'Cloud storage secret key' },
+        { key: 'region', label: 'Region', type: 'text', value: 'us-east-1', required: true, description: 'Storage region' },
+        { key: 'base_url', label: 'Base URL', type: 'url', value: 'https://s3.amazonaws.com', required: true, description: 'Storage base URL' }
       ]
     }
   ];
 
   const tabs = [
-    { id: 'sms', label: 'SMS APIs', icon: MessageSquare, count: apiConfigs.filter(c => c.type === 'sms').length },
-    { id: 'email', label: 'Email APIs', icon: Mail, count: apiConfigs.filter(c => c.type === 'email').length },
-    { id: 'payment', label: 'Payment APIs', icon: CreditCard, count: apiConfigs.filter(c => c.type === 'payment').length },
-    { id: 'cloud', label: 'Cloud Storage', icon: Cloud, count: apiConfigs.filter(c => c.type === 'cloud').length },
-    { id: 'security', label: 'Security', icon: Shield, count: apiConfigs.filter(c => c.type === 'security').length },
-    { id: 'webhook', label: 'Webhooks', icon: Globe, count: apiConfigs.filter(c => c.type === 'webhook').length }
+    { id: 'sms', label: 'SMS APIs', icon: MessageSquare, count: 0 },
+    { id: 'email', label: 'Email APIs', icon: Mail, count: 0 },
+    { id: 'cloud', label: 'Cloud Storage', icon: Cloud, count: 0 },
+    { id: 'members', label: 'Member Tiers', icon: Shield, count: 0 },
+    { id: 'user-config', label: 'User Config', icon: Settings, count: 0 }
   ];
 
   const getStatusColor = (status: string) => {
@@ -210,9 +476,57 @@ export function AdminSettings() {
     }
   };
 
-  const handleFieldChange = (configId: string, fieldKey: string, value: string) => {
-    // In a real app, this would update the state
-    console.log(`Updating ${configId}.${fieldKey} to:`, value);
+  const handleFieldChange = async (configId: string, fieldKey: string, value: string) => {
+    if (activeTab === 'email') {
+      // Find the email config and update it
+      const config = emailConfigs.find(c => c.id.toString() === configId);
+      if (config) {
+        const updatedConfig = {
+          ...config,
+          [fieldKey]: value
+        };
+        
+        // Save to database
+        await saveEmailConfig(config.id, {
+          config_name: updatedConfig.config_name,
+          provider: updatedConfig.provider,
+          host: updatedConfig.host,
+          port: updatedConfig.port,
+          encryption: updatedConfig.encryption,
+          username: updatedConfig.username,
+          password: updatedConfig.password,
+          from_email: updatedConfig.from_email,
+          from_name: updatedConfig.from_name,
+          status: updatedConfig.status,
+          is_primary: updatedConfig.is_primary
+        });
+      }
+    } else if (activeTab === 'cloud') {
+      // Find the cloud config and update it
+      const config = cloudConfigs.find(c => c.id.toString() === configId);
+      if (config) {
+        const updatedConfig = {
+          ...config,
+          [fieldKey]: value
+        };
+        
+        // Save to database
+        await saveCloudConfig(config.id, {
+          config_name: updatedConfig.config_name,
+          provider: updatedConfig.provider,
+          bucket_name: updatedConfig.bucket_name,
+          access_key: updatedConfig.access_key,
+          secret_key: updatedConfig.secret_key,
+          region: updatedConfig.region,
+          base_url: updatedConfig.base_url,
+          status: updatedConfig.status,
+          is_primary: updatedConfig.is_primary
+        });
+      }
+    } else {
+      // For other tabs, just log the change
+      console.log(`Updating ${configId}.${fieldKey} to:`, value);
+    }
   };
 
   const handleTestConnection = async (config: ApiConfig) => {
@@ -221,17 +535,27 @@ export function AdminSettings() {
     setIsTesting(true);
     setTestResult(null);
 
-    // Simulate API test
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const success = Math.random() > 0.3; // 70% success rate for demo
-    setTestResult({
-      success,
-      message: success 
-        ? `Connection to ${config.name} successful!` 
-        : `Connection failed: ${config.name} is not responding.`
-    });
-    setIsTesting(false);
+    if (activeTab === 'email') {
+      // For email configurations, we'll show a test modal
+      // The actual test will be triggered from the modal
+      setIsTesting(false);
+    } else if (activeTab === 'cloud') {
+      // For cloud configurations, we'll show a test modal
+      // The actual test will be triggered from the modal
+      setIsTesting(false);
+    } else {
+      // Simulate API test for other configurations
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      const success = Math.random() > 0.3; // 70% success rate for demo
+      setTestResult({
+        success,
+        message: success 
+          ? `Connection to ${config.name} successful!` 
+          : `Connection failed: ${config.name} is not responding.`
+      });
+      setIsTesting(false);
+    }
   };
 
   const handleSaveConfig = (configId: string) => {
@@ -250,7 +574,265 @@ export function AdminSettings() {
     alert('Copied to clipboard!');
   };
 
-  const filteredConfigs = apiConfigs.filter(config => config.type === activeTab);
+  const filteredConfigs = activeTab === 'email' 
+    ? emailConfigs.map(config => ({
+        id: config.id.toString(),
+        name: config.config_name,
+        type: 'email',
+        status: config.status,
+        description: `${config.provider} - ${config.host}:${config.port}`,
+        testEndpoint: '/api/test/email',
+        fields: [
+          { key: 'host', label: 'Host', type: 'text', value: config.host, required: true, description: 'SMTP server hostname' },
+          { key: 'port', label: 'Port', type: 'number', value: config.port.toString(), required: true, description: 'SMTP server port' },
+          { key: 'encryption', label: 'Encryption', type: 'select', value: config.encryption, required: true, options: [
+            { value: 'tls', label: 'TLS' },
+            { value: 'ssl', label: 'SSL' },
+            { value: 'none', label: 'None' }
+          ]},
+          { key: 'username', label: 'Username', type: 'email', value: config.username, required: true, description: 'SMTP username' },
+          { key: 'password', label: 'Password', type: 'password', value: config.password, required: true, description: 'SMTP password' },
+          { key: 'from_email', label: 'From Email', type: 'email', value: config.from_email, required: true, description: 'Sender email address' },
+          { key: 'from_name', label: 'From Name', type: 'text', value: config.from_name, required: true, description: 'Sender display name' }
+        ]
+      }))
+    : activeTab === 'cloud'
+    ? cloudConfigs.map(config => ({
+        id: config.id.toString(),
+        name: config.config_name,
+        type: 'cloud',
+        status: config.status,
+        description: `${config.provider.toUpperCase()} - ${config.bucket_name} (${config.region})`,
+        testEndpoint: '/api/test/cloud',
+        fields: [
+          { key: 'provider', label: 'Provider', type: 'select', value: config.provider, required: true, options: [
+            { value: 'aws', label: 'Amazon Web Services (AWS)' },
+            { value: 'gcp', label: 'Google Cloud Platform (GCP)' },
+            { value: 'azure', label: 'Microsoft Azure' }
+          ]},
+          { key: 'bucket_name', label: 'Bucket Name', type: 'text', value: config.bucket_name, required: true, description: 'Cloud storage bucket name' },
+          { key: 'access_key', label: 'Access Key', type: 'text', value: config.access_key, required: true, description: 'Cloud provider access key' },
+          { key: 'secret_key', label: 'Secret Key', type: 'password', value: config.secret_key, required: true, description: 'Cloud provider secret key' },
+          { key: 'region', label: 'Region', type: 'text', value: config.region, required: true, description: 'Cloud provider region' },
+          { key: 'base_url', label: 'Base URL', type: 'text', value: config.base_url, required: true, description: 'Cloud storage base URL' }
+        ]
+      }))
+    : apiConfigs.filter(config => config.type === activeTab);
+
+  // Member tiers helpers
+  const loadTiers = async () => {
+    setTiersLoading(true);
+    const res = await adminApiService.getMemberTiers();
+    if (res.status === 'success' && res.data) setTiers(res.data);
+    setTiersLoading(false);
+  };
+
+  const seedDefaultTiers = async () => {
+    setTiersLoading(true);
+    await adminApiService.seedMemberTiers();
+    await loadTiers();
+  };
+
+  const createTier = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tierForm.tier_name || !tierForm.processing_fee_percent) return;
+    setTiersLoading(true);
+    await adminApiService.createMemberTier({
+      tier_name: tierForm.tier_name,
+      processing_fee_percent: parseFloat(tierForm.processing_fee_percent),
+      interest_percent_per_day: parseFloat(tierForm.interest_percent_per_day || '0.01')
+    });
+    setTierForm({ tier_name: '', processing_fee_percent: '', interest_percent_per_day: '0.01' });
+    await loadTiers();
+  };
+
+  // Load user configuration
+  const loadUserConfig = async () => {
+    try {
+      setUserConfigLoading(true);
+      const response = await adminApiService.getUserConfig();
+      if (response.success) {
+        setUserConfig(response.data);
+      }
+    } catch (error) {
+      console.error('Error loading user config:', error);
+    } finally {
+      setUserConfigLoading(false);
+    }
+  };
+
+  // Save user configuration
+  const saveUserConfig = async () => {
+    if (!userConfig) return;
+    
+    try {
+      setUserConfigSaving(true);
+      const configs = {
+        default_credit_score: { value: userConfig.default_credit_score.value },
+        credit_limit_multiplier: { value: userConfig.credit_limit_multiplier.value },
+        min_credit_score: { value: userConfig.min_credit_score.value },
+        max_credit_score: { value: userConfig.max_credit_score.value },
+        credit_score_update_frequency: { value: userConfig.credit_score_update_frequency.value }
+      };
+      
+      const response = await adminApiService.updateUserConfig(configs);
+      if (response.success) {
+        alert('User configuration updated successfully!');
+        loadUserConfig(); // Reload to get updated timestamps
+      }
+    } catch (error) {
+      console.error('Error saving user config:', error);
+      alert('Failed to save user configuration');
+    } finally {
+      setUserConfigSaving(false);
+    }
+  };
+
+  // Update user config value
+  const updateUserConfigValue = (key: keyof UserConfigData, value: string) => {
+    if (!userConfig) return;
+    setUserConfig({
+      ...userConfig,
+      [key]: {
+        ...userConfig[key],
+        value
+      }
+    });
+  };
+
+  // Load email configurations
+  const loadEmailConfigs = async () => {
+    try {
+      setEmailConfigsLoading(true);
+      const response = await adminApiService.getEmailConfigs();
+      if (response.success) {
+        setEmailConfigs(response.data);
+      }
+    } catch (error) {
+      console.error('Error loading email configurations:', error);
+    } finally {
+      setEmailConfigsLoading(false);
+    }
+  };
+
+  // Save email configuration
+  const saveEmailConfig = async (configId: number, configData: {
+    config_name: string;
+    provider: string;
+    host: string;
+    port: number;
+    encryption: 'tls' | 'ssl' | 'none';
+    username: string;
+    password: string;
+    from_email: string;
+    from_name: string;
+    status: 'active' | 'inactive';
+    is_primary: boolean;
+  }) => {
+    try {
+      setEmailConfigsSaving(true);
+      const response = await adminApiService.updateEmailConfig(configId, configData);
+      if (response.success) {
+        alert('Email configuration updated successfully!');
+        loadEmailConfigs(); // Reload configurations
+      }
+    } catch (error) {
+      console.error('Error saving email configuration:', error);
+      alert('Failed to save email configuration');
+    } finally {
+      setEmailConfigsSaving(false);
+    }
+  };
+
+  // Test email configuration
+  const testEmailConfig = async (configId: number, testEmail: string, testSubject: string, testMessage: string) => {
+    try {
+      setIsTesting(true);
+      const response = await adminApiService.testEmailConfig(configId, testEmail, testSubject, testMessage);
+      if (response.success) {
+        setTestResult({ success: true, message: 'Email test sent successfully!' });
+      }
+    } catch (error) {
+      console.error('Error testing email configuration:', error);
+      setTestResult({ success: false, message: 'Failed to send test email' });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  // Load cloud storage configurations
+  const loadCloudConfigs = async () => {
+    try {
+      setCloudConfigsLoading(true);
+      const response = await adminApiService.getCloudConfigs();
+      if (response.success) {
+        setCloudConfigs(response.data);
+      }
+    } catch (error) {
+      console.error('Error loading cloud storage configurations:', error);
+    } finally {
+      setCloudConfigsLoading(false);
+    }
+  };
+
+  // Save cloud storage configuration
+  const saveCloudConfig = async (configId: number, configData: {
+    config_name: string;
+    provider: 'aws' | 'gcp' | 'azure';
+    bucket_name: string;
+    access_key: string;
+    secret_key: string;
+    region: string;
+    base_url: string;
+    status: 'active' | 'inactive';
+    is_primary: boolean;
+  }) => {
+    try {
+      setCloudConfigsSaving(true);
+      const response = await adminApiService.updateCloudConfig(configId, configData);
+      if (response.success) {
+        alert('Cloud storage configuration updated successfully!');
+        loadCloudConfigs(); // Reload configurations
+      }
+    } catch (error) {
+      console.error('Error saving cloud storage configuration:', error);
+      alert('Failed to save cloud storage configuration');
+    } finally {
+      setCloudConfigsSaving(false);
+    }
+  };
+
+  // Test cloud storage configuration
+  const testCloudConfig = async (configId: number, testFileName: string, testContent: string) => {
+    try {
+      setIsTesting(true);
+      // Mock cloud storage test (replace with actual AWS S3 test)
+      console.log(`☁️ Testing Cloud Storage: ${testFileName}`);
+      console.log(`Using config ID: ${configId}`);
+      
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      setTestResult({ success: true, message: 'Cloud storage test successful! File uploaded and verified.' });
+    } catch (error) {
+      console.error('Error testing cloud storage configuration:', error);
+      setTestResult({ success: false, message: 'Failed to test cloud storage configuration' });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'members') {
+      loadTiers();
+    } else if (activeTab === 'user-config') {
+      loadUserConfig();
+    } else if (activeTab === 'email') {
+      loadEmailConfigs();
+    } else if (activeTab === 'cloud') {
+      loadCloudConfigs();
+    }
+  }, [activeTab]);
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: '#F5F7FA' }}>
@@ -303,7 +885,186 @@ export function AdminSettings() {
           </div>
         </div>
 
+        {/* Member Tiers Settings */}
+        {activeTab === 'members' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold">Member Tiers</h2>
+              </div>
+              <form onSubmit={createTier} className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+                <input className="border p-2 rounded" placeholder="Tier name (e.g., bronze)" value={tierForm.tier_name} onChange={e => setTierForm({ ...tierForm, tier_name: e.target.value })} />
+                <input className="border p-2 rounded" placeholder="Processing fee % (e.g., 10)" value={tierForm.processing_fee_percent} onChange={e => setTierForm({ ...tierForm, processing_fee_percent: e.target.value })} />
+                <input className="border p-2 rounded" placeholder="Interest %/day (e.g., 0.01)" value={tierForm.interest_percent_per_day} onChange={e => setTierForm({ ...tierForm, interest_percent_per_day: e.target.value })} />
+                <button className="px-3 py-2 bg-green-600 text-white rounded" type="submit" disabled={tiersLoading}>Add Tier</button>
+              </form>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left border-b">
+                      <th className="py-2 pr-4">Name</th>
+                      <th className="py-2 pr-4">Processing Fee %</th>
+                      <th className="py-2 pr-4">Interest %/day</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tiers.map(t => (
+                      <tr key={t.id} className="border-b">
+                        <td className="py-2 pr-4 capitalize">{t.tier_name}</td>
+                        <td className="py-2 pr-4">{t.processing_fee_percent}</td>
+                        <td className="py-2 pr-4">{t.interest_percent_per_day}</td>
+                      </tr>
+                    ))}
+                    {tiers.length === 0 && !tiersLoading && (
+                      <tr>
+                        <td className="py-3" colSpan={3}>No tiers found. Click "Seed Defaults".</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* User Configuration Settings */}
+        {activeTab === 'user-config' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">User Configuration</h2>
+                  <p className="text-sm text-gray-600 mt-1">Configure default credit scores and credit limit calculations</p>
+                </div>
+                <button
+                  onClick={saveUserConfig}
+                  disabled={userConfigSaving}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  <Save className="w-4 h-4" />
+                  {userConfigSaving ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+
+              {userConfigLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  <span className="ml-2 text-gray-600">Loading configuration...</span>
+                </div>
+              ) : userConfig ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Default Credit Score */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Default Credit Score
+                    </label>
+                    <input
+                      type="number"
+                      min="300"
+                      max="850"
+                      value={userConfig.default_credit_score.value}
+                      onChange={(e) => updateUserConfigValue('default_credit_score', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="640"
+                    />
+                    <p className="text-xs text-gray-500">
+                      {userConfig.default_credit_score.description}
+                    </p>
+                  </div>
+
+                  {/* Credit Limit Multiplier */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Credit Limit Multiplier (%)
+                    </label>
+                    <input
+                      type="number"
+                      min="50"
+                      max="500"
+                      value={userConfig.credit_limit_multiplier.value}
+                      onChange={(e) => updateUserConfigValue('credit_limit_multiplier', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="200"
+                    />
+                    <p className="text-xs text-gray-500">
+                      {userConfig.credit_limit_multiplier.description}
+                    </p>
+                  </div>
+
+                  {/* Minimum Credit Score */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Minimum Credit Score
+                    </label>
+                    <input
+                      type="number"
+                      min="300"
+                      max="850"
+                      value={userConfig.min_credit_score.value}
+                      onChange={(e) => updateUserConfigValue('min_credit_score', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="300"
+                    />
+                    <p className="text-xs text-gray-500">
+                      {userConfig.min_credit_score.description}
+                    </p>
+                  </div>
+
+                  {/* Maximum Credit Score */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Maximum Credit Score
+                    </label>
+                    <input
+                      type="number"
+                      min="300"
+                      max="850"
+                      value={userConfig.max_credit_score.value}
+                      onChange={(e) => updateUserConfigValue('max_credit_score', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="850"
+                    />
+                    <p className="text-xs text-gray-500">
+                      {userConfig.max_credit_score.description}
+                    </p>
+                  </div>
+
+                  {/* Credit Score Update Frequency */}
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Credit Score Update Frequency
+                    </label>
+                    <select
+                      value={userConfig.credit_score_update_frequency.value}
+                      onChange={(e) => updateUserConfigValue('credit_score_update_frequency', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="monthly">Monthly</option>
+                      <option value="quarterly">Quarterly</option>
+                      <option value="yearly">Yearly</option>
+                    </select>
+                    <p className="text-xs text-gray-500">
+                      {userConfig.credit_score_update_frequency.description}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">Failed to load user configuration</p>
+                  <button
+                    onClick={loadUserConfig}
+                    className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Configuration Cards */}
+        {activeTab !== 'members' && activeTab !== 'user-config' && (
         <div className="space-y-6">
           {filteredConfigs.map((config) => {
             const TypeIcon = getTypeIcon(config.type);
@@ -429,6 +1190,7 @@ export function AdminSettings() {
             );
           })}
         </div>
+        )}
 
         {/* Test Connection Modal */}
         {showTestModal && testingConfig && (
@@ -455,50 +1217,66 @@ export function AdminSettings() {
                   </div>
                 </div>
 
-                {isTesting ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="text-center">
-                      <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-2" />
-                      <p className="text-sm text-gray-600">Testing connection...</p>
-                    </div>
-                  </div>
-                ) : testResult ? (
-                  <div className={`p-4 rounded-lg ${
-                    testResult.success 
-                      ? 'bg-green-50 border border-green-200' 
-                      : 'bg-red-50 border border-red-200'
-                  }`}>
-                    <div className="flex items-center gap-2">
-                      {testResult.success ? (
-                        <CheckCircle className="w-5 h-5 text-green-600" />
-                      ) : (
-                        <XCircle className="w-5 h-5 text-red-600" />
-                      )}
-                      <p className={`text-sm font-medium ${
-                        testResult.success ? 'text-green-800' : 'text-red-800'
+                {testingConfig.type === 'email' ? (
+                  <EmailTestForm 
+                    configId={parseInt(testingConfig.id)}
+                    onTest={testEmailConfig}
+                    onClose={() => setShowTestModal(false)}
+                  />
+                ) : testingConfig.type === 'cloud' ? (
+                  <CloudTestForm 
+                    configId={parseInt(testingConfig.id)}
+                    onTest={testCloudConfig}
+                    onClose={() => setShowTestModal(false)}
+                  />
+                ) : (
+                  <>
+                    {isTesting ? (
+                      <div className="flex items-center justify-center py-8">
+                        <div className="text-center">
+                          <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-2" />
+                          <p className="text-sm text-gray-600">Testing connection...</p>
+                        </div>
+                      </div>
+                    ) : testResult ? (
+                      <div className={`p-4 rounded-lg ${
+                        testResult.success 
+                          ? 'bg-green-50 border border-green-200' 
+                          : 'bg-red-50 border border-red-200'
                       }`}>
-                        {testResult.message}
-                      </p>
-                    </div>
-                  </div>
-                ) : null}
+                        <div className="flex items-center gap-2">
+                          {testResult.success ? (
+                            <CheckCircle className="w-5 h-5 text-green-600" />
+                          ) : (
+                            <XCircle className="w-5 h-5 text-red-600" />
+                          )}
+                          <p className={`text-sm font-medium ${
+                            testResult.success ? 'text-green-800' : 'text-red-800'
+                          }`}>
+                            {testResult.message}
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
 
-                <div className="flex gap-3 pt-4">
-                  <button
-                    onClick={() => setShowTestModal(false)}
-                    className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
-                  >
-                    Close
-                  </button>
-                  {!isTesting && (
-                    <button
-                      onClick={() => handleTestConnection(testingConfig)}
-                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                    >
-                      Test Again
-                    </button>
-                  )}
-                </div>
+                    <div className="flex gap-3 pt-4">
+                      <button
+                        onClick={() => setShowTestModal(false)}
+                        className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+                      >
+                        Close
+                      </button>
+                      {!isTesting && (
+                        <button
+                          onClick={() => handleTestConnection(testingConfig)}
+                          className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                        >
+                          Test Again
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>

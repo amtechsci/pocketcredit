@@ -56,12 +56,26 @@ const createUser = async (userData) => {
       marital_status = null
     } = userData;
 
+    // Get default credit score from user_config
+    let defaultCreditScore = 640; // fallback value
+    try {
+      const configs = await executeQuery(
+        'SELECT config_value FROM user_config WHERE config_key = ?',
+        ['default_credit_score']
+      );
+      if (configs && configs.length > 0) {
+        defaultCreditScore = parseInt(configs[0].config_value);
+      }
+    } catch (configError) {
+      console.warn('Could not fetch default credit score, using fallback:', configError.message);
+    }
+
     const query = `
       INSERT INTO users (
         phone, email, first_name, last_name, 
         date_of_birth, gender, marital_status, 
-        phone_verified, status, profile_completion_step, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        phone_verified, status, profile_completion_step, credit_score, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
     `;
     
     const values = [
@@ -74,7 +88,8 @@ const createUser = async (userData) => {
       marital_status,
       true, // phone_verified = true after OTP verification
       'active', // status = active
-      2 // profile_completion_step = 2 (Step 1 was OTP, so they land on Step 2: Basic Details)
+      2, // profile_completion_step = 2 (Step 1 was OTP, so they land on Step 2: Basic Details)
+      defaultCreditScore // credit_score = default from config
     ];
 
     const result = await executeQuery(query, values);
@@ -214,6 +229,7 @@ const getProfileSummary = (user) => {
     kyc_completed: user.kyc_completed,
     status: user.status,
     profile_completion_step: user.profile_completion_step || 0,
+    credit_score: user.credit_score || 640,
     created_at: user.created_at,
     last_login_at: user.last_login_at,
     profile_completed: isProfileComplete(user)

@@ -190,67 +190,30 @@ export function LoanApplicationStepsPage() {
       return;
     }
 
-    // Validation
-    if (!referenceDetails.name1 || !referenceDetails.phone1 || !referenceDetails.relation1 ||
-        !referenceDetails.name2 || !referenceDetails.phone2 || !referenceDetails.relation2 ||
-        !referenceDetails.name3 || !referenceDetails.phone3 || !referenceDetails.relation3) {
-      toast.error('Please fill in all reference fields');
-      return;
-    }
-
-    // Validate phone numbers
-    const phoneRegex = /^[6-9]\d{9}$/;
-    if (!phoneRegex.test(referenceDetails.phone1) || !phoneRegex.test(referenceDetails.phone2) || !phoneRegex.test(referenceDetails.phone3)) {
-      toast.error('Please enter valid 10-digit mobile numbers starting with 6-9');
-      return;
-    }
-
-    // Check for duplicate phone numbers
-    const phones = [referenceDetails.phone1, referenceDetails.phone2, referenceDetails.phone3];
-    const uniquePhones = [...new Set(phones)];
-    if (uniquePhones.length !== phones.length) {
-      toast.error('All reference phone numbers must be different');
-      return;
-    }
-
-    if (!referenceDetails.confirmReferences) {
-      toast.error('Please confirm the reference details');
-      return;
-    }
-
-    setLoading(true);
+    // Check if user has references, if not redirect to manage them
     try {
-      const response = await apiService.saveReferenceDetails({
-        application_id: parseInt(applicationId),
-        references: [
-          {
-            name: referenceDetails.name1,
-            phone: referenceDetails.phone1,
-            relation: referenceDetails.relation1
-          },
-          {
-            name: referenceDetails.name2,
-            phone: referenceDetails.phone2,
-            relation: referenceDetails.relation2
-          },
-          {
-            name: referenceDetails.name3,
-            phone: referenceDetails.phone3,
-            relation: referenceDetails.relation3
-          }
-        ]
-      });
-
-      if (response.success === true) {
-        toast.success('Reference details saved successfully!');
-        // Refresh loan application to get updated step
-        await fetchLoanApplication(applicationId);
-      } else {
-        toast.error(response.message || 'Failed to save reference details');
+      const response = await apiService.getUserReferences();
+      
+      if (!response.success || !response.data || response.data.length === 0) {
+        toast.info('Please add your references first');
+        navigate('/user-references');
+        return;
       }
+      
+      // If user has references, mark this step as completed
+      setLoading(true);
+      
+      // For now, we'll just mark the step as completed since references are user-level
+      // In a real implementation, you might want to create a loan_references entry
+      // that references the user's existing references
+      toast.success('Reference details verified!');
+      
+      // Refresh loan application to get updated step
+      await fetchLoanApplication(applicationId);
+      
     } catch (error: any) {
-      console.error('Reference details error:', error);
-      toast.error(error.message || 'Failed to save reference details');
+      console.error('Error checking user references:', error);
+      toast.error('Failed to verify reference details');
     } finally {
       setLoading(false);
     }
@@ -356,232 +319,56 @@ export function LoanApplicationStepsPage() {
     <Card className="shadow-lg">
       <div className="p-6 border-b border-gray-200">
         <h2 className="text-xl font-semibold text-gray-900 mb-2">Reference Details</h2>
-        <p className="text-gray-600">Please provide 3 reference contact numbers (family/friends for quick verification)</p>
+        <p className="text-gray-600">Your personal references are required for loan verification</p>
       </div>
 
       <div className="p-6">
-        <form onSubmit={handleReferenceDetailsSubmit} className="space-y-6">
-        {/* Reference 1 */}
-        <div className="bg-gray-50 p-4 rounded-lg border">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
-              <span className="text-sm font-bold text-white">1</span>
-            </div>
-            <h4 className="text-base font-semibold text-gray-900">Reference 1</h4>
+        <div className="text-center py-8">
+          <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <Label htmlFor="name1" className="text-sm font-medium text-gray-700">Name *</Label>
-              <Input
-                id="name1"
-                type="text"
-                value={referenceDetails.name1}
-                onChange={(e) => handleReferenceDetailsChange('name1', e.target.value)}
-                placeholder="Enter full name"
-                className="h-10 bg-white"
-                required
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="phone1" className="text-sm font-medium text-gray-700">Mobile Number *</Label>
-              <div className="flex">
-                <div className="flex items-center px-3 bg-white border border-gray-300 border-r-0 rounded-l-md">
-                  <span className="text-gray-700 font-medium text-sm">+91</span>
-                </div>
-                <Input
-                  id="phone1"
-                  type="tel"
-                  value={referenceDetails.phone1}
-                  onChange={(e) => handleReferenceDetailsChange('phone1', e.target.value)}
-                  placeholder="Enter mobile number"
-                  className="h-10 rounded-l-none bg-white"
-                  maxLength={10}
-                  required
-                />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="relation1" className="text-sm font-medium text-gray-700">Relation *</Label>
-              <Select
-                value={referenceDetails.relation1}
-                onValueChange={(value) => handleReferenceDetailsChange('relation1', value)}
-              >
-                <SelectTrigger className="h-10 bg-white">
-                  <SelectValue placeholder="Select relation" />
-                </SelectTrigger>
-                <SelectContent>
-                  {RELATION_OPTIONS.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {option}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
-
-        {/* Reference 2 */}
-        <div className="bg-gray-50 p-4 rounded-lg border">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
-              <span className="text-sm font-bold text-white">2</span>
-            </div>
-            <h4 className="text-base font-semibold text-gray-900">Reference 2</h4>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <Label htmlFor="name2" className="text-sm font-medium text-gray-700">Name *</Label>
-              <Input
-                id="name2"
-                type="text"
-                value={referenceDetails.name2}
-                onChange={(e) => handleReferenceDetailsChange('name2', e.target.value)}
-                placeholder="Enter full name"
-                className="h-10 bg-white"
-                required
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="phone2" className="text-sm font-medium text-gray-700">Mobile Number *</Label>
-              <div className="flex">
-                <div className="flex items-center px-3 bg-white border border-gray-300 border-r-0 rounded-l-md">
-                  <span className="text-gray-700 font-medium text-sm">+91</span>
-                </div>
-                <Input
-                  id="phone2"
-                  type="tel"
-                  value={referenceDetails.phone2}
-                  onChange={(e) => handleReferenceDetailsChange('phone2', e.target.value)}
-                  placeholder="Enter mobile number"
-                  className="h-10 rounded-l-none bg-white"
-                  maxLength={10}
-                  required
-                />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="relation2" className="text-sm font-medium text-gray-700">Relation *</Label>
-              <Select
-                value={referenceDetails.relation2}
-                onValueChange={(value) => handleReferenceDetailsChange('relation2', value)}
-              >
-                <SelectTrigger className="h-10 bg-white">
-                  <SelectValue placeholder="Select relation" />
-                </SelectTrigger>
-                <SelectContent>
-                  {RELATION_OPTIONS.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {option}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
-
-        {/* Reference 3 */}
-        <div className="bg-gray-50 p-4 rounded-lg border">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
-              <span className="text-sm font-bold text-white">3</span>
-            </div>
-            <h4 className="text-base font-semibold text-gray-900">Reference 3</h4>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <Label htmlFor="name3" className="text-sm font-medium text-gray-700">Name *</Label>
-              <Input
-                id="name3"
-                type="text"
-                value={referenceDetails.name3}
-                onChange={(e) => handleReferenceDetailsChange('name3', e.target.value)}
-                placeholder="Enter full name"
-                className="h-10 bg-white"
-                required
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="phone3" className="text-sm font-medium text-gray-700">Mobile Number *</Label>
-              <div className="flex">
-                <div className="flex items-center px-3 bg-white border border-gray-300 border-r-0 rounded-l-md">
-                  <span className="text-gray-700 font-medium text-sm">+91</span>
-                </div>
-                <Input
-                  id="phone3"
-                  type="tel"
-                  value={referenceDetails.phone3}
-                  onChange={(e) => handleReferenceDetailsChange('phone3', e.target.value)}
-                  placeholder="Enter mobile number"
-                  className="h-10 rounded-l-none bg-white"
-                  maxLength={10}
-                  required
-                />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="relation3" className="text-sm font-medium text-gray-700">Relation *</Label>
-              <Select
-                value={referenceDetails.relation3}
-                onValueChange={(value) => handleReferenceDetailsChange('relation3', value)}
-              >
-                <SelectTrigger className="h-10 bg-white">
-                  <SelectValue placeholder="Select relation" />
-                </SelectTrigger>
-                <SelectContent>
-                  {RELATION_OPTIONS.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {option}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
-
-          {/* Confirmation Checkbox */}
-          <div className="pt-6 border-t border-gray-200">
-            <div className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                id="confirmReferences"
-                checked={referenceDetails.confirmReferences}
-                onChange={(e) => handleReferenceDetailsChange('confirmReferences', e.target.checked)}
-                className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-              />
-              <div className="text-sm text-gray-700 leading-relaxed">
-                <label htmlFor="confirmReferences" className="cursor-pointer">
-                  I confirm that the reference contact numbers provided are correct and belong to people 
-                  who can verify my identity. I understand that these references may be contacted for 
-                  verification purposes.
-                </label>
-              </div>
-            </div>
-          </div>
-
-          {/* Submit Button */}
-          <div className="pt-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Manage Your References</h3>
+          <p className="text-gray-600 mb-6">
+            You need to add up to 3 personal references for loan verification. 
+            These references will be used for all your loan applications.
+          </p>
+          
+          <div className="space-y-4">
             <Button
-              type="submit"
-              disabled={loading || !referenceDetails.confirmReferences}
-              className="w-full h-11 bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
+              onClick={() => navigate('/user-references')}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 mx-auto"
             >
-              {loading ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Saving References...
-                </>
-              ) : (
-                <>
-                  <Users className="w-4 h-4 mr-2" />
-                  Save Reference Details
-                </>
-              )}
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+              Manage References
             </Button>
+            
+            <p className="text-sm text-gray-500">
+              After adding your references, come back here to continue with your loan application.
+            </p>
           </div>
-        </form>
+        </div>
+
+        {/* Continue Button */}
+        <div className="flex justify-end pt-4 border-t border-gray-200 mt-6">
+          <Button
+            onClick={handleReferenceDetailsSubmit}
+            disabled={loading}
+            className="px-8 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {loading ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Verifying...
+              </>
+            ) : (
+              'Continue with Loan Application'
+            )}
+          </Button>
+        </div>
       </div>
     </Card>
   );

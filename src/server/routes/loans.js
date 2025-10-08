@@ -238,12 +238,13 @@ router.get('/:applicationId', requireAuth, async (req, res) => {
         [applicationId]
       );
       
-      const references = await executeQuery(
-        'SELECT id FROM loan_references WHERE application_id = ? LIMIT 1',
-        [applicationId]
+      // Check if user has references (user-level, not loan-specific)
+      const userReferences = await executeQuery(
+        'SELECT id FROM `references` WHERE user_id = ? LIMIT 1',
+        [userId]
       );
       
-      if (bankDetails && bankDetails.length > 0 && references && references.length > 0) {
+      if (bankDetails && bankDetails.length > 0 && userReferences && userReferences.length > 0) {
         currentStep = 'completed';
       } else if (bankDetails && bankDetails.length > 0) {
         currentStep = 'references';

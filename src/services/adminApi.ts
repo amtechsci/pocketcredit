@@ -331,6 +331,36 @@ class AdminApiService {
     return this.request('GET', '/applications/export/csv', undefined, filters);
   }
 
+  // Admin Settings - Member Tiers
+  async getMemberTiers(): Promise<ApiResponse<any>> {
+    return this.request('GET', '/settings/member-tiers');
+  }
+
+  async seedMemberTiers(): Promise<ApiResponse<any>> {
+    return this.request('POST', '/settings/member-tiers/seed');
+  }
+
+  async createMemberTier(data: { tier_name: string; processing_fee_percent: number; interest_percent_per_day: number; }): Promise<ApiResponse<any>> {
+    return this.request('POST', '/settings/member-tiers', data);
+  }
+
+  async updateMemberTier(id: number, data: Partial<{ tier_name: string; processing_fee_percent: number; interest_percent_per_day: number; }>): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/settings/member-tiers/${id}`, data);
+  }
+
+  // Admin Settings - Integrations (sms, email, cloud)
+  async getIntegrations(type: 'sms' | 'email' | 'cloud'): Promise<ApiResponse<any>> {
+    return this.request('GET', `/settings/integrations/${type}`);
+  }
+
+  async createIntegration(type: 'sms' | 'email' | 'cloud', data: { provider: string; status?: 'active' | 'inactive'; config?: Record<string, any>; }): Promise<ApiResponse<any>> {
+    return this.request('POST', `/settings/integrations/${type}`, data);
+  }
+
+  async updateIntegration(type: 'sms' | 'email' | 'cloud', id: number, data: Partial<{ provider: string; status: 'active' | 'inactive'; config: Record<string, any>; }>): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/settings/integrations/${type}/${id}`, data);
+  }
+
   // Dashboard APIs
   async getDashboardStats(period: string = '30d'): Promise<ApiResponse<any>> {
     return this.request('GET', '/dashboard/stats', undefined, { period });
@@ -466,6 +496,166 @@ class AdminApiService {
 
   async getActivityTypes(): Promise<ApiResponse<any>> {
     return this.request('GET', '/activities/types');
+  }
+  // User Configuration
+  async getUserConfig(): Promise<ApiResponse<{
+    default_credit_score: { id: number; value: string; description: string; updated_at: string };
+    credit_limit_multiplier: { id: number; value: string; description: string; updated_at: string };
+    min_credit_score: { id: number; value: string; description: string; updated_at: string };
+    max_credit_score: { id: number; value: string; description: string; updated_at: string };
+    credit_score_update_frequency: { id: number; value: string; description: string; updated_at: string };
+  }>> {
+    return this.request('GET', '/settings/user-config');
+  }
+
+  async updateUserConfig(configs: {
+    default_credit_score?: { value: string; description?: string };
+    credit_limit_multiplier?: { value: string; description?: string };
+    min_credit_score?: { value: string; description?: string };
+    max_credit_score?: { value: string; description?: string };
+    credit_score_update_frequency?: { value: string; description?: string };
+  }): Promise<ApiResponse<Array<{
+    key: string;
+    value: string;
+    description: string;
+  }>>> {
+    return this.request('PUT', '/settings/user-config', { configs });
+  }
+
+  async calculateCreditLimit(userId: string, monthlySalary: number): Promise<ApiResponse<{
+    userId: number;
+    monthlySalary: number;
+    creditLimitMultiplier: number;
+    calculatedCreditLimit: number;
+    calculation: string;
+  }>> {
+    return this.request('GET', `/settings/user-config/calculate-credit-limit?userId=${userId}&monthlySalary=${monthlySalary}`);
+  }
+
+  // SMS Configuration Management
+  async getSmsConfigs(): Promise<ApiResponse<Array<{
+    id: number;
+    config_name: string;
+    provider: string;
+    api_url: string;
+    api_key: string;
+    username: string;
+    password: string;
+    status: 'active' | 'inactive';
+    is_primary: boolean;
+    created_at: string;
+    updated_at: string;
+  }>>> {
+    return this.request('GET', '/settings/sms-configs');
+  }
+
+  async updateSmsConfig(id: number, configData: {
+    config_name: string;
+    provider: string;
+    api_url: string;
+    api_key: string;
+    username: string;
+    password: string;
+    status: 'active' | 'inactive';
+    is_primary: boolean;
+  }): Promise<ApiResponse<{ message: string }>> {
+    return this.request('PUT', `/settings/sms-configs/${id}`, configData);
+  }
+
+  async testSmsConfig(configId: number, testNumber: string, testMessage: string): Promise<ApiResponse<{
+    config_name: string;
+    test_number: string;
+    test_message: string;
+    timestamp: string;
+  }>> {
+    return this.request('POST', '/settings/test-sms', {
+      config_id: configId,
+      test_number: testNumber,
+      test_message: testMessage
+    });
+  }
+
+  // Email Configuration Management
+  async getEmailConfigs(): Promise<ApiResponse<Array<{
+    id: number;
+    config_name: string;
+    provider: string;
+    host: string;
+    port: number;
+    encryption: 'tls' | 'ssl' | 'none';
+    username: string;
+    password: string;
+    from_email: string;
+    from_name: string;
+    status: 'active' | 'inactive';
+    is_primary: boolean;
+    created_at: string;
+    updated_at: string;
+  }>>> {
+    return this.request('GET', '/settings/email-configs');
+  }
+
+  async updateEmailConfig(id: number, configData: {
+    config_name: string;
+    provider: string;
+    host: string;
+    port: number;
+    encryption: 'tls' | 'ssl' | 'none';
+    username: string;
+    password: string;
+    from_email: string;
+    from_name: string;
+    status: 'active' | 'inactive';
+    is_primary: boolean;
+  }): Promise<ApiResponse<{ message: string }>> {
+    return this.request('PUT', `/settings/email-configs/${id}`, configData);
+  }
+
+  async testEmailConfig(configId: number, testEmail: string, testSubject: string, testMessage: string): Promise<ApiResponse<{
+    config_name: string;
+    test_email: string;
+    test_subject: string;
+    test_message: string;
+    timestamp: string;
+  }>> {
+    return this.request('POST', '/settings/test-email', {
+      config_id: configId,
+      test_email: testEmail,
+      test_subject: testSubject,
+      test_message: testMessage
+    });
+  }
+
+  // Cloud Configuration Management
+  async getCloudConfigs(): Promise<ApiResponse<Array<{
+    id: number;
+    config_name: string;
+    provider: 'aws' | 'gcp' | 'azure';
+    bucket_name: string;
+    access_key: string;
+    secret_key: string;
+    region: string;
+    base_url: string;
+    status: 'active' | 'inactive';
+    is_primary: boolean;
+    created_at: string;
+    updated_at: string;
+  }>>> {
+    return this.request('GET', '/settings/cloud-configs');
+  }
+
+  async updateCloudConfig(id: number, configData: {
+    config_name: string;
+    provider: 'aws' | 'gcp' | 'azure';
+    bucket_name: string;
+    access_key: string;
+    secret_key: string;
+    region: string;
+    base_url: string;
+    status: 'active' | 'inactive';
+    is_primary: boolean;
+  }): Promise<ApiResponse<{ message: string }>> {
+    return this.request('PUT', `/settings/cloud-configs/${id}`, configData);
   }
 }
 

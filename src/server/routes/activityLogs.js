@@ -50,7 +50,7 @@ router.get('/recent', async (req, res) => {
         admin.email as admin_email
       FROM activity_logs al
       LEFT JOIN users u ON al.user_id = u.id
-      LEFT JOIN admin_users admin ON al.admin_id = admin.id
+      LEFT JOIN admins admin ON al.admin_id = admin.id
     `;
 
     const whereConditions = [];

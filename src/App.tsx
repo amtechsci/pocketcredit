@@ -20,6 +20,7 @@ import { DynamicDocumentUploadPage as DocumentUploadPage } from './components/pa
 import { SimplifiedLoanApplicationPage } from './components/pages/SimplifiedLoanApplicationPage';
 import { BankDetailsPage } from './components/pages/BankDetailsPage';
 import { ReferenceDetailsPage } from './components/pages/ReferenceDetailsPage';
+import { UserReferencesPage } from './components/pages/UserReferencesPage';
 import { LoanApplicationStepsPage } from './components/pages/LoanApplicationStepsPage';
 import { ApplicationFlow } from './components/ApplicationFlow';
 import { CreditScorePage } from './components/pages/CreditScorePage';
@@ -323,6 +324,12 @@ function AppContent() {
         <Route path="/loan-application/references" element={
           <DashboardLayout>
             <ReferenceDetailsPage />
+          </DashboardLayout>
+        } />
+        
+        <Route path="/user-references" element={
+          <DashboardLayout>
+            <UserReferencesPage />
           </DashboardLayout>
         } />
         

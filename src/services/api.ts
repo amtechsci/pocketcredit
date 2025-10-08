@@ -325,6 +325,45 @@ class ApiService {
     return this.request('GET', `/loans/${applicationId}`);
   }
 
+  // User References (using consolidated references table)
+  async saveUserReferences(references: Array<{
+    name: string;
+    phone: string;
+    relation: string;
+  }>): Promise<ApiResponse<{
+    references_count: number;
+    user_id: number;
+  }>> {
+    return this.request('POST', '/references', { references });
+  }
+
+  async getUserReferences(): Promise<ApiResponse<Array<{
+    id: number;
+    user_id: number;
+    name: string;
+    phone: string;
+    relation: string;
+    status: string;
+    admin_id: number | null;
+    created_at: string;
+    updated_at: string;
+  }>>> {
+    return this.request('GET', '/references');
+  }
+
+  async updateUserReference(id: number, referenceData: {
+    name: string;
+    phone: string;
+    relation: string;
+  }): Promise<ApiResponse<{ message: string }>> {
+    return this.request('PUT', `/references/${id}`, referenceData);
+  }
+
+  async deleteUserReference(id: number): Promise<ApiResponse<{ message: string }>> {
+    return this.request('DELETE', `/references/${id}`);
+  }
+
+  // Legacy loan references (kept for backward compatibility)
   async saveReferenceDetails(referenceData: {
     application_id: number;
     references: Array<{

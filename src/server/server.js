@@ -28,11 +28,12 @@ const transactionRoutes = require('./routes/transactions');
 const notificationRoutes = require('./routes/notifications');
 const employmentRoutes = require('./routes/employment');
 const bankDetailsRoutes = require('./routes/bankDetails');
-const loanReferencesRoutes = require('./routes/loanReferences');
+const referencesRoutes = require('./routes/references');
 const userProfileRoutes = require('./routes/userProfile');
 const adminApplicationsRoutes = require('./routes/adminApplications');
 const adminDashboardRoutes = require('./routes/adminDashboard');
 const adminUsersRoutes = require('./routes/adminUsers');
+const adminSettingsRoutes = require('./routes/adminSettings');
 const activityLogsRoutes = require('./routes/activityLogsSimple');
 const { activityLoggerMiddleware } = require('./middleware/activityLogger');
 const activityProcessor = require('./workers/activityProcessor');
@@ -120,11 +121,12 @@ app.use('/api/transactions', transactionRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/employment-details', employmentRoutes);
 app.use('/api/bank-details', bankDetailsRoutes);
-app.use('/api/loan-references', loanReferencesRoutes);
+app.use('/api/references', referencesRoutes);
 app.use('/api/admin/user-profile', userProfileRoutes);
 app.use('/api/admin/applications', adminApplicationsRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
 app.use('/api/admin/users', adminUsersRoutes);
+app.use('/api/admin/settings', adminSettingsRoutes);
 app.use('/api/admin/activities', activityLogsRoutes);
 
 // Health check endpoint
