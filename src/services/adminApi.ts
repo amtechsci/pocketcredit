@@ -208,11 +208,6 @@ class AdminApiService {
     return this.request('POST', `/loans/${loanId}/reject`, { reason });
   }
 
-  // User Profile Management APIs
-  async getUserProfile(userId: string): Promise<ApiResponse<any>> {
-    return this.request('GET', `/user-profile/${userId}`);
-  }
-
   // Documents Management
   async getUserDocuments(userId: string): Promise<ApiResponse<any>> {
     return this.request('GET', `/user-profile/${userId}/documents`);
@@ -361,19 +356,6 @@ class AdminApiService {
     return this.request('PUT', `/settings/integrations/${type}/${id}`, data);
   }
 
-  // Dashboard APIs
-  async getDashboardStats(period: string = '30d'): Promise<ApiResponse<any>> {
-    return this.request('GET', '/dashboard/stats', undefined, { period });
-  }
-
-  async getRecentActivity(limit: number = 10): Promise<ApiResponse<any>> {
-    return this.request('GET', `/dashboard/recent-activity?limit=${limit}`);
-  }
-
-  async getChartData(period: string): Promise<ApiResponse<any>> {
-    return this.request('GET', `/dashboard/charts?period=${period}`);
-  }
-
   // Reports APIs
   async getReports(type: string, filters: any = {}): Promise<ApiResponse<any>> {
     return this.request('GET', `/reports/${type}`, undefined, filters);
@@ -414,71 +396,6 @@ class AdminApiService {
     workExperience: number;
   }): Promise<ApiResponse<any>> {
     return this.request('PUT', `/user-profile/${userId}/employment-info`, data);
-  }
-
-  async addBankDetails(userId: string, data: {
-    bankName: string;
-    accountNumber: string;
-    ifscCode: string;
-    accountHolderName: string;
-    branchName: string;
-  }): Promise<ApiResponse<any>> {
-    return this.request('POST', `/user-profile/${userId}/bank-details`, data);
-  }
-
-  async addReferenceDetails(userId: string, data: {
-    name: string;
-    relationship: string;
-    phone: string;
-    email: string;
-    address: string;
-  }): Promise<ApiResponse<any>> {
-    return this.request('POST', `/user-profile/${userId}/reference-details`, data);
-  }
-
-  async uploadDocument(userId: string, data: {
-    documentType: string;
-    fileName: string;
-    fileSize: number;
-    description?: string;
-  }): Promise<ApiResponse<any>> {
-    return this.request('POST', `/user-profile/${userId}/documents`, data);
-  }
-
-  async addTransaction(userId: string, data: {
-    amount: number;
-    type: string;
-    description: string;
-    date: string;
-    status: string;
-  }): Promise<ApiResponse<any>> {
-    return this.request('POST', `/user-profile/${userId}/transactions`, data);
-  }
-
-  async addFollowUp(userId: string, data: {
-    type: string;
-    scheduledDate: string;
-    notes: string;
-    priority: string;
-    status: string;
-  }): Promise<ApiResponse<any>> {
-    return this.request('POST', `/user-profile/${userId}/follow-ups`, data);
-  }
-
-  async addNote(userId: string, data: {
-    subject: string;
-    note: string;
-    category: string;
-    priority: string;
-  }): Promise<ApiResponse<any>> {
-    return this.request('POST', `/user-profile/${userId}/notes`, data);
-  }
-
-  async sendSMS(userId: string, data: {
-    message: string;
-    templateId?: string;
-  }): Promise<ApiResponse<any>> {
-    return this.request('POST', `/user-profile/${userId}/sms`, data);
   }
 
   // Activity Logs Methods
