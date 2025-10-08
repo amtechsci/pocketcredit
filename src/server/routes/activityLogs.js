@@ -45,8 +45,7 @@ router.get('/recent', async (req, res) => {
         u.first_name as user_first_name,
         u.last_name as user_last_name,
         u.email as user_email,
-        admin.first_name as admin_first_name,
-        admin.last_name as admin_last_name,
+        admin.name as admin_name,
         admin.email as admin_email
       FROM activity_logs al
       LEFT JOIN users u ON al.user_id = u.id
@@ -120,7 +119,7 @@ router.get('/recent', async (req, res) => {
       } : null,
       admin: activity.admin_id ? {
         id: activity.admin_id,
-        name: `${activity.admin_first_name || ''} ${activity.admin_last_name || ''}`.trim(),
+        name: activity.admin_name || 'Unknown Admin',
         email: activity.admin_email
       } : null,
       ipAddress: activity.ip_address,

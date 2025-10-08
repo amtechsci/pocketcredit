@@ -177,6 +177,14 @@ class AdminApiService {
     return this.request<DashboardStats>('GET', '/dashboard');
   }
 
+  async getChartData(period: string = '30d'): Promise<ApiResponse<any>> {
+    return this.request('GET', `/dashboard/charts?period=${period}`);
+  }
+
+  async getRecentActivity(limit: number = 10): Promise<ApiResponse<any>> {
+    return this.request('GET', `/dashboard/recent-activity?limit=${limit}`);
+  }
+
   // User Management APIs
   async getUsers(page: number = 1, limit: number = 20, filters: any = {}): Promise<ApiResponse<any>> {
     return this.request('GET', '/users', undefined, {
@@ -187,7 +195,7 @@ class AdminApiService {
   }
 
   async getUserProfile(userId: string): Promise<ApiResponse<UserDetailData>> {
-    return this.request<UserDetailData>('GET', `/users/${userId}`);
+    return this.request<UserDetailData>('GET', `/user-profile/${userId}`);
   }
 
   // Loan Management APIs
