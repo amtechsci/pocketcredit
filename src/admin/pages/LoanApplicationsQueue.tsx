@@ -204,66 +204,8 @@ export function LoanApplicationsQueue() {
     fetchStats();
   }, []);
 
-  // Mock data for fallback
-  const mockApplications: LoanApplication[] = [
-    {
-      id: 'CL250912',
-      applicantName: 'Rajesh Kumar Singh',
-      mobile: '+91 98765 43210',
-      email: 'rajesh.kumar@email.com',
-      loanAmount: 500000,
-      loanType: 'personal',
-      status: 'under_review',
-      applicationDate: '2025-01-09T10:30:00Z',
-      assignedManager: 'Raj Patel',
-      recoveryOfficer: 'Amit Sharma',
-      cibilScore: 720,
-      monthlyIncome: 75000,
-      employment: 'Software Engineer',
-      company: 'TCS Limited',
-      city: 'Bangalore',
-      state: 'Karnataka',
-      pincode: '560001'
-    },
-    {
-      id: 'CL250913',
-      applicantName: 'Priya Sharma Verma',
-      mobile: '+91 87654 32109',
-      email: 'priya.sharma@email.com',
-      loanAmount: 350000,
-      loanType: 'personal',
-      status: 'pending_documents',
-      applicationDate: '2025-01-09T09:15:00Z',
-      assignedManager: 'Sarah Johnson',
-      recoveryOfficer: 'Vikram Singh',
-      cibilScore: 680,
-      monthlyIncome: 60000,
-      employment: 'Marketing Manager',
-      company: 'Infosys',
-      city: 'Pune',
-      state: 'Maharashtra',
-      pincode: '411001'
-    },
-    {
-      id: 'CL250914',
-      applicantName: 'Amit Patel Shah',
-      mobile: '+91 76543 21098',
-      email: 'amit.patel@email.com',
-      loanAmount: 1200000,
-      loanType: 'business',
-      status: 'applied',
-      applicationDate: '2025-01-08T16:45:00Z',
-      assignedManager: 'Raj Patel',
-      recoveryOfficer: 'Priya Singh',
-      cibilScore: 750,
-      monthlyIncome: 150000,
-      employment: 'Business Owner',
-      company: 'Patel Trading Co.',
-      city: 'Ahmedabad',
-      state: 'Gujarat',
-      pincode: '380001'
-    }
-  ];
+  // No mock data - using real database only
+  const mockApplications: LoanApplication[] = [];
 
   const statusColors = {
     applied: 'bg-blue-100 text-blue-800',

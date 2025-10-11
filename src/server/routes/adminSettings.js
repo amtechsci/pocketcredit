@@ -3,6 +3,7 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 const { authenticateAdmin } = require('../middleware/auth');
 const userConfigRoutes = require('./userConfig');
 const configManagementRoutes = require('./configManagement');
+const eligibilityConfigRoutes = require('./eligibilityConfig');
 
 const router = express.Router();
 
@@ -184,11 +185,26 @@ router.put('/member-tiers/:id', authenticateAdmin, async (req, res) => {
   }
 });
 
+router.delete('/member-tiers/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await ensureMemberTiersTable();
+    await executeQuery('DELETE FROM member_tiers WHERE id = ?', [id]);
+    res.json({ status: 'success', message: 'Member tier deleted successfully' });
+  } catch (error) {
+    console.error('Delete member tier error:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to delete member tier' });
+  }
+});
+
 // Mount user config routes
 router.use('/', userConfigRoutes);
 
 // Mount configuration management routes
 router.use('/', configManagementRoutes);
+
+// Mount eligibility configuration routes
+router.use('/', eligibilityConfigRoutes);
 
 module.exports = router;
 

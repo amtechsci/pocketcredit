@@ -351,6 +351,10 @@ class AdminApiService {
     return this.request('PUT', `/settings/member-tiers/${id}`, data);
   }
 
+  async deleteMemberTier(id: number): Promise<ApiResponse<any>> {
+    return this.request('DELETE', `/settings/member-tiers/${id}`);
+  }
+
   // Admin Settings - Integrations (sms, email, cloud)
   async getIntegrations(type: 'sms' | 'email' | 'cloud'): Promise<ApiResponse<any>> {
     return this.request('GET', `/settings/integrations/${type}`);
@@ -581,6 +585,187 @@ class AdminApiService {
     is_primary: boolean;
   }): Promise<ApiResponse<{ message: string }>> {
     return this.request('PUT', `/settings/cloud-configs/${id}`, configData);
+  }
+
+  // Eligibility Configuration Management
+  async getEligibilityConfig(): Promise<ApiResponse<{
+    min_monthly_salary: { id: number; value: string; description: string; data_type: string; updated_at: string };
+    allowed_payment_modes: { id: number; value: string; description: string; data_type: string; updated_at: string };
+    hold_period_days: { id: number; value: string; description: string; data_type: string; updated_at: string };
+    required_employment_types: { id: number; value: string; description: string; data_type: string; updated_at: string };
+    min_age_years: { id: number; value: string; description: string; data_type: string; updated_at: string };
+    max_age_years: { id: number; value: string; description: string; data_type: string; updated_at: string };
+  }>> {
+    return this.request('GET', '/settings/eligibility-config');
+  }
+
+  async updateEligibilityConfig(configs: {
+    min_monthly_salary?: { value: string; description?: string };
+    allowed_payment_modes?: { value: string; description?: string };
+    hold_period_days?: { value: string; description?: string };
+    required_employment_types?: { value: string; description?: string };
+    min_age_years?: { value: string; description?: string };
+    max_age_years?: { value: string; description?: string };
+  }): Promise<ApiResponse<Array<{
+    key: string;
+    value: string;
+    description: string;
+  }>>> {
+    return this.request('PUT', '/settings/eligibility-config', { configs });
+  }
+
+  // ==================== Loan Limit Tiers APIs ====================
+
+  /**
+   * Get all loan limit tiers
+   */
+  async getLoanTiers(): Promise<any> {
+    return this.request('GET', '/loan-tiers');
+  }
+
+  /**
+   * Get single loan tier by ID
+   */
+  async getLoanTier(id: string | number): Promise<any> {
+    return this.request('GET', `/loan-tiers/${id}`);
+  }
+
+  /**
+   * Create new loan tier
+   */
+  async createLoanTier(data: {
+    tier_name: string;
+    min_salary: number;
+    max_salary?: number | null;
+    loan_limit: number;
+    is_active?: boolean;
+    tier_order: number;
+  }): Promise<any> {
+    return this.request('POST', '/loan-tiers', data);
+  }
+
+  /**
+   * Update existing loan tier
+   */
+  async updateLoanTier(id: string | number, data: {
+    tier_name: string;
+    min_salary: number;
+    max_salary?: number | null;
+    loan_limit: number;
+    is_active?: boolean;
+    tier_order: number;
+  }): Promise<any> {
+    return this.request('PUT', `/loan-tiers/${id}`, data);
+  }
+
+  /**
+   * Delete loan tier
+   */
+  async deleteLoanTier(id: string | number): Promise<any> {
+    return this.request('DELETE', `/loan-tiers/${id}`);
+  }
+
+  /**
+   * Toggle loan tier active status
+   */
+  async toggleLoanTier(id: string | number): Promise<any> {
+    return this.request('PATCH', `/loan-tiers/${id}/toggle`);
+  }
+
+  // ==================== Loan Plans APIs ====================
+
+  /**
+   * Get all loan plans
+   */
+  async getLoanPlans(): Promise<any> {
+    return this.request('GET', '/loan-plans');
+  }
+
+  /**
+   * Get single loan plan by ID
+   */
+  async getLoanPlan(id: string | number): Promise<any> {
+    return this.request('GET', `/loan-plans/${id}`);
+  }
+
+  /**
+   * Create new loan plan
+   */
+  async createLoanPlan(data: {
+    plan_name: string;
+    plan_code: string;
+    plan_type: 'single' | 'multi_emi';
+    repayment_days?: number;
+    emi_frequency?: 'daily' | 'weekly' | 'biweekly' | 'monthly';
+    emi_count?: number;
+    min_credit_score?: number;
+    eligible_member_tiers?: string[];
+    eligible_employment_types?: string[];
+    is_active?: boolean;
+    plan_order: number;
+    description?: string;
+    terms_conditions?: string;
+  }): Promise<any> {
+    return this.request('POST', '/loan-plans', data);
+  }
+
+  /**
+   * Update existing loan plan
+   */
+  async updateLoanPlan(id: string | number, data: any): Promise<any> {
+    return this.request('PUT', `/loan-plans/${id}`, data);
+  }
+
+  /**
+   * Delete loan plan
+   */
+  async deleteLoanPlan(id: string | number): Promise<any> {
+    return this.request('DELETE', `/loan-plans/${id}`);
+  }
+
+  /**
+   * Toggle loan plan active status
+   */
+  async toggleLoanPlan(id: string | number): Promise<any> {
+    return this.request('PATCH', `/loan-plans/${id}/toggle`);
+  }
+
+  // ==================== Late Fee Tiers APIs ====================
+
+  /**
+   * Get late fee tiers for a member tier
+   */
+  async getLateFees(memberTierId: string | number): Promise<any> {
+    return this.request('GET', `/late-fees/${memberTierId}`);
+  }
+
+  /**
+   * Create new late fee tier
+   */
+  async createLateFee(data: {
+    member_tier_id: number;
+    tier_name: string;
+    days_overdue_start: number;
+    days_overdue_end?: number | null;
+    fee_type: 'percentage' | 'fixed';
+    fee_value: number;
+    tier_order: number;
+  }): Promise<any> {
+    return this.request('POST', '/late-fees', data);
+  }
+
+  /**
+   * Update late fee tier
+   */
+  async updateLateFee(id: string | number, data: any): Promise<any> {
+    return this.request('PUT', `/late-fees/${id}`, data);
+  }
+
+  /**
+   * Delete late fee tier
+   */
+  async deleteLateFee(id: string | number): Promise<any> {
+    return this.request('DELETE', `/late-fees/${id}`);
   }
 }
 

@@ -17,7 +17,6 @@ const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const loanApplicationRoutes = require('./routes/loanApplicationRoutes');
 const loanRoutes = require('./routes/loans');
-const adminRoutes = require('./routes/admin');
 const adminAuthRoutes = require('./routes/adminAuth');
 const adminManagementRoutes = require('./routes/adminManagement');
 const documentRoutes = require('./routes/documents');
@@ -34,7 +33,13 @@ const adminApplicationsRoutes = require('./routes/adminApplications');
 const adminDashboardRoutes = require('./routes/adminDashboard');
 const adminUsersRoutes = require('./routes/adminUsers');
 const adminSettingsRoutes = require('./routes/adminSettings');
+const adminLoanTiersRoutes = require('./routes/adminLoanTiers');
+const adminLoanPlansRoutes = require('./routes/adminLoanPlans');
+const adminLateFeesRoutes = require('./routes/adminLateFees');
 const activityLogsRoutes = require('./routes/activityLogsSimple');
+const eligibilityRoutes = require('./routes/eligibilityConfig');
+const employmentQuickCheckRoutes = require('./routes/employmentQuickCheck');
+const loanPlansRoutes = require('./routes/loanPlans');
 const { activityLoggerMiddleware } = require('./middleware/activityLogger');
 const activityProcessor = require('./workers/activityProcessor');
 
@@ -110,7 +115,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/loan-applications', loanApplicationRoutes);
 app.use('/api/loans', loanRoutes);
-app.use('/api/admin', adminRoutes);
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin', adminManagementRoutes);
 app.use('/api/documents', documentRoutes);
@@ -127,7 +131,13 @@ app.use('/api/admin/applications', adminApplicationsRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
 app.use('/api/admin/users', adminUsersRoutes);
 app.use('/api/admin/settings', adminSettingsRoutes);
+app.use('/api/admin/loan-tiers', adminLoanTiersRoutes);
+app.use('/api/admin/loan-plans', adminLoanPlansRoutes);
+app.use('/api/admin/late-fees', adminLateFeesRoutes);
 app.use('/api/admin/activities', activityLogsRoutes);
+app.use('/api/eligibility', eligibilityRoutes);
+app.use('/api/employment-quick-check', employmentQuickCheckRoutes);
+app.use('/api/loan-plans', loanPlansRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -184,10 +194,6 @@ const startServer = async () => {
       console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
       console.log(`📚 API Base URL: http://localhost:${PORT}/api`);
       console.log(`🔐 Authentication: http://localhost:${PORT}/api/auth`);
-      
-      // Initialize database if it doesn't exist
-      const initDB = require('./scripts/initDatabase');
-      initDB();
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);

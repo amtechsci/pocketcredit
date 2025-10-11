@@ -88,7 +88,7 @@ const createUser = async (userData) => {
       marital_status,
       true, // phone_verified = true after OTP verification
       'active', // status = active
-      2, // profile_completion_step = 2 (Step 1 was OTP, so they land on Step 2: Basic Details)
+      1, // profile_completion_step = 1 (Start with Step 1: Employment Quick Check)
       defaultCreditScore // credit_score = default from config
     ];
 
@@ -214,7 +214,21 @@ const updateProfileById = async (userId, updateData) => {
  * @param {Object} user - User object
  * @returns {Object} Profile summary
  */
-const getProfileSummary = (user) => {
+const getProfileSummary = async (user) => {
+  // Fetch PAN from verification_records if exists
+  let pan_number = null;
+  try {
+    const panRecords = await executeQuery(
+      'SELECT document_number FROM verification_records WHERE user_id = ? AND document_type = ? LIMIT 1',
+      [user.id, 'pan']
+    );
+    if (panRecords && panRecords.length > 0) {
+      pan_number = panRecords[0].document_number;
+    }
+  } catch (error) {
+    console.error('Error fetching PAN:', error.message);
+  }
+
   return {
     id: user.id,
     phone: user.phone,
@@ -229,10 +243,14 @@ const getProfileSummary = (user) => {
     kyc_completed: user.kyc_completed,
     status: user.status,
     profile_completion_step: user.profile_completion_step || 0,
+    profile_completed: user.profile_completed || false,
     credit_score: user.credit_score || 640,
+    loan_limit: user.loan_limit || 0,
+    pincode: user.pincode,
+    pan_number: pan_number,
+    eligibility_status: user.eligibility_status,
     created_at: user.created_at,
-    last_login_at: user.last_login_at,
-    profile_completed: isProfileComplete(user)
+    last_login_at: user.last_login_at
   };
 }; 
 

@@ -24,11 +24,12 @@ const sendOtp = async (req, res) => {
       });
     }
 
-    // Generate 6-digit OTP
-    const otp = otpGenerator.generate(6, {
+    // Generate 4-digit OTP
+    const otp = otpGenerator.generate(4, {
       upperCaseAlphabets: false,
       lowerCaseAlphabets: false,
-      specialChars: false
+      specialChars: false,
+      digits: true
     });
 
     // Store OTP in Redis with 5-minute expiry (300 seconds)
@@ -106,10 +107,10 @@ const verifyOtp = async (req, res) => {
       });
     }
 
-    if (!/^\d{6}$/.test(otp)) {
+    if (!/^\d{4}$/.test(otp)) {
       return res.status(400).json({
         status: 'error',
-        message: 'OTP must be 6 digits'
+        message: 'OTP must be 4 digits'
       });
     }
 
@@ -182,7 +183,7 @@ const verifyOtp = async (req, res) => {
     );
 
     // Get profile summary
-    const profileSummary = getProfileSummary(user);
+    const profileSummary = await getProfileSummary(user);
 
     // Determine response message
     const isNewUser = !user.first_name || !user.last_name || !user.email;
@@ -252,7 +253,7 @@ const getProfile = async (req, res) => {
       });
     }
 
-    const profileSummary = getProfileSummary(user);
+    const profileSummary = await getProfileSummary(user);
 
     res.json({
       status: 'success',

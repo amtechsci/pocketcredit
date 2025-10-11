@@ -1,5 +1,5 @@
 const express = require('express');
-const { updateBasicProfile, updateAdditionalProfile, getProfileStatus } = require('../controllers/userController');
+const { updateBasicProfile, updateAdditionalProfile, updateStudentProfile, getProfileStatus } = require('../controllers/userController');
 const { requireAuth } = require('../middleware/jwtAuth');
 
 const router = express.Router();
@@ -22,6 +22,13 @@ router.put('/profile/basic', requireAuth, updateBasicProfile);
  * @access  Private
  */
 router.put('/profile/additional', requireAuth, updateAdditionalProfile);
+
+/**
+ * @route   PUT /api/user/profile/student
+ * @desc    Update student profile details (Step 3 for students)
+ * @access  Private
+ */
+router.put('/profile/student', requireAuth, updateStudentProfile);
 
 /**
  * @route   GET /api/user/profile/status

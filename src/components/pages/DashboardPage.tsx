@@ -209,9 +209,9 @@ export function DashboardPage() {
     }
   }, [isAuthenticated, navigate, user, fetchUserProfile, fetchPendingApplications, fetchUserLoans, fetchUserStats]);
 
-  // Check if user needs to complete profile based on profile_completion_step
+  // Check if user needs to complete profile based on profile_completed flag
   useEffect(() => {
-    if (user && user.profile_completion_step && user.profile_completion_step < 4) {
+    if (user && !user.profile_completed) {
       navigate('/profile-completion');
       return;
     }

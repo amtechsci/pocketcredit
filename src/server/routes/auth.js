@@ -262,7 +262,7 @@ router.post('/verify-otp', validate(schemas.otpVerification), async (req, res) =
         date_of_birth: null,
         gender: null,
         member_id: 1, // Default member tier
-        profile_completion_step: 2, // Start at step 2 (Basic Information)
+        // profile_completion_step is handled by createUser() - defaults to 1
         profile_completed: false,
         phone_verified: true,
         email_verified: false,

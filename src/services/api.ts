@@ -253,6 +253,8 @@ class ApiService {
   async createLoanApplication(applicationData: {
     desired_amount: number;
     purpose: string;
+    loan_plan_id?: number;
+    plan_code?: string;
   }): Promise<ApiResponse<{
     application_id: number;
     application_number: string;
@@ -410,6 +412,33 @@ class ApiService {
     return this.request('GET', '/user/profile/status');
   }
 
+  // Employment Quick Check (Step 1)
+  async saveEmploymentQuickCheck(data: {
+    employment_type: string;
+    monthly_salary?: number;
+    payment_mode?: string;
+    designation?: string;
+  }): Promise<ApiResponse<{
+    eligible: boolean;
+    message?: string;
+    hold_until?: string;
+    issues?: string[];
+  }>> {
+    return this.request('POST', '/employment-quick-check', data);
+  }
+
+  // Student Profile Update (Step 3)
+  async updateStudentProfile(data: {
+    college_name: string;
+    graduation_status: string;
+  }): Promise<ApiResponse<{
+    user: User;
+    next_step: string;
+    profile_completed: boolean;
+  }>> {
+    return this.request('PUT', '/user/profile/student', data);
+  }
+
   // Loan Application APIs
   async applyForLoan(loanData: {
     loan_amount: number;
@@ -513,6 +542,24 @@ class ApiService {
   // Health check
   async healthCheck(): Promise<ApiResponse> {
     return this.request('GET', '/health');
+  }
+  // ==================== Loan Plans APIs ====================
+
+  /**
+   * Get available loan plans for the current user
+   */
+  async getAvailableLoanPlans(): Promise<ApiResponse<any[]>> {
+    return this.request('GET', '/loan-plans/available');
+  }
+
+  /**
+   * Calculate loan repayment details for a specific plan
+   */
+  async calculateLoanPlan(loanAmount: number, planId: number): Promise<ApiResponse<any>> {
+    return this.request('POST', '/loan-plans/calculate', {
+      loan_amount: loanAmount,
+      plan_id: planId
+    });
   }
 }
 

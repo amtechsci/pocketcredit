@@ -12,7 +12,6 @@ import { Logo } from '../Logo';
 export function AuthPage() {
   const navigate = useNavigate();
   const { loginWithOTP } = useAuth();
-  const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
   const [mobileNumber, setMobileNumber] = useState('');
   const [otp, setOtp] = useState('');
   const [showOtp, setShowOtp] = useState(false);
@@ -85,8 +84,8 @@ export function AuthPage() {
   };
 
   const verifyOtp = async () => {
-    if (otp.length !== 6) {
-      toast.error('Please enter a valid 6-digit OTP');
+    if (otp.length !== 4) {
+      toast.error('Please enter a valid 4-digit OTP');
       return;
     }
 
@@ -124,45 +123,19 @@ export function AuthPage() {
     setConsentChecked(false);
   };
 
-  const switchAuthMode = (mode: 'signin' | 'signup' | 'forgot') => {
-    setAuthMode(mode);
-    resetForm();
-  };
-
-  const getTitle = () => {
-    switch (authMode) {
-      case 'signin': return 'Sign In to Your Account';
-      case 'signup': return 'Create Your Account';
-      case 'forgot': return 'Reset Your Password';
-      default: return 'Authentication';
-    }
-  };
-
-  const getDescription = () => {
-    switch (authMode) {
-      case 'signin': return 'Welcome back! Please sign in to continue.';
-      case 'signup': return 'Join thousands of users who trust Pocket Credit for their financial needs.';
-      case 'forgot': return 'Enter your mobile number to reset your password.';
-      default: return '';
-    }
-  };
-
   return (
     <div className="min-h-screen py-12" style={{ backgroundColor: '#F0F4F8' }}>
       <div className="container mx-auto px-4 max-w-md">
 
         <Card className="shadow-lg">
-          <CardHeader className="text-center pb-6">
+          <CardHeader className="text-center pb-0">
             {/* Logo */}
-            <div className="flex items-center justify-center mb-4">
-              <Logo size="lg" />
-            </div>
             
             <CardTitle style={{ color: '#1E2A3B' }}>
-              {getTitle()}
+              Login or Sign Up
             </CardTitle>
             <CardDescription className="text-base">
-              {getDescription()}
+              Enter your mobile number to continue
             </CardDescription>
           </CardHeader>
 
@@ -171,10 +144,7 @@ export function AuthPage() {
               // Mobile Number Input
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="mobile">Mobile Number</Label>
-                  <p className="text-xs text-gray-500">
-                    Please enter phone number linked to your Aadhaar Card
-                  </p>
+                  
                   <div className="relative">
                     <Phone className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                     <Input
@@ -183,14 +153,17 @@ export function AuthPage() {
                       placeholder="Enter your mobile number"
                       value={mobileNumber}
                       onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                      className="pl-10"
+                      className="pl-10 border-1 border-gray-300 rounded-md"
                       maxLength={10}
                     />
+                    <p className="text-xs text-gray-500" style={{ paddingLeft: '2px', marginTop: '5px' }}> 
+                      Please enter phone number linked to your Aadhaar Card
+                    </p>
                   </div>
                 </div>
 
                 {/* Disclaimer and Consent */}
-                <div className="space-y-3 p-4 bg-gray-50 rounded-lg">
+                <div className="space-y-3 p-2 bg-gray-50 rounded-lg">
                   <div className="flex items-start space-x-2">
                     <input
                       type="checkbox"
@@ -260,15 +233,15 @@ export function AuthPage() {
                     <Input
                       id="otp"
                       type="text"
-                      placeholder="Enter 6-digit OTP"
+                      placeholder="Enter 4-digit OTP"
                       value={otp}
-                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                      className="pl-10 text-center text-lg tracking-widest"
-                      maxLength={6}
+                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                      className="pl-10 text-center text-lg tracking-widest border-1 border-gray-300 rounded-md"
+                      maxLength={4}
                     />
                   </div>
                   <p className="text-xs text-gray-500 text-center">
-                    Enter the 6-digit OTP sent to your mobile number
+                    Enter the 4-digit OTP sent to your mobile number
                   </p>
                 </div>
 
@@ -289,7 +262,7 @@ export function AuthPage() {
 
                 <Button
                   onClick={verifyOtp}
-                  disabled={loading || otp.length !== 6}
+                  disabled={loading || otp.length !== 4}
                   style={{ backgroundColor: '#0052FF' }}
                   className="w-full text-white hover:opacity-90"
                 >
@@ -298,54 +271,6 @@ export function AuthPage() {
               </div>
             )}
 
-            {/* Auth Mode Switcher */}
-            {!showOtp && (
-              <div className="space-y-4 pt-4 border-t">
-                {authMode === 'signin' ? (
-                  <div className="text-center space-y-2">
-                    <p className="text-sm text-gray-600">
-                      Don't have an account?{' '}
-                      <button
-                        onClick={() => switchAuthMode('signup')}
-                        className="text-blue-600 hover:underline font-medium"
-                      >
-                        Sign Up
-                      </button>
-                    </p>
-                    <button
-                      onClick={() => switchAuthMode('forgot')}
-                      className="text-sm text-gray-500 hover:text-blue-600 hover:underline"
-                    >
-                      Forgot Password?
-                    </button>
-                  </div>
-                ) : authMode === 'signup' ? (
-                  <div className="text-center">
-                    <p className="text-sm text-gray-600">
-                      Already have an account?{' '}
-                      <button
-                        onClick={() => switchAuthMode('signin')}
-                        className="text-blue-600 hover:underline font-medium"
-                      >
-                        Sign In
-                      </button>
-                    </p>
-                  </div>
-                ) : (
-                  <div className="text-center">
-                    <p className="text-sm text-gray-600">
-                      Remember your password?{' '}
-                      <button
-                        onClick={() => switchAuthMode('signin')}
-                        className="text-blue-600 hover:underline font-medium"
-                      >
-                        Sign In
-                      </button>
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
 
 
             {/* Terms and Privacy */}

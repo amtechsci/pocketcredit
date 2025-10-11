@@ -3,8 +3,8 @@ const { authenticateAdmin } = require('../middleware/auth');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const router = express.Router();
 
-// Get dashboard statistics
-router.get('/stats', authenticateAdmin, async (req, res) => {
+// Get dashboard statistics (root route and /stats both work)
+const getDashboardStats = async (req, res) => {
   try {
     await initializeDatabase();
     
@@ -114,7 +114,11 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
       message: 'Failed to fetch dashboard statistics'
     });
   }
-});
+};
+
+// Mount the dashboard stats on both root and /stats
+router.get('/', authenticateAdmin, getDashboardStats);
+router.get('/stats', authenticateAdmin, getDashboardStats);
 
 // Get recent activity
 router.get('/recent-activity', authenticateAdmin, async (req, res) => {

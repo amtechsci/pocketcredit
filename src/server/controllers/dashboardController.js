@@ -56,7 +56,7 @@ const getDashboardSummary = async (req, res) => {
     const user = users[0];
 
     // Check if user needs to complete profile
-    if (!user.profile_completed || user.profile_completion_step < 5) {
+    if (!user.profile_completed) {
       // Check what specific data is missing
       const addresses = await executeQuery('SELECT * FROM addresses WHERE user_id = ?', [userId]);
       const employment = await executeQuery('SELECT * FROM employment_details WHERE user_id = ?', [userId]);
@@ -122,9 +122,9 @@ const getDashboardSummary = async (req, res) => {
 const fetchDashboardData = async (userId) => {
   console.log('🔍 Fetching dashboard data for user:', userId);
   
-  // Get user basic info
+  // Get user basic info including credit score and loan limit
   const userQuery = `
-    SELECT id, first_name, last_name, phone, email, created_at
+    SELECT id, first_name, last_name, phone, email, created_at, credit_score, loan_limit
     FROM users 
     WHERE id = ? AND status = 'active'
   `;
@@ -137,9 +137,9 @@ const fetchDashboardData = async (userId) => {
 
   const user = users[0];
 
-  // Get financial details from employment_details (since financial_details doesn't exist)
+  // Get financial details from employment_details
   const financialQuery = `
-    SELECT monthly_salary as monthly_income, 0 as credit_score, 0 as monthly_expenses, 0 as existing_loans
+    SELECT monthly_salary as monthly_income, 0 as monthly_expenses, 0 as existing_loans
     FROM employment_details 
     WHERE user_id = ?
   `;
@@ -216,8 +216,8 @@ const fetchDashboardData = async (userId) => {
       member_since: user.created_at
     },
     summary: {
-      credit_score: financial.credit_score || 0,
-      available_credit: availableCredit,
+      credit_score: user.credit_score || 0,
+      available_credit: user.loan_limit || availableCredit,
       total_loans: parseInt(stats.total_loans) || 0,
       active_loans: parseInt(stats.active_loans) || 0,
       total_loan_amount: parseFloat(stats.total_loan_amount) || 0,
@@ -237,7 +237,7 @@ const fetchDashboardData = async (userId) => {
       {
         type: 'info',
         title: 'Credit Score Updated',
-        message: `Your credit score is ${financial.credit_score || 0}`,
+        message: `Your credit score is ${user.credit_score || 0}`,
         icon: 'TrendingUp'
       }
     ]

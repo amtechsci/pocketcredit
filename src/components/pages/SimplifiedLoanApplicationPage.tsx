@@ -70,32 +70,13 @@ export function SimplifiedLoanApplicationPage() {
       return;
     }
 
-    setLoading(true);
-    try {
-      const response = await apiService.createLoanApplication({
-        desired_amount: formData.desiredAmount,
-        purpose: formData.purpose
-      });
-
-      console.log('Loan application response:', response);
-      console.log('Response status:', response.status);
-      console.log('Response success:', response.success);
-      if (response.status === 'success' || response.success === true) {
-        console.log('Loan application submitted successfully:', response.data);
-        toast.success('Loan application submitted successfully!');
-        // Redirect to loan application steps flow
-        console.log('Redirecting to:', `/loan-application/steps?applicationId=${response.data.application_id}`);
-        navigate(`/loan-application/steps?applicationId=${response.data.application_id}`);
-      } else {
-        console.log('Loan application submission failed:', response.message);
-        toast.error(response.message || 'Failed to submit loan application');
+    // Redirect to plan selection instead of submitting directly
+    navigate('/loan-application/select-plan', {
+      state: {
+        loanAmount: formData.desiredAmount,
+        loanPurpose: formData.purpose
       }
-    } catch (error: any) {
-      console.error('Loan application error:', error);
-      toast.error(error.message || 'Failed to submit loan application');
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   if (!isAuthenticated) {

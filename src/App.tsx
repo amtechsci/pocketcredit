@@ -9,7 +9,7 @@ import { PersonalLoanPage } from './components/pages/PersonalLoanPage';
 import { BusinessLoanPage } from './components/pages/BusinessLoanPage';
 import { AuthPage } from './components/pages/AuthPage';
 import { AdminLogin } from './admin/AdminLogin';
-import { ProfileCompletionPageSimple as ProfileCompletionPage } from './components/pages/ProfileCompletionPageSimple';
+import ProfileCompletionPageSimple from './components/pages/ProfileCompletionPageSimple';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DynamicDashboardPage as DashboardPage } from './components/pages/DynamicDashboardPage';
 import { AuthOnlyRoute, ProtectedRoute } from './components/ProtectedRoute';
@@ -18,6 +18,8 @@ import { DynamicLoanDetailsPage as LoanDetailsPage } from './components/pages/Dy
 import { DynamicPaymentHistoryPage as PaymentHistoryPage } from './components/pages/DynamicPaymentHistoryPage';
 import { DynamicDocumentUploadPage as DocumentUploadPage } from './components/pages/DynamicDocumentUploadPage';
 import { SimplifiedLoanApplicationPage } from './components/pages/SimplifiedLoanApplicationPage';
+import LoanPlanSelection from './components/pages/LoanPlanSelection';
+import LoanApplicationConfirmation from './components/pages/LoanApplicationConfirmation';
 import { BankDetailsPage } from './components/pages/BankDetailsPage';
 import { ReferenceDetailsPage } from './components/pages/ReferenceDetailsPage';
 import { UserReferencesPage } from './components/pages/UserReferencesPage';
@@ -314,6 +316,18 @@ function AppContent() {
             <SimplifiedLoanApplicationPage />
           </DashboardLayout>
         } />
+
+        <Route path="/loan-application/select-plan" element={
+          <DashboardLayout>
+            <LoanPlanSelection />
+          </DashboardLayout>
+        } />
+
+        <Route path="/loan-application/confirm" element={
+          <DashboardLayout>
+            <LoanApplicationConfirmation />
+          </DashboardLayout>
+        } />
         
         <Route path="/loan-application/bank-details" element={
           <DashboardLayout>
@@ -346,7 +360,7 @@ function AppContent() {
           isAuthenticated ? (
             <DashboardLayout>
               <ErrorBoundary>
-                <ProfileCompletionPage />
+                <ProfileCompletionPageSimple />
               </ErrorBoundary>
             </DashboardLayout>
           ) : (
@@ -356,7 +370,7 @@ function AppContent() {
         
         <Route path="/dashboard" element={
           isAuthenticated ? (
-            user?.profile_completion_step >= 5 ? (
+            user?.profile_completed ? (
               <DashboardLayout>
                 <DashboardPage />
               </DashboardLayout>

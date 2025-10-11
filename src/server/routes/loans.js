@@ -26,7 +26,9 @@ router.post('/apply', requireAuth, async (req, res) => {
 
     const { 
       desired_amount, 
-      purpose
+      purpose,
+      loan_plan_id,
+      plan_code
     } = req.body;
 
     // Validation
@@ -98,10 +100,10 @@ router.post('/apply', requireAuth, async (req, res) => {
     // Create loan application
     const result = await executeQuery(
       `INSERT INTO loan_applications (
-        user_id, application_number, loan_amount, loan_purpose, 
+        user_id, application_number, loan_amount, loan_purpose, loan_plan_id, plan_code,
         status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'submitted', NOW(), NOW())`,
-      [userId, applicationNumber, desired_amount, purpose]
+      ) VALUES (?, ?, ?, ?, ?, ?, 'submitted', NOW(), NOW())`,
+      [userId, applicationNumber, desired_amount, purpose, loan_plan_id || null, plan_code || null]
     );
 
     const applicationId = result.insertId;
