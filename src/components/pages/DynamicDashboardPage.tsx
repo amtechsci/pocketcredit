@@ -96,6 +96,7 @@ export function DynamicDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingApplications, setPendingApplications] = useState<any[]>([]);
+  const [canApplyForLoan, setCanApplyForLoan] = useState(true);
 
   // Load dashboard data
   const loadDashboardData = useCallback(async () => {
@@ -107,6 +108,11 @@ export function DynamicDashboardPage() {
       
       if (response.status === 'success' && response.data) {
         setDashboardData(response.data);
+        
+        // Check if user can apply for new loan
+        if ((response.data as any).loan_status) {
+          setCanApplyForLoan((response.data as any).loan_status.can_apply);
+        }
       } else if (response.status === 'profile_incomplete') {
         // User needs to complete their profile
         console.log('Profile incomplete, redirecting to profile completion:', response.data);
@@ -293,7 +299,7 @@ export function DynamicDashboardPage() {
                 <p className="text-blue-100">Manage your loans and track payments</p>
               </div>
             </div>
-            {!hasActiveOrPendingLoans() && (
+            {canApplyForLoan && !hasActiveOrPendingLoans() && (
               <Button 
                 onClick={() => {
                         console.log('Apply for a Loan button clicked');
@@ -547,7 +553,7 @@ export function DynamicDashboardPage() {
                   <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Loans</h3>
                   <p className="text-gray-600 mb-4">You don't have any active loans at the moment.</p>
-                  {!hasActiveOrPendingLoans() && (
+                  {canApplyForLoan && !hasActiveOrPendingLoans() && (
                     <Button 
                       onClick={() => {
                         console.log('Apply for a Loan button clicked');
@@ -734,15 +740,17 @@ export function DynamicDashboardPage() {
               <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Loans</h3>
               <p className="text-gray-600 mb-4">You don't have any active loans at the moment.</p>
-              <Button 
-                onClick={() => {
-                      console.log('Apply for a Loan button clicked');
-                      navigate('/application');
-                    }}
-                style={{ backgroundColor: '#0052FF' }}
-              >
-                Apply for a Loan
-              </Button>
+              {canApplyForLoan && (
+                <Button 
+                  onClick={() => {
+                        console.log('Apply for a Loan button clicked');
+                        navigate('/application');
+                      }}
+                  style={{ backgroundColor: '#0052FF' }}
+                >
+                  Apply for a Loan
+                </Button>
+              )}
             </div>
           )}
         </Card>
@@ -856,7 +864,7 @@ export function DynamicDashboardPage() {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <h3 className="text-xl font-semibold">My Loans</h3>
-                {!hasActiveOrPendingLoans() && (
+                {canApplyForLoan && !hasActiveOrPendingLoans() && (
                   <Button 
                     onClick={() => {
                         console.log('Apply for a Loan button clicked');
@@ -983,7 +991,7 @@ export function DynamicDashboardPage() {
                   <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Loans</h3>
                   <p className="text-gray-600 mb-4">You don't have any active loans at the moment.</p>
-                  {!hasActiveOrPendingLoans() && (
+                  {canApplyForLoan && !hasActiveOrPendingLoans() && (
                     <Button 
                       onClick={() => {
                         console.log('Apply for a Loan button clicked');

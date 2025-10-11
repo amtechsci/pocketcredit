@@ -255,6 +255,14 @@ class ApiService {
     purpose: string;
     loan_plan_id?: number;
     plan_code?: string;
+    plan_snapshot?: any;
+    processing_fee?: number;
+    processing_fee_percent?: number;
+    total_interest?: number;
+    interest_percent_per_day?: number;
+    total_repayable?: number;
+    late_fee_structure?: any;
+    emi_schedule?: any;
   }): Promise<ApiResponse<{
     application_id: number;
     application_number: string;

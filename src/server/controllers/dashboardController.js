@@ -195,6 +195,21 @@ const fetchDashboardData = async (userId) => {
   // Get upcoming payments (simplified - no EMI data available)
   const upcomingPayments = []; // No EMI tracking available
 
+  // Check for pending loan applications
+  const pendingApplicationsQuery = `
+    SELECT id, status, application_number
+    FROM loan_applications
+    WHERE user_id = ? AND status IN ('submitted', 'under_review', 'bank_details_provided')
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  const pendingApplications = await executeQuery(pendingApplicationsQuery, [userId]);
+  const hasPendingApplication = pendingApplications && pendingApplications.length > 0;
+  const pendingApplicationInfo = hasPendingApplication ? pendingApplications[0] : null;
+
+  // User can apply for new loan only if they have no active loans AND no pending applications
+  const canApplyForLoan = !hasPendingApplication && (activeLoans.length === 0);
+
   // Get recent notifications (notifications table doesn't exist yet)
   const notifications = [];
 
@@ -214,6 +229,12 @@ const fetchDashboardData = async (userId) => {
       phone: user.phone,
       email: user.email,
       member_since: user.created_at
+    },
+    loan_status: {
+      can_apply: canApplyForLoan,
+      has_pending_application: hasPendingApplication,
+      pending_application: pendingApplicationInfo,
+      active_loans_count: activeLoans.length
     },
     summary: {
       credit_score: user.credit_score || 0,

@@ -393,21 +393,97 @@ export function LoanApplicationsQueue() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Loan Applications Queue</h1>
-          <p className="text-gray-600">Manage and review all loan applications</p>
+
+      {/* Search and Status Tabs */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="space-y-4">
+        {/* Search Bar */}
+        <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+          <div className="flex-1 max-w-md">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <input
+                type="text"
+                placeholder="Search by name, ID, mobile, or email..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+              />
+              {isSearching && (
+                <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center gap-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  <span className="text-xs text-gray-500">
+                    {searchCountdown > 0 ? `Searching in ${searchCountdown}s...` : 'Searching...'}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Filter Buttons */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handleStatusFilter('all')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                statusFilter === 'all'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+              }`}
+            >
+              All <span className="ml-1 px-2 py-0.5 bg-gray-100 text-gray-800 rounded-full text-xs">{pagination?.totalApplications || 0}</span>
+            </button>
+            <button
+              onClick={() => handleStatusFilter('submitted')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                statusFilter === 'submitted'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+              }`}
+            >
+              Submitted <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'submitted' ? 'bg-purple-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.submittedApplications || 0}</span>
+            </button>
+            <button
+              onClick={() => handleStatusFilter('under_review')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                statusFilter === 'under_review'
+                  ? 'bg-orange-600 text-white shadow-sm'
+                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+              }`}
+            >
+              Under Review <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'under_review' ? 'bg-orange-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.pendingApplications || 0}</span>
+            </button>
+            <button
+              onClick={() => handleStatusFilter('approved')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                statusFilter === 'approved'
+                  ? 'bg-green-600 text-white shadow-sm'
+                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+              }`}
+            >
+              Approved <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'approved' ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.approvedApplications || 0}</span>
+            </button>
+            <button
+              onClick={() => handleStatusFilter('rejected')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                statusFilter === 'rejected'
+                  ? 'bg-red-600 text-white shadow-sm'
+                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+              }`}
+            >
+              Rejected <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'rejected' ? 'bg-red-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.rejectedApplications || 0}</span>
+            </button>
+            <button
+              onClick={() => handleStatusFilter('disbursed')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                statusFilter === 'disbursed'
+                  ? 'bg-teal-600 text-white shadow-sm'
+                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+              }`}
+            >
+              Disbursed <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'disbursed' ? 'bg-teal-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.disbursedApplications || 0}</span>
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">
-            <Download className="w-4 h-4" />
-            Export
-          </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
-            <Filter className="w-4 h-4" />
-            Advanced Filter
-          </button>
         </div>
       </div>
 
@@ -417,14 +493,14 @@ export function LoanApplicationsQueue() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Total Applications</p>
-              <p className="text-2xl font-bold text-gray-900">{stats?.total || 0}</p>
+              <p className="text-2xl font-bold text-gray-900">{stats?.totalApplications || 0}</p>
             </div>
             <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
               <User className="w-6 h-6 text-blue-600" />
             </div>
           </div>
           <div className="mt-2">
-            <span className="text-sm text-green-600">+{stats?.applied || 0} new applications</span>
+            <span className="text-sm text-green-600">+{stats?.newApplications || 0} new applications</span>
           </div>
         </div>
 
@@ -432,7 +508,7 @@ export function LoanApplicationsQueue() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Pending Review</p>
-              <p className="text-2xl font-bold text-orange-600">{stats?.underReview || 0}</p>
+              <p className="text-2xl font-bold text-orange-600">{stats?.pendingApplications || 0}</p>
             </div>
             <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
               <Clock className="w-6 h-6 text-orange-600" />
@@ -447,7 +523,7 @@ export function LoanApplicationsQueue() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Approved</p>
-              <p className="text-2xl font-bold text-green-600">{stats?.approved || 0}</p>
+              <p className="text-2xl font-bold text-green-600">{stats?.approvedApplications || 0}</p>
             </div>
             <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
               <CheckCircle className="w-6 h-6 text-green-600" />
@@ -462,7 +538,7 @@ export function LoanApplicationsQueue() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Rejected</p>
-              <p className="text-2xl font-bold text-red-600">{stats?.rejected || 0}</p>
+              <p className="text-2xl font-bold text-red-600">{stats?.rejectedApplications || 0}</p>
             </div>
             <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center">
               <XCircle className="w-6 h-6 text-red-600" />
@@ -470,260 +546,6 @@ export function LoanApplicationsQueue() {
           </div>
           <div className="mt-2">
             <span className="text-sm text-gray-500">Requires review</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Enhanced Search and Filters */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <div className="space-y-4">
-          {/* Search Bar */}
-          <div className="flex flex-col lg:flex-row lg:items-center gap-4">
-            <div className="flex-1 max-w-md">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input
-                  type="text"
-                  placeholder="Search by name, ID, mobile, or email..."
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  className="pl-10 pr-4 py-2.5 w-full border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                />
-                {isSearching && (
-                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center gap-2">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                    <span className="text-xs text-gray-500">
-                      {searchCountdown > 0 ? `Searching in ${searchCountdown}s...` : 'Searching...'}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Quick Filter Buttons */}
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => handleStatusFilter('all')}
-                className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                  statusFilter === 'all'
-                    ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                All ({pagination?.totalApplications || 0})
-              </button>
-              <button
-                onClick={() => handleStatusFilter('under_review')}
-                className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                  statusFilter === 'under_review'
-                    ? 'bg-orange-100 text-orange-700 border border-orange-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Pending ({stats?.pendingApplications || 0})
-              </button>
-              <button
-                onClick={() => handleStatusFilter('approved')}
-                className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                  statusFilter === 'approved'
-                    ? 'bg-green-100 text-green-700 border border-green-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Approved ({stats?.approvedApplications || 0})
-              </button>
-              <button
-                onClick={() => handleStatusFilter('rejected')}
-                className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                  statusFilter === 'rejected'
-                    ? 'bg-red-100 text-red-700 border border-red-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Rejected ({stats?.rejectedApplications || 0})
-              </button>
-            </div>
-          </div>
-
-          {/* Advanced Filters */}
-          <div className="flex flex-wrap items-center gap-4 pt-4 border-t border-gray-100">
-            {/* Status Filter */}
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-700">Status:</span>
-              <select
-                value={statusFilter}
-                onChange={(e) => handleStatusFilter(e.target.value)}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-              >
-                <option value="all">All Status</option>
-                <option value="applied">Applied</option>
-                <option value="under_review">Under Review</option>
-                <option value="pending_documents">Pending Docs</option>
-                <option value="approved">Approved</option>
-                <option value="rejected">Rejected</option>
-                <option value="disbursed">Disbursed</option>
-              </select>
-            </div>
-
-            {/* Loan Type Filter */}
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-700">Type:</span>
-              <select className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white">
-                <option value="all">All Types</option>
-                <option value="personal">Personal</option>
-                <option value="business">Business</option>
-              </select>
-            </div>
-
-            {/* Amount Range Filter */}
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-700">Amount:</span>
-              <select className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white">
-                <option value="all">All Amounts</option>
-                <option value="0-50000">₹0 - ₹50K</option>
-                <option value="50000-100000">₹50K - ₹1L</option>
-                <option value="100000-500000">₹1L - ₹5L</option>
-                <option value="500000+">₹5L+</option>
-              </select>
-            </div>
-
-            {/* Date Filter */}
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-700">Period:</span>
-              <select className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white">
-                <option value="all">All Time</option>
-                <option value="today">Today</option>
-                <option value="week">This Week</option>
-                <option value="month">This Month</option>
-                <option value="custom">Custom Range</option>
-              </select>
-            </div>
-
-            {/* Sort Filter */}
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-700">Sort:</span>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-              >
-                <option value="applicationDate">Application Date</option>
-                <option value="applicantName">Applicant Name</option>
-                <option value="loanAmount">Loan Amount</option>
-                <option value="status">Status</option>
-                <option value="cibilScore">CIBIL Score</option>
-              </select>
-              <button
-                onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
-                title={`Sort ${sortOrder === 'asc' ? 'Descending' : 'Ascending'}`}
-              >
-                <ArrowUpDown className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Page Size Selector */}
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-700">Show:</span>
-              <select
-                value={pageSize}
-                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-              >
-                <option value={10}>10</option>
-                <option value={20}>20</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-              </select>
-            </div>
-
-            {/* Clear Filters */}
-            {(searchInput || statusFilter !== 'all') && (
-              <button
-                onClick={() => {
-                  setSearchInput('');
-                  handleSearch('');
-                  handleStatusFilter('all');
-                  setIsSearching(false);
-                  setSearchCountdown(0);
-                }}
-                className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors border border-gray-300"
-              >
-                Clear All
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Bulk Actions */}
-        {selectedApplications.length > 0 && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-medium text-blue-900">
-                  {selectedApplications.length} application{selectedApplications.length > 1 ? 's' : ''} selected
-                </span>
-                <button
-                  onClick={() => setSelectedApplications([])}
-                  className="text-sm text-blue-600 hover:text-blue-800 underline"
-                >
-                  Clear selection
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                {canApproveLoans && (
-                  <button
-                    onClick={handleBulkApprove}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors"
-                  >
-                    <CheckCircle className="w-4 h-4" />
-                    Approve All
-                  </button>
-                )}
-                {canRejectLoans && (
-                  <button
-                    onClick={handleBulkReject}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors"
-                  >
-                    <XCircle className="w-4 h-4" />
-                    Reject All
-                  </button>
-                )}
-                <button
-                  onClick={handleBulkAssign}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 transition-colors"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  Assign All
-                </button>
-                <button
-                  onClick={handleBulkExport}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                  Export Selected
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Results Summary */}
-        <div className="mt-3 pt-3 border-t border-gray-100">
-          <div className="flex items-center justify-between text-sm text-gray-600">
-            <span>
-              Showing <span className="font-medium text-gray-900">{pagination?.totalApplications || filteredApplications.length}</span> applications
-              {pagination && (
-                <span className="text-gray-500">
-                  {' '}(Page {pagination.currentPage} of {pagination.totalPages})
-                </span>
-              )}
-            </span>
-            {stats && (
-              <span className="text-blue-600">
-                {stats.total} total • {stats.pendingApplications} pending • {stats.approvedApplications} approved
-              </span>
-            )}
           </div>
         </div>
       </div>

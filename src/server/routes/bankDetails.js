@@ -112,8 +112,8 @@ router.post('/', requireAuth, async (req, res) => {
     } else {
       // Insert new bank details
       const result = await executeQuery(
-        'INSERT INTO bank_details (loan_application_id, account_number, ifsc_code, bank_name, account_holder_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())',
-        [application_id, account_number, ifsc_code, bankName, accountHolderName]
+        'INSERT INTO bank_details (user_id, loan_application_id, account_number, ifsc_code, bank_name, account_holder_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())',
+        [userId, application_id, account_number, ifsc_code, bankName, accountHolderName]
       );
       bankDetailsId = result.insertId;
     }
@@ -139,9 +139,12 @@ router.post('/', requireAuth, async (req, res) => {
 
   } catch (error) {
     console.error('Error saving bank details:', error);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
-      message: 'Internal server error while saving bank details'
+      message: 'Internal server error while saving bank details',
+      error: error.message
     });
   }
 });
@@ -289,8 +292,8 @@ router.post('/choose', requireAuth, async (req, res) => {
     } else {
       // Insert new bank details
       result = await executeQuery(
-        'INSERT INTO bank_details (loan_application_id, account_number, ifsc_code, bank_name, account_holder_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())',
-        [application_id, bankDetail.account_number, bankDetail.ifsc_code, bankDetail.bank_name, bankDetail.account_holder_name]
+        'INSERT INTO bank_details (user_id, loan_application_id, account_number, ifsc_code, bank_name, account_holder_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())',
+        [userId, application_id, bankDetail.account_number, bankDetail.ifsc_code, bankDetail.bank_name, bankDetail.account_holder_name]
       );
     }
 

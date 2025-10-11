@@ -40,11 +40,27 @@ export const LoanApplicationConfirmation: React.FC = () => {
 
     setLoading(true);
     try {
+      // Create complete snapshot of plan details at time of application
       const response = await apiService.createLoanApplication({
         desired_amount: loanAmount,
         purpose: loanPurpose,
         loan_plan_id: selectedPlan.id,
-        plan_code: selectedPlan.plan_code
+        plan_code: selectedPlan.plan_code,
+        // Save complete calculation snapshot (so old loans don't change if plans change)
+        plan_snapshot: {
+          plan_name: selectedPlan.plan_name,
+          plan_type: selectedPlan.plan_type,
+          repayment_days: selectedPlan.repayment_days,
+          emi_frequency: selectedPlan.emi_frequency,
+          emi_count: selectedPlan.emi_count
+        },
+        processing_fee: calculation.processing_fee,
+        processing_fee_percent: calculation.breakdown.processing_fee_percent,
+        total_interest: calculation.interest,
+        interest_percent_per_day: parseFloat(calculation.breakdown.interest_rate.match(/[\d.]+/)?.[0] || '0'),
+        total_repayable: calculation.total_repayable,
+        late_fee_structure: calculation.late_fee_structure,
+        emi_schedule: calculation.emi_details?.schedule || null
       });
 
       if (response.status === 'success' || response.success === true) {

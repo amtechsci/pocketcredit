@@ -28,7 +28,15 @@ router.post('/apply', requireAuth, async (req, res) => {
       desired_amount, 
       purpose,
       loan_plan_id,
-      plan_code
+      plan_code,
+      plan_snapshot,
+      processing_fee,
+      processing_fee_percent,
+      total_interest,
+      interest_percent_per_day,
+      total_repayable,
+      late_fee_structure,
+      emi_schedule
     } = req.body;
 
     // Validation
@@ -93,26 +101,49 @@ router.post('/apply', requireAuth, async (req, res) => {
 
     const user = users[0];
 
-    // Generate unique application number
-    const applicationNumber = `LA${Date.now()}${Math.floor(Math.random() * 1000000)}`;
+    // Generate unique application number (shorter format)
+    const timestamp = Date.now().toString().slice(-10); // Last 10 digits of timestamp
+    const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0'); // 4-digit random
+    const applicationNumber = `LA${timestamp}${random}`;  // Format: LA1234567890XXXX (18 chars)
     const currentDate = new Date();
 
-    // Create loan application
+    // Create loan application with complete plan snapshot
     const result = await executeQuery(
       `INSERT INTO loan_applications (
-        user_id, application_number, loan_amount, loan_purpose, loan_plan_id, plan_code,
+        user_id, application_number, loan_amount, loan_purpose, 
+        loan_plan_id, plan_code, plan_snapshot,
+        processing_fee, processing_fee_percent, 
+        total_interest, interest_percent_per_day,
+        total_repayable, late_fee_structure, emi_schedule,
         status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'submitted', NOW(), NOW())`,
-      [userId, applicationNumber, desired_amount, purpose, loan_plan_id || null, plan_code || null]
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', NOW(), NOW())`,
+      [
+        userId, 
+        applicationNumber, 
+        desired_amount, 
+        purpose, 
+        loan_plan_id || null, 
+        plan_code || null,
+        plan_snapshot ? JSON.stringify(plan_snapshot) : null,
+        processing_fee || null,
+        processing_fee_percent || null,
+        total_interest || null,
+        interest_percent_per_day || null,
+        total_repayable || null,
+        late_fee_structure ? JSON.stringify(late_fee_structure) : null,
+        emi_schedule ? JSON.stringify(emi_schedule) : null
+      ]
     );
 
     const applicationId = result.insertId;
 
     res.status(201).json({
       success: true,
+      status: 'success',
       message: 'Loan application created successfully',
       data: {
         id: applicationId,
+        application_id: applicationId,  // Add for backward compatibility
         application_number: applicationNumber,
         desired_amount: desired_amount,
         purpose: purpose,
@@ -123,9 +154,12 @@ router.post('/apply', requireAuth, async (req, res) => {
 
   } catch (error) {
     console.error('Create loan application error:', error);
+    console.error('Error details:', error.message);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
-      message: 'Internal server error while creating loan application'
+      message: 'Internal server error while creating loan application',
+      error: error.message
     });
   }
 });

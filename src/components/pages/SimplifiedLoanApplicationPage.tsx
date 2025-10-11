@@ -34,11 +34,44 @@ export function SimplifiedLoanApplicationPage() {
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [canApply, setCanApply] = useState(true);
+  const [checkingEligibility, setCheckingEligibility] = useState(true);
   const [formData, setFormData] = useState<LoanApplicationData>({
     desiredAmount: 0,
     purpose: '',
     agreeToTerms: false
   });
+
+  // Check if user can apply for a new loan
+  useEffect(() => {
+    const checkLoanEligibility = async () => {
+      try {
+        const response = await apiService.getDashboardSummary();
+        if (response.data && (response.data as any).loan_status) {
+          const loanStatus = (response.data as any).loan_status;
+          setCanApply(loanStatus.can_apply);
+          
+          if (!loanStatus.can_apply) {
+            if (loanStatus.has_pending_application) {
+              toast.error('You already have a pending loan application. Please complete it first.');
+            } else if (loanStatus.active_loans_count > 0) {
+              toast.error('You already have an active loan. Please complete it before applying for a new one.');
+            }
+            // Redirect to dashboard after showing message
+            setTimeout(() => navigate('/dashboard'), 2000);
+          }
+        }
+      } catch (error) {
+        console.error('Error checking loan eligibility:', error);
+      } finally {
+        setCheckingEligibility(false);
+      }
+    };
+
+    if (isAuthenticated) {
+      checkLoanEligibility();
+    }
+  }, [isAuthenticated, navigate]);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -79,15 +112,22 @@ export function SimplifiedLoanApplicationPage() {
     });
   };
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || checkingEligibility) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading...</p>
+          <p className="text-gray-600">
+            {checkingEligibility ? 'Checking loan eligibility...' : 'Loading...'}
+          </p>
         </div>
       </div>
     );
+  }
+
+  // Block access if user can't apply
+  if (!canApply) {
+    return null; // Will be redirected by useEffect
   }
 
   return (
