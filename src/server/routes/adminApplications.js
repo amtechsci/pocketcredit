@@ -127,7 +127,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
     baseQuery += ` ORDER BY ${sortField} ${sortDirection}`;
 
     // Get total count for pagination
-    const countQuery = baseQuery.replace(/SELECT.*?FROM/, 'SELECT COUNT(*) as total FROM');
+    const countQuery = baseQuery.replace(/SELECT[\s\S]*?FROM/, 'SELECT COUNT(*) as total FROM').replace(/ORDER BY[\s\S]*$/, '');
     const countResult = await executeQuery(countQuery, queryParams);
     const totalApplications = countResult[0] ? countResult[0].total : 0;
 
@@ -496,6 +496,16 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
     `);
     
     const stats = {
+      // Frontend expected field names
+      totalApplications: total,
+      submittedApplications: statusCounts['submitted'] || 0,
+      pendingApplications: statusCounts['under_review'] || 0,
+      approvedApplications: statusCounts['approved'] || 0,
+      rejectedApplications: statusCounts['rejected'] || 0,
+      disbursedApplications: statusCounts['disbursed'] || 0,
+      newApplications: statusCounts['submitted'] || 0, // New applications are typically submitted
+      
+      // Legacy field names for backward compatibility
       total: total,
       applied: statusCounts['applied'] || 0,
       underReview: statusCounts['under_review'] || 0,

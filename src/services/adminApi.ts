@@ -173,8 +173,8 @@ class AdminApiService {
   }
 
   // Dashboard APIs
-  async getDashboardStats(): Promise<ApiResponse<DashboardStats>> {
-    return this.request<DashboardStats>('GET', '/dashboard');
+  async getDashboardStats(period: string = '30d'): Promise<ApiResponse<DashboardStats>> {
+    return this.request<DashboardStats>('GET', `/dashboard?period=${period}`);
   }
 
   async getChartData(period: string = '30d'): Promise<ApiResponse<any>> {
