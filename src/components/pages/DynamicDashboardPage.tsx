@@ -26,6 +26,8 @@ import {
 } from 'lucide-react';
 import { DashboardHeader } from '../DashboardHeader';
 import { ApplicationFlow } from '../ApplicationFlow';
+import { HoldBanner } from '../HoldBanner';
+import { GraduationUpsellCard } from '../GraduationUpsellCard';
 
 // Types for dashboard data
 interface DashboardData {
@@ -38,7 +40,19 @@ interface DashboardData {
     eligibility_retry_date?: string;
     email: string;
     member_since: string;
+    employment_type?: string;
+    graduation_status?: 'graduated' | 'not_graduated';
+    loan_limit?: number;
   };
+  hold_info?: {
+    is_on_hold: boolean;
+    hold_type: 'permanent' | 'temporary';
+    hold_reason: string;
+    hold_until?: string;
+    hold_until_formatted?: string;
+    remaining_days?: number;
+    is_expired?: boolean;
+  } | null;
   summary: {
     credit_score: number;
     available_credit: number;
@@ -89,13 +103,15 @@ interface DashboardData {
 
 export function DynamicDashboardPage() {
   const navigate = useNavigate();
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
   const [showLoanApplication, setShowLoanApplication] = useState(false);
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingApplications, setPendingApplications] = useState<any[]>([]);
+  const [appliedLoans, setAppliedLoans] = useState<any[]>([]);
+  const [runningLoans, setRunningLoans] = useState<any[]>([]);
   const [canApplyForLoan, setCanApplyForLoan] = useState(true);
 
   // Load dashboard data
@@ -129,7 +145,7 @@ export function DynamicDashboardPage() {
     }
   }, [navigate]);
 
-  // Fetch pending loan applications
+  // Fetch pending loan applications and split them into applied and running loans
   const fetchPendingApplications = useCallback(async () => {
     try {
       console.log('🔄 Fetching pending applications...');
@@ -147,10 +163,27 @@ export function DynamicDashboardPage() {
         );
         
         console.log('✅ Unique applications:', uniqueApplications);
+        
+        // Split applications into applied loans and running loans
+        const applied = uniqueApplications.filter((app: any) => 
+          ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(app.status)
+        );
+        
+        const running = uniqueApplications.filter((app: any) => 
+          ['account_manager', 'cleared'].includes(app.status)
+        );
+        
+        console.log('📝 Applied loans:', applied);
+        console.log('🏃 Running loans:', running);
+        
         setPendingApplications(uniqueApplications);
+        setAppliedLoans(applied);
+        setRunningLoans(running);
       } else {
         console.log('❌ Response not successful:', response);
         setPendingApplications([]);
+        setAppliedLoans([]);
+        setRunningLoans([]);
       }
     } catch (error: any) {
       console.error('❌ Error fetching pending applications:', error);
@@ -166,6 +199,8 @@ export function DynamicDashboardPage() {
       
       // Set empty array to prevent UI issues
       setPendingApplications([]);
+      setAppliedLoans([]);
+      setRunningLoans([]);
     }
   }, []);
 
@@ -186,14 +221,12 @@ export function DynamicDashboardPage() {
     }
   }, [isAuthenticated, user]);
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-      navigate('/');
-    } catch (error) {
-      console.error('Logout error:', error);
+  // Refresh pending applications when component mounts (in case user deleted an application)
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      fetchPendingApplications();
     }
-  };
+  }, []); // Empty dependency array means this runs once when component mounts
 
   // Format currency
   const formatCurrency = (amount: number) => {
@@ -314,17 +347,20 @@ export function DynamicDashboardPage() {
             )}
           </div>
           
-          <div className="grid grid-cols-4 gap-6">
-            <div className="bg-white/10 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <TrendingUp className="w-5 h-5" />
-                <p className="text-blue-100 text-sm">Credit Score</p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
+            {/* Hide Credit Score for students */}
+            {userData.employment_type !== 'student' && (
+              <div className="bg-white/10 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingUp className="w-5 h-5" />
+                  <p className="text-blue-100 text-sm">Credit Score</p>
+                </div>
+                <p className="text-3xl font-bold">{summary.credit_score}</p>
+                <p className={`text-xs ${getCreditScoreColor(summary.credit_score)}`}>
+                  {getCreditScoreCategory(summary.credit_score)} (+25 this month)
+                </p>
               </div>
-              <p className="text-3xl font-bold">{summary.credit_score}</p>
-              <p className={`text-xs ${getCreditScoreColor(summary.credit_score)}`}>
-                {getCreditScoreCategory(summary.credit_score)} (+25 this month)
-              </p>
-            </div>
+            )}
             <div className="bg-white/10 rounded-lg p-4">
               <div className="flex items-center gap-2 mb-2">
                 <Wallet className="w-5 h-5" />
@@ -333,54 +369,62 @@ export function DynamicDashboardPage() {
               <p className="text-3xl font-bold">{formatCurrency(summary.available_credit)}</p>
               <p className="text-xs text-blue-200">Pre-approved</p>
             </div>
-            <div className="bg-white/10 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <CreditCardIcon className="w-5 h-5" />
-                <p className="text-blue-100 text-sm">Active Loans</p>
-              </div>
-              <p className="text-3xl font-bold">{summary.active_loans}</p>
-              <p className="text-xs text-blue-200">{formatCurrency(summary.outstanding_amount)} outstanding</p>
-            </div>
-            <div className="bg-white/10 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Calendar className="w-5 h-5" />
-                <p className="text-blue-100 text-sm">Next EMI</p>
-              </div>
-              <p className="text-3xl font-bold">
-                {upcoming_payments.length > 0 ? formatCurrency(upcoming_payments[0].emi_amount) : '₹0'}
-              </p>
-              <p className="text-xs text-blue-200">
-                {upcoming_payments.length > 0 ? `Due ${formatDate(upcoming_payments[0].next_emi_date)}` : 'No pending'}
-              </p>
-            </div>
+            {/* Hide loan stats for students */}
+            {userData.employment_type !== 'student' && (
+              <>
+                <div className="bg-white/10 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CreditCardIcon className="w-5 h-5" />
+                    <p className="text-blue-100 text-sm">Active Loans</p>
+                  </div>
+                  <p className="text-3xl font-bold">{summary.active_loans}</p>
+                  <p className="text-xs text-blue-200">{formatCurrency(summary.outstanding_amount)} outstanding</p>
+                </div>
+                <div className="bg-white/10 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Calendar className="w-5 h-5" />
+                    <p className="text-blue-100 text-sm">Next EMI</p>
+                  </div>
+                  <p className="text-3xl font-bold">
+                    {upcoming_payments.length > 0 ? formatCurrency(upcoming_payments[0].emi_amount) : '₹0'}
+                  </p>
+                  <p className="text-xs text-blue-200">
+                    {upcoming_payments.length > 0 ? `Due ${formatDate(upcoming_payments[0].next_emi_date)}` : 'No pending'}
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
 
       {/* Mobile Welcome Section */}
-      <div className="lg:hidden">
-        <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-6 text-white">
-          <div className="flex items-center gap-4 mb-4">
-            <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-              <User className="w-6 h-6" />
+      <div className="lg:hidden w-full">
+        <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg p-4 text-white">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
+              <User className="w-5 h-5" />
             </div>
-            <div>
-              <h2 className="text-xl font-semibold">Welcome back, {userData.name}!</h2>
-              <p className="text-blue-100">Manage your loans and track payments</p>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-base font-semibold truncate">Welcome back, {userData.name}!</h2>
+              <p className="text-blue-100 text-xs">Manage your loans and track payments</p>
             </div>
           </div>
           
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-white/10 rounded-lg p-4">
-              <p className="text-blue-100 text-sm">Credit Score</p>
-              <p className="text-2xl font-bold">{summary.credit_score}</p>
-              <p className={`text-xs ${getCreditScoreColor(summary.credit_score)}`}>
-                {getCreditScoreCategory(summary.credit_score)}
-              </p>
-            </div>
-            <div className="bg-white/10 rounded-lg p-4">
-              <p className="text-blue-100 text-sm">Available Credit</p>
-              <p className="text-2xl font-bold">{formatCurrency(summary.available_credit)}</p>
+          <div className="grid grid-cols-1 gap-3">
+            {/* Hide Credit Score for students */}
+            {userData.employment_type !== 'student' && (
+              <div className="bg-white/10 rounded-lg p-3">
+                <p className="text-blue-100 text-xs">Credit Score</p>
+                <p className="text-xl font-bold">{summary.credit_score}</p>
+                <p className={`text-xs ${getCreditScoreColor(summary.credit_score)}`}>
+                  {getCreditScoreCategory(summary.credit_score)}
+                </p>
+              </div>
+            )}
+            <div className="bg-white/10 rounded-lg p-3">
+              <p className="text-blue-100 text-xs">Available Credit</p>
+              <p className="text-xl font-bold">{formatCurrency(summary.available_credit)}</p>
               <p className="text-xs text-blue-200">Pre-approved</p>
             </div>
           </div>
@@ -400,26 +444,51 @@ export function DynamicDashboardPage() {
         ))}
       </div>
 
-      {/* Pending Loan Applications - Overview */}
-      {pendingApplications.length > 0 && (
+      {/* Applied Loan Applications - Overview */}
+      {appliedLoans.length > 0 && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
           <div className="flex items-center gap-3 mb-4">
             <Clock className="w-6 h-6 text-yellow-600" />
-            <h3 className="text-lg font-semibold text-yellow-900">Pending Loan Applications</h3>
+            <h3 className="text-lg font-semibold text-yellow-900">Applied Loan Applications</h3>
             <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
-              {pendingApplications.length} pending
+              {appliedLoans.length} in progress
             </Badge>
           </div>
           
           <div className="text-center py-4">
             <p className="text-gray-600 mb-4">
-              You have {pendingApplications.length} pending loan application{pendingApplications.length !== 1 ? 's' : ''} that need your attention.
+              You have {appliedLoans.length} loan application{appliedLoans.length !== 1 ? 's' : ''} in progress.
             </p>
             <Button 
-              onClick={() => setActiveTab('loans')}
+              onClick={() => setActiveTab('applied-loans')}
               className="bg-yellow-600 hover:bg-yellow-700 text-white"
             >
               View All Applications
+            </Button>
+          </div>
+        </div>
+      )}
+      
+      {/* Running Loans - Overview */}
+      {runningLoans.length > 0 && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <CheckCircle className="w-6 h-6 text-green-600" />
+            <h3 className="text-lg font-semibold text-green-900">Loans with Account Manager</h3>
+            <Badge variant="secondary" className="bg-green-100 text-green-800">
+              {runningLoans.length} active
+            </Badge>
+          </div>
+          
+          <div className="text-center py-4">
+            <p className="text-gray-600 mb-4">
+              You have {runningLoans.length} loan{runningLoans.length !== 1 ? 's' : ''} with account manager.
+            </p>
+            <Button 
+              onClick={() => setActiveTab('loans')}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              View My Loans
             </Button>
           </div>
         </div>
@@ -430,50 +499,6 @@ export function DynamicDashboardPage() {
         <div className="grid grid-cols-12 gap-6">
           {/* Left Column - Main Content */}
           <div className="col-span-8 space-y-6">
-            {/* Quick Stats */}
-            <div className="grid grid-cols-4 gap-4">
-              <Card className="p-6 text-center hover:shadow-md transition-shadow">
-                <CreditCard className="w-10 h-10 mx-auto mb-3 text-blue-600" />
-                <p className="text-3xl font-bold text-gray-900">{summary.total_loans}</p>
-                <p className="text-sm text-gray-600">Total Loans</p>
-                <div className="flex items-center justify-center mt-2 text-xs text-blue-600">
-                  <ArrowUpRight className="w-3 h-3 mr-1" />
-                  +1 this year
-                </div>
-              </Card>
-              
-              <Card className="p-6 text-center hover:shadow-md transition-shadow">
-                <TrendingUp className="w-10 h-10 mx-auto mb-3 text-blue-600" />
-                <p className="text-3xl font-bold text-gray-900">{summary.active_loans}</p>
-                <p className="text-sm text-gray-600">Active Loans</p>
-                <div className="flex items-center justify-center mt-2 text-xs text-blue-600">
-                  <CheckCircle className="w-3 h-3 mr-1" />
-                  On track
-                </div>
-              </Card>
-              
-              <Card className="p-6 text-center hover:shadow-md transition-shadow">
-                <IndianRupee className="w-10 h-10 mx-auto mb-3 text-orange-600" />
-                <p className="text-3xl font-bold text-gray-900">
-                  {upcoming_payments.length > 0 ? formatCurrency(upcoming_payments[0].emi_amount) : '₹0'}
-                </p>
-                <p className="text-sm text-gray-600">Next EMI</p>
-                <div className="flex items-center justify-center mt-2 text-xs text-orange-600">
-                  <Clock className="w-3 h-3 mr-1" />
-                  {upcoming_payments.length > 0 ? 'Due soon' : 'No pending'}
-                </div>
-              </Card>
-              
-              <Card className="p-6 text-center hover:shadow-md transition-shadow">
-                <Shield className="w-10 h-10 mx-auto mb-3 text-purple-600" />
-                <p className="text-3xl font-bold text-gray-900">{summary.payment_score}%</p>
-                <p className="text-sm text-gray-600">Payment Score</p>
-                <div className="flex items-center justify-center mt-2 text-xs text-purple-600">
-                  <Target className="w-3 h-3 mr-1" />
-                  Excellent
-                </div>
-              </Card>
-            </div>
 
             {/* Active Loan Details */}
             <Card className="p-6">
@@ -571,113 +596,48 @@ export function DynamicDashboardPage() {
 
           {/* Right Sidebar */}
           <div className="col-span-4 space-y-6">
-            {/* Credit Score Widget */}
-            <Card className="p-6 text-center">
-              <div className="w-20 h-20 bg-blue-100 rounded-full mx-auto mb-4 flex items-center justify-center">
-                <TrendingUp className="w-10 h-10 text-blue-600" />
-              </div>
-              <p className={`text-4xl font-bold mb-2 ${getCreditScoreColor(summary.credit_score)}`}>
-                {summary.credit_score}
-              </p>
-              <p className="text-sm text-gray-600 mb-4">Credit Score</p>
-              <div className="flex justify-center mb-4">
-                <Badge className="bg-blue-100 text-blue-800">
-                  {getCreditScoreCategory(summary.credit_score)}
-                </Badge>
-              </div>
-              <div className="text-xs text-gray-500 space-y-1">
-                <div className="flex justify-between">
-                  <span>Last updated:</span>
-                  <span>{formatDate(new Date().toISOString())}</span>
+            {/* Graduation Upsell Card for Students OR Credit Score Widget for Others */}
+            {userData.employment_type === 'student' && 
+             userData.graduation_status === 'not_graduated' && 
+             userData.loan_limit ? (
+              <GraduationUpsellCard
+                currentLoanLimit={userData.loan_limit}
+                onSuccess={() => {
+                  fetchDashboard();
+                }}
+              />
+            ) : userData.employment_type !== 'student' ? (
+              <Card className="p-6 text-center">
+                <div className="w-20 h-20 bg-blue-100 rounded-full mx-auto mb-4 flex items-center justify-center">
+                  <TrendingUp className="w-10 h-10 text-blue-600" />
                 </div>
-                <div className="flex justify-between">
-                  <span>Status:</span>
-                  <span className="text-blue-600">Good</span>
+                <p className={`text-4xl font-bold mb-2 ${getCreditScoreColor(summary.credit_score)}`}>
+                  {summary.credit_score}
+                </p>
+                <p className="text-sm text-gray-600 mb-4">Credit Score</p>
+                <div className="flex justify-center mb-4">
+                  <Badge className="bg-blue-100 text-blue-800">
+                    {getCreditScoreCategory(summary.credit_score)}
+                  </Badge>
                 </div>
-              </div>
-            </Card>
-
-            {/* Upcoming Payments */}
-            <Card className="p-6">
-              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-orange-600" />
-                Upcoming Payments
-              </h3>
-              
-              {upcoming_payments.length > 0 ? (
-                upcoming_payments.map((payment, index) => (
-                  <div key={index} className="flex items-center justify-between p-4 border rounded-lg mb-3 hover:bg-gray-50 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
-                        <IndianRupee className="w-5 h-5 text-orange-600" />
-                      </div>
-                      <div>
-                        <p className="font-semibold">{formatCurrency(payment.emi_amount)} EMI</p>
-                        <p className="text-sm text-gray-600">Due: {formatDate(payment.next_emi_date)}</p>
-                      </div>
-                    </div>
-                    <Badge variant="outline" className="border-orange-300 text-orange-600">
-                      {payment.status}
-                    </Badge>
+                <div className="text-xs text-gray-500 space-y-1">
+                  <div className="flex justify-between">
+                    <span>Last updated:</span>
+                    <span>{formatDate(new Date().toISOString())}</span>
                   </div>
-                ))
-              ) : (
-                <div className="text-center py-4">
-                  <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-2" />
-                  <p className="text-gray-600">No upcoming payments</p>
+                  <div className="flex justify-between">
+                    <span>Status:</span>
+                    <span className="text-blue-600">Good</span>
+                  </div>
                 </div>
-              )}
-              
-              {upcoming_payments.length > 0 && (
-                <Button 
-                  variant="outline" 
-                  className="w-full mt-4"
-                  onClick={() => navigate('/pay-emi')}
-                >
-                  Pay Now
-                </Button>
-              )}
-            </Card>
-
-
+              </Card>
+            ) : null}
           </div>
         </div>
       </div>
 
       {/* Mobile Layout */}
       <div className="lg:hidden space-y-6">
-        {/* Quick Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Card className="p-4 text-center">
-            <CreditCard className="w-8 h-8 mx-auto mb-2 text-blue-600" />
-            <p className="text-2xl font-bold text-gray-900">{summary.total_loans}</p>
-            <p className="text-sm text-gray-600">Total Loans</p>
-          </Card>
-          
-          <Card className="p-4 text-center">
-            <TrendingUp className="w-8 h-8 mx-auto mb-2 text-blue-600" />
-            <p className="text-2xl font-bold text-gray-900">{summary.active_loans}</p>
-            <p className="text-sm text-gray-600">Active Loans</p>
-          </Card>
-          
-          <Card className="p-4 text-center">
-            <IndianRupee className="w-8 h-8 mx-auto mb-2 text-orange-600" />
-            <p className="text-2xl font-bold text-gray-900">
-              {upcoming_payments.length > 0 ? formatCurrency(upcoming_payments[0].emi_amount) : '₹0'}
-            </p>
-            <p className="text-sm text-gray-600">Next EMI</p>
-          </Card>
-          
-          <Card className="p-4 text-center">
-            <Calendar className="w-8 h-8 mx-auto mb-2 text-purple-600" />
-            <p className="text-2xl font-bold text-gray-900">
-              {upcoming_payments.length > 0 ? formatDate(upcoming_payments[0].next_emi_date) : 'No due'}
-            </p>
-            <p className="text-sm text-gray-600">Due Date</p>
-          </Card>
-        </div>
-
-
         {/* Active Loans */}
         <Card className="p-6">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -759,7 +719,7 @@ export function DynamicDashboardPage() {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 overflow-x-hidden">
       <DashboardHeader userName={userData.name} />
       
       <div className="flex">
@@ -780,6 +740,20 @@ export function DynamicDashboardPage() {
                 Overview
               </button>
               <button
+                onClick={() => setActiveTab('applied-loans')}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
+                  activeTab === 'applied-loans' 
+                    ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700' 
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <Clock className="w-5 h-5" />
+                Applied Loans
+                {appliedLoans.length > 0 && (
+                  <Badge className="ml-auto bg-yellow-500 text-white">{appliedLoans.length}</Badge>
+                )}
+              </button>
+              <button
                 onClick={() => setActiveTab('loans')}
                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
                   activeTab === 'loans' 
@@ -788,7 +762,10 @@ export function DynamicDashboardPage() {
                 }`}
               >
                 <CreditCard className="w-5 h-5" />
-                My Loans
+                Loans
+                {runningLoans.length > 0 && (
+                  <Badge className="ml-auto bg-blue-500 text-white">{runningLoans.length}</Badge>
+                )}
               </button>
               <button
                 onClick={() => setActiveTab('payments')}
@@ -820,18 +797,36 @@ export function DynamicDashboardPage() {
         {/* Main Content */}
         <div className="flex-1">
           {/* Mobile Tab Navigation - Hidden on desktop */}
-          <div className="lg:hidden bg-white border-b">
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-4 rounded-none border-0">
-                <TabsTrigger value="overview" className="rounded-none">Overview</TabsTrigger>
-                <TabsTrigger value="loans" className="rounded-none">Loans</TabsTrigger>
-                <TabsTrigger value="payments" className="rounded-none">Payments</TabsTrigger>
-                <TabsTrigger value="profile" className="rounded-none">Profile</TabsTrigger>
+          <div className="lg:hidden bg-white border-b overflow-x-auto scrollbar-hide">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="inline-flex w-full rounded-none border-0 bg-transparent h-11">
+                <TabsTrigger value="overview" className="rounded-none whitespace-nowrap flex-1 text-xs px-2">Overview</TabsTrigger>
+                <TabsTrigger value="applied-loans" className="rounded-none whitespace-nowrap flex-1 text-xs px-2 relative">
+                  Applied
+                  {appliedLoans.length > 0 && (
+                    <span className="absolute top-1 right-1 bg-yellow-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center text-[10px]">
+                      {appliedLoans.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="loans" className="rounded-none whitespace-nowrap flex-1 text-xs px-2 relative">
+                  Loans
+                  {runningLoans.length > 0 && (
+                    <span className="absolute top-1 right-1 bg-blue-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center text-[10px]">
+                      {runningLoans.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="payments" className="rounded-none whitespace-nowrap flex-1 text-xs px-2">Payments</TabsTrigger>
+                <TabsTrigger value="profile" className="rounded-none whitespace-nowrap flex-1 text-xs px-2">Profile</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
           
-          <div className="container mx-auto px-4 py-6">
+          <div className="w-full max-w-7xl mx-auto px-3 py-4">
+            {/* Hold Status Banner */}
+            {dashboardData.hold_info && <HoldBanner holdInfo={dashboardData.hold_info} />}
+            
             {/* Eligibility Status Check */}
             {userData.eligibility_status === 'not_eligible' && (
               <div className="mb-6 p-6 bg-red-50 border border-red-200 rounded-lg">
@@ -860,127 +855,209 @@ export function DynamicDashboardPage() {
             {renderOverview()}
           </TabsContent>
           
-          <TabsContent value="loans">
+          <TabsContent value="applied-loans">
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xl font-semibold">My Loans</h3>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-base lg:text-xl font-semibold">Applied Loans</h3>
+                  <p className="text-xs lg:text-sm text-gray-600 mt-0.5 lg:mt-1">Track your loan applications</p>
+                </div>
                 {canApplyForLoan && !hasActiveOrPendingLoans() && (
                   <Button 
                     onClick={() => {
-                        console.log('Apply for a Loan button clicked');
-                        navigate('/application');
-                      }}
+                      console.log('Apply for a Loan button clicked');
+                      navigate('/application');
+                    }}
                     style={{ backgroundColor: '#0052FF' }}
+                    className="text-xs lg:text-sm whitespace-nowrap"
+                    size="sm"
                   >
-                    Apply New Loan
+                    Apply
                   </Button>
                 )}
               </div>
 
-              {/* Pending Loan Applications */}
-              {pendingApplications.length > 0 ? (
-                <div className="space-y-4">
-                  <h2 className="text-xl font-semibold text-gray-900">Pending Loan Applications</h2>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    {pendingApplications.map((application) => (
-                      <Card key={application.id} className="p-6 hover:shadow-md transition-shadow">
-                        <div className="flex justify-between items-start mb-4">
-                          <div>
-                            <h4 className="text-lg font-semibold">{application.loan_purpose || 'Personal Loan'}</h4>
-                            <p className="text-gray-600">Application: {application.application_number}</p>
-                          </div>
-                          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
-                            {application.status}
-                          </Badge>
-                        </div>
-                        
-                        <div className="grid grid-cols-2 gap-4 mb-4">
-                          <div>
-                            <p className="text-sm text-gray-500">Loan Amount</p>
-                            <p className="text-lg font-semibold">₹{Number(application.loan_amount).toLocaleString()}</p>
-                          </div>
-                          <div>
-                            <p className="text-sm text-gray-500">Current Step</p>
-                            <p className="text-sm font-medium capitalize">{(application.current_step || 'bank_details').replace('_', ' ')}</p>
-                          </div>
-                        </div>
-                        
-                        <div className="flex justify-between items-center">
-                          <p className="text-sm text-gray-500">
-                            Applied: {formatDate(application.created_at)}
-                          </p>
-                          <Button 
-                            onClick={() => {
-                              console.log('Continue Application clicked for:', application.id);
-                              navigate(`/loan-application/steps?applicationId=${application.id}`);
-                            }}
-                            style={{ backgroundColor: '#0052FF' }}
-                            size="sm"
-                          >
-                            Continue Application
-                          </Button>
-                        </div>
-                      </Card>
-                    ))}
+              {/* Status Flow Indicator */}
+              <Card className="p-3 lg:p-6 bg-gradient-to-r from-blue-50 to-indigo-50">
+                <h4 className="text-xs lg:text-sm font-semibold text-gray-700 mb-3">Application Status Flow</h4>
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-col items-center">
+                    <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-blue-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">1</div>
+                    <p className="text-[10px] lg:text-xs text-center font-medium">Submitted</p>
+                  </div>
+                  <div className="flex-1 h-0.5 lg:h-1 bg-blue-300 mx-1 lg:mx-2"></div>
+                  <div className="flex flex-col items-center">
+                    <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-blue-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">2</div>
+                    <p className="text-[10px] lg:text-xs text-center font-medium">Review</p>
+                  </div>
+                  <div className="flex-1 h-0.5 lg:h-1 bg-blue-300 mx-1 lg:mx-2"></div>
+                  <div className="flex flex-col items-center">
+                    <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-yellow-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">3</div>
+                    <p className="text-[10px] lg:text-xs text-center font-medium">Follow Up</p>
+                  </div>
+                  <div className="flex-1 h-0.5 lg:h-1 bg-blue-300 mx-1 lg:mx-2"></div>
+                  <div className="flex flex-col items-center">
+                    <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-green-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">4</div>
+                    <p className="text-[10px] lg:text-xs text-center font-medium">Disbursal</p>
                   </div>
                 </div>
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <p>No pending loan applications</p>
-                </div>
-              )}
-              
-              {active_loans.length > 0 ? (
-                <div className="grid gap-6">
-                  {active_loans.map((loan) => (
-                    <Card key={loan.id} className="p-6 hover:shadow-md transition-shadow">
-                      <div className="flex justify-between items-start mb-4">
-                        <div>
-                          <h4 className="text-lg font-semibold">{loan.loan_purpose || 'Personal Loan'}</h4>
-                          <p className="text-gray-600">Loan ID: {loan.loan_number}</p>
+              </Card>
+
+              {/* Applied Loan Applications */}
+              {appliedLoans.length > 0 ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {appliedLoans.map((application) => (
+                    <Card key={application.id} className="p-3 lg:p-6 hover:shadow-md transition-shadow">
+                      <div className="flex justify-between items-start mb-3 lg:mb-4">
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-sm lg:text-lg font-semibold truncate">{application.loan_purpose || 'Personal Loan'}</h4>
+                          <p className="text-gray-600 text-xs lg:text-sm truncate">App: {application.application_number}</p>
                         </div>
-                        <Badge variant="secondary" className="bg-blue-100 text-blue-800">
-                          {loan.status}
+                        <Badge 
+                          variant="secondary" 
+                          className={`text-[10px] lg:text-xs px-1.5 lg:px-2.5 py-0.5 ${
+                            application.status === 'submitted' ? 'bg-blue-100 text-blue-800' :
+                            application.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
+                            application.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
+                            application.status === 'disbursal' ? 'bg-green-100 text-green-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}
+                        >
+                          {application.status.replace('_', ' ')}
                         </Badge>
                       </div>
                       
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                      <div className="grid grid-cols-2 gap-2 lg:gap-4 mb-3 lg:mb-4">
+                        <div>
+                          <p className="text-xs lg:text-sm text-gray-500">Loan Amount</p>
+                          <p className="text-sm lg:text-lg font-semibold">₹{Number(application.loan_amount).toLocaleString()}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs lg:text-sm text-gray-500">Applied On</p>
+                          <p className="text-xs lg:text-sm font-medium">{formatDate(application.created_at)}</p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-col lg:flex-row justify-between lg:items-center pt-3 lg:pt-4 border-t gap-2">
+                        <p className="text-[10px] lg:text-xs text-gray-500">
+                          {application.status === 'submitted' && 'Application submitted'}
+                          {application.status === 'under_review' && 'Under review'}
+                          {application.status === 'follow_up' && 'Info required'}
+                          {application.status === 'disbursal' && 'Processing disbursal'}
+                        </p>
+                        <Button 
+                          onClick={() => {
+                            console.log('View Details clicked for:', application.id);
+                            navigate('/loan-application/kyc-verification', {
+                              state: { applicationId: application.id }
+                            });
+                          }}
+                          variant="outline"
+                          size="sm"
+                          className="text-xs lg:text-sm whitespace-nowrap"
+                        >
+                          View
+                        </Button>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <Card className="p-6 lg:p-8 text-center">
+                  <Clock className="w-12 h-12 lg:w-16 lg:h-16 text-gray-400 mx-auto mb-3 lg:mb-4" />
+                  <h3 className="text-base lg:text-lg font-semibold text-gray-900 mb-2">No Applied Loans</h3>
+                  <p className="text-xs lg:text-sm text-gray-600 mb-3 lg:mb-4">You don't have any loan applications in progress.</p>
+                  {canApplyForLoan && (
+                    <Button 
+                      onClick={() => {
+                        console.log('Apply for a Loan button clicked');
+                        navigate('/application');
+                      }}
+                      style={{ backgroundColor: '#0052FF' }}
+                      className="text-xs lg:text-sm"
+                      size="sm"
+                    >
+                      Apply for a Loan
+                    </Button>
+                  )}
+                </Card>
+              )}
+            </div>
+          </TabsContent>
+          
+          <TabsContent value="loans">
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-semibold">My Loans</h3>
+                  <p className="text-sm text-gray-600 mt-1">Manage your active loans with account manager</p>
+                </div>
+              </div>
+
+              {/* Running Loans (Account Manager) */}
+              {runningLoans.length > 0 ? (
+                <div className="grid gap-6">
+                  {runningLoans.map((loan) => (
+                    <Card key={loan.id} className="p-6 hover:shadow-md transition-shadow border-l-4 border-l-green-500">
+                      <div className="flex justify-between items-start mb-4">
+                        <div>
+                          <h4 className="text-lg font-semibold">{loan.loan_purpose || 'Personal Loan'}</h4>
+                          <p className="text-gray-600 text-sm">Application: {loan.application_number}</p>
+                        </div>
+                        <Badge 
+                          variant="secondary" 
+                          className={
+                            loan.status === 'account_manager' ? 'bg-green-100 text-green-800' :
+                            loan.status === 'cleared' ? 'bg-blue-100 text-blue-800' :
+                            'bg-gray-100 text-gray-800'
+                          }
+                        >
+                          {loan.status.replace('_', ' ')}
+                        </Badge>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
                         <div>
                           <p className="text-sm text-gray-600">Loan Amount</p>
-                          <p className="text-xl font-semibold">{formatCurrency(loan.loan_amount)}</p>
+                          <p className="text-xl font-semibold">₹{Number(loan.loan_amount).toLocaleString()}</p>
                         </div>
                         <div>
-                          <p className="text-sm text-gray-600">Outstanding</p>
-                          <p className="text-xl font-semibold text-orange-600">{formatCurrency(loan.outstanding_amount)}</p>
+                          <p className="text-sm text-gray-600">Status</p>
+                          <p className="text-sm font-medium capitalize">{loan.status.replace('_', ' ')}</p>
                         </div>
                         <div>
-                          <p className="text-sm text-gray-600">Monthly EMI</p>
-                          <p className="text-xl font-semibold">{formatCurrency(loan.emi_amount)}</p>
+                          <p className="text-sm text-gray-600">Applied On</p>
+                          <p className="text-sm font-medium">{formatDate(loan.created_at)}</p>
                         </div>
-                        <div>
-                          <p className="text-sm text-gray-600">Progress</p>
-                          <p className="text-xl font-semibold">{Math.round(loan.progress_percentage)}%</p>
+                      </div>
+                      
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <CheckCircle className="w-5 h-5 text-green-600" />
+                          <p className="text-sm font-semibold text-green-900">Loan with Account Manager</p>
                         </div>
+                        <p className="text-xs text-green-700">
+                          Your loan has been assigned to an account manager. They will contact you shortly to complete the process.
+                        </p>
                       </div>
                       
                       <div className="flex gap-3">
                         <Button 
-                          onClick={() => navigate(`/loan-details/${loan.id}`)}
+                          onClick={() => {
+                            console.log('View Details clicked for:', loan.id);
+                            navigate('/loan-application/kyc-verification', {
+                              state: { applicationId: loan.id }
+                            });
+                          }}
                           style={{ backgroundColor: '#0052FF' }}
                         >
                           View Details
                         </Button>
                         <Button 
                           variant="outline"
-                          onClick={() => navigate('/pay-emi')}
+                          onClick={() => navigate('/contact-support')}
                         >
-                          Pay EMI
-                        </Button>
-                        <Button 
-                          variant="outline"
-                          onClick={() => navigate('/payment-history')}
-                        >
-                          Payment History
+                          Contact Support
                         </Button>
                       </div>
                     </Card>
@@ -989,19 +1066,9 @@ export function DynamicDashboardPage() {
               ) : (
                 <Card className="p-8 text-center">
                   <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Loans</h3>
-                  <p className="text-gray-600 mb-4">You don't have any active loans at the moment.</p>
-                  {canApplyForLoan && !hasActiveOrPendingLoans() && (
-                    <Button 
-                      onClick={() => {
-                        console.log('Apply for a Loan button clicked');
-                        navigate('/application');
-                      }}
-                      style={{ backgroundColor: '#0052FF' }}
-                    >
-                      Apply for a Loan
-                    </Button>
-                  )}
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No Running Loans</h3>
+                  <p className="text-gray-600 mb-4">You don't have any loans with account manager at the moment.</p>
+                  <p className="text-sm text-gray-500">Check the "Applied Loans" tab to track your applications in progress.</p>
                 </Card>
               )}
             </div>

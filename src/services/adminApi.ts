@@ -767,6 +767,141 @@ class AdminApiService {
   async deleteLateFee(id: string | number): Promise<any> {
     return this.request('DELETE', `/late-fees/${id}`);
   }
+
+  // Validation APIs - using direct axios calls since these routes are not under /api/admin
+  async getValidationOptions(type?: string): Promise<ApiResponse<any>> {
+    const endpoint = type ? `/api/validation/options/${type}` : '/api/validation/options';
+    const response = await axios.get(endpoint, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
+
+  async addValidationOption(data: { name: string; type: string }): Promise<ApiResponse<any>> {
+    const response = await axios.post('/api/validation/options', data, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
+
+  async submitValidationAction(data: {
+    userId: number;
+    loanApplicationId?: number;
+    actionType: string;
+    actionDetails: any;
+    adminId: string;
+  }): Promise<ApiResponse<any>> {
+    const response = await axios.post('/api/validation/submit', data, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
+
+  async getValidationHistory(userId: number, loanApplicationId?: number): Promise<ApiResponse<any>> {
+    const params = loanApplicationId ? `?loanApplicationId=${loanApplicationId}` : '';
+    const response = await axios.get(`/api/validation/history/${userId}${params}`, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
+
+  async getValidationStatus(userId: number, loanApplicationId?: number): Promise<ApiResponse<any>> {
+    const params = loanApplicationId ? `?loanApplicationId=${loanApplicationId}` : '';
+    const response = await axios.get(`/api/validation/status/${userId}${params}`, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
+
+  async updateValidationStatus(userId: number, data: any): Promise<ApiResponse<any>> {
+    const response = await axios.put(`/api/validation/status/${userId}`, data, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
+
+  // Loan Calculations API
+  async getLoanCalculation(loanId: number, days?: number): Promise<ApiResponse<any>> {
+    const params = days ? `?days=${days}` : '';
+    const response = await axios.get(`/api/loan-calculations/${loanId}${params}`, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
+
+  async updateLoanCalculation(loanId: number, data: { processing_fee_percent?: number; interest_percent_per_day?: number }): Promise<ApiResponse<any>> {
+    const response = await axios.put(`/api/loan-calculations/${loanId}`, data, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
+
+  async calculateLoanPreview(data: { loan_amount: number; processing_fee_percent: number; interest_percent_per_day: number; days: number }): Promise<ApiResponse<any>> {
+    const response = await axios.post('/api/loan-calculations/calculate', data, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
+
+  async getLoanDays(loanId: number): Promise<ApiResponse<any>> {
+    const response = await axios.get(`/api/loan-calculations/${loanId}/days`, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
+
+  // KFS (Key Facts Statement) API
+  async getKFS(loanId: number): Promise<ApiResponse<any>> {
+    const response = await axios.get(`/api/kfs/${loanId}`, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
+
+  async generateKFSPDF(loanId: number, htmlContent: string): Promise<Blob> {
+    const response = await axios.post(`/api/kfs/${loanId}/generate-pdf`, { htmlContent }, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      },
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
+  async emailKFSPDF(loanId: number, htmlContent: string, recipientEmail: string, recipientName: string): Promise<ApiResponse<any>> {
+    const response = await axios.post(`/api/kfs/${loanId}/email-pdf`, { 
+      htmlContent, 
+      recipientEmail, 
+      recipientName 
+    }, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
 }
 
 // Export singleton instance

@@ -4,6 +4,18 @@ const { validate, schemas } = require('../middleware/validation');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const router = express.Router();
 
+// Helper function to convert income_range to approximate monthly income
+const getMonthlyIncomeFromRange = (range) => {
+  if (!range) return 0;
+  const rangeMap = {
+    '1k-15k': 7500,
+    '15k-25k': 20000,
+    '25k-35k': 30000,
+    'above-35k': 40000
+  };
+  return rangeMap[range] || 0;
+};
+
 // Get all loan applications with filters and pagination
 router.get('/', authenticateAdmin, async (req, res) => {
   try {
@@ -50,13 +62,12 @@ router.get('/', authenticateAdmin, async (req, res) => {
         u.date_of_birth,
         u.gender,
         u.marital_status,
+        u.income_range,
         COALESCE(ed.employment_type, '') as employment_type,
         COALESCE(ed.company_name, '') as company_name,
-        COALESCE(ed.monthly_salary, 0) as monthly_salary,
         COALESCE(ed.designation, '') as designation,
         COALESCE(ed.work_experience_years, 0) as work_experience_years,
         0 as credit_score,
-        COALESCE(ed.monthly_salary, 0) as monthly_income,
         0 as monthly_expenses,
         0 as existing_loans,
         COALESCE(a.city, '') as city,
@@ -168,7 +179,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
       mobile: app.mobile || '',
       email: app.email || '',
       cibilScore: app.credit_score || 750, // Use actual credit score or default
-      monthlyIncome: app.monthly_salary || app.monthly_income || 50000, // Use actual income
+      monthlyIncome: getMonthlyIncomeFromRange(app.income_range), // Convert income range to value
       employment: app.employment_type || 'Salaried', // Use actual employment type
       company: app.company_name || 'N/A', // Use actual company name
       city: app.city || 'N/A', // Use actual city
@@ -237,9 +248,9 @@ router.get('/:applicationId', authenticateAdmin, async (req, res) => {
         u.marital_status,
         u.kyc_completed,
         u.status as user_status,
+        u.income_range,
         ed.employment_type,
         ed.company_name,
-        ed.monthly_salary,
         ed.designation,
         ed.work_experience_years,
         fd.credit_score,
@@ -315,7 +326,7 @@ router.get('/:applicationId', authenticateAdmin, async (req, res) => {
         type: app.employment_type,
         company: app.company_name,
         designation: app.designation,
-        monthlySalary: app.monthly_salary,
+        monthlySalary: getMonthlyIncomeFromRange(app.income_range),
         workExperienceYears: app.work_experience_years
       },
       financial: {
@@ -500,16 +511,18 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       totalApplications: total,
       submittedApplications: statusCounts['submitted'] || 0,
       pendingApplications: statusCounts['under_review'] || 0,
-      approvedApplications: statusCounts['approved'] || 0,
+      followUpApplications: statusCounts['follow_up'] || 0,
       rejectedApplications: statusCounts['rejected'] || 0,
-      disbursedApplications: statusCounts['disbursed'] || 0,
+      disbursalApplications: statusCounts['disbursal'] || 0,
+      accountManagerApplications: statusCounts['account_manager'] || 0,
+      clearedApplications: statusCounts['cleared'] || 0,
       newApplications: statusCounts['submitted'] || 0, // New applications are typically submitted
       
       // Legacy field names for backward compatibility
       total: total,
       applied: statusCounts['applied'] || 0,
       underReview: statusCounts['under_review'] || 0,
-      approved: statusCounts['approved'] || 0,
+      approved: statusCounts['follow_up'] || 0,
       rejected: statusCounts['rejected'] || 0,
       disbursed: statusCounts['disbursed'] || 0,
       pendingDocuments: statusCounts['pending_documents'] || 0,

@@ -539,7 +539,6 @@ router.post('/employment', authenticateToken, async (req, res) => {
       designation, 
       work_experience_years, 
       work_experience_months,
-      monthly_salary,
       salary_date,
       company_address,
       company_phone,
@@ -572,7 +571,6 @@ router.post('/employment', authenticateToken, async (req, res) => {
       if (designation !== undefined) { updates.push('designation = ?'); values.push(designation); }
       if (work_experience_years !== undefined) { updates.push('work_experience_years = ?'); values.push(work_experience_years); }
       if (work_experience_months !== undefined) { updates.push('work_experience_months = ?'); values.push(work_experience_months); }
-      if (monthly_salary !== undefined) { updates.push('monthly_salary = ?'); values.push(monthly_salary); }
       if (salary_date !== undefined) { updates.push('salary_date = ?'); values.push(salary_date); }
       if (company_address !== undefined) { updates.push('company_address = ?'); values.push(company_address); }
       if (company_phone !== undefined) { updates.push('company_phone = ?'); values.push(company_phone); }
@@ -597,11 +595,11 @@ router.post('/employment', authenticateToken, async (req, res) => {
       // Create new
       [result] = await connection.execute(
         `INSERT INTO user_employment (user_id, employment_type, company_name, designation, 
-                                     work_experience_years, work_experience_months, monthly_salary, 
+                                     work_experience_years, work_experience_months, 
                                      salary_date, company_address, company_phone, company_email) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [req.user.id, employment_type, company_name, designation, work_experience_years, 
-         work_experience_months, monthly_salary, salary_date, company_address, company_phone, company_email]
+         work_experience_months, salary_date, company_address, company_phone, company_email]
       );
     }
 
@@ -615,7 +613,6 @@ router.post('/employment', authenticateToken, async (req, res) => {
         designation,
         work_experience_years,
         work_experience_months,
-        monthly_salary,
         salary_date
       }
     });

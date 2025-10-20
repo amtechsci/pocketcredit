@@ -122,11 +122,15 @@ const getDashboardSummary = async (req, res) => {
 const fetchDashboardData = async (userId) => {
   console.log('🔍 Fetching dashboard data for user:', userId);
   
-  // Get user basic info including credit score and loan limit
+  // Get user basic info including credit score, loan limit, and hold status
   const userQuery = `
-    SELECT id, first_name, last_name, phone, email, created_at, credit_score, loan_limit
+    SELECT 
+      id, first_name, last_name, phone, email, created_at, 
+      credit_score, loan_limit, status, eligibility_status,
+      application_hold_reason, hold_until_date,
+      employment_type, graduation_status
     FROM users 
-    WHERE id = ? AND status = 'active'
+    WHERE id = ?
   `;
   const users = await executeQuery(userQuery, [userId]);
   console.log('👤 User query result:', users);
@@ -136,16 +140,57 @@ const fetchDashboardData = async (userId) => {
   }
 
   const user = users[0];
+  
+  // Check if user is on hold and prepare hold information
+  let holdInfo = null;
+  if (user.status === 'on_hold') {
+    holdInfo = {
+      is_on_hold: true,
+      hold_reason: user.application_hold_reason,
+      hold_type: user.hold_until_date ? 'temporary' : 'permanent'
+    };
+    
+    if (user.hold_until_date) {
+      const holdUntil = new Date(user.hold_until_date);
+      const now = new Date();
+      const remainingDays = Math.ceil((holdUntil - now) / (1000 * 60 * 60 * 24));
+      
+      holdInfo.hold_until = holdUntil.toISOString();
+      holdInfo.hold_until_formatted = holdUntil.toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      });
+      holdInfo.remaining_days = remainingDays > 0 ? remainingDays : 0;
+      holdInfo.is_expired = remainingDays <= 0;
+    }
+  }
 
   // Get financial details from employment_details
+  // Note: income_range is now stored as text (e.g., '1k-15k'), not a numeric value
   const financialQuery = `
-    SELECT monthly_salary as monthly_income, 0 as monthly_expenses, 0 as existing_loans
+    SELECT income_range, monthly_salary_old, 0 as monthly_expenses, 0 as existing_loans
     FROM employment_details 
     WHERE user_id = ?
   `;
   const financialDetails = await executeQuery(financialQuery, [userId]);
   console.log('💰 Financial details result:', financialDetails);
-  const financial = financialDetails && financialDetails[0] ? financialDetails[0] : {};
+  
+  // Convert income_range to approximate monthly_income for display
+  let monthly_income = 0;
+  if (financialDetails && financialDetails[0]) {
+    const incomeRange = financialDetails[0].income_range;
+    if (incomeRange === '1k-15k') monthly_income = 10000;
+    else if (incomeRange === '15k-25k') monthly_income = 20000;
+    else if (incomeRange === '25k-35k') monthly_income = 30000;
+    else if (incomeRange === 'above-35k') monthly_income = 50000;
+    else if (financialDetails[0].monthly_salary_old) monthly_income = financialDetails[0].monthly_salary_old;
+  }
+  
+  const financial = financialDetails && financialDetails[0] ? {
+    ...financialDetails[0],
+    monthly_income
+  } : { monthly_income: 0, monthly_expenses: 0, existing_loans: 0 };
 
   // Get loan statistics from loan_applications
   const loanStatsQuery = `
@@ -221,6 +266,8 @@ const fetchDashboardData = async (userId) => {
   // Calculate payment score (simplified)
   const paymentScore = 98; // This would be calculated based on payment history
 
+  console.log(`💰 Dashboard - User ${user.id} loan_limit: ${user.loan_limit}`);
+
   // Prepare dashboard summary
   return {
     user: {
@@ -228,10 +275,14 @@ const fetchDashboardData = async (userId) => {
       name: `${user.first_name || ''} ${user.last_name || ''}`.trim(),
       phone: user.phone,
       email: user.email,
-      member_since: user.created_at
+      member_since: user.created_at,
+      employment_type: user.employment_type,
+      graduation_status: user.graduation_status,
+      loan_limit: user.loan_limit
     },
+    hold_info: holdInfo, // Add hold information if user is on hold
     loan_status: {
-      can_apply: canApplyForLoan,
+      can_apply: canApplyForLoan && !holdInfo, // Cannot apply if on hold
       has_pending_application: hasPendingApplication,
       pending_application: pendingApplicationInfo,
       active_loans_count: activeLoans.length
@@ -248,20 +299,7 @@ const fetchDashboardData = async (userId) => {
     active_loans: loansWithOutstanding,
     upcoming_payments: upcomingPayments,
     notifications: notifications,
-    alerts: [
-      {
-        type: 'success',
-        title: 'EMI Auto-Pay Enabled',
-        message: 'Your next EMI will be auto-debited on the due date',
-        icon: 'CheckCircle'
-      },
-      {
-        type: 'info',
-        title: 'Credit Score Updated',
-        message: `Your credit score is ${user.credit_score || 0}`,
-        icon: 'TrendingUp'
-      }
-    ]
+    alerts: []
   };
 };
 

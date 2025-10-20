@@ -64,12 +64,24 @@ router.put('/eligibility-config', async (req, res) => {
   }
 });
 
+// Helper function to convert income_range to approximate monthly income
+const getMonthlyIncomeFromRange = (range) => {
+  if (!range) return 0;
+  const rangeMap = {
+    '1k-15k': 7500,
+    '15k-25k': 20000,
+    '25k-35k': 30000,
+    'above-35k': 40000
+  };
+  return rangeMap[range] || 0;
+};
+
 // GET /api/eligibility/check - Public endpoint to check eligibility (for user-facing form)
 router.get('/check', async (req, res) => {
   try {
     await initializeDatabase();
     
-    const { employment_type, monthly_salary, payment_mode } = req.query;
+    const { employment_type, income_range, payment_mode } = req.query;
     
     // Get eligibility criteria
     const configs = await executeQuery('SELECT config_key, config_value FROM eligibility_config');
@@ -83,11 +95,14 @@ router.get('/check', async (req, res) => {
     const requiredEmployment = (criteria.required_employment_types || 'salaried').split(',');
     const holdDays = parseInt(criteria.hold_period_days || '45');
     
+    // Convert income_range to monthly income for comparison
+    const monthlyIncome = getMonthlyIncomeFromRange(income_range);
+    
     // Check eligibility
     const issues = [];
     let eligible = true;
     
-    if (monthly_salary && parseInt(monthly_salary) < minSalary) {
+    if (income_range && monthlyIncome < minSalary) {
       eligible = false;
       issues.push(`Minimum monthly salary required is ₹${minSalary.toLocaleString()}`);
     }

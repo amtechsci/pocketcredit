@@ -27,7 +27,7 @@ interface LoanApplication {
   email: string;
   loanAmount: number;
   loanType: 'personal' | 'business';
-  status: 'applied' | 'under_review' | 'approved' | 'rejected' | 'disbursed' | 'pending_documents';
+  status: 'applied' | 'under_review' | 'follow_up' | 'disbursal' | 'account_manager' | 'cleared' | 'rejected' | 'pending_documents';
   applicationDate: string;
   assignedManager: string;
   recoveryOfficer: string;
@@ -69,7 +69,7 @@ export function LoanApplicationsQueue() {
   // Initialize status filter from URL parameters
   useEffect(() => {
     const statusFromUrl = searchParams.get('status');
-    if (statusFromUrl && ['all', 'submitted', 'under_review', 'approved', 'rejected'].includes(statusFromUrl)) {
+    if (statusFromUrl && ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'cleared', 'rejected'].includes(statusFromUrl)) {
       setStatusFilter(statusFromUrl);
     }
   }, [searchParams]);
@@ -209,11 +209,31 @@ export function LoanApplicationsQueue() {
 
   const statusColors = {
     applied: 'bg-blue-100 text-blue-800',
+    submitted: 'bg-blue-100 text-blue-800',
     under_review: 'bg-yellow-100 text-yellow-800',
-    approved: 'bg-green-100 text-green-800',
+    follow_up: 'bg-green-100 text-green-800',
+    disbursal: 'bg-teal-100 text-teal-800',
+    account_manager: 'bg-purple-100 text-purple-800',
+    cleared: 'bg-gray-100 text-gray-800',
     rejected: 'bg-red-100 text-red-800',
     disbursed: 'bg-purple-100 text-purple-800',
     pending_documents: 'bg-orange-100 text-orange-800'
+  };
+
+  const getStatusLabel = (status: string) => {
+    const statusLabels = {
+      applied: 'Applied',
+      submitted: 'Submitted',
+      under_review: 'Under Review',
+      follow_up: 'Follow Up',
+      disbursal: 'Disbursal',
+      account_manager: 'Account Manager',
+      cleared: 'Cleared',
+      rejected: 'Rejected',
+      disbursed: 'Disbursed',
+      pending_documents: 'Pending Documents'
+    };
+    return statusLabels[status] || status.replace('_', ' ').toUpperCase();
   };
 
   const formatCurrency = (amount: number) => {
@@ -453,14 +473,44 @@ export function LoanApplicationsQueue() {
               Under Review <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'under_review' ? 'bg-orange-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.pendingApplications || 0}</span>
             </button>
             <button
-              onClick={() => handleStatusFilter('approved')}
+              onClick={() => handleStatusFilter('follow_up')}
               className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                statusFilter === 'approved'
+                statusFilter === 'follow_up'
                   ? 'bg-green-600 text-white shadow-sm'
                   : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
               }`}
             >
-              Approved <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'approved' ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.approvedApplications || 0}</span>
+              Follow Up <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'follow_up' ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.followUpApplications || 0}</span>
+            </button>
+            <button
+              onClick={() => handleStatusFilter('disbursal')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                statusFilter === 'disbursal'
+                  ? 'bg-teal-600 text-white shadow-sm'
+                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+              }`}
+            >
+              Disbursal <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'disbursal' ? 'bg-teal-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.disbursalApplications || 0}</span>
+            </button>
+            <button
+              onClick={() => handleStatusFilter('account_manager')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                statusFilter === 'account_manager'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+              }`}
+            >
+              Account Manager <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'account_manager' ? 'bg-purple-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.accountManagerApplications || 0}</span>
+            </button>
+            <button
+              onClick={() => handleStatusFilter('cleared')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                statusFilter === 'cleared'
+                  ? 'bg-gray-600 text-white shadow-sm'
+                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+              }`}
+            >
+              Cleared <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'cleared' ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.clearedApplications || 0}</span>
             </button>
             <button
               onClick={() => handleStatusFilter('rejected')}
@@ -471,16 +521,6 @@ export function LoanApplicationsQueue() {
               }`}
             >
               Rejected <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'rejected' ? 'bg-red-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.rejectedApplications || 0}</span>
-            </button>
-            <button
-              onClick={() => handleStatusFilter('disbursed')}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                statusFilter === 'disbursed'
-                  ? 'bg-teal-600 text-white shadow-sm'
-                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
-              }`}
-            >
-              Disbursed <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'disbursed' ? 'bg-teal-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.disbursedApplications || 0}</span>
             </button>
           </div>
         </div>
@@ -709,7 +749,7 @@ export function LoanApplicationsQueue() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColors[application.status]}`}>
-                      {application.status.replace('_', ' ').toUpperCase()}
+                      {getStatusLabel(application.status)}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">

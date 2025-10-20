@@ -17,6 +17,12 @@ export interface User {
   date_of_birth?: string;
   gender?: string;
   marital_status?: string;
+  employment_type?: string;
+  graduation_status?: string;
+  loan_limit?: number;
+  income_range?: string;
+  pan_number?: string;
+  pincode?: string;
   phone_verified: boolean;
   email_verified?: boolean;
   kyc_completed?: boolean;
@@ -25,6 +31,7 @@ export interface User {
   status: string;
   created_at: string;
   last_login_at?: string;
+  latlong?: string;
 }
 
 export interface LoginResponse {
@@ -67,10 +74,12 @@ export interface LoanApplicationStats {
 // API Service Class
 class ApiService {
   private api: AxiosInstance;
+  private baseURL: string;
 
   constructor() {
+    this.baseURL = process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:3002/api';
     this.api = axios.create({
-      baseURL: process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:3002/api',
+      baseURL: this.baseURL,
       timeout: 30000, // Increased timeout to 30 seconds
       withCredentials: true, // Important: Send cookies for session management
       headers: {
@@ -191,7 +200,17 @@ class ApiService {
     date_of_birth: string;
     gender?: string;
     marital_status?: string;
-  }): Promise<ApiResponse<{ user: User; next_step: string; step_completed: string }>> {
+    pan_number?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+  }): Promise<ApiResponse<{ 
+    user: User; 
+    next_step: string; 
+    step_completed: string;
+    hold_permanent?: boolean;
+    hold_until?: string;
+    hold_reason?: string;
+  }>> {
     return this.request('PUT', '/user/profile/basic', profileData);
   }
 
@@ -336,28 +355,45 @@ class ApiService {
   }
 
   // User References (using consolidated references table)
-  async saveUserReferences(references: Array<{
-    name: string;
-    phone: string;
-    relation: string;
-  }>): Promise<ApiResponse<{
+  async saveUserReferences(data: {
+    references: Array<{
+      name: string;
+      phone: string;
+      relation: string;
+    }>;
+    alternate_mobile: string;
+    company_name: string;
+    company_email: string;
+  }): Promise<ApiResponse<{
     references_count: number;
     user_id: number;
+    alternate_data: {
+      alternate_mobile: string;
+      company_name: string;
+      company_email: string;
+    };
   }>> {
-    return this.request('POST', '/references', { references });
+    return this.request('POST', '/references', data);
   }
 
-  async getUserReferences(): Promise<ApiResponse<Array<{
-    id: number;
-    user_id: number;
-    name: string;
-    phone: string;
-    relation: string;
-    status: string;
-    admin_id: number | null;
-    created_at: string;
-    updated_at: string;
-  }>>> {
+  async getUserReferences(): Promise<ApiResponse<{
+    references: Array<{
+      id: number;
+      user_id: number;
+      name: string;
+      phone: string;
+      relation: string;
+      status: string;
+      admin_id: number | null;
+      created_at: string;
+      updated_at: string;
+    }>;
+    alternate_data: {
+      alternate_mobile: string | null;
+      company_name: string | null;
+      company_email: string | null;
+    } | null;
+  }>> {
     return this.request('GET', '/references');
   }
 
@@ -437,14 +473,89 @@ class ApiService {
 
   // Student Profile Update (Step 3)
   async updateStudentProfile(data: {
+    date_of_birth: string;
     college_name: string;
     graduation_status: string;
   }): Promise<ApiResponse<{
     user: User;
     next_step: string;
     profile_completed: boolean;
+    hold_permanent?: boolean;
+    hold_until?: string;
+    hold_reason?: string;
+    age_restriction?: boolean;
   }>> {
     return this.request('PUT', '/user/profile/student', data);
+  }
+
+  // Update Graduation Status (Upsell feature)
+  async updateGraduationStatus(data: {
+    graduation_status: 'graduated' | 'not_graduated';
+    graduation_date?: string;
+  }): Promise<ApiResponse<{
+    user: User;
+    loan_limit: number;
+    old_loan_limit: number;
+    upgraded: boolean;
+  }>> {
+    return this.request('PUT', '/user/graduation-status', data);
+  }
+
+  // Student Document Upload APIs
+  async uploadStudentDocument(formData: FormData): Promise<ApiResponse<{
+    message: string;
+    document: {
+      id: number;
+      document_type: string;
+      s3_key: string;
+      file_name: string;
+      file_size: number;
+      mime_type: string;
+      status: string;
+    };
+  }>> {
+    const token = localStorage.getItem('pocket_user_token');
+    const response = await fetch(`${this.baseURL}/student-documents/upload`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || 'Upload failed');
+    }
+
+    return response.json();
+  }
+
+  async getStudentDocuments(): Promise<ApiResponse<{
+    documents: Array<{
+      id: number;
+      document_type: string;
+      file_name: string;
+      file_size: number;
+      mime_type: string;
+      status: string;
+      upload_date: string;
+    }>;
+  }>> {
+    return this.request('GET', '/student-documents');
+  }
+
+  async deleteStudentDocument(documentId: number): Promise<ApiResponse<{
+    message: string;
+  }>> {
+    return this.request('DELETE', `/student-documents/${documentId}`);
+  }
+
+  async getStudentDocumentUrl(documentId: number): Promise<ApiResponse<{
+    url: string;
+    expires_in: number;
+  }>> {
+    return this.request('GET', `/student-documents/${documentId}/url`);
   }
 
   // Loan Application APIs
@@ -568,6 +679,84 @@ class ApiService {
       loan_amount: loanAmount,
       plan_id: planId
     });
+  }
+
+  // ==================== Digitap API ====================
+
+  /**
+   * Fetch user prefill data from Digitap API (credit score, personal details)
+   */
+  async fetchDigitapPrefill(): Promise<ApiResponse<{
+    name?: string;
+    dob?: string;
+    pan?: string;
+    gender?: string;
+    email?: string;
+    address?: any;
+    credit_score?: number;
+    age?: number;
+  }>> {
+    return this.request('POST', '/digitap/prefill');
+  }
+
+  async saveDigitapPrefill(data: {
+    name: string;
+    dob: string;
+    pan: string;
+    gender: string;
+    email: string;
+    address: any;
+  }): Promise<ApiResponse<{ message: string }>> {
+    return this.request('POST', '/digitap/save-prefill', data);
+  }
+
+  /**
+   * Email OTP Verification Methods
+   */
+  async sendEmailOtp(email: string, type: 'personal' | 'official'): Promise<ApiResponse<{ message: string }>> {
+    return this.request('POST', '/email-otp/send', { email, type });
+  }
+
+  async verifyEmailOtp(email: string, otp: string, type: 'personal' | 'official'): Promise<ApiResponse<{ message: string }>> {
+    return this.request('POST', '/email-otp/verify', { email, otp, type });
+  }
+
+  /**
+   * Additional Details Update
+   */
+  async updateAdditionalDetails(data: {
+    personal_email: string;
+    marital_status: string;
+    salary_date: string;
+    official_email: string;
+  }): Promise<ApiResponse<{ message: string }>> {
+    return this.request('PUT', '/user/additional-details', data);
+  }
+
+  /**
+   * Digilocker KYC - Generate KYC URL
+   */
+  async generateDigilockerKYCUrl(data: {
+    mobile_number: string;
+    application_id: number;
+    first_name?: string;
+    last_name?: string;
+    email?: string;
+  }): Promise<ApiResponse<{ kycUrl: string; transactionId: string; shortUrl: string }>> {
+    return this.request('POST', '/digilocker/generate-kyc-url', data);
+  }
+
+  /**
+   * Submit Employment Details
+   */
+  async submitEmploymentDetails(data: {
+    company_name: string;
+    industry: string;
+    department: string;
+    designation: string;
+    application_id: number;
+  }): Promise<ApiResponse<{ message: string }>> {
+    return this.request('POST', '/employment/details', data);
   }
 }
 

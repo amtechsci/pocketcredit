@@ -1,23 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Check, Building2, Users, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Check, Building2, CreditCard } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { DashboardHeader } from '../DashboardHeader';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
 import { toast } from 'sonner';
 
-const RELATION_OPTIONS = [
-  'Family',
-  'Friend',
-  'Colleague',
-  'Relative',
-  'Neighbor'
-];
 
 interface LoanApplication {
   id: number;
@@ -35,17 +27,16 @@ interface BankDetailsData {
   confirmDetails: boolean;
 }
 
-interface ReferenceData {
-  name1: string;
-  phone1: string;
-  relation1: string;
-  name2: string;
-  phone2: string;
-  relation2: string;
-  name3: string;
-  phone3: string;
-  relation3: string;
-  confirmReferences: boolean;
+
+interface ExistingBankDetail {
+  id: number;
+  account_number: string;
+  ifsc_code: string;
+  bank_name: string;
+  account_holder_name: string;
+  application_number?: string;
+  loan_amount?: number;
+  application_status?: string;
 }
 
 export function LoanApplicationStepsPage() {
@@ -56,6 +47,8 @@ export function LoanApplicationStepsPage() {
   const [applicationId, setApplicationId] = useState<string | null>(null);
   const [loanApplication, setLoanApplication] = useState<LoanApplication | null>(null);
   const [currentStep, setCurrentStep] = useState<string>('');
+  const [existingBankDetails, setExistingBankDetails] = useState<ExistingBankDetail[]>([]);
+  const [showBankDetailsSelection, setShowBankDetailsSelection] = useState(false);
   
   // Bank details form
   const [bankDetails, setBankDetails] = useState<BankDetailsData>({
@@ -64,19 +57,7 @@ export function LoanApplicationStepsPage() {
     confirmDetails: false
   });
 
-  // Reference details form
-  const [referenceDetails, setReferenceDetails] = useState<ReferenceData>({
-    name1: '',
-    phone1: '',
-    relation1: 'Family',
-    name2: '',
-    phone2: '',
-    relation2: 'Family',
-    name3: '',
-    phone3: '',
-    relation3: 'Friend',
-    confirmReferences: false
-  });
+  // Reference details form (removed as it's not used in the current implementation)
 
   // Get application ID from URL params
   useEffect(() => {
@@ -106,18 +87,25 @@ export function LoanApplicationStepsPage() {
       const response = await apiService.getLoanApplication(appId);
       console.log('Loan application response:', response);
       console.log('Response status:', response.status);
-      console.log('Response success:', response.success);
+      console.log('Response success:', (response as any).success);
       console.log('Response data:', response.data);
       
-      if (response.status === 'success' || response.success === true) {
+      if (response.status === 'success' || (response as any).success === true) {
         console.log('Setting loan application:', response.data);
-        console.log('Setting current step:', response.data.current_step);
-        setLoanApplication(response.data);
-        const step = response.data.current_step || 'bank_details';
-        console.log('Final step to set:', step);
-        setCurrentStep(step);
+        console.log('Setting current step:', response.data?.current_step);
+        if (response.data) {
+          setLoanApplication(response.data);
+          const step = response.data.current_step || 'bank_details';
+          console.log('Final step to set:', step);
+          setCurrentStep(step);
+          
+          // If current step is bank_details, check for existing bank details
+          if (step === 'bank_details' && user) {
+            await fetchExistingBankDetails();
+          }
+        }
       } else {
-        console.log('Failed to fetch loan application:', response.message);
+        console.log('Failed to fetch loan application:', (response as any).message);
       }
     } catch (error) {
       console.error('Error fetching loan application:', error);
@@ -125,12 +113,56 @@ export function LoanApplicationStepsPage() {
     }
   };
 
+  const fetchExistingBankDetails = async () => {
+    if (!user) return;
+    
+    try {
+      const response = await apiService.getUserBankDetails(user.id);
+      if ((response as any).success && response.data && response.data.length > 0) {
+        setExistingBankDetails(response.data as ExistingBankDetail[]);
+        setShowBankDetailsSelection(true);
+      }
+    } catch (error) {
+      console.error('Error fetching existing bank details:', error);
+      // Don't show error to user, just proceed with new bank details form
+    }
+  };
+
   const handleBankDetailsChange = (field: keyof BankDetailsData, value: any) => {
     setBankDetails(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleReferenceDetailsChange = (field: keyof ReferenceData, value: any) => {
-    setReferenceDetails(prev => ({ ...prev, [field]: value }));
+
+  const handleChooseExistingBankDetails = async (bankDetailsId: number) => {
+    if (!applicationId) {
+      toast.error('Application ID not found');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await apiService.chooseBankDetails({
+        application_id: parseInt(applicationId),
+        bank_details_id: bankDetailsId
+      });
+
+      if ((response as any).success === true) {
+        toast.success('Bank details applied successfully!');
+        // Refresh loan application to get updated step
+        await fetchLoanApplication(applicationId);
+      } else {
+        toast.error((response as any).message || 'Failed to apply bank details');
+      }
+    } catch (error: any) {
+      console.error('Choose bank details error:', error);
+      toast.error(error.message || 'Failed to apply bank details');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddNewBankDetails = () => {
+    setShowBankDetailsSelection(false);
   };
 
   const handleBankDetailsSubmit = async (e: React.FormEvent) => {
@@ -167,12 +199,12 @@ export function LoanApplicationStepsPage() {
         ifsc_code: bankDetails.ifscCode
       });
 
-      if (response.success === true) {
+      if ((response as any).success === true) {
         toast.success('Bank details saved successfully!');
         // Refresh loan application to get updated step
         await fetchLoanApplication(applicationId);
       } else {
-        toast.error(response.message || 'Failed to save bank details');
+        toast.error((response as any).message || 'Failed to save bank details');
       }
     } catch (error: any) {
       console.error('Bank details error:', error);
@@ -194,7 +226,7 @@ export function LoanApplicationStepsPage() {
     try {
       const response = await apiService.getUserReferences();
       
-      if (!response.success || !response.data || response.data.length === 0) {
+      if (!(response as any).success || !response.data || response.data.length === 0) {
         toast.info('Please add your references first');
         navigate('/user-references');
         return;
@@ -219,6 +251,60 @@ export function LoanApplicationStepsPage() {
     }
   };
 
+
+  const renderBankDetailsSelection = () => {
+    return (
+      <Card className="p-6 sm:p-8">
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Choose Bank Details</h2>
+          <p className="text-gray-600">We found existing bank details from your previous applications. You can reuse them or add new details.</p>
+        </div>
+
+        <div className="space-y-4 mb-6">
+          {existingBankDetails.map((bankDetail) => (
+            <Card key={bankDetail.id} className="p-4 border border-gray-200 hover:border-blue-300 transition-colors">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <CreditCard className="w-6 h-6 text-blue-600" />
+                  </div>
+                  <div>
+                    <div className="font-medium text-gray-900">{bankDetail.bank_name}</div>
+                    <div className="text-sm text-gray-600">
+                      Account: •••• {bankDetail.account_number.slice(-4)} | IFSC: {bankDetail.ifsc_code}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {bankDetail.application_number && bankDetail.application_status && 
+                        `From application ${bankDetail.application_number} (${bankDetail.application_status})`
+                      }
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  onClick={() => handleChooseExistingBankDetails(bankDetail.id)}
+                  disabled={loading}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {loading ? 'Applying...' : 'Use This'}
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+
+        <div className="pt-4 border-t border-gray-200">
+          <Button
+            onClick={handleAddNewBankDetails}
+            variant="outline"
+            className="w-full h-12 text-base"
+          >
+            <Building2 className="w-4 h-4 mr-2" />
+            Add New Bank Details
+          </Button>
+        </div>
+      </Card>
+    );
+  };
 
   const renderBankDetailsForm = () => {
     console.log('Rendering bank details form');
@@ -329,10 +415,10 @@ export function LoanApplicationStepsPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Manage Your References</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Manage Your References & Alternate Data</h3>
           <p className="text-gray-600 mb-6">
-            You need to add up to 3 personal references for loan verification. 
-            These references will be used for all your loan applications.
+            You need to add exactly 3 personal references and alternate data for loan verification. 
+            These will be used for all your loan applications.
           </p>
           
           <div className="space-y-4">
@@ -343,11 +429,11 @@ export function LoanApplicationStepsPage() {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
               </svg>
-              Manage References
+              Manage References & Alternate Data
             </Button>
             
-            <p className="text-sm text-gray-500">
-              After adding your references, come back here to continue with your loan application.
+            <p className="text-sm text-gray-500 text-center">
+              Please add exactly 3 references and your alternate data. After completion, come back here to continue.
             </p>
           </div>
         </div>
@@ -442,7 +528,9 @@ export function LoanApplicationStepsPage() {
           console.log('Current step for rendering:', currentStep);
           return null;
         })()}
-        {currentStep === 'bank_details' && renderBankDetailsForm()}
+        {currentStep === 'bank_details' && (
+          showBankDetailsSelection ? renderBankDetailsSelection() : renderBankDetailsForm()
+        )}
         {currentStep === 'references' && renderReferenceDetailsForm()}
         {currentStep === 'completed' && renderCompletedStep()}
         {!currentStep && (

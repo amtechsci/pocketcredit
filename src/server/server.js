@@ -40,6 +40,9 @@ const activityLogsRoutes = require('./routes/activityLogsSimple');
 const eligibilityRoutes = require('./routes/eligibilityConfig');
 const employmentQuickCheckRoutes = require('./routes/employmentQuickCheck');
 const loanPlansRoutes = require('./routes/loanPlans');
+const validationRoutes = require('./routes/validation');
+const loanCalculationsRoutes = require('./routes/loanCalculations');
+const kfsRoutes = require('./routes/kfs');
 const { activityLoggerMiddleware } = require('./middleware/activityLogger');
 const activityProcessor = require('./workers/activityProcessor');
 
@@ -138,6 +141,28 @@ app.use('/api/admin/activities', activityLogsRoutes);
 app.use('/api/eligibility', eligibilityRoutes);
 app.use('/api/employment-quick-check', employmentQuickCheckRoutes);
 app.use('/api/loan-plans', loanPlansRoutes);
+app.use('/api/validation', validationRoutes);
+app.use('/api/loan-calculations', loanCalculationsRoutes);
+app.use('/api/kfs', kfsRoutes);
+
+// Digitap API routes
+const digitapRoutes = require('./routes/digitap');
+app.use('/api/digitap', digitapRoutes);
+
+const studentDocumentsRoutes = require('./routes/studentDocuments');
+app.use('/api/student-documents', studentDocumentsRoutes);
+
+// Email OTP routes
+const emailOtpRoutes = require('./routes/emailOtp');
+app.use('/api/email-otp', emailOtpRoutes);
+
+// Digilocker KYC routes
+const digilockerRoutes = require('./routes/digilocker');
+app.use('/api/digilocker', digilockerRoutes);
+
+// Digilocker Webhook (callback from Digilocker after KYC)
+const digiwebhookRoutes = require('./routes/digiwebhook');
+app.use('/api/digiwebhook', digiwebhookRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

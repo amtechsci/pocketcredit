@@ -27,7 +27,8 @@ import {
   Monitor,
   RefreshCw,
   Filter,
-  Flag
+  Flag,
+  Shield
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import { adminApiService } from '../../services/adminApi';
@@ -53,7 +54,10 @@ export function UserProfileDetail() {
   const [showSendSmsModal, setShowSendSmsModal] = useState(false);
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
   const [showAddTemplateModal, setShowAddTemplateModal] = useState(false);
-  const { canEditUsers } = useAdmin();
+  const { canEditUsers, currentUser } = useAdmin();
+  
+  // Debug admin context
+  console.log('Admin context in UserProfileDetail:', { canEditUsers, currentUser });
 
   // Real data state
   const [userData, setUserData] = useState<any>(null);
@@ -110,6 +114,182 @@ export function UserProfileDetail() {
     templateId: ''
   });
 
+  // State for editable loan fields
+  const [editingLoan, setEditingLoan] = useState<any>(null);
+  const [editValues, setEditValues] = useState<any>({});
+
+  // Validation tab state
+  const [selectedAction, setSelectedAction] = useState('');
+  const [selectedDocuments, setSelectedDocuments] = useState([]);
+  const [selectedReasons, setSelectedReasons] = useState([]);
+  const [documentInput, setDocumentInput] = useState('');
+  const [reasonInput, setReasonInput] = useState('');
+  const [showDocumentSuggestions, setShowDocumentSuggestions] = useState(false);
+  const [showReasonSuggestions, setShowReasonSuggestions] = useState(false);
+  const [holdUser, setHoldUser] = useState('');
+  const [holdDuration, setHoldDuration] = useState('');
+  const [holdDays, setHoldDays] = useState('');
+
+  // History modal state
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [selectedHistoryItem, setSelectedHistoryItem] = useState(null);
+
+  // Real validation history data from API
+  const [validationHistory, setValidationHistory] = useState([]);
+  const [validationHistoryLoading, setValidationHistoryLoading] = useState(false);
+
+  // Validation options from API
+  const [documentOptions, setDocumentOptions] = useState([]);
+  const [reasonOptions, setReasonOptions] = useState([]);
+  const [validationOptionsLoading, setValidationOptionsLoading] = useState(false);
+
+  // Helper function to view history details
+  const viewHistoryDetails = (item) => {
+    setSelectedHistoryItem(item);
+    setShowHistoryModal(true);
+  };
+
+  // Fetch validation options from API
+  const fetchValidationOptions = async () => {
+    try {
+      setValidationOptionsLoading(true);
+      const response = await adminApiService.getValidationOptions();
+      
+      if (response.status === 'success') {
+        const options = response.data;
+        setDocumentOptions(options.need_document?.map(opt => opt.name) || []);
+        setReasonOptions(options.not_process?.map(opt => opt.name) || []);
+      }
+    } catch (error) {
+      console.error('Error fetching validation options:', error);
+      // Fallback to default options
+      setDocumentOptions([
+        'Last 3 month bank statement up to date',
+        'Last 2 month bank statement up to date', 
+        'Last 1 month bank statement up to date',
+        'Current month till date bank statement',
+        'Latest one month pay slip/salary slip',
+        'Pay slip/salary slip',
+        'Aadhar front side',
+        'Aadhar back side',
+        'Aadhar card password',
+        'Passport front side',
+        'Passport back side',
+        'Office address & land line number',
+        'Company website URL link',
+        'Offer letter/appointment letter',
+        'Pan card',
+        'Present address proof',
+        'Other'
+      ]);
+      setReasonOptions([
+        'Less salary',
+        'Salary not reflecting in statement',
+        'Modified(Bank statement)',
+        'Modified(salary slip)',
+        'Self employed',
+        'Resigned job',
+        'Red profile',
+        'Existing Customer',
+        'Waste Customer',
+        'Wrong number/invalid/not exist',
+        'Net banking issue',
+        'Doesn\'t have net banking',
+        'Other'
+      ]);
+    } finally {
+      setValidationOptionsLoading(false);
+    }
+  };
+
+  // Fetch validation history from API
+  const fetchValidationHistory = async () => {
+    if (!userData?.id) return;
+    
+    try {
+      setValidationHistoryLoading(true);
+      const response = await adminApiService.getValidationHistory(userData.id);
+      
+      if (response.status === 'success') {
+        setValidationHistory(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching validation history:', error);
+      setValidationHistory([]);
+    } finally {
+      setValidationHistoryLoading(false);
+    }
+  };
+
+  // Submit validation action
+  const submitValidationAction = async () => {
+    if (!selectedAction || !userData?.id) return;
+
+    try {
+      // Get admin ID from the admin context
+      const adminId = currentUser?.id || 'unknown';
+      console.log('Admin context:', currentUser);
+      console.log('Admin ID:', adminId);
+      console.log('Selected action:', selectedAction);
+      console.log('User data:', userData);
+      
+      let actionDetails = {};
+
+      switch (selectedAction) {
+        case 'need_document':
+          actionDetails = { documents: selectedDocuments };
+          break;
+        case 'not_process':
+          actionDetails = { reasons: selectedReasons };
+          break;
+        case 'process':
+          actionDetails = { message: 'Application moved to disbursal status' };
+          break;
+        case 'cancel':
+          actionDetails = {
+            cancelLoan: true,
+            holdUser,
+            holdDuration,
+            holdDays: holdDuration === 'days' ? holdDays : null
+          };
+          break;
+      }
+
+      const requestData = {
+        userId: userData.id,
+        loanApplicationId: userData.current_loan_id || null,
+        actionType: selectedAction,
+        actionDetails,
+        adminId
+      };
+      
+      console.log('Sending validation request:', requestData);
+      
+      const response = await adminApiService.submitValidationAction(requestData);
+
+      if (response.status === 'success') {
+        // Reset form
+        setSelectedAction('');
+        setSelectedDocuments([]);
+        setSelectedReasons([]);
+        setDocumentInput('');
+        setReasonInput('');
+        setHoldUser('');
+        setHoldDuration('');
+        setHoldDays('');
+        
+        // Refresh history
+        await fetchValidationHistory();
+        
+        // Show success message
+        alert('Validation action submitted successfully!');
+      }
+    } catch (error) {
+      console.error('Error submitting validation action:', error);
+      alert('Failed to submit validation action. Please try again.');
+    }
+  };
+
   // Fetch user profile data
   useEffect(() => {
     const fetchUserProfile = async () => {
@@ -134,6 +314,21 @@ export function UserProfileDetail() {
       fetchUserProfile();
     }
   }, [params.userId]);
+
+  // Fetch validation data when user data is loaded
+  useEffect(() => {
+    if (userData?.id) {
+      fetchValidationOptions();
+      fetchValidationHistory();
+    }
+  }, [userData?.id]);
+
+  // Fetch validation history when validation tab is active
+  useEffect(() => {
+    if (activeTab === 'validation' && userData?.id) {
+      fetchValidationHistory();
+    }
+  }, [activeTab, userData?.id]);
 
   // Initialize form data when modals open
   useEffect(() => {
@@ -937,8 +1132,10 @@ export function UserProfileDetail() {
     { id: 'documents', label: 'Documents', icon: FileText },
     { id: 'bank', label: 'Bank Information', icon: CreditCard },
     { id: 'reference', label: 'Reference', icon: Phone },
-    { id: 'loans', label: 'All Loans', icon: Building },
+    { id: 'applied-loans', label: 'Applied Loans', icon: Clock },
+    { id: 'loans', label: 'Loans', icon: Building },
     { id: 'transactions', label: 'Transaction Details', icon: IndianRupee },
+    { id: 'validation', label: 'Validation', icon: Shield },
     { id: 'follow-up', label: 'Follow Up', icon: MessageSquare },
     { id: 'notes', label: 'Note', icon: FileText },
     { id: 'sms', label: 'SMS', icon: MessageSquare },
@@ -1670,147 +1867,436 @@ export function UserProfileDetail() {
     </div>
   );
 
-  // Loans Tab
-  const renderLoansTab = () => (
-    <div className="space-y-6">
-      {/* Loan Application Review Header */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">All Loans</h3>
+  // Loan calculation helper function (used by both Applied Loans and Loans tabs)
+  const calculateValues = (principal: number, pfPercent: number, intPercent: number, days: number) => {
+    const processingFee = (principal * pfPercent) / 100;
+    const gst = processingFee * 0.18;
+    const disbAmount = principal - processingFee - gst;
+    // Interest = (Disb Amount + Processing Fee) × Days × Interest% per day
+    const interest = (disbAmount + processingFee) * days * (intPercent / 100);
+    const totalAmount = disbAmount + processingFee + interest + gst;
+    
+    return { disbAmount, processingFee, gst, interest, totalAmount };
+  };
+
+  // Applied Loans Tab (Submitted -> Under Review -> Follow Up -> Disbursal)
+  const renderAppliedLoansTab = () => {
+    const appliedLoans = getArray('loans').filter((loan: any) => 
+      ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(loan.status)
+    );
+
+    const handleEdit = (loan: any) => {
+      setEditingLoan(loan.id);
+      setEditValues({
+        principalAmount: loan.principalAmount || loan.amount || 0,
+        pfPercent: loan.processingFeePercent || 14,
+        intPercent: loan.interestRate || 0.10,
+      });
+    };
+
+    const handleSave = async (loanId: number) => {
+      try {
+        // Call API to save the edited values
+        const response: any = await adminApiService.updateLoanCalculation(loanId, {
+          processing_fee_percent: parseFloat(editValues.pfPercent),
+          interest_percent_per_day: parseFloat(editValues.intPercent)
+        });
+        
+        if (response.success || response.status === 'success') {
+          console.log('Loan calculation updated successfully:', response);
+          // Refresh the user data to show updated values
+          const profileResponse = await adminApiService.getUserProfile(params.userId!);
+          if (profileResponse.status === 'success') {
+            setUserData(profileResponse.data);
+          }
+          setEditingLoan(null);
+          alert('Loan calculation updated successfully!');
+        } else {
+          console.error('Failed to update loan calculation:', response.message);
+          alert('Failed to update loan calculation: ' + response.message);
+        }
+      } catch (error: any) {
+        console.error('Error saving loan:', error);
+        alert('Error saving loan: ' + (error.message || 'Unknown error'));
+      }
+    };
+
+    return (
+      <div className="space-y-6">
+        {/* Applied Loans Header */}
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold text-gray-900">Applied Loans</h3>
+            <p className="text-sm text-gray-600 mt-1">Loans in application process (Submitted → Under Review → Follow Up → Disbursal)</p>
           </div>
-          <div className="flex items-center gap-3">
-            <button className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-              <Download className="w-4 h-4" />
-              Export
-            </button>
-          </div>
+
+          {appliedLoans.length > 0 ? (
+            <>
+              {/* Loans Table */}
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan ID</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Principal Amount</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">PF%</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Int%</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disb Amount</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time Period</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">P.Fee</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">GST</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Interest</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Amount</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Apply Date</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status Date</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {appliedLoans.map((loan: any, index: number) => {
+                      const isEditing = editingLoan === loan.id;
+                      const principal = isEditing ? parseFloat(editValues.principalAmount) : parseFloat(loan.principalAmount || loan.amount || 0);
+                      const pfPercent = isEditing ? parseFloat(editValues.pfPercent) : parseFloat(loan.processingFeePercent || 14);
+                      const intPercent = isEditing ? parseFloat(editValues.intPercent) : parseFloat(loan.interestRate || 0.10);
+                      
+                      // Get days from plan_snapshot or default to 15 days for applied loans
+                      let days = 15; // Default for applied loans
+                      if (loan.plan_snapshot) {
+                        try {
+                          const planData = typeof loan.plan_snapshot === 'string' ? JSON.parse(loan.plan_snapshot) : loan.plan_snapshot;
+                          days = planData.repayment_days || 15;
+                        } catch (e) {
+                          days = 15;
+                        }
+                      }
+                      
+                      const calculated = calculateValues(principal, pfPercent, intPercent, days);
+                      const processingFee = calculated.processingFee;
+                      const interest = calculated.interest;
+                      const gst = processingFee * 0.18;
+                      const totalAmount = calculated.disbAmount + processingFee + interest + gst;
+                      
+                      // Generate shorter loan ID (last 8 characters)
+                      const shortLoanId = loan.loanId ? `CLL${loan.loanId.slice(-8)}` : `CLL${loan.id}`;
+                      
+                      return (
+                        <tr key={index} className="hover:bg-gray-50">
+                          {/* Loan ID - Shorter format */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {shortLoanId}
+                          </td>
+                          
+                          {/* Principal Amount - Editable */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                value={editValues.principalAmount}
+                                onChange={(e) => setEditValues({...editValues, principalAmount: e.target.value})}
+                                className="w-24 px-2 py-1 border border-gray-300 rounded"
+                              />
+                            ) : (
+                              principal
+                            )}
+                          </td>
+                          
+                          {/* PF% - Editable */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                step="0.1"
+                                value={editValues.pfPercent}
+                                onChange={(e) => setEditValues({...editValues, pfPercent: e.target.value})}
+                                className="w-16 px-2 py-1 border border-gray-300 rounded"
+                              />
+                            ) : (
+                              pfPercent
+                            )}
+                          </td>
+                          
+                          {/* Int% - Editable */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={editValues.intPercent}
+                                onChange={(e) => setEditValues({...editValues, intPercent: e.target.value})}
+                                className="w-16 px-2 py-1 border border-gray-300 rounded"
+                              />
+                            ) : (
+                              intPercent
+                            )}
+                          </td>
+                          
+                          {/* Disb Amount - Calculated */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {calculated.disbAmount.toFixed(3)}
+                          </td>
+                          
+                          {/* Time Period */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {loan.timePeriod || loan.tenure || '30'}
+                          </td>
+                          
+                          {/* P.Fee - Calculated (not editable) */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {processingFee.toFixed(3)}
+                          </td>
+                          
+                          {/* GST - Calculated */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {gst.toFixed(1)}
+                          </td>
+                          
+                          {/* Interest - Calculated (not editable) */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {interest.toFixed(0)}
+                          </td>
+                          
+                          {/* Total Amount - Calculated */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {totalAmount.toFixed(0)}
+                          </td>
+                          
+                          {/* Apply Date */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatDate(loan.appliedDate || loan.createdAt)}
+                          </td>
+                          
+                          {/* Reason */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {loan.reason || loan.type || 'Personal'}
+                          </td>
+                          
+                          {/* Status */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {loan.status}
+                          </td>
+                          
+                          {/* Status Date */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatDate(loan.statusDate || loan.updatedAt)}
+                          </td>
+                          
+                          {/* Action Buttons */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm font-medium">
+                            <div className="flex flex-col gap-1">
+                              {isEditing ? (
+                                <button 
+                                  onClick={() => handleSave(loan.id)}
+                                  className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                                >
+                                  Save
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => handleEdit(loan)}
+                                  className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                                >
+                                  Edit
+                                </button>
+                              )}
+                              <button 
+                                className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                                onClick={() => window.open(`/admin/loan-agreement/${loan.id}`, '_blank')}
+                                title="View Loan Agreement"
+                              >
+                                Agreement
+                              </button>
+                              <button 
+                                className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
+                                onClick={() => window.open(`/admin/kfs/${loan.id}`, '_blank')}
+                                title="View Key Facts Statement"
+                              >
+                                View KFS
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-12">
+              <Clock className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No Applied Loans</h3>
+              <p className="text-gray-600">This user doesn't have any loan applications in progress.</p>
+            </div>
+          )}
         </div>
-
-
-        {/* Loans Table */}
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan ID</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Principal Amount</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">PF%</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Int%</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disb Amount</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time Period</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">P.Fee</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">GST</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Interest</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Amount</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Apply Date</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status Date</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {getArray('loans').map((loan, index) => (
-                <tr key={index} className="hover:bg-gray-50">
-                  <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {loan.loanId}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatCurrency(loan.principalAmount || loan.amount)}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {loan.processingFeePercent || '2.5'}%
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {loan.interestRate || '12.5'}%
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatCurrency(loan.disbursedAmount || loan.amount)}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {loan.timePeriod || '12'} months
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatCurrency(loan.processingFee || (loan.amount * 0.025))}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatCurrency(loan.gst || (loan.amount * 0.025 * 0.18))}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatCurrency(loan.interest || (loan.amount * 0.125))}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {formatCurrency(loan.totalAmount || (loan.amount + (loan.amount * 0.125) + (loan.amount * 0.025) + (loan.amount * 0.025 * 0.18)))}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatDate(loan.appliedDate || loan.createdAt)}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {loan.reason || 'Personal Loan'}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      loan.status === 'approved' ? 'bg-green-100 text-green-800' :
-                      loan.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                      loan.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                      loan.status === 'disbursed' ? 'bg-blue-100 text-blue-800' :
-                      loan.status === 'active' ? 'bg-purple-100 text-purple-800' :
-                      'bg-gray-100 text-gray-800'
-                    }`}>
-                      {loan.status}
-                    </span>
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatDate(loan.statusDate || loan.updatedAt)}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm font-medium">
-                    <div className="flex items-center gap-2">
-                      <button 
-                        className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-50"
-                        title="View Application Details"
-                        onClick={() => handleViewApplication(loan.loanId)}
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      {loan.status === 'pending' || loan.status === 'under_review' ? (
-                        <>
-                          <button 
-                            className="text-green-600 hover:text-green-900 p-1 rounded hover:bg-green-50"
-                            title="Approve Application"
-                            onClick={() => handleApproveLoan(loan.loanId)}
-                          >
-                            <CheckCircle className="w-4 h-4" />
-                          </button>
-                          <button 
-                            className="text-red-600 hover:text-red-900 p-1 rounded hover:bg-red-50"
-                            title="Reject Application"
-                            onClick={() => handleRejectLoan(loan.loanId)}
-                          >
-                            <XCircle className="w-4 h-4" />
-                          </button>
-                        </>
-                      ) : (
-                        <button 
-                          className="text-gray-600 hover:text-gray-900 p-1 rounded hover:bg-gray-50"
-                          title="Edit Application"
-                          onClick={() => handleEditLoan(loan.loanId)}
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
       </div>
+    );
+  };
 
-    </div>
-  );
+  // Loans Tab (Account Manager)
+  const renderLoansTab = () => {
+    const runningLoans = getArray('loans').filter((loan: any) => 
+      ['account_manager', 'cleared'].includes(loan.status)
+    );
+
+    return (
+      <div className="space-y-6">
+        {/* Loan Application Review Header */}
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold text-gray-900">Loans (Account Manager)</h3>
+            <p className="text-sm text-gray-600 mt-1">Loans assigned to account manager</p>
+          </div>
+
+
+          {runningLoans.length > 0 ? (
+            <>
+              {/* Loans Table */}
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan ID</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Principal Amount</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">PF%</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Int%</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disb Amount</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time Period</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">P.Fee</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">GST</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Interest</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Amount</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Apply Date</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status Date</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {runningLoans.map((loan: any, index: number) => {
+                      // Calculate actual days from disbursement date
+                      const calculateDays = (disbursedDate: string | Date) => {
+                        if (!disbursedDate) return 0;
+                        const startDate = new Date(disbursedDate);
+                        startDate.setHours(0, 0, 0, 0);
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const diffInMs = today.getTime() - startDate.getTime();
+                        const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+                        return diffInDays + 1; // Include both start and end date
+                      };
+                      
+                      const principal = parseFloat(loan.principalAmount || loan.amount || 0);
+                      const pfPercent = parseFloat(loan.processingFeePercent || 14);
+                      const intPercent = parseFloat(loan.interestRate || 0.10);
+                      const days = loan.disbursed_at ? calculateDays(loan.disbursed_at) : 0;
+                      
+                      // Calculate using the same formula as applied loans
+                      const calculated = calculateValues(principal, pfPercent, intPercent, days);
+                      
+                      return (
+                      <tr key={index} className="hover:bg-gray-50 border-l-4 border-l-green-500">
+                        <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {loan.loanId}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {formatCurrency(principal)}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {pfPercent}%
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {intPercent}%
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {formatCurrency(calculated.disbAmount)}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {days} days
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {formatCurrency(calculated.processingFee)}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {formatCurrency(calculated.gst)}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {formatCurrency(calculated.interest)}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {formatCurrency(calculated.totalAmount)}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {formatDate(loan.appliedDate || loan.createdAt)}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {loan.reason || 'Personal Loan'}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            loan.status === 'account_manager' ? 'bg-green-100 text-green-800' :
+                            loan.status === 'cleared' ? 'bg-blue-100 text-blue-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {loan.status.replace('_', ' ')}
+                          </span>
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {formatDate(loan.statusDate || loan.updatedAt)}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm font-medium">
+                          <div className="flex items-center gap-2">
+                            <button 
+                              className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-50"
+                              title="View Application Details"
+                              onClick={() => handleViewApplication(loan.loanId)}
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button 
+                              className="text-gray-600 hover:text-gray-900 p-1 rounded hover:bg-gray-50"
+                              title="Edit Application"
+                              onClick={() => handleEditLoan(loan.loanId)}
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button 
+                              className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                              onClick={() => window.open(`/admin/loan-agreement/${loan.id}`, '_blank')}
+                              title="View Loan Agreement"
+                            >
+                              Agreement
+                            </button>
+                            <button 
+                              className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
+                              onClick={() => window.open(`/admin/kfs/${loan.id}`, '_blank')}
+                              title="View Key Facts Statement"
+                            >
+                              KFS
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-12">
+              <Building className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No Running Loans</h3>
+              <p className="text-gray-600">This user doesn't have any loans with account manager.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   // Transactions Tab
   const renderTransactionsTab = () => (
@@ -1995,6 +2481,631 @@ export function UserProfileDetail() {
       </div>
     </div>
   );
+
+
+  // Validation Tab Helper Functions
+  const getDocumentSuggestions = () => {
+    if (!documentInput) return documentOptions;
+    return documentOptions.filter(option => 
+      option.toLowerCase().includes(documentInput.toLowerCase()) &&
+      !selectedDocuments.includes(option)
+    );
+  };
+
+  const getReasonSuggestions = () => {
+    if (!reasonInput) return reasonOptions;
+    return reasonOptions.filter(option => 
+      option.toLowerCase().includes(reasonInput.toLowerCase()) &&
+      !selectedReasons.includes(option)
+    );
+  };
+
+  // Handle adding documents
+  const addDocument = (document) => {
+    if (document && !selectedDocuments.includes(document)) {
+      setSelectedDocuments([...selectedDocuments, document]);
+      setDocumentInput('');
+      setShowDocumentSuggestions(false);
+    }
+  };
+
+  // Handle adding reasons
+  const addReason = (reason) => {
+    if (reason && !selectedReasons.includes(reason)) {
+      setSelectedReasons([...selectedReasons, reason]);
+      setReasonInput('');
+      setShowReasonSuggestions(false);
+    }
+  };
+
+  // Handle removing documents
+  const removeDocument = (documentToRemove) => {
+    setSelectedDocuments(selectedDocuments.filter(doc => doc !== documentToRemove));
+  };
+
+  // Handle removing reasons
+  const removeReason = (reasonToRemove) => {
+    setSelectedReasons(selectedReasons.filter(reason => reason !== reasonToRemove));
+  };
+
+  // Handle document input key press
+  const handleDocumentKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addDocument(documentInput);
+    } else if (e.key === 'Escape') {
+      setShowDocumentSuggestions(false);
+    }
+  };
+
+  // Handle reason input key press
+  const handleReasonKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addReason(reasonInput);
+    } else if (e.key === 'Escape') {
+      setShowReasonSuggestions(false);
+    }
+  };
+
+  // Validation Tab
+  const renderValidationTab = () => {
+
+    return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-lg font-semibold text-gray-900">Validation Status</h3>
+        </div>
+
+        {/* Validation Summary Cards */}
+        <div className="grid grid-cols-6 gap-2 mb-6">
+          {/* KYC Verification Card */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-2">
+            <div className="flex items-center justify-between mb-1">
+              <div className="w-4 h-4 bg-blue-100 rounded flex items-center justify-center">
+                <Shield className="w-2 h-2 text-blue-600" />
+              </div>
+              <span className="text-xs font-medium text-blue-600 bg-blue-100 px-1 py-0.5 rounded-full">
+                ✓
+              </span>
+            </div>
+            <h3 className="text-xs font-medium text-gray-600 mb-0.5">KYC</h3>
+            <p className="text-xs text-gray-500 mb-1">Aadhaar & PAN</p>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-gray-900">95%</span>
+              <button className="text-xs text-blue-600 hover:text-blue-800">Update</button>
+            </div>
+          </div>
+
+          {/* Income Verification Card */}
+          <div className="bg-green-50 border border-green-200 rounded-lg p-2">
+            <div className="flex items-center justify-between mb-1">
+              <div className="w-4 h-4 bg-green-100 rounded flex items-center justify-center">
+                <Shield className="w-2 h-2 text-green-600" />
+              </div>
+              <span className="text-xs font-medium text-green-600 bg-green-100 px-1 py-0.5 rounded-full">
+                ✓
+              </span>
+            </div>
+            <h3 className="text-xs font-medium text-gray-600 mb-0.5">Income</h3>
+            <p className="text-xs text-gray-500 mb-1">Bank Statement</p>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-gray-900">100%</span>
+              <button className="text-xs text-green-600 hover:text-green-800">Update</button>
+            </div>
+          </div>
+
+          {/* Reference Verification Card */}
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2">
+            <div className="flex items-center justify-between mb-1">
+              <div className="w-4 h-4 bg-yellow-100 rounded flex items-center justify-center">
+                <Shield className="w-2 h-2 text-yellow-600" />
+              </div>
+              <span className="text-xs font-medium text-yellow-600 bg-yellow-100 px-1 py-0.5 rounded-full">
+                !
+              </span>
+            </div>
+            <h3 className="text-xs font-medium text-gray-600 mb-0.5">Reference</h3>
+            <p className="text-xs text-gray-500 mb-1">2/3 Verified</p>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-gray-900">67%</span>
+              <button className="text-xs text-yellow-600 hover:text-yellow-800">Update</button>
+            </div>
+          </div>
+
+          {/* Address Verification Card */}
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-2">
+            <div className="flex items-center justify-between mb-1">
+              <div className="w-4 h-4 bg-purple-100 rounded flex items-center justify-center">
+                <Shield className="w-2 h-2 text-purple-600" />
+              </div>
+              <span className="text-xs font-medium text-purple-600 bg-purple-100 px-1 py-0.5 rounded-full">
+                ✓
+              </span>
+            </div>
+            <h3 className="text-xs font-medium text-gray-600 mb-0.5">Address</h3>
+            <p className="text-xs text-gray-500 mb-1">Gas Bill</p>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-gray-900">90%</span>
+              <button className="text-xs text-purple-600 hover:text-purple-800">Update</button>
+            </div>
+          </div>
+
+          {/* Employment Verification Card */}
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-2">
+            <div className="flex items-center justify-between mb-1">
+              <div className="w-4 h-4 bg-orange-100 rounded flex items-center justify-center">
+                <Shield className="w-2 h-2 text-orange-600" />
+              </div>
+              <span className="text-xs font-medium text-orange-600 bg-orange-100 px-1 py-0.5 rounded-full">
+                ✓
+              </span>
+            </div>
+            <h3 className="text-xs font-medium text-gray-600 mb-0.5">Employment</h3>
+            <p className="text-xs text-gray-500 mb-1">Official Mail</p>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-gray-900">85%</span>
+              <button className="text-xs text-orange-600 hover:text-orange-800">Update</button>
+            </div>
+          </div>
+
+          {/* Other Verification Card */}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-2">
+            <div className="flex items-center justify-between mb-1">
+              <div className="w-4 h-4 bg-gray-100 rounded flex items-center justify-center">
+                <Shield className="w-2 h-2 text-gray-600" />
+              </div>
+              <span className="text-xs font-medium text-gray-600 bg-gray-100 px-1 py-0.5 rounded-full">
+                !
+              </span>
+            </div>
+            <h3 className="text-xs font-medium text-gray-600 mb-0.5">Other</h3>
+            <p className="text-xs text-gray-500 mb-1">Extra Details</p>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-gray-900">0%</span>
+              <button className="text-xs text-gray-600 hover:text-gray-800">Update</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Follow-up Form and History Layout */}
+        <div className="flex gap-6">
+          {/* Quick Follow-up Form - 1/3 width */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6 w-1/3">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Follow-up</h3>
+          
+          <div className="space-y-4">
+            {/* Action Selection */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Select Action</label>
+              <select 
+                value={selectedAction}
+                onChange={(e) => setSelectedAction(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Choose an action...</option>
+                <option value="need_document">Need Document</option>
+                <option value="process">Process</option>
+                <option value="not_process">Not Process</option>
+                <option value="cancel">Cancel</option>
+              </select>
+            </div>
+
+            {/* Need Document Section */}
+            {selectedAction === 'need_document' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Required Documents</label>
+                <div className="relative">
+                  <div className="border border-gray-300 rounded-md p-3 min-h-[100px] bg-gray-50">
+                    {/* Selected Documents */}
+                    {selectedDocuments.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {selectedDocuments.map((document, index) => (
+                          <span key={index} className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                            {document}
+                            <button 
+                              onClick={() => removeDocument(document)}
+                              className="ml-2 text-blue-600 hover:text-blue-800"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* Input Field */}
+                    <input
+                      type="text"
+                      value={documentInput}
+                      onChange={(e) => {
+                        setDocumentInput(e.target.value);
+                        setShowDocumentSuggestions(true);
+                      }}
+                      onKeyPress={handleDocumentKeyPress}
+                      onFocus={() => setShowDocumentSuggestions(true)}
+                      onBlur={() => setTimeout(() => setShowDocumentSuggestions(false), 200)}
+                      placeholder="Type to search or add new document..."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    />
+                  </div>
+                  
+                            {/* Suggestions Dropdown */}
+                            {showDocumentSuggestions && (getDocumentSuggestions().length > 0 || documentInput) && (
+                              <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                                {getDocumentSuggestions().map((option, index) => (
+                                  <div
+                                    key={index}
+                                    onClick={() => addDocument(option)}
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm"
+                                  >
+                                    {option}
+                                  </div>
+                                ))}
+                                {documentInput && !documentOptions.includes(documentInput) && (
+                                  <div
+                                    onClick={() => addDocument(documentInput)}
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    className="px-3 py-2 hover:bg-green-50 cursor-pointer text-sm border-t border-gray-200 bg-green-50"
+                                  >
+                                    + Create "{documentInput}"
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                </div>
+              </div>
+            )}
+
+            {/* Process Section */}
+            {selectedAction === 'process' && (
+              <div>
+                <div className="bg-green-50 border border-green-200 rounded-md p-4">
+                  <div className="flex items-center">
+                    <CheckCircle className="w-5 h-5 text-green-600 mr-2" />
+                    <span className="text-sm font-medium text-green-800">
+                      This will process the application to Disbursal status
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Not Process Section */}
+            {selectedAction === 'not_process' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Rejection Reasons</label>
+                <div className="relative">
+                  <div className="border border-gray-300 rounded-md p-3 min-h-[100px] bg-gray-50">
+                    {/* Selected Reasons */}
+                    {selectedReasons.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {selectedReasons.map((reason, index) => (
+                          <span key={index} className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
+                            {reason}
+                            <button 
+                              onClick={() => removeReason(reason)}
+                              className="ml-2 text-red-600 hover:text-red-800"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* Input Field */}
+                    <input
+                      type="text"
+                      value={reasonInput}
+                      onChange={(e) => {
+                        setReasonInput(e.target.value);
+                        setShowReasonSuggestions(true);
+                      }}
+                      onKeyPress={handleReasonKeyPress}
+                      onFocus={() => setShowReasonSuggestions(true)}
+                      onBlur={() => setTimeout(() => setShowReasonSuggestions(false), 200)}
+                      placeholder="Type to search or add new reason..."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 bg-white"
+                    />
+                  </div>
+                  
+                            {/* Suggestions Dropdown */}
+                            {showReasonSuggestions && (getReasonSuggestions().length > 0 || reasonInput) && (
+                              <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                                {getReasonSuggestions().map((option, index) => (
+                                  <div
+                                    key={index}
+                                    onClick={() => addReason(option)}
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    className="px-3 py-2 hover:bg-red-50 cursor-pointer text-sm"
+                                  >
+                                    {option}
+                                  </div>
+                                ))}
+                                {reasonInput && !reasonOptions.includes(reasonInput) && (
+                                  <div
+                                    onClick={() => addReason(reasonInput)}
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    className="px-3 py-2 hover:bg-green-50 cursor-pointer text-sm border-t border-gray-200 bg-green-50"
+                                  >
+                                    + Create "{reasonInput}"
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                </div>
+              </div>
+            )}
+
+            {/* Cancel Section */}
+            {selectedAction === 'cancel' && (
+              <div>
+                <div className="space-y-4">
+                  <div className="flex items-center">
+                    <input 
+                      type="checkbox" 
+                      id="cancel-loan" 
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" 
+                    />
+                    <label htmlFor="cancel-loan" className="ml-2 text-sm text-gray-700">
+                      Cancel the current applied loan
+                    </label>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Hold user?</label>
+                    <select 
+                      value={holdUser}
+                      onChange={(e) => setHoldUser(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Select option...</option>
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
+                  </div>
+
+                  {holdUser === 'yes' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Hold duration</label>
+                      <div className="space-y-2">
+                        <div className="flex items-center">
+                          <input 
+                            type="radio" 
+                            id="forever" 
+                            name="hold-type" 
+                            value="forever"
+                            checked={holdDuration === 'forever'}
+                            onChange={(e) => setHoldDuration(e.target.value)}
+                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300" 
+                          />
+                          <label htmlFor="forever" className="ml-2 text-sm text-gray-700">Forever</label>
+                        </div>
+                        <div className="flex items-center">
+                          <input 
+                            type="radio" 
+                            id="days" 
+                            name="hold-type" 
+                            value="days"
+                            checked={holdDuration === 'days'}
+                            onChange={(e) => setHoldDuration(e.target.value)}
+                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300" 
+                          />
+                          <label htmlFor="days" className="ml-2 text-sm text-gray-700">For</label>
+                          <input 
+                            type="number" 
+                            value={holdDays}
+                            onChange={(e) => setHoldDays(e.target.value)}
+                            className="ml-2 px-2 py-1 border border-gray-300 rounded text-sm w-20" 
+                            placeholder="days" 
+                          />
+                          <span className="ml-1 text-sm text-gray-700">days</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Submit Button */}
+            <div className="flex justify-end pt-4">
+              <button 
+                onClick={submitValidationAction}
+                disabled={!selectedAction}
+                className={`px-6 py-2 rounded-md transition-colors ${
+                  selectedAction 
+                    ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
+              >
+                Submit Action
+              </button>
+            </div>
+          </div>
+          </div>
+
+          {/* Validation History Table - 2/3 width */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6 w-2/3">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Validation History</h3>
+            
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Type
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Updated By
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Updated On
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {validationHistoryLoading ? (
+                    <tr>
+                      <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
+                        Loading validation history...
+                      </td>
+                    </tr>
+                  ) : validationHistory.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
+                        No validation history found
+                      </td>
+                    </tr>
+                  ) : (
+                    validationHistory.map((item) => (
+                      <tr key={item.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            item.type === 'Need Document' ? 'bg-blue-100 text-blue-800' :
+                            item.type === 'Process' ? 'bg-green-100 text-green-800' :
+                            'bg-red-100 text-red-800'
+                          }`}>
+                            {item.type}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {item.updatedBy}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {item.updatedOn}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <button
+                            onClick={() => viewHistoryDetails(item)}
+                            className="text-blue-600 hover:text-blue-900 font-medium"
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* History Details Modal */}
+      {showHistoryModal && selectedHistoryItem && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">
+                  {selectedHistoryItem.type} Details
+                </h3>
+                <button
+                  onClick={() => setShowHistoryModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <span className="sr-only">Close</span>
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-gray-600 mb-2">
+                    <strong>Updated By:</strong> {selectedHistoryItem.updatedBy}
+                  </p>
+                  <p className="text-sm text-gray-600 mb-4">
+                    <strong>Updated On:</strong> {selectedHistoryItem.updatedOn}
+                  </p>
+                </div>
+
+                {selectedHistoryItem.action === 'need_document' && selectedHistoryItem.details.documents && (
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-900 mb-3">Required Documents:</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedHistoryItem.details.documents.map((doc, index) => (
+                        <span
+                          key={index}
+                          className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200"
+                        >
+                          {doc}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedHistoryItem.action === 'not_process' && selectedHistoryItem.details.reasons && (
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-900 mb-3">Rejection Reasons:</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedHistoryItem.details.reasons.map((reason, index) => (
+                        <span
+                          key={index}
+                          className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200"
+                        >
+                          {reason}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedHistoryItem.action === 'process' && selectedHistoryItem.details.message && (
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-900 mb-3">Action Details:</h4>
+                    <p className="text-sm text-gray-600 bg-green-50 p-3 rounded-md">
+                      {selectedHistoryItem.details.message}
+                    </p>
+                  </div>
+                )}
+
+                {selectedHistoryItem.action === 'cancel' && (
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-900 mb-3">Cancel Details:</h4>
+                    <div className="space-y-2 text-sm text-gray-600 bg-gray-50 p-3 rounded-md">
+                      <p><strong>Cancel Loan:</strong> {selectedHistoryItem.details.cancelLoan ? 'Yes' : 'No'}</p>
+                      {selectedHistoryItem.details.holdUser && (
+                        <>
+                          <p><strong>Hold User:</strong> {selectedHistoryItem.details.holdUser}</p>
+                          {selectedHistoryItem.details.holdDuration && (
+                            <p><strong>Hold Duration:</strong> {selectedHistoryItem.details.holdDuration}</p>
+                          )}
+                          {selectedHistoryItem.details.holdDays && (
+                            <p><strong>Hold Days:</strong> {selectedHistoryItem.details.holdDays}</p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end mt-6">
+                <button
+                  onClick={() => setShowHistoryModal(false)}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+  };
 
 
   // Follow Up Tab
@@ -4379,8 +5490,10 @@ export function UserProfileDetail() {
         {activeTab === 'bank' && renderBankTab()}
         {activeTab === 'reference' && renderReferenceTab()}
         {activeTab === 'login-data' && renderLoginDataTab()}
+        {activeTab === 'applied-loans' && renderAppliedLoansTab()}
         {activeTab === 'loans' && renderLoansTab()}
         {activeTab === 'transactions' && renderTransactionsTab()}
+        {activeTab === 'validation' && renderValidationTab()}
         {activeTab === 'follow-up' && renderFollowUpTab()}
         {activeTab === 'notes' && renderNotesTab()}
         {activeTab === 'sms' && renderSmsTab()}

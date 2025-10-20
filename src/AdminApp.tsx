@@ -9,6 +9,8 @@ import { ActivityLogsPage } from './admin/pages/ActivityLogsPage';
 import { AdminTeamManagement } from './admin/pages/AdminTeamManagement';
 import { AdminReports } from './admin/pages/AdminReports';
 import { AdminSettings } from './admin/pages/AdminSettings';
+import { KFSDocument } from './admin/pages/KFSDocument';
+import { LoanAgreementDocument } from './admin/pages/LoanAgreementDocument';
 import { AdminProvider } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
 
@@ -236,6 +238,16 @@ export default function AdminApp() {
       <Route path="settings" element={
         <ProtectedRoute>
           <AdminSettings />
+        </ProtectedRoute>
+      } />
+      <Route path="kfs/:loanId" element={
+        <ProtectedRoute>
+          <KFSDocument />
+        </ProtectedRoute>
+      } />
+      <Route path="loan-agreement/:loanId" element={
+        <ProtectedRoute>
+          <LoanAgreementDocument />
         </ProtectedRoute>
       } />
       <Route path="*" element={<Navigate to="login" replace />} />

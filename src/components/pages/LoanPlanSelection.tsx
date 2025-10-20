@@ -49,6 +49,7 @@ interface PlanCalculation {
     processing_fee_percent: number;
     interest: number;
     interest_rate: string;
+    interest_percent_per_day: number;
     total: number;
   };
 }

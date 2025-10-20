@@ -188,20 +188,23 @@ router.post('/calculate', requireAuth, async (req, res) => {
     const user = users[0];
     
     // Use default rates if user doesn't have a tier assigned
-    const processingFeePercent = user.processing_fee_percent || 3; // Default 3%
-    const interestPercentPerDay = user.interest_percent_per_day || 0.01; // Default 0.01%
+    const processingFeePercent = user.processing_fee_percent || 10; // Default 10% (Bronze tier)
+    const interestPercentPerDay = user.interest_percent_per_day || 0.001; // Default 0.001 (0.1% per day)
 
     const loanAmount = parseFloat(loan_amount);
     
-    // Calculate processing fee
+    // Calculate processing fee (deducted from principal upfront)
     const processingFee = Math.round((loanAmount * processingFeePercent) / 100);
 
     // Calculate interest based on plan duration
+    // Interest = Principal × Interest Rate (decimal) × Days
+    // Note: interestPercentPerDay is already in decimal format (e.g., 0.001 = 0.1% per day)
     const totalDays = plan.total_duration_days || plan.repayment_days || 15;
-    const totalInterest = Math.round((loanAmount * interestPercentPerDay * totalDays) / 100);
+    const totalInterest = Math.round(loanAmount * interestPercentPerDay * totalDays);
 
-    // Calculate total repayable
-    const totalRepayable = loanAmount + totalInterest + processingFee;
+    // Calculate total repayable (Principal + Interest)
+    // Processing fee is deducted upfront, not added to repayment
+    const totalRepayable = loanAmount + totalInterest;
 
     // Calculate EMI details if multi-EMI plan
     let emiDetails = null;
@@ -280,6 +283,7 @@ router.post('/calculate', requireAuth, async (req, res) => {
           processing_fee_percent: processingFeePercent,
           interest: totalInterest,
           interest_rate: `${interestPercentPerDay}% per day for ${totalDays} days`,
+          interest_percent_per_day: interestPercentPerDay, // Add raw numeric value
           total: totalRepayable
         }
       }

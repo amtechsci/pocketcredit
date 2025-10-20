@@ -107,19 +107,18 @@ router.post('/', requireAuth, async (req, res) => {
          employment_type = ?, 
          company_name = ?, 
          designation = ?, 
-         monthly_salary = ?, 
          work_experience_years = ?, 
          updated_at = NOW() 
          WHERE user_id = ?`,
-        [employment_type, company_name, designation, parseFloat(monthly_income), work_experience_years ? parseInt(work_experience_years, 10) : null, userId]
+        [employment_type, company_name, designation, work_experience_years ? parseInt(work_experience_years, 10) : null, userId]
       );
     } else {
       // Create new record
       result = await executeQuery(
         `INSERT INTO employment_details 
-         (user_id, employment_type, company_name, designation, monthly_salary, work_experience_years, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-        [userId, employment_type, company_name, designation, parseFloat(monthly_income), work_experience_years ? parseInt(work_experience_years, 10) : null]
+         (user_id, employment_type, company_name, designation, work_experience_years, created_at, updated_at) 
+         VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
+        [userId, employment_type, company_name, designation, work_experience_years ? parseInt(work_experience_years, 10) : null]
       );
     }
 
@@ -186,7 +185,6 @@ router.get('/', requireAuth, async (req, res) => {
     res.json({
       status: 'success',
       data: {
-        monthly_income: employmentData.monthly_salary,
         employment_type: employmentData.employment_type,
         company_name: employmentData.company_name,
         designation: employmentData.designation,
@@ -199,6 +197,117 @@ router.get('/', requireAuth, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Internal server error while fetching employment details'
+    });
+  }
+});
+
+/**
+ * POST /api/employment/details
+ * Submit detailed employment information for loan application
+ */
+router.post('/details', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+    const { company_name, industry, department, designation, application_id } = req.body;
+
+    // Validation
+    if (!company_name || !industry || !department || !designation) {
+      return res.status(400).json({
+        success: false,
+        message: 'All employment fields are required'
+      });
+    }
+
+    if (!application_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Application ID is required'
+      });
+    }
+
+    // Verify the application belongs to the user
+    const application = await executeQuery(
+      'SELECT id, user_id FROM loan_applications WHERE id = ? AND user_id = ?',
+      [application_id, userId]
+    );
+
+    if (!application || application.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan application not found'
+      });
+    }
+
+    // Check if employment details already exist for this application
+    const existing = await executeQuery(
+      'SELECT id FROM application_employment_details WHERE application_id = ?',
+      [application_id]
+    );
+
+    if (existing.length > 0) {
+      // Update existing record
+      await executeQuery(
+        `UPDATE application_employment_details 
+         SET company_name = ?, 
+             industry = ?, 
+             department = ?, 
+             designation = ?, 
+             updated_at = NOW() 
+         WHERE application_id = ?`,
+        [company_name, industry, department, designation, application_id]
+      );
+    } else {
+      // Insert new record
+      await executeQuery(
+        `INSERT INTO application_employment_details 
+         (application_id, user_id, company_name, industry, department, designation, created_at, updated_at) 
+         VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [application_id, userId, company_name, industry, department, designation]
+      );
+    }
+
+    // Also update the employment_details table for user's profile
+    const employmentExists = await executeQuery(
+      'SELECT id FROM employment_details WHERE user_id = ?',
+      [userId]
+    );
+
+    if (employmentExists.length > 0) {
+      await executeQuery(
+        `UPDATE employment_details 
+         SET company_name = ?, 
+             designation = ?, 
+             updated_at = NOW() 
+         WHERE user_id = ?`,
+        [company_name, designation, userId]
+      );
+    } else {
+      await executeQuery(
+        `INSERT INTO employment_details 
+         (user_id, company_name, designation, employment_type, created_at, updated_at) 
+         VALUES (?, ?, ?, 'salaried', NOW(), NOW())`,
+        [userId, company_name, designation]
+      );
+    }
+
+    res.json({
+      success: true,
+      message: 'Employment details saved successfully',
+      data: {
+        company_name,
+        industry,
+        department,
+        designation
+      }
+    });
+
+  } catch (error) {
+    console.error('Employment details submission error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to save employment details',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

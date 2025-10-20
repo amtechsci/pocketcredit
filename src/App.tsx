@@ -22,8 +22,10 @@ import LoanPlanSelection from './components/pages/LoanPlanSelection';
 import LoanApplicationConfirmation from './components/pages/LoanApplicationConfirmation';
 import { BankDetailsPage } from './components/pages/BankDetailsPage';
 import { ReferenceDetailsPage } from './components/pages/ReferenceDetailsPage';
-import { UserReferencesPage } from './components/pages/UserReferencesPage';
+import { EnhancedUserReferencesPage } from './components/pages/EnhancedUserReferencesPage';
 import { LoanApplicationStepsPage } from './components/pages/LoanApplicationStepsPage';
+import { DigilockerKYCPage } from './components/pages/DigilockerKYCPage';
+import { EmploymentDetailsPage } from './components/pages/EmploymentDetailsPage';
 import { ApplicationFlow } from './components/ApplicationFlow';
 import { CreditScorePage } from './components/pages/CreditScorePage';
 import { ResourcesPage } from './components/pages/ResourcesPage';
@@ -343,7 +345,19 @@ function AppContent() {
         
         <Route path="/user-references" element={
           <DashboardLayout>
-            <UserReferencesPage />
+            <EnhancedUserReferencesPage />
+          </DashboardLayout>
+        } />
+        
+        <Route path="/loan-application/kyc-verification" element={
+          <DashboardLayout>
+            <DigilockerKYCPage />
+          </DashboardLayout>
+        } />
+        
+        <Route path="/loan-application/employment-details" element={
+          <DashboardLayout>
+            <EmploymentDetailsPage />
           </DashboardLayout>
         } />
         

@@ -41,7 +41,9 @@ const requireAuth = async (req, res, next) => {
       });
     }
 
-    if (user.status !== 'active') {
+    // Allow 'active' and 'on_hold' users to authenticate
+    // Users on hold can view their dashboard but can't progress (enforced by checkHoldStatus middleware)
+    if (user.status !== 'active' && user.status !== 'on_hold') {
       return res.status(401).json({
         status: 'error',
         message: 'Account is not active'
@@ -78,7 +80,8 @@ const requireAuthHybrid = async (req, res, next) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         const user = await findUserById(decoded.id);
         
-        if (user && user.status === 'active') {
+        // Allow both 'active' and 'on_hold' users
+        if (user && (user.status === 'active' || user.status === 'on_hold')) {
           req.user = user;
           req.userId = user.id;
           return next();
@@ -92,7 +95,8 @@ const requireAuthHybrid = async (req, res, next) => {
     if (req.session && req.session.userId) {
       const user = await findUserById(req.session.userId);
       
-      if (user && user.status === 'active') {
+      // Allow both 'active' and 'on_hold' users
+      if (user && (user.status === 'active' || user.status === 'on_hold')) {
         req.user = user;
         req.userId = user.id;
         return next();

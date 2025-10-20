@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, IndianRupee, FileText, Shield, ExternalLink } from 'lucide-react';
+import { ArrowLeft, IndianRupee, FileText, Shield, ExternalLink } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Input } from '../ui/input';
@@ -36,13 +36,14 @@ export function SimplifiedLoanApplicationPage() {
   const [loading, setLoading] = useState(false);
   const [canApply, setCanApply] = useState(true);
   const [checkingEligibility, setCheckingEligibility] = useState(true);
+  const [userLoanLimit, setUserLoanLimit] = useState<number>(100000); // Default 1L
   const [formData, setFormData] = useState<LoanApplicationData>({
     desiredAmount: 0,
     purpose: '',
     agreeToTerms: false
   });
 
-  // Check if user can apply for a new loan
+  // Check if user can apply for a new loan and fetch loan limit
   useEffect(() => {
     const checkLoanEligibility = async () => {
       try {
@@ -50,6 +51,11 @@ export function SimplifiedLoanApplicationPage() {
         if (response.data && (response.data as any).loan_status) {
           const loanStatus = (response.data as any).loan_status;
           setCanApply(loanStatus.can_apply);
+          
+          // Get user's loan limit
+          const limit = (response.data as any).user?.loan_limit || (response.data as any).summary?.available_credit || 100000;
+          setUserLoanLimit(limit);
+          console.log('User loan limit:', limit);
           
           if (!loanStatus.can_apply) {
             if (loanStatus.has_pending_application) {
@@ -90,6 +96,16 @@ export function SimplifiedLoanApplicationPage() {
     // Validation
     if (!formData.desiredAmount || formData.desiredAmount <= 0) {
       toast.error('Please enter a valid loan amount');
+      return;
+    }
+
+    if (formData.desiredAmount < 1000) {
+      toast.error('Minimum loan amount is ₹1,000');
+      return;
+    }
+
+    if (formData.desiredAmount > userLoanLimit) {
+      toast.error(`Loan amount cannot exceed your limit of ₹${userLoanLimit.toLocaleString()}`);
       return;
     }
 
@@ -161,6 +177,9 @@ export function SimplifiedLoanApplicationPage() {
             <div className="space-y-2">
               <Label htmlFor="desiredAmount" className="text-base font-medium">
                 Desired Loan Amount (₹) *
+                <span className="text-sm text-blue-600 ml-2 font-normal">
+                  (Max: ₹{userLoanLimit.toLocaleString()})
+                </span>
               </Label>
               <div className="relative">
                 <IndianRupee className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
@@ -168,17 +187,32 @@ export function SimplifiedLoanApplicationPage() {
                   id="desiredAmount"
                   type="number"
                   value={formData.desiredAmount || ''}
-                  onChange={(e) => handleInputChange('desiredAmount', parseInt(e.target.value) || 0)}
-                  placeholder="Enter loan amount"
+                  style={{border: '2px solid #e5e7eb'}}
                   className="pl-10 h-12 text-base"
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value) || 0;
+                    // Enforce maximum limit in real-time
+                    if (value > userLoanLimit) {
+                      toast.error(`Maximum loan limit is ₹${userLoanLimit.toLocaleString()}`);
+                      handleInputChange('desiredAmount', userLoanLimit);
+                    } else {
+                      handleInputChange('desiredAmount', value);
+                    }
+                  }}
+                  onBlur={(e) => {
+                    // Validate on blur as well
+                    const value = parseInt(e.target.value) || 0;
+                    if (value > userLoanLimit) {
+                      handleInputChange('desiredAmount', userLoanLimit);
+                    }
+                  }}
+                  placeholder="Enter loan amount"
                   min="1000"
+                  max={userLoanLimit}
                   step="1000"
                   required
                 />
               </div>
-              <p className="text-sm text-gray-500">
-                Minimum amount: ₹1,000
-              </p>
             </div>
 
             {/* Loan Purpose */}

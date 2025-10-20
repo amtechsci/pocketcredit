@@ -8,7 +8,7 @@ router.post('/', requireAuth, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;
-    const { employment_type, monthly_salary, payment_mode, designation } = req.body;
+    const { employment_type, income_range, eligible_loan_amount, payment_mode, designation } = req.body;
 
     if (!userId) {
       return res.status(401).json({ success: false, message: 'Authentication required' });
@@ -51,10 +51,10 @@ router.post('/', requireAuth, async (req, res) => {
 
     // For salaried users - validate salary fields
     if (employment_type === 'salaried') {
-      if (!monthly_salary || !payment_mode || !designation) {
+      if (!income_range || !eligible_loan_amount || !payment_mode || !designation) {
         return res.status(400).json({ 
           success: false, 
-          message: 'Salary, payment mode, and designation are required for salaried users' 
+          message: 'Income range, payment mode, and designation are required for salaried users' 
         });
       }
 
@@ -65,123 +65,89 @@ router.post('/', requireAuth, async (req, res) => {
         criteria[c.config_key] = c.config_value;
       });
 
-      const minSalary = parseInt(criteria.min_monthly_salary || '30000');
-      const allowedModes = (criteria.allowed_payment_modes || 'bank_transfer,cheque').split(',').map(m => m.trim());
       const holdDays = parseInt(criteria.hold_period_days || '90');
 
       // Check eligibility
       const issues = [];
       let eligible = true;
 
-      // Check salary
-      if (parseInt(monthly_salary) < minSalary) {
-        eligible = false;
-        issues.push(`Minimum monthly salary required is ₹${minSalary.toLocaleString()}`);
+      // Income range is already validated on frontend, but double-check
+      const validRanges = ['1k-15k', '15k-25k', '25k-35k', 'above-35k'];
+      if (!validRanges.includes(income_range)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid income range selected'
+        });
       }
 
       // Check payment mode
-      const normalizedPaymentMode = payment_mode.toLowerCase().replace(' ', '_');
-      if (!allowedModes.includes(normalizedPaymentMode)) {
-        if (payment_mode === 'cash') {
-          // Cash payment - hold permanently
-          await executeQuery(
-            'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
-            ['on_hold', 'not_eligible', 'Cash payment mode not allowed', userId]
-          );
+      if (payment_mode === 'cash') {
+        // Cash payment - hold permanently
+        await executeQuery(
+          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
+          ['on_hold', 'not_eligible', 'Cash payment mode not allowed', userId]
+        );
 
-          return res.json({
-            success: true,
-            data: {
-              eligible: false,
-              message: 'Application held permanently due to cash payment mode',
-              hold_reason: 'Cash payment mode',
-              hold_permanent: true
-            }
-          });
-        } else if (payment_mode === 'cheque') {
-          // Cheque payment - hold for 90 days
-          const holdUntil = new Date();
-          holdUntil.setDate(holdUntil.getDate() + holdDays);
-          
-          await executeQuery(
-            'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, hold_until_date = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
-            ['on_hold', 'not_eligible', 'Cheque payment mode', holdUntil, userId]
-          );
+        return res.json({
+          success: true,
+          data: {
+            eligible: false,
+            message: 'Application held permanently due to cash payment mode',
+            hold_reason: 'Cash payment mode',
+            hold_permanent: true
+          }
+        });
+      } else if (payment_mode === 'cheque') {
+        // Cheque payment - hold for 90 days
+        const holdUntil = new Date();
+        holdUntil.setDate(holdUntil.getDate() + holdDays);
+        
+        await executeQuery(
+          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, hold_until_date = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
+          ['on_hold', 'not_eligible', 'Cheque payment mode', holdUntil, userId]
+        );
 
-          return res.json({
-            success: true,
-            data: {
-              eligible: false,
-              message: `Application held for ${holdDays} days due to cheque payment mode`,
-              hold_reason: 'Cheque payment mode',
-              hold_until: holdUntil,
-              hold_days: holdDays
-            }
-          });
-        }
+        return res.json({
+          success: true,
+          data: {
+            eligible: false,
+            message: `Application held for ${holdDays} days due to cheque payment mode`,
+            hold_reason: 'Cheque payment mode',
+            hold_until: holdUntil,
+            hold_days: holdDays
+          }
+        });
       }
 
       if (eligible) {
-        // Get loan limit from tiers table based on salary
-        const salary = parseFloat(monthly_salary);
+        // Use the loan amount calculated from income range
+        const loanLimit = parseFloat(eligible_loan_amount);
         
-        // Fetch active loan limit tiers ordered by tier_order
-        const tiers = await executeQuery(
-          'SELECT * FROM loan_limit_tiers WHERE is_active = 1 ORDER BY tier_order ASC'
-        );
-
-        let loanLimit = 0;
-        
-        // Find the matching tier for the salary
-        for (const tier of tiers) {
-          const minSalary = parseFloat(tier.min_salary);
-          const maxSalary = tier.max_salary ? parseFloat(tier.max_salary) : null;
-          
-          // Check if salary falls in this tier
-          if (maxSalary === null) {
-            // No upper limit (e.g., "35000 and above")
-            if (salary >= minSalary) {
-              loanLimit = parseFloat(tier.loan_limit);
-              break;
-            }
-          } else {
-            // Has both min and max
-            if (salary >= minSalary && salary <= maxSalary) {
-              loanLimit = parseFloat(tier.loan_limit);
-              break;
-            }
-          }
-        }
-        
-        // If no tier matched, set loan limit to 0
-        if (loanLimit === 0) {
-          eligible = false;
-          issues.push('Your salary does not fall within any eligible loan tier');
-        }
-        
-        // User is eligible - update profile step, set loan limit, and save employment info
+        // User is eligible - update profile step, set loan limit, income range, and save employment info
         await executeQuery(
-          'UPDATE users SET profile_completion_step = 2, status = ?, eligibility_status = ?, loan_limit = ?, updated_at = NOW() WHERE id = ?',
-          ['active', 'eligible', loanLimit, userId]
+          'UPDATE users SET profile_completion_step = 2, status = ?, eligibility_status = ?, loan_limit = ?, income_range = ?, updated_at = NOW() WHERE id = ?',
+          ['active', 'eligible', loanLimit, income_range, userId]
         );
 
         // Save employment data
         await executeQuery(`
           INSERT INTO employment_details 
-          (user_id, employment_type, monthly_salary, salary_payment_mode, designation, created_at, updated_at)
+          (user_id, employment_type, income_range, salary_payment_mode, designation, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, NOW(), NOW())
           ON DUPLICATE KEY UPDATE 
             employment_type = VALUES(employment_type),
-            monthly_salary = VALUES(monthly_salary),
+            income_range = VALUES(income_range),
             salary_payment_mode = VALUES(salary_payment_mode),
             designation = VALUES(designation),
             updated_at = NOW()
-        `, [userId, employment_type, monthly_salary, payment_mode, designation]);
+        `, [userId, employment_type, income_range, payment_mode, designation]);
 
         return res.json({
           success: true,
           data: {
             eligible: true,
+            loan_limit: loanLimit,
+            income_range: income_range,
             message: 'Eligibility verified successfully'
           }
         });
@@ -205,10 +171,10 @@ router.post('/', requireAuth, async (req, res) => {
       }
     }
 
-    // For student users - no salary validation needed
+    // For student users - skip Step 2, go directly to Step 3 (College Information)
     if (employment_type === 'student') {
       await executeQuery(
-        'UPDATE users SET profile_completion_step = 2, status = ?, eligibility_status = ?, updated_at = NOW() WHERE id = ?',
+        'UPDATE users SET profile_completion_step = 3, status = ?, eligibility_status = ?, updated_at = NOW() WHERE id = ?',
         ['active', 'pending', userId]
       );
 

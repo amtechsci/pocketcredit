@@ -1,6 +1,7 @@
 const express = require('express');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
+const { checkHoldStatus } = require('../middleware/checkHoldStatus');
 const router = express.Router();
 
 // =====================================================
@@ -8,7 +9,7 @@ const router = express.Router();
 // =====================================================
 
 // POST /api/bank-details - Save Bank Details for Loan Application
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;
@@ -94,29 +95,18 @@ router.post('/', requireAuth, async (req, res) => {
 
     const bankName = bankNames[bankCode] || `${bankCode} Bank`;
 
-    // Check if bank details already exist for this application
-    const existingBankDetails = await executeQuery(
-      'SELECT id FROM bank_details WHERE loan_application_id = ?',
-      [application_id]
+    // Insert new bank details (user-level)
+    const result = await executeQuery(
+      'INSERT INTO bank_details (user_id, account_number, ifsc_code, bank_name, account_holder_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())',
+      [userId, account_number, ifsc_code, bankName, accountHolderName]
     );
+    const bankDetailsId = result.insertId;
 
-    let bankDetailsId;
-
-    if (existingBankDetails && existingBankDetails.length > 0) {
-      // Update existing bank details
-      await executeQuery(
-        'UPDATE bank_details SET account_number = ?, ifsc_code = ?, bank_name = ?, account_holder_name = ?, updated_at = NOW() WHERE loan_application_id = ?',
-        [account_number, ifsc_code, bankName, accountHolderName, application_id]
-      );
-      bankDetailsId = existingBankDetails[0].id;
-    } else {
-      // Insert new bank details
-      const result = await executeQuery(
-        'INSERT INTO bank_details (user_id, loan_application_id, account_number, ifsc_code, bank_name, account_holder_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())',
-        [userId, application_id, account_number, ifsc_code, bankName, accountHolderName]
-      );
-      bankDetailsId = result.insertId;
-    }
+    // Link the bank details to the loan application
+    await executeQuery(
+      'UPDATE loan_applications SET user_bank_id = ? WHERE id = ?',
+      [bankDetailsId, application_id]
+    );
 
     // Update loan application status and step
     await executeQuery(
@@ -211,10 +201,11 @@ router.get('/user/:userId', requireAuth, async (req, res) => {
     }
 
     const bankDetails = await executeQuery(
-      `SELECT bd.*, la.application_number, la.loan_amount, la.status as application_status
+      `SELECT bd.*, 
+              (SELECT COUNT(*) FROM loan_applications WHERE user_bank_id = bd.id) as usage_count,
+              (SELECT application_number FROM loan_applications WHERE user_bank_id = bd.id ORDER BY created_at DESC LIMIT 1) as latest_application
        FROM bank_details bd
-       JOIN loan_applications la ON bd.loan_application_id = la.id
-       WHERE la.user_id = ?
+       WHERE bd.user_id = ?
        ORDER BY bd.created_at DESC`,
       [userId]
     );
@@ -275,27 +266,11 @@ router.post('/choose', requireAuth, async (req, res) => {
 
     const bankDetail = bankDetails[0];
 
-    // Check if bank details already exist for this application
-    const existingBankDetails = await executeQuery(
-      'SELECT id FROM bank_details WHERE loan_application_id = ?',
-      [application_id]
+    // Link the existing bank details to the loan application
+    await executeQuery(
+      'UPDATE loan_applications SET user_bank_id = ? WHERE id = ?',
+      [bank_details_id, application_id]
     );
-
-    let result;
-
-    if (existingBankDetails && existingBankDetails.length > 0) {
-      // Update existing bank details
-      result = await executeQuery(
-        'UPDATE bank_details SET account_number = ?, ifsc_code = ?, bank_name = ?, account_holder_name = ?, updated_at = NOW() WHERE loan_application_id = ?',
-        [bankDetail.account_number, bankDetail.ifsc_code, bankDetail.bank_name, bankDetail.account_holder_name, application_id]
-      );
-    } else {
-      // Insert new bank details
-      result = await executeQuery(
-        'INSERT INTO bank_details (user_id, loan_application_id, account_number, ifsc_code, bank_name, account_holder_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())',
-        [userId, application_id, bankDetail.account_number, bankDetail.ifsc_code, bankDetail.bank_name, bankDetail.account_holder_name]
-      );
-    }
 
     res.json({
       success: true,

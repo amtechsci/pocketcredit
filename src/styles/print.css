@@ -1,0 +1,83 @@
+/* Print Styles for KFS Document */
+@media print {
+  /* Hide non-printable elements */
+  .print\\:hidden {
+    display: none !important;
+  }
+
+  /* Reset page margins */
+  @page {
+    margin: 0;
+    size: A4;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Remove shadows and backgrounds for print */
+  .print\\:shadow-none {
+    box-shadow: none !important;
+  }
+
+  /* Page breaks */
+  .page-break {
+    page-break-after: always;
+    page-break-before: avoid;
+    break-after: page;
+    break-before: avoid;
+    display: block;
+    height: 0;
+    margin: 0;
+    padding: 0;
+  }
+
+  .page-break-before {
+    page-break-before: always;
+    break-before: page;
+  }
+
+  .page-break-after {
+    page-break-after: always;
+    break-after: page;
+  }
+
+  .page-break-inside-avoid {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Ensure tables don't break across pages */
+  table {
+    page-break-inside: avoid;
+  }
+
+  /* Ensure proper spacing */
+  .print\\:my-0 {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+
+  /* Ensure proper padding for print */
+  .print\\:p-12 {
+    padding: 3rem !important;
+  }
+
+  .print\\:p-16 {
+    padding: 4rem !important;
+  }
+
+  /* Hide scrollbars */
+  ::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Optimize colors for print */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+}
+

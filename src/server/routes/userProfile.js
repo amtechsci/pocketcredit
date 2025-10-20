@@ -39,7 +39,9 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       SELECT 
         id, application_number, loan_amount, loan_purpose, 
         tenure_months, interest_rate, status, rejection_reason, 
-        approved_by, approved_at, disbursed_at, created_at, updated_at
+        approved_by, approved_at, disbursed_at, created_at, updated_at,
+        processing_fee_percent, interest_percent_per_day, 
+        processing_fee, total_interest, total_repayable, plan_snapshot
       FROM loan_applications 
       WHERE user_id = ?
       ORDER BY created_at DESC
@@ -53,7 +55,11 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     `, [userId]);
     
     const employment = await executeQuery(`
-      SELECT * FROM employment_details WHERE user_id = ? LIMIT 1
+      SELECT ed.*, u.income_range 
+      FROM employment_details ed
+      LEFT JOIN users u ON ed.user_id = u.id
+      WHERE ed.user_id = ? 
+      LIMIT 1
     `, [userId]);
 
     // Calculate age from date_of_birth
@@ -69,8 +75,21 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       return age;
     };
 
+    // Convert income_range to approximate monthly income
+    const getMonthlyIncomeFromRange = (range) => {
+      if (!range) return 0;
+      const rangeMap = {
+        '1k-15k': 7500,
+        '15k-25k': 20000,
+        '25k-35k': 30000,
+        'above-35k': 40000
+      };
+      return rangeMap[range] || 0;
+    };
+
     // Derive risk category and member level from available data
-    const monthlyIncomeValue = (employment && employment[0])?.monthly_salary ? Number((employment && employment[0])?.monthly_salary) : 0;
+    const incomeRange = (employment && employment[0])?.income_range;
+    const monthlyIncomeValue = getMonthlyIncomeFromRange(incomeRange);
     let riskCategory = 'N/A';
     if (monthlyIncomeValue > 0) {
       if (monthlyIncomeValue >= 50000) riskCategory = 'Low';
@@ -116,7 +135,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         education: 'N/A', // This field doesn't exist yet
         employment: (employment && employment[0])?.employment_type || 'N/A',
         company: (employment && employment[0])?.company_name || 'N/A',
-        monthlyIncome: (employment && employment[0])?.monthly_salary || 0,
+        monthlyIncome: monthlyIncomeValue,
         workExperience: (employment && employment[0])?.work_experience_years || 'N/A',
         designation: (employment && employment[0])?.designation || 'N/A',
         yearsAtCurrentAddress: 'N/A', // This would need to be calculated
@@ -159,20 +178,22 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           appliedDate: app.created_at,
           approvedDate: app.approved_at,
           disbursedDate: app.disbursed_at,
+          disbursed_at: app.disbursed_at,
           emi: emi,
           tenure: app.tenure_months,
           timePeriod: app.tenure_months,
-          processingFeePercent: 2.5,
-          interestRate: app.interest_rate || 0,
+          processingFeePercent: app.processing_fee_percent || 14,
+          interestRate: app.interest_percent_per_day || 0.3,
           disbursedAmount: app.disbursed_at ? app.loan_amount : 0,
-          processingFee: processingFee,
+          processingFee: app.processing_fee || processingFee,
           gst: gst,
-          interest: totalInterest,
-          totalAmount: totalAmount,
+          interest: app.total_interest || totalInterest,
+          totalAmount: app.total_repayable || totalAmount,
           reason: app.rejection_reason || app.loan_purpose || 'N/A',
           statusDate: app.approved_at || app.disbursed_at || app.created_at,
           createdAt: app.created_at,
-          updatedAt: app.updated_at || app.created_at
+          updatedAt: app.updated_at || app.created_at,
+          plan_snapshot: app.plan_snapshot
         };
       })
     };

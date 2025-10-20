@@ -57,7 +57,7 @@ export const LoanApplicationConfirmation: React.FC = () => {
         processing_fee: calculation.processing_fee,
         processing_fee_percent: calculation.breakdown.processing_fee_percent,
         total_interest: calculation.interest,
-        interest_percent_per_day: parseFloat(calculation.breakdown.interest_rate.match(/[\d.]+/)?.[0] || '0'),
+        interest_percent_per_day: calculation.breakdown.interest_percent_per_day || 0.001,
         total_repayable: calculation.total_repayable,
         late_fee_structure: calculation.late_fee_structure,
         emi_schedule: calculation.emi_details?.schedule || null
@@ -65,7 +65,10 @@ export const LoanApplicationConfirmation: React.FC = () => {
 
       if (response.status === 'success' || response.success === true) {
         toast.success('Loan application submitted successfully!');
-        navigate(`/loan-application/steps?applicationId=${response.data.application_id}`);
+        // Redirect to KYC verification instead of steps
+        navigate('/loan-application/kyc-verification', {
+          state: { applicationId: response.data.application_id }
+        });
       } else {
         toast.error(response.message || 'Failed to submit loan application');
       }

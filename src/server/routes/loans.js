@@ -85,7 +85,7 @@ router.post('/apply', requireAuth, async (req, res) => {
 
     // Get user profile and employment details for eligibility checks
     const users = await executeQuery(
-      `SELECT u.*, ed.monthly_salary, ed.employment_type, ed.company_name
+      `SELECT u.*, ed.employment_type, ed.company_name
        FROM users u 
        LEFT JOIN employment_details ed ON u.id = ed.user_id
        WHERE u.id = ?`,
@@ -179,7 +179,7 @@ router.get('/pending', requireAuth, async (req, res) => {
     const queryPromise = (async () => {
       console.log('Database connection established'); // This log is now less relevant as connection is managed by executeQuery
 
-      // Query for pending loan applications
+      // Query for pending loan applications (including all new statuses)
       const applications = await executeQuery(
         `SELECT DISTINCT
           la.id,
@@ -189,7 +189,7 @@ router.get('/pending', requireAuth, async (req, res) => {
           la.status,
           la.created_at
         FROM loan_applications la
-        WHERE la.user_id = ? AND la.status IN ('submitted', 'under_review', 'approved', 'disbursed')
+        WHERE la.user_id = ? AND la.status IN ('submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'cleared')
         ORDER BY la.created_at DESC
         LIMIT 10`,
         [userId]
@@ -269,20 +269,31 @@ router.get('/:applicationId', requireAuth, async (req, res) => {
     // Get current step separately to avoid complex joins
     let currentStep = 'bank_details';
     try {
-      const bankDetails = await executeQuery(
-        'SELECT id FROM bank_details WHERE loan_application_id = ? LIMIT 1',
+      // Check if loan application has bank details linked
+      const loanWithBank = await executeQuery(
+        'SELECT user_bank_id FROM loan_applications WHERE id = ? AND user_bank_id IS NOT NULL',
         [applicationId]
       );
       
-      // Check if user has references (user-level, not loan-specific)
+      // Check if user has exactly 3 references and alternate data (user-level, not loan-specific)
       const userReferences = await executeQuery(
-        'SELECT id FROM `references` WHERE user_id = ? LIMIT 1',
+        'SELECT COUNT(*) as ref_count FROM `references` WHERE user_id = ?',
         [userId]
       );
       
-      if (bankDetails && bankDetails.length > 0 && userReferences && userReferences.length > 0) {
+      // Check if user has alternate data
+      const userAlternateData = await executeQuery(
+        'SELECT alternate_mobile, company_name, company_email FROM users WHERE id = ?',
+        [userId]
+      );
+      
+      const hasRequiredReferences = userReferences && userReferences.length > 0 && userReferences[0].ref_count === 3;
+      const hasAlternateData = userAlternateData && userAlternateData.length > 0 && 
+        userAlternateData[0].alternate_mobile && userAlternateData[0].company_name && userAlternateData[0].company_email;
+      
+      if (loanWithBank && loanWithBank.length > 0 && hasRequiredReferences && hasAlternateData) {
         currentStep = 'completed';
-      } else if (bankDetails && bankDetails.length > 0) {
+      } else if (loanWithBank && loanWithBank.length > 0) {
         currentStep = 'references';
       } else {
         currentStep = 'bank_details';

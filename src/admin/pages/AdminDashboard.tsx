@@ -10,15 +10,9 @@ import {
   Users,
   CreditCard,
   IndianRupee,
-  AlertCircle,
   CheckCircle,
   Clock,
-  XCircle,
-  Settings,
-  Activity,
-  ArrowUpRight,
-  FileText,
-  Shield
+  XCircle
 } from 'lucide-react';
 
 
@@ -34,24 +28,11 @@ export function AdminDashboard() {
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
-        const [statsResponse, activityResponse, chartResponse] = await Promise.all([
-          adminApiService.getDashboardStats('30d'),
-          adminApiService.getRecentActivities(10),
-          adminApiService.getChartData('30d')
-        ]);
+        const statsResponse = await adminApiService.getDashboardStats('30d');
         
         if (statsResponse.status === 'success' && statsResponse.data) {
-          console.log('📊 Dashboard data received:', {
-            stats: statsResponse.data,
-            activities: activityResponse.data,
-            charts: chartResponse.data
-          });
-          
-          setDashboardData({
-            ...statsResponse.data,
-            recentActivity: activityResponse.data || [],
-            chartData: chartResponse.data || {}
-          });
+          console.log('📊 Dashboard data received:', { stats: statsResponse.data });
+          setDashboardData(statsResponse.data);
         }
       } catch (err) {
         console.error('Dashboard data fetch error:', err);
@@ -91,10 +72,10 @@ export function AdminDashboard() {
       color: 'orange'
     },
     {
-      title: 'Approved Loans',
-      subtitle: 'Successfully Approved',
-      value: dashboardData.approvedApplications?.toLocaleString() || '0',
-      change: dashboardData.approvedApplications > 0 ? `${Math.round((dashboardData.approvedApplications / dashboardData.totalApplications) * 100)}%` : '0%',
+      title: 'Follow Up Required',
+      subtitle: 'Approved & Need Follow Up',
+      value: dashboardData.followUpApplications?.toLocaleString() || '0',
+      change: dashboardData.followUpApplications > 0 ? `${Math.round((dashboardData.followUpApplications / dashboardData.totalApplications) * 100)}%` : '0%',
       trend: 'up',
       icon: CheckCircle,
       color: 'green'
@@ -119,9 +100,6 @@ export function AdminDashboard() {
     }
   ] : [];
 
-
-  const recentActivity = dashboardData?.recentActivity || [];
-
   const quickActions = [
     { 
       title: 'Pending Approvals', 
@@ -134,9 +112,9 @@ export function AdminDashboard() {
       action: () => navigate('/admin/applications?status=submitted') 
     },
     { 
-      title: 'Approved Loans', 
-      count: dashboardData?.approvedApplications?.toString() || '0', 
-      action: () => navigate('/admin/applications?status=approved') 
+      title: 'Follow Up Required', 
+      count: dashboardData?.followUpApplications?.toString() || '0', 
+      action: () => navigate('/admin/applications?status=follow_up') 
     },
     { 
       title: 'Total Users', 
@@ -156,37 +134,6 @@ export function AdminDashboard() {
     return colors[color as keyof typeof colors] || 'bg-gray-500';
   };
 
-  const getActivityIcon = (type: string) => {
-    switch (type) {
-      case 'user_action':
-        return <Users className="w-4 h-4 text-blue-500" />;
-      case 'admin_action':
-        return <Settings className="w-4 h-4 text-purple-500" />;
-      case 'system_event':
-        return <Activity className="w-4 h-4 text-gray-500" />;
-      case 'api_call':
-        return <ArrowUpRight className="w-4 h-4 text-indigo-500" />;
-      case 'error':
-        return <AlertCircle className="w-4 h-4 text-red-500" />;
-      case 'approval':
-        return <CheckCircle className="w-4 h-4 text-green-500" />;
-      case 'rejection':
-        return <XCircle className="w-4 h-4 text-red-500" />;
-      case 'application':
-        return <FileText className="w-4 h-4 text-blue-500" />;
-      case 'verification':
-        return <Shield className="w-4 h-4 text-orange-500" />;
-      case 'payment':
-        return <IndianRupee className="w-4 h-4 text-green-500" />;
-      default:
-        return <Clock className="w-4 h-4 text-gray-500" />;
-    }
-  };
-
-  const getReadableAction = (action: string, _metadata?: any) => {
-    // Return the action as-is since middleware now provides business-friendly descriptions
-    return action;
-  };
 
   return (
     <div className="p-6 space-y-6">
@@ -279,49 +226,6 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      {/* Recent Activity Feed */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900">Recent Activity</h2>
-            <button 
-              onClick={() => navigate('/admin/activity-logs')}
-              className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-            >
-              View All
-            </button>
-          </div>
-        </div>
-        <div className="divide-y divide-gray-200">
-          {recentActivity.length > 0 ? recentActivity.map((activity: any) => (
-            <div key={activity.id} className="p-6 flex items-center space-x-4">
-              <div className="flex-shrink-0">
-                {getActivityIcon(activity.type)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900">
-                  {getReadableAction(activity.action, activity.metadata)}
-                </p>
-                <p className="text-sm text-gray-500">
-                  {activity.user ? `👤 ${activity.user.name || `User #${activity.user.id}`}` : 
-                   activity.admin ? `⚙️ Admin ${activity.admin.name || activity.admin.email || `#${activity.admin.id}`}` : 
-                   '🔧 System'}
-                  {activity.metadata?.phone && ` • ${activity.metadata.phone}`}
-                  {activity.metadata?.amount && ` • ₹${activity.metadata.amount}`}
-                  {activity.metadata?.newStatus && ` • ${activity.metadata.newStatus}`}
-                </p>
-              </div>
-              <div className="flex-shrink-0 text-sm text-gray-500">
-                {new Date(activity.timestamp).toLocaleString()}
-              </div>
-            </div>
-          )) : (
-            <div className="p-6 text-center text-gray-500">
-              No recent activity found
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

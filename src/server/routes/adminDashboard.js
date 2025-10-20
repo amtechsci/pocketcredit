@@ -38,7 +38,7 @@ const getDashboardStats = async (req, res) => {
       loansResult
     ] = await Promise.all([
       executeQuery('SELECT COUNT(*) as total, SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as recent, SUM(CASE WHEN kyc_completed = 1 THEN 1 ELSE 0 END) as verified, SUM(CASE WHEN kyc_completed = 0 THEN 1 ELSE 0 END) as pending FROM users', [startDate]),
-      executeQuery('SELECT COUNT(*) as total, SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as recent, SUM(CASE WHEN LOWER(status) IN ("submitted", "pending", "under_review") THEN 1 ELSE 0 END) as pending, SUM(CASE WHEN LOWER(status) = "approved" THEN 1 ELSE 0 END) as approved, SUM(CASE WHEN LOWER(status) = "rejected" THEN 1 ELSE 0 END) as rejected, SUM(loan_amount) as totalAmount, AVG(loan_amount) as avgAmount FROM loan_applications', [startDate]),
+      executeQuery('SELECT COUNT(*) as total, SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as recent, SUM(CASE WHEN LOWER(status) IN ("submitted", "pending", "under_review") THEN 1 ELSE 0 END) as pending, SUM(CASE WHEN LOWER(status) = "follow_up" THEN 1 ELSE 0 END) as follow_up, SUM(CASE WHEN LOWER(status) = "rejected" THEN 1 ELSE 0 END) as rejected, SUM(loan_amount) as totalAmount, AVG(loan_amount) as avgAmount FROM loan_applications', [startDate]),
       executeQuery('SELECT COUNT(*) as total, SUM(CASE WHEN status = "approved" THEN 1 ELSE 0 END) as active, SUM(CASE WHEN status = "disbursed" THEN 1 ELSE 0 END) as disbursed, SUM(loan_amount) as totalDisbursed, AVG(loan_amount) as avgAmount FROM loan_applications WHERE status IN ("approved", "disbursed")')
     ]);
 
@@ -58,7 +58,7 @@ const getDashboardStats = async (req, res) => {
       // Application statistics
       totalApplications: applications.total || 0,
       pendingApplications: applications.pending || 0,
-      approvedApplications: applications.approved || 0,
+      followUpApplications: applications.follow_up || 0,
       rejectedApplications: applications.rejected || 0,
       newApplications: applications.recent || 0,
       submittedApplications: applications.recent || 0,

@@ -100,14 +100,16 @@ export function LoanApplicationPage() {
       navigate('/auth');
     }
   }, [isAuthenticated, navigate]);
+  
   const [currentStep, setCurrentStep] = useState(0);
+  const [userLoanLimit, setUserLoanLimit] = useState<number>(100000); // Default 1L, will be fetched from API
   const [formData, setFormData] = useState<LoanApplicationData>({
     panNumber: '',
     monthlyIncome: 50000,
     employmentType: '',
-    desiredLoanAmount: 500000,
+    desiredLoanAmount: 50000,
     loanPurpose: '',
-    selectedLoanAmount: 320000,
+    selectedLoanAmount: 50000,
     reasonForLoan: 'Personal',
     firstName: user?.first_name || '',
     lastName: user?.last_name || '',
@@ -129,6 +131,44 @@ export function LoanApplicationPage() {
   const [loading, setLoading] = useState(false);
   const [eligibilityResult, setEligibilityResult] = useState<any>(null);
 
+  // Fetch user's loan limit from API
+  useEffect(() => {
+    const fetchUserLoanLimit = async () => {
+      try {
+        const token = localStorage.getItem('pocket_user_token');
+        if (!token) return;
+
+        const response = await fetch('/api/dashboard', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const limit = data.data?.user?.loan_limit || data.data?.summary?.available_credit || 100000;
+          setUserLoanLimit(limit);
+          
+          // Update form data to match user's limit
+          setFormData(prev => ({
+            ...prev,
+            desiredLoanAmount: Math.min(prev.desiredLoanAmount, limit),
+            selectedLoanAmount: Math.min(prev.selectedLoanAmount, limit)
+          }));
+
+          console.log('User loan limit:', limit);
+        }
+      } catch (error) {
+        console.error('Failed to fetch user loan limit:', error);
+      }
+    };
+
+    if (isAuthenticated) {
+      fetchUserLoanLimit();
+    }
+  }, [isAuthenticated]);
+
   // Calculate progress
   const progress = ((currentStep + 1) / steps.length) * 100;
 
@@ -137,7 +177,9 @@ export function LoanApplicationPage() {
   };
 
   const handleSliderChange = (value: number[]) => {
-    setFormData(prev => ({ ...prev, selectedLoanAmount: value[0] }));
+    const requestedAmount = value[0];
+    const limitedAmount = Math.min(requestedAmount, userLoanLimit);
+    setFormData(prev => ({ ...prev, selectedLoanAmount: limitedAmount }));
   };
 
   const nextStep = () => {
@@ -246,15 +288,29 @@ export function LoanApplicationPage() {
           </div>
 
           <div>
-            <Label htmlFor="desiredLoanAmount" className="text-sm sm:text-base">Desired Loan Amount (₹) *</Label>
+            <Label htmlFor="desiredLoanAmount" className="text-sm sm:text-base">
+              Desired Loan Amount (₹) *
+              <span className="text-xs text-gray-500 ml-2">(Max: ₹{userLoanLimit.toLocaleString()})</span>
+            </Label>
             <Input
               id="desiredLoanAmount"
               type="number"
               value={formData.desiredLoanAmount}
-              onChange={(e) => handleInputChange('desiredLoanAmount', parseInt(e.target.value) || 0)}
-              placeholder="5,00,000"
+              onChange={(e) => {
+                const value = parseInt(e.target.value) || 0;
+                const limitedValue = Math.min(value, userLoanLimit);
+                handleInputChange('desiredLoanAmount', limitedValue);
+                if (value > userLoanLimit) {
+                  alert(`Loan amount cannot exceed your limit of ₹${userLoanLimit.toLocaleString()}`);
+                }
+              }}
+              placeholder={`Max: ₹${userLoanLimit.toLocaleString()}`}
+              max={userLoanLimit}
               className="mt-1 h-10 sm:h-11 text-base"
             />
+            <p className="text-xs text-gray-500 mt-1">
+              Your available loan limit is ₹{userLoanLimit.toLocaleString()}
+            </p>
           </div>
 
           <div>
@@ -292,6 +348,19 @@ export function LoanApplicationPage() {
         <h2 className="text-lg sm:text-2xl font-semibold mb-4 sm:mb-6">Loan Amount</h2>
 
         <div className="space-y-6 sm:space-y-8">
+          {/* User Loan Limit Info */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs sm:text-sm text-blue-700 font-medium">Your Available Loan Limit</p>
+                <p className="text-lg sm:text-2xl font-bold text-blue-900">₹{userLoanLimit.toLocaleString()}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-blue-600">Based on your profile</p>
+              </div>
+            </div>
+          </div>
+
           {/* Loan Amount Slider */}
           <div>
             <Label className="text-base sm:text-lg font-medium">Select Loan Amount</Label>
@@ -299,20 +368,26 @@ export function LoanApplicationPage() {
               <Slider
                 value={[formData.selectedLoanAmount]}
                 onValueChange={handleSliderChange}
-                max={1000000}
-                min={50000}
-                step={10000}
+                max={userLoanLimit}
+                min={Math.min(10000, userLoanLimit)}
+                step={1000}
                 className="w-full"
               />
               <div className="flex justify-between text-xs sm:text-sm text-gray-600 mt-2">
-                <span>₹50K</span>
-                <span>₹10L</span>
+                <span>₹{(Math.min(10000, userLoanLimit) / 1000).toFixed(0)}K</span>
+                <span>₹{(userLoanLimit / 1000).toFixed(0)}K</span>
               </div>
             </div>
             <div className="text-center mt-4">
               <div className="text-2xl sm:text-3xl font-bold text-blue-600">
                 ₹{formData.selectedLoanAmount.toLocaleString()}
               </div>
+              <p className="text-xs sm:text-sm text-gray-500 mt-1">
+                {formData.selectedLoanAmount >= userLoanLimit 
+                  ? 'Maximum limit reached'
+                  : `You can borrow up to ₹${(userLoanLimit - formData.selectedLoanAmount).toLocaleString()} more`
+                }
+              </p>
             </div>
           </div>
 
@@ -336,71 +411,53 @@ export function LoanApplicationPage() {
           <div className="space-y-3 sm:space-y-4">
             <h3 className="text-base sm:text-lg font-semibold">Available Loan Options</h3>
             
-            {/* 2 EMI Loan - Locked */}
-            <div className="border border-red-200 bg-red-50 rounded-lg p-3 sm:p-4 flex items-center justify-between">
+            {/* Standard Loan - Available (Based on user's limit) */}
+            <div className="border-2 border-green-300 bg-green-50 rounded-lg p-3 sm:p-4 flex items-center justify-between">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1 sm:mb-2">
-                  <h4 className="font-semibold text-sm sm:text-base">2 EMI Loan</h4>
-                  <Badge variant="destructive" className="text-xs">Locked</Badge>
+                  <h4 className="font-semibold text-sm sm:text-base">Personal Loan</h4>
+                  <Badge className="bg-green-600 text-white text-xs">Available</Badge>
                 </div>
-                <div className="text-green-600 font-semibold text-base sm:text-lg">
-                  ₹12,00,000
+                <div className="text-green-700 font-bold text-base sm:text-lg">
+                  Up to ₹{userLoanLimit.toLocaleString()}
                 </div>
-                <div className="text-xs sm:text-sm text-gray-600">
-                  Tenure: 65 days
+                <div className="text-xs sm:text-sm text-gray-700 mt-1">
+                  <div>• Selected: ₹{formData.selectedLoanAmount.toLocaleString()}</div>
+                  <div>• Flexible tenure options</div>
+                  <div>• Quick approval process</div>
                 </div>
               </div>
               <div className="text-center ml-2">
-                <Lock className="w-6 h-6 sm:w-8 sm:h-8 text-red-500 mx-auto mb-1" />
-                <div className="text-xs text-red-600 text-center leading-tight">
-                  increase creditlab score to unlock
+                <Check className="w-6 h-6 sm:w-8 sm:h-8 text-green-600 mx-auto mb-1" />
+                <div className="text-xs text-green-700 font-medium text-center">
+                  Approved
                 </div>
               </div>
             </div>
 
-            {/* 3 EMI Loan - Locked */}
-            <div className="border border-red-200 bg-red-50 rounded-lg p-3 sm:p-4 flex items-center justify-between">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1 sm:mb-2">
-                  <h4 className="font-semibold text-sm sm:text-base">3 EMI Loan</h4>
-                  <Badge variant="destructive" className="text-xs">Locked</Badge>
+            {/* Higher Limits - Locked */}
+            {userLoanLimit < 50000 && (
+              <div className="border border-orange-200 bg-orange-50 rounded-lg p-3 sm:p-4 flex items-center justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 sm:mb-2">
+                    <h4 className="font-semibold text-sm sm:text-base">Higher Loan Limits</h4>
+                    <Badge variant="secondary" className="text-xs bg-orange-200 text-orange-800">Locked</Badge>
+                  </div>
+                  <div className="text-orange-700 font-semibold text-base sm:text-lg">
+                    ₹50,000 - ₹5,00,000
+                  </div>
+                  <div className="text-xs sm:text-sm text-gray-600">
+                    Build your credit history to unlock
+                  </div>
                 </div>
-                <div className="text-green-600 font-semibold text-base sm:text-lg">
-                  ₹16,00,000
-                </div>
-                <div className="text-xs sm:text-sm text-gray-600">
-                  Tenure: 95 days
-                </div>
-              </div>
-              <div className="text-center ml-2">
-                <Lock className="w-6 h-6 sm:w-8 sm:h-8 text-red-500 mx-auto mb-1" />
-                <div className="text-xs text-red-600 text-center leading-tight">
-                  increase creditlab score to unlock
-                </div>
-              </div>
-            </div>
-
-            {/* Standard Loan - Available */}
-            <div className="border border-green-200 bg-green-50 rounded-lg p-3 sm:p-4 flex items-center justify-between">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1 sm:mb-2">
-                  <h4 className="font-semibold text-sm sm:text-base">Standard Personal Loan</h4>
-                  <Badge className="bg-green-100 text-green-800 text-xs">Available</Badge>
-                </div>
-                <div className="text-green-600 font-semibold text-base sm:text-lg">
-                  ₹{formData.selectedLoanAmount.toLocaleString()}
-                </div>
-                <div className="text-xs sm:text-sm text-gray-600">
-                  Tenure: 12-24 months
+                <div className="text-center ml-2">
+                  <Lock className="w-6 h-6 sm:w-8 sm:h-8 text-orange-500 mx-auto mb-1" />
+                  <div className="text-xs text-orange-600 text-center leading-tight">
+                    Complete payments to increase limit
+                  </div>
                 </div>
               </div>
-              <div className="text-center ml-2">
-                <Check className="w-6 h-6 sm:w-8 sm:h-8 text-green-500 mx-auto mb-1" />
-                <div className="text-xs text-green-600 text-center">
-                  Eligible
-                </div>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Disclaimers */}

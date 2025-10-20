@@ -12,6 +12,9 @@
     "update-member-tiers": "node scripts/updateMemberTiers.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.913.0",
+    "@aws-sdk/lib-storage": "^3.913.0",
+    "@aws-sdk/s3-request-presigner": "^3.913.0",
     "bcrypt": "^5.1.1",
     "bcryptjs": "^2.4.3",
     "connect-redis": "^7.1.0",
@@ -29,8 +32,9 @@
     "multer": "^1.4.5-lts.1",
     "mysql2": "^3.14.5",
     "node-cron": "^3.0.2",
-    "nodemailer": "^6.9.4",
+    "nodemailer": "^7.0.9",
     "otp-generator": "^4.0.1",
+    "puppeteer": "^24.25.0",
     "redis": "^5.8.2",
     "twilio": "^4.14.0",
     "uuid": "^9.0.1"
