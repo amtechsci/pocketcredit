@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -12,9 +12,8 @@ import { useAuth } from '../../contexts/AuthContext';
 export const DigilockerKYCPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
   const { user } = useAuth();
-  const { applicationId } = location.state || { applicationId: searchParams.get('applicationId') };
+  const { applicationId } = location.state || {};
 
   const [mobileNumber, setMobileNumber] = useState('');
   const [loading, setLoading] = useState(false);
@@ -22,25 +21,7 @@ export const DigilockerKYCPage: React.FC = () => {
   const [verificationStatus, setVerificationStatus] = useState<'idle' | 'success' | 'failed'>('idle');
   const maxAttempts = 2;
 
-  // Check if returning from KYC success/failure
-  useEffect(() => {
-    const kycSuccess = searchParams.get('kycSuccess');
-    const kycFailed = searchParams.get('kycFailed');
-
-    if (kycSuccess === 'true') {
-      setVerificationStatus('success');
-      toast.success('KYC verification successful!');
-      setTimeout(() => {
-        navigate('/loan-application/employment-details', {
-          state: { applicationId }
-        });
-      }, 2000);
-    } else if (kycFailed === 'true') {
-      setVerificationStatus('failed');
-      setAttempts(prev => prev + 1);
-      toast.error('KYC verification failed');
-    }
-  }, [searchParams, applicationId, navigate]);
+  // Removed insecure URL param checking - now done via KYCCheckPage with DB verification
 
   const handleMobileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/\D/g, '').slice(0, 10);

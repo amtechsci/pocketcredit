@@ -25,6 +25,7 @@ import { ReferenceDetailsPage } from './components/pages/ReferenceDetailsPage';
 import { EnhancedUserReferencesPage } from './components/pages/EnhancedUserReferencesPage';
 import { LoanApplicationStepsPage } from './components/pages/LoanApplicationStepsPage';
 import { DigilockerKYCPage } from './components/pages/DigilockerKYCPage';
+import { KYCCheckPage } from './components/pages/KYCCheckPage';
 import { EmploymentDetailsPage } from './components/pages/EmploymentDetailsPage';
 import { ApplicationFlow } from './components/ApplicationFlow';
 import { CreditScorePage } from './components/pages/CreditScorePage';
@@ -352,6 +353,12 @@ function AppContent() {
         <Route path="/loan-application/kyc-verification" element={
           <DashboardLayout>
             <DigilockerKYCPage />
+          </DashboardLayout>
+        } />
+        
+        <Route path="/loan-application/kyc-check" element={
+          <DashboardLayout>
+            <KYCCheckPage />
           </DashboardLayout>
         } />
         

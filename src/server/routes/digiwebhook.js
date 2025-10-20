@@ -36,6 +36,10 @@ router.get('/', async (req, res) => {
     const isSuccess = success === 'true' || success === true;
 
     if (isSuccess) {
+      // TODO: Fetch actual KYC data from Digilocker
+      // Call Digilocker API to get user details using transactionId
+      // For now, we'll add a placeholder
+      
       // Update KYC status to verified
       await executeQuery(
         `UPDATE kyc_verifications 
@@ -54,8 +58,8 @@ router.get('/', async (req, res) => {
 
       console.log('✅ KYC Verified successfully for user:', kycRecord.user_id);
 
-      // Redirect to employment details page
-      res.redirect(`${process.env.FRONTEND_URL || 'https://pocketcredit.in'}/loan-application/employment-details?applicationId=${kycRecord.application_id}&kycSuccess=true`);
+      // Redirect WITHOUT kycSuccess param - frontend will check DB
+      res.redirect(`${process.env.FRONTEND_URL || 'https://pocketcredit.in'}/loan-application/kyc-check?applicationId=${kycRecord.application_id}`);
     } else {
       // Update KYC status to failed
       await executeQuery(
@@ -68,8 +72,8 @@ router.get('/', async (req, res) => {
 
       console.log('❌ KYC Failed for user:', kycRecord.user_id);
 
-      // Redirect back to KYC page with failure message
-      res.redirect(`${process.env.FRONTEND_URL || 'https://pocketcredit.in'}/loan-application/kyc-verification?applicationId=${kycRecord.application_id}&kycFailed=true`);
+      // Redirect WITHOUT kycFailed param - frontend will check DB
+      res.redirect(`${process.env.FRONTEND_URL || 'https://pocketcredit.in'}/loan-application/kyc-check?applicationId=${kycRecord.application_id}`);
     }
 
   } catch (error) {

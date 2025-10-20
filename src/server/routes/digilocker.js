@@ -137,7 +137,7 @@ router.get('/kyc-status/:applicationId', requireAuth, async (req, res) => {
     await initializeDatabase();
     
     const results = await executeQuery(
-      `SELECT kyc_status, kyc_method, verified_at, created_at 
+      `SELECT kyc_status, kyc_method, verified_at, created_at, verification_data 
        FROM kyc_verifications 
        WHERE user_id = ? AND application_id = ? 
        ORDER BY created_at DESC 
@@ -166,6 +166,77 @@ router.get('/kyc-status/:applicationId', requireAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch KYC status'
+    });
+  }
+});
+
+/**
+ * POST /api/digilocker/fetch-kyc-data
+ * Fetch actual KYC data from Digilocker using transactionId
+ */
+router.post('/fetch-kyc-data', requireAuth, async (req, res) => {
+  const { transaction_id } = req.body;
+  const userId = req.userId;
+
+  if (!transaction_id) {
+    return res.status(400).json({
+      success: false,
+      message: 'Transaction ID is required'
+    });
+  }
+
+  try {
+    await initializeDatabase();
+
+    console.log('📥 Fetching KYC data from Digilocker for txnId:', transaction_id);
+
+    // Call Digilocker API to fetch actual KYC data
+    // TODO: Replace with actual Digilocker fetch data endpoint
+    const digilockerResponse = await axios.post(
+      process.env.DIGILOCKER_FETCH_API_URL || 'https://svcint.digitap.work/wrap/demo/api/ent/v1/kyc/fetch-data',
+      {
+        transactionId: transaction_id
+      },
+      {
+        headers: {
+          'Authorization': process.env.DIGILOCKER_AUTH_TOKEN || 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=',
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    console.log('✅ Digilocker KYC Data Response:', digilockerResponse.data);
+
+    if (digilockerResponse.data && digilockerResponse.data.code === "200") {
+      const kycData = digilockerResponse.data.model || digilockerResponse.data.data;
+
+      // Update kyc_verifications table with full data
+      await executeQuery(
+        `UPDATE kyc_verifications 
+         SET verification_data = JSON_SET(
+           COALESCE(verification_data, '{}'),
+           '$.kycData', ?
+         )
+         WHERE user_id = ? 
+         AND JSON_EXTRACT(verification_data, '$.transactionId') = ?`,
+        [JSON.stringify(kycData), userId, transaction_id]
+      );
+
+      res.json({
+        success: true,
+        message: 'KYC data fetched successfully',
+        data: kycData
+      });
+    } else {
+      throw new Error('Invalid response from Digilocker fetch API');
+    }
+
+  } catch (error) {
+    console.error('❌ Fetch KYC data error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch KYC data from Digilocker',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
