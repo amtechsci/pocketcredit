@@ -27,6 +27,18 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
     });
   }
 
+  // Optional name validation per provider rules
+  const nameRegex = /^[A-Za-z][A-Za-z .\-_' ]{0,44}$/; // start alpha, allowed ., -, ', space, _ up to 45
+  if (first_name && !nameRegex.test(first_name)) {
+    return res.status(400).json({ success: false, message: 'Invalid first name format' });
+  }
+  if (last_name && !nameRegex.test(last_name)) {
+    return res.status(400).json({ success: false, message: 'Invalid last name format' });
+  }
+  if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+    return res.status(400).json({ success: false, message: 'Invalid email format' });
+  }
+
   try {
     await initializeDatabase();
     
@@ -54,6 +66,9 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
       digilockerRequest,
       {
         headers: {
+          // Per docs: base64(client_id:client_secret)
+          'ent_authorization': process.env.DIGILOCKER_AUTH_TOKEN || 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=',
+          // Backward compatibility if gateway expects Authorization
           'Authorization': process.env.DIGILOCKER_AUTH_TOKEN || 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=',
           'Content-Type': 'application/json'
         }
@@ -238,6 +253,78 @@ router.post('/fetch-kyc-data', requireAuth, async (req, res) => {
       message: 'Failed to fetch KYC data from Digilocker',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
+  }
+});
+
+/**
+ * GET /api/digilocker/get-details/:transactionId
+ * Proxy to Digitap get-digilocker-details (returns profile data)
+ */
+router.get('/get-details/:transactionId', requireAuth, async (req, res) => {
+  const { transactionId } = req.params;
+  const userId = req.userId;
+  if (!transactionId) {
+    return res.status(400).json({ success: false, message: 'Transaction ID is required' });
+  }
+  try {
+    await initializeDatabase();
+    // Demo/UAT environment by default
+    const apiUrl = process.env.DIGILOCKER_GET_DETAILS_URL || 'https://svcint.digitap.work/wrap/demo/api/ent/v1/kyc/get-digilocker-details';
+    const apiResp = await axios.post(
+      apiUrl,
+      { transactionId },
+      { headers: { 'ent_authorization': process.env.DIGILOCKER_AUTH_TOKEN || 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=', 'Content-Type': 'application/json' } }
+    );
+    if (!apiResp.data || apiResp.data.code !== '200') {
+      return res.status(400).json({ success: false, message: apiResp.data?.msg || 'Failed to fetch details' });
+    }
+    const details = apiResp.data.model || apiResp.data.data;
+    // Persist under verification_data.kycData
+    await executeQuery(
+      `UPDATE kyc_verifications SET verification_data = JSON_SET(COALESCE(verification_data,'{}'), '$.kycData', ?) 
+       WHERE user_id = ? AND JSON_EXTRACT(verification_data, '$.transactionId') = ?`,
+      [JSON.stringify(details), userId, transactionId]
+    );
+    res.json({ success: true, data: details });
+  } catch (e) {
+    console.error('get-details error:', e);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/digilocker/list-docs/:transactionId
+ * Proxy to Digitap digilocker/list-docs (returns doc links)
+ */
+router.get('/list-docs/:transactionId', requireAuth, async (req, res) => {
+  const { transactionId } = req.params;
+  const userId = req.userId;
+  if (!transactionId) {
+    return res.status(400).json({ success: false, message: 'Transaction ID is required' });
+  }
+  try {
+    await initializeDatabase();
+    // Demo/UAT environment by default
+    const apiUrl = process.env.DIGILOCKER_LIST_DOCS_URL || 'https://svcint.digitap.work/wrap/demo/api/ent/v1/digilocker/list-docs';
+    const apiResp = await axios.post(
+      apiUrl,
+      { transactionId },
+      { headers: { 'ent_authorization': process.env.DIGILOCKER_AUTH_TOKEN || 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=', 'Content-Type': 'application/json' } }
+    );
+    if (!apiResp.data || apiResp.data.code !== '200') {
+      return res.status(400).json({ success: false, message: apiResp.data?.msg || 'Failed to list docs' });
+    }
+    const docs = apiResp.data.model || apiResp.data.data;
+    // Persist under verification_data.docs
+    await executeQuery(
+      `UPDATE kyc_verifications SET verification_data = JSON_SET(COALESCE(verification_data,'{}'), '$.docs', ?) 
+       WHERE user_id = ? AND JSON_EXTRACT(verification_data, '$.transactionId') = ?`,
+      [JSON.stringify(docs), userId, transactionId]
+    );
+    res.json({ success: true, data: docs });
+  } catch (e) {
+    console.error('list-docs error:', e);
+    res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
 

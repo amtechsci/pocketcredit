@@ -59,6 +59,23 @@ router.get('/', async (req, res) => {
     const isSuccess = success === 'true' || success === true;
 
     if (isSuccess) {
+      // If provider sends full data in webhook via configuration, persist it for audit
+      if (req.query.data || (req.body && req.body.data)) {
+        const payloadData = req.query.data || req.body.data;
+        try {
+          const parsed = typeof payloadData === 'string' ? JSON.parse(payloadData) : payloadData;
+          await executeQuery(
+            `UPDATE kyc_verifications SET verification_data = JSON_SET(COALESCE(verification_data,'{}'), '$.kycData', ?) WHERE id = ?`,
+            [JSON.stringify(parsed), kycRecord.id]
+          );
+        } catch (e) {
+          console.warn('⚠️ Failed to parse webhook data JSON, storing raw:', e?.message);
+          await executeQuery(
+            `UPDATE kyc_verifications SET verification_data = JSON_SET(COALESCE(verification_data,'{}'), '$.kycDataRaw', ?) WHERE id = ?`,
+            [String(payloadData), kycRecord.id]
+          );
+        }
+      }
       // TODO: Fetch actual KYC data from Digilocker
       // Call Digilocker API to get user details using transactionId
       // For now, we'll add a placeholder

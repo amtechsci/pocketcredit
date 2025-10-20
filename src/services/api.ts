@@ -747,6 +747,20 @@ class ApiService {
   }
 
   /**
+   * Digilocker - Get Details (profile)
+   */
+  async digilockerGetDetails(transactionId: string): Promise<ApiResponse<any>> {
+    return this.request('GET', `/digilocker/get-details/${transactionId}`);
+  }
+
+  /**
+   * Digilocker - List Docs
+   */
+  async digilockerListDocs(transactionId: string): Promise<ApiResponse<any>> {
+    return this.request('GET', `/digilocker/list-docs/${transactionId}`);
+  }
+
+  /**
    * Submit Employment Details
    */
   async submitEmploymentDetails(data: {
