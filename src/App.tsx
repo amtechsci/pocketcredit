@@ -351,21 +351,33 @@ function AppContent() {
         } />
         
         <Route path="/loan-application/kyc-verification" element={
-          <DashboardLayout>
-            <DigilockerKYCPage />
-          </DashboardLayout>
+          isAuthenticated ? (
+            <DashboardLayout>
+              <DigilockerKYCPage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
         } />
         
         <Route path="/loan-application/kyc-check" element={
-          <DashboardLayout>
-            <KYCCheckPage />
-          </DashboardLayout>
+          isAuthenticated ? (
+            <DashboardLayout>
+              <KYCCheckPage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
         } />
         
         <Route path="/loan-application/employment-details" element={
-          <DashboardLayout>
-            <EmploymentDetailsPage />
-          </DashboardLayout>
+          isAuthenticated ? (
+            <DashboardLayout>
+              <EmploymentDetailsPage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
         } />
         
         <Route path="/loan-application/steps" element={
