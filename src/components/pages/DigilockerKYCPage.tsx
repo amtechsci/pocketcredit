@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -17,11 +17,43 @@ export const DigilockerKYCPage: React.FC = () => {
 
   const [mobileNumber, setMobileNumber] = useState('');
   const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(true); // Check if KYC already complete
   const [attempts, setAttempts] = useState(0);
   const [verificationStatus, setVerificationStatus] = useState<'idle' | 'success' | 'failed'>('idle');
   const maxAttempts = 2;
 
-  // Removed insecure URL param checking - now done via KYCCheckPage with DB verification
+  // Check if KYC is already verified on page load
+  useEffect(() => {
+    const checkKYCStatus = async () => {
+      if (!applicationId) {
+        setChecking(false);
+        return;
+      }
+
+      try {
+        const response = await apiService.getKYCStatus(applicationId);
+        
+        if (response.success && response.data.kyc_status === 'verified') {
+          // KYC already completed - redirect to next step
+          toast.success('KYC already verified! Proceeding to next step...');
+          setTimeout(() => {
+            navigate('/loan-application/employment-details', {
+              state: { applicationId }
+            });
+          }, 1500);
+        } else {
+          // KYC not complete - show the form
+          setChecking(false);
+        }
+      } catch (error) {
+        console.error('Error checking KYC status:', error);
+        // On error, show the form anyway
+        setChecking(false);
+      }
+    };
+
+    checkKYCStatus();
+  }, [applicationId, navigate]);
 
   const handleMobileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/\D/g, '').slice(0, 10);
@@ -76,6 +108,18 @@ export const DigilockerKYCPage: React.FC = () => {
       state: { applicationId }
     });
   };
+
+  // Show loading while checking KYC status
+  if (checking) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-blue-600 mx-auto mb-4" />
+          <p className="text-gray-600">Checking KYC status...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">

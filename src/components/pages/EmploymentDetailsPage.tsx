@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Briefcase, Building, Users, Award, ArrowRight } from 'lucide-react';
+import { Briefcase, Building, Users, Award, ArrowRight, Check, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../services/api';
 
@@ -13,6 +13,13 @@ interface EmploymentData {
   industry: string;
   department: string;
   designation: string;
+}
+
+interface CompanySuggestion {
+  id: number;
+  company_name: string;
+  industry: string | null;
+  is_verified: boolean;
 }
 
 const INDUSTRIES = [
@@ -87,8 +94,107 @@ export const EmploymentDetailsPage: React.FC = () => {
     designation: ''
   });
 
+  // Company autocomplete state
+  const [companySuggestions, setCompanySuggestions] = useState<CompanySuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
+  const suggestionRef = useRef<HTMLDivElement>(null);
+  const companyInputRef = useRef<HTMLInputElement>(null);
+
+  // Load initial companies on mount
+  useEffect(() => {
+    const loadInitialCompanies = async () => {
+      try {
+        const response = await apiService.searchCompanies('', 10);
+        if (response.success && response.data) {
+          setCompanySuggestions(response.data);
+        }
+      } catch (error) {
+        console.error('Failed to load initial companies:', error);
+      }
+    };
+
+    loadInitialCompanies();
+  }, []);
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (suggestionRef.current && !suggestionRef.current.contains(event.target as Node) &&
+          companyInputRef.current && !companyInputRef.current.contains(event.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Search companies with debounce
+  const searchCompanies = async (query: string) => {
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+
+    // If query is empty or too short, load initial popular companies
+    if (query.trim().length < 2) {
+      const timeout = setTimeout(async () => {
+        setLoadingSuggestions(true);
+        try {
+          const response = await apiService.searchCompanies('', 10);
+          if (response.success && response.data) {
+            setCompanySuggestions(response.data);
+            setShowSuggestions(true);
+          }
+        } catch (error) {
+          console.error('Failed to load companies:', error);
+        } finally {
+          setLoadingSuggestions(false);
+        }
+      }, 200);
+      
+      setSearchTimeout(timeout);
+      return;
+    }
+
+    // Search with user query
+    const timeout = setTimeout(async () => {
+      setLoadingSuggestions(true);
+      try {
+        const response = await apiService.searchCompanies(query, 15);
+        if (response.success && response.data) {
+          setCompanySuggestions(response.data);
+          setShowSuggestions(true);
+        }
+      } catch (error) {
+        console.error('Failed to search companies:', error);
+      } finally {
+        setLoadingSuggestions(false);
+      }
+    }, 300); // 300ms debounce
+
+    setSearchTimeout(timeout);
+  };
+
   const handleInputChange = (field: keyof EmploymentData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+    
+    // Trigger company search when company_name changes
+    if (field === 'company_name') {
+      searchCompanies(value);
+    }
+  };
+
+  const handleSelectCompany = (company: CompanySuggestion) => {
+    setFormData(prev => ({ 
+      ...prev, 
+      company_name: company.company_name,
+      // Auto-fill industry if available
+      industry: company.industry || prev.industry
+    }));
+    setShowSuggestions(false);
+    setCompanySuggestions([]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -170,20 +276,82 @@ export const EmploymentDetailsPage: React.FC = () => {
 
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Company Name */}
-              <div className="space-y-2">
+              {/* Company Name with Autocomplete */}
+              <div className="space-y-2 relative">
                 <Label htmlFor="company_name" className="text-base flex items-center gap-2">
                   <Building className="w-4 h-4" />
                   Company Name <span className="text-red-500">*</span>
                 </Label>
-                <Input
-                  id="company_name"
-                  value={formData.company_name}
-                  onChange={(e) => handleInputChange('company_name', e.target.value)}
-                  placeholder="Enter your company name"
-                  className="h-11"
-                  disabled={loading}
-                />
+                <div className="relative">
+                  <Input
+                    ref={companyInputRef}
+                    id="company_name"
+                    value={formData.company_name}
+                    onChange={(e) => handleInputChange('company_name', e.target.value)}
+                    onFocus={() => {
+                      // Show suggestions if we have any (initial or search results)
+                      if (companySuggestions.length > 0) {
+                        setShowSuggestions(true);
+                      }
+                    }}
+                    placeholder="Click to see popular companies or start typing"
+                    className="h-11 pr-10"
+                    disabled={loading}
+                  />
+                  <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  
+                  {/* Autocomplete Suggestions Dropdown */}
+                  {showSuggestions && (companySuggestions.length > 0 || loadingSuggestions) && (
+                    <div 
+                      ref={suggestionRef}
+                      className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto"
+                    >
+                      {loadingSuggestions ? (
+                        <div className="p-4 text-center text-sm text-gray-500">
+                          Searching companies...
+                        </div>
+                      ) : (
+                        <>
+                          {companySuggestions.map((company) => (
+                            <button
+                              key={company.id}
+                              type="button"
+                              onClick={() => handleSelectCompany(company)}
+                              className="w-full px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0 transition-colors flex items-start justify-between gap-2"
+                            >
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-gray-900">
+                                    {company.company_name}
+                                  </span>
+                                  {company.is_verified && (
+                                    <Check className="w-4 h-4 text-green-600 flex-shrink-0" />
+                                  )}
+                                </div>
+                                {company.industry && (
+                                  <span className="text-xs text-gray-500 block mt-1">
+                                    {company.industry}
+                                  </span>
+                                )}
+                              </div>
+                            </button>
+                          ))}
+                          <div className="p-3 bg-gray-50 border-t border-gray-200">
+                            <p className="text-xs text-gray-600 text-center">
+                              {formData.company_name.trim() 
+                                ? "Don't see your company? You can still type and submit"
+                                : "Showing popular companies. Type to search or enter manually"
+                              }
+                            </p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Click to see popular companies, or start typing to search
+                </p>
               </div>
 
               {/* Industry */}

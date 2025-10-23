@@ -189,6 +189,10 @@ app.use('/api/digiwebhook', digiwebhookRoutes);
 const accountAggregatorRoutes = require('./routes/accountAggregator');
 app.use('/api/aa', accountAggregatorRoutes);
 
+// Companies autocomplete
+const companiesRoutes = require('./routes/companies');
+app.use('/api/companies', companiesRoutes);
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({

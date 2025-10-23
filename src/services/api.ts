@@ -739,6 +739,17 @@ class ApiService {
   }
 
   /**
+   * Get KYC Status for an application
+   */
+  async getKYCStatus(applicationId: number | string): Promise<ApiResponse<{
+    kyc_status: string;
+    kyc_method: string | null;
+    verified_at: string | null;
+  }>> {
+    return this.request('GET', `/digilocker/kyc-status/${applicationId}`);
+  }
+
+  /**
    * Digilocker - Get Details (profile)
    */
   async digilockerGetDetails(transactionId: string): Promise<ApiResponse<any>> {
@@ -762,7 +773,29 @@ class ApiService {
     designation: string;
     application_id: number;
   }): Promise<ApiResponse<{ message: string }>> {
-    return this.request('POST', '/employment/details', data);
+    return this.request('POST', '/employment-details/details', data);
+  }
+
+  /**
+   * Search Companies (autocomplete)
+   */
+  async searchCompanies(query: string, limit: number = 15): Promise<ApiResponse<Array<{
+    id: number;
+    company_name: string;
+    industry: string | null;
+    is_verified: boolean;
+  }>>> {
+    return this.request('GET', `/companies/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+  }
+
+  /**
+   * Add new company (user-submitted)
+   */
+  async addCompany(data: {
+    company_name: string;
+    industry?: string;
+  }): Promise<ApiResponse<any>> {
+    return this.request('POST', '/companies/add', data);
   }
 
   /**
