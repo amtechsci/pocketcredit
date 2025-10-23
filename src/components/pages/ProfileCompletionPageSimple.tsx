@@ -31,7 +31,7 @@ interface EmploymentQuickCheckForm {
   income_range: string;
   eligible_loan_amount: number;
   payment_mode: string;
-  designation: string;
+  date_of_birth: string;
 }
 
 interface StudentForm {
@@ -61,7 +61,7 @@ const ProfileCompletionPageSimple = () => {
     income_range: '',
     eligible_loan_amount: 0,
     payment_mode: '',
-    designation: '',
+    date_of_birth: '',
   });
 
   const [studentFormData, setStudentFormData] = useState<StudentForm>({
@@ -75,6 +75,7 @@ const ProfileCompletionPageSimple = () => {
   const [showPrefillConfirm, setShowPrefillConfirm] = useState(false);
   const [fetchingPrefill, setFetchingPrefill] = useState(false);
   const [digitapCalled, setDigitapCalled] = useState(false);
+  const [showManualForm, setShowManualForm] = useState(false); // Control manual form visibility
 
   // Student document upload states
   const [uploadedDocs, setUploadedDocs] = useState<{
@@ -158,6 +159,17 @@ const ProfileCompletionPageSimple = () => {
     if (currentStep === 2 && isSalaried && !digitapCalled) {
       console.log('✅ Triggering Digitap API call...');
       fetchDigitapData();
+      
+      // Safety: Show manual form after 20 seconds if Digitap hasn't responded
+      const timeoutId = setTimeout(() => {
+        if (!showPrefillConfirm && !showManualForm) {
+          console.log('⏰ Digitap timeout - showing manual form');
+          setShowManualForm(true);
+          toast.info('Taking too long? You can enter details manually');
+        }
+      }, 20000); // 20 seconds
+      
+      return () => clearTimeout(timeoutId);
     }
   }, [currentStep, user?.employment_type, employmentQuickCheckData.employment_type, digitapCalled]);
   
@@ -224,19 +236,34 @@ const ProfileCompletionPageSimple = () => {
         console.log('Digitap data received:', response.data);
         setDigitapData(response.data);
         setShowPrefillConfirm(true);
+        setShowManualForm(false); // Hide manual form when Digitap succeeds
         toast.success('We found your details automatically!');
       } else if ((response as any)?.hold_applied) {
         // Credit score too low - hold applied
-        toast.error((response as any).message || 'Application on hold due to credit score');
-        // Wait a bit then redirect
-        setTimeout(() => navigate('/dashboard'), 3000);
+        const creditScore = (response as any).credit_score;
+        const holdUntil = (response as any).hold_until;
+        const holdDays = (response as any).hold_days || 60;
+        
+        console.log(`❌ Credit score (${creditScore}) below 630 - applying ${holdDays}-day hold`);
+        
+        // Show detailed error message
+        toast.error(
+          (response as any).message || 
+          `Your credit score (${creditScore}) is below our minimum requirement of 630. You can reapply after ${holdDays} days.`,
+          { duration: 6000 }
+        );
+        
+        // Wait a bit then redirect to dashboard where hold banner will be shown
+        setTimeout(() => navigate('/dashboard'), 4000);
       } else {
         // API failed or returned no data - allow manual entry
         console.log('Digitap API failed or no data, proceeding with manual entry');
+        setShowManualForm(true); // Show manual form when Digitap fails
         toast.info('Please enter your details manually');
       }
     } catch (error) {
       console.error('Digitap fetch error:', error);
+      setShowManualForm(true); // Show manual form on error
       toast.info('Please enter your details manually');
     } finally {
       setFetchingPrefill(false);
@@ -287,6 +314,7 @@ const ProfileCompletionPageSimple = () => {
 
   const handlePrefillReject = () => {
     setShowPrefillConfirm(false);
+    setShowManualForm(true); // Show manual form when user rejects Digitap data
     toast.info('Please enter your details manually');
   };
 
@@ -299,10 +327,29 @@ const ProfileCompletionPageSimple = () => {
       };
 
       if (employmentQuickCheckData.employment_type === 'salaried') {
+        // Age validation for salaried employees
+        if (!employmentQuickCheckData.date_of_birth) {
+          toast.error('Please enter your date of birth');
+          setLoading(false);
+          return;
+        }
+
+        const dob = new Date(employmentQuickCheckData.date_of_birth);
+        const today = new Date();
+        const age = today.getFullYear() - dob.getFullYear() - 
+          ((today.getMonth() < dob.getMonth() || 
+           (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate())) ? 1 : 0);
+
+        if (age > 45) {
+          toast.error('Sorry, applicants above 45 years of age are not eligible at this time.');
+          setLoading(false);
+          return;
+        }
+
         submitData.income_range = employmentQuickCheckData.income_range;
         submitData.eligible_loan_amount = employmentQuickCheckData.eligible_loan_amount;
         submitData.payment_mode = employmentQuickCheckData.payment_mode;
-        submitData.designation = employmentQuickCheckData.designation;
+        submitData.date_of_birth = employmentQuickCheckData.date_of_birth;
       }
 
       const response = await apiService.saveEmploymentQuickCheck(submitData);
@@ -352,11 +399,12 @@ const ProfileCompletionPageSimple = () => {
       const lastName = nameParts.slice(1).join(' ') || nameParts[0] || '';
 
       // Prepare data for API
+      // Note: DOB is captured in Step 1 for salaried users, so we use existing user DOB
       const profileData = {
         first_name: firstName,
         last_name: lastName,
         email: user?.email || '',
-        date_of_birth: basicFormData.date_of_birth,
+        date_of_birth: user?.date_of_birth || basicFormData.date_of_birth || '',
         gender: basicFormData.gender,
         pan_number: basicFormData.pan_number,
         latitude: basicFormData.latitude,
@@ -521,13 +569,13 @@ const ProfileCompletionPageSimple = () => {
                       <option value="">Select employment type</option>
                       <option value="salaried">Salaried</option>
                       <option value="student">Student</option>
-                      <option value="self_employed">Self-employed (Hold)</option>
-                      <option value="part_time">Part-time (Hold)</option>
-                      <option value="freelancer">Freelancer (Hold)</option>
-                      <option value="homemaker">Homemaker (Hold)</option>
-                      <option value="retired">Retired (Hold)</option>
-                      <option value="no_job">Don't have Job (Hold)</option>
-                      <option value="others">Others (Hold)</option>
+                      <option value="self_employed">Self-employed</option>
+                      <option value="part_time">Part-time</option>
+                      <option value="freelancer">Freelancer</option>
+                      <option value="homemaker">Homemaker</option>
+                      <option value="retired">Retired</option>
+                      <option value="no_job">Don't have Job</option>
+                      <option value="others">Others</option>
                     </select>
                   </div>
 
@@ -575,15 +623,18 @@ const ProfileCompletionPageSimple = () => {
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="designation">Designation *</Label>
+                        <Label htmlFor="date_of_birth">Date of Birth *</Label>
                         <Input
-                          id="designation"
-                          type="text"
-                          value={employmentQuickCheckData.designation}
-                          onChange={(e) => setEmploymentQuickCheckData(prev => ({ ...prev, designation: e.target.value }))}
-                          placeholder="Enter your designation"
+                          id="date_of_birth"
+                          type="date"
+                          value={employmentQuickCheckData.date_of_birth}
+                          onChange={(e) => setEmploymentQuickCheckData(prev => ({ ...prev, date_of_birth: e.target.value }))}
+                          max={new Date(new Date().setFullYear(new Date().getFullYear() - 18)).toISOString().split('T')[0]}
+                          min={new Date(new Date().setFullYear(new Date().getFullYear() - 65)).toISOString().split('T')[0]}
                           required
+                          className="h-11"
                         />
+                        <p className="text-xs text-gray-500">You must be at least 18 years old</p>
                       </div>
                     </>
                   )}
@@ -657,76 +708,64 @@ const ProfileCompletionPageSimple = () => {
                   </div>
                 )}
 
-                <form onSubmit={handleBasicProfileSubmit} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="full_name">Full Name as per PAN Card *</Label>
-                    <Input
-                      id="full_name"
-                      value={basicFormData.full_name}
-                      onChange={(e) => setBasicFormData(prev => ({ ...prev, full_name: e.target.value }))}
-                      placeholder="Enter your full name"
-                      required
-                      className="h-11"
-                    />
-                  </div>
+                {/* Manual Form - Only show when Digitap fails or user clicks "Enter Manually" */}
+                {showManualForm && (
+                  <form onSubmit={handleBasicProfileSubmit} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="full_name">Full Name as per PAN Card *</Label>
+                        <Input
+                          id="full_name"
+                          value={basicFormData.full_name}
+                          onChange={(e) => setBasicFormData(prev => ({ ...prev, full_name: e.target.value }))}
+                          placeholder="Enter your full name"
+                          required
+                          className="h-11"
+                        />
+                      </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="pan_number">PAN Number *</Label>
-                    <Input
-                      id="pan_number"
-                      value={basicFormData.pan_number}
-                      onChange={(e) => setBasicFormData(prev => ({ ...prev, pan_number: e.target.value.toUpperCase() }))}
-                      placeholder="Enter PAN number"
-                      className="uppercase h-11"
-                      maxLength={10}
-                      required
-                    />
-                  </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="pan_number">PAN Number *</Label>
+                        <Input
+                          id="pan_number"
+                          value={basicFormData.pan_number}
+                          onChange={(e) => setBasicFormData(prev => ({ ...prev, pan_number: e.target.value.toUpperCase() }))}
+                          placeholder="Enter PAN number"
+                          className="uppercase h-11"
+                          maxLength={10}
+                          required
+                        />
+                      </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="gender">Gender *</Label>
-                    <select
-                      id="gender"
-                      value={basicFormData.gender}
-                      onChange={(e) => setBasicFormData(prev => ({ ...prev, gender: e.target.value }))}
-                      className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
-                      <option value="">Select gender</option>
-                      <option value="male">Male</option>
-                      <option value="female">Female</option>
-                      <option value="other">Other</option>
-                    </select>
-                  </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="gender">Gender *</Label>
+                        <select
+                          id="gender"
+                          value={basicFormData.gender}
+                          onChange={(e) => setBasicFormData(prev => ({ ...prev, gender: e.target.value }))}
+                          className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          required
+                        >
+                          <option value="">Select gender</option>
+                          <option value="male">Male</option>
+                          <option value="female">Female</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </div>
+                    </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="date_of_birth">Date of Birth *</Label>
-                    <Input
-                      id="date_of_birth"
-                      type="date"
-                      value={basicFormData.date_of_birth}
-                      onChange={(e) => setBasicFormData(prev => ({ ...prev, date_of_birth: e.target.value }))}
-                      max={new Date(new Date().setFullYear(new Date().getFullYear() - 18)).toISOString().split('T')[0]}
-                      min={new Date(new Date().setFullYear(new Date().getFullYear() - 65)).toISOString().split('T')[0]}
-                      required
-                      className="h-11"
-                    />
-                    <p className="text-xs text-gray-500">Age must be between 18 and 65 years</p>
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-2">
-                  <Button
-                    type="submit"
-                    disabled={loading}
-                    className="bg-blue-600 hover:bg-blue-700 h-11 w-full md:w-auto"
-                  >
-                    {loading ? 'Saving...' : 'Continue'}
-                    <ArrowRight className="w-4 h-4 ml-2" />
-                  </Button>
-                </div>
-              </form>
+                    <div className="flex justify-end pt-2">
+                      <Button
+                        type="submit"
+                        disabled={loading}
+                        className="bg-blue-600 hover:bg-blue-700 h-11 w-full md:w-auto"
+                      >
+                        {loading ? 'Saving...' : 'Continue'}
+                        <ArrowRight className="w-4 h-4 ml-2" />
+                      </Button>
+                    </div>
+                  </form>
+                )}
               </>
             )}
 

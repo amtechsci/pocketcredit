@@ -19,11 +19,22 @@ const redisConfig = {
   connectTimeout: 10000,
   commandTimeout: 5000,
   // Enable retry on connection failure
-  retryDelayOnClusterDown: 300,
-  retryDelayOnFailover: 100,
-  maxRetriesPerRequest: 3,
-  // Enable offline queue
-  enableOfflineQueue: false
+  retryStrategy(times) {
+    const delay = Math.min(times * 50, 2000);
+    return delay;
+  },
+  reconnectOnError(err) {
+    const targetErrors = ['READONLY', 'ECONNRESET', 'ETIMEDOUT'];
+    if (targetErrors.some(targetError => err.message.includes(targetError))) {
+      return true; // Reconnect
+    }
+    return false;
+  },
+  // Enable offline queue - this is critical for unstable connections
+  enableOfflineQueue: true,
+  enableReadyCheck: true,
+  autoResubscribe: true,
+  autoResendUnfulfilledCommands: true
 };
 
 // Redis client instance

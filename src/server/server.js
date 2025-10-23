@@ -38,6 +38,7 @@ const adminLoanPlansRoutes = require('./routes/adminLoanPlans');
 const adminLateFeesRoutes = require('./routes/adminLateFees');
 const activityLogsRoutes = require('./routes/activityLogsSimple');
 const eligibilityRoutes = require('./routes/eligibilityConfig');
+// const adminKYCRoutes = require('./routes/adminKYC'); // Commented out - not needed yet
 const employmentQuickCheckRoutes = require('./routes/employmentQuickCheck');
 const loanPlansRoutes = require('./routes/loanPlans');
 const validationRoutes = require('./routes/validation');
@@ -64,11 +65,30 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// CORS configuration
+// CORS configuration - Allow localhost and local network IPs
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', 'https://localhost:5173'],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, Postman, curl)
+    if (!origin) return callback(null, true);
+    
+    // Allow localhost in any port
+    if (origin.match(/^http:\/\/localhost(:\d+)?$/)) return callback(null, true);
+    if (origin.match(/^https:\/\/localhost(:\d+)?$/)) return callback(null, true);
+    if (origin.match(/^http:\/\/127\.0\.0\.1(:\d+)?$/)) return callback(null, true);
+    
+    // Allow local network IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+    if (origin.match(/^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/)) return callback(null, true);
+    if (origin.match(/^http:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/)) return callback(null, true);
+    if (origin.match(/^http:\/\/172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+(:\d+)?$/)) return callback(null, true);
+    
+    // Allow production domain
+    if (origin === 'https://pocketcredit.in') return callback(null, true);
+    
+    // Reject all others
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'Accept', 'Origin', 'X-Requested-With'],
   optionsSuccessStatus: 200 // Some legacy browsers choke on 204
 }));
@@ -138,6 +158,7 @@ app.use('/api/admin/loan-tiers', adminLoanTiersRoutes);
 app.use('/api/admin/loan-plans', adminLoanPlansRoutes);
 app.use('/api/admin/late-fees', adminLateFeesRoutes);
 app.use('/api/admin/activities', activityLogsRoutes);
+// app.use('/api/admin/kyc', adminKYCRoutes); // Commented out - not needed yet
 app.use('/api/eligibility', eligibilityRoutes);
 app.use('/api/employment-quick-check', employmentQuickCheckRoutes);
 app.use('/api/loan-plans', loanPlansRoutes);
@@ -163,6 +184,10 @@ app.use('/api/digilocker', digilockerRoutes);
 // Digilocker Webhook (callback from Digilocker after KYC)
 const digiwebhookRoutes = require('./routes/digiwebhook');
 app.use('/api/digiwebhook', digiwebhookRoutes);
+
+// Account Aggregator routes (bank statement verification)
+const accountAggregatorRoutes = require('./routes/accountAggregator');
+app.use('/api/aa', accountAggregatorRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

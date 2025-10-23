@@ -6,6 +6,10 @@ require('dotenv').config();
 /**
  * Session Configuration Middleware
  * Configures express-session with Redis store for 24-hour sessions
+ * 
+ * NOTE: This is primarily kept for backward compatibility and hybrid auth fallback.
+ * Main authentication now uses JWT tokens (see middleware/jwtAuth.js)
+ * The requireAuth function below is LEGACY and not used - use jwtAuth.requireAuth instead
  */
 
 // Get Redis client
@@ -42,6 +46,7 @@ const initializeSession = () => {
 
 /**
  * Authentication middleware to check if user is logged in
+ * @deprecated This function is LEGACY and not used anymore. Use jwtAuth.requireAuth instead.
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  * @param {Function} next - Express next function
@@ -67,6 +72,7 @@ const requireAuth = (req, res, next) => {
 /**
  * Optional authentication middleware
  * Sets req.user if session exists, but doesn't block the request
+ * @deprecated This function is LEGACY and not used anymore.
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  * @param {Function} next - Express next function
@@ -84,6 +90,7 @@ const optionalAuth = (req, res, next) => {
 /**
  * Session cleanup middleware
  * Cleans up expired sessions and invalid data
+ * @deprecated This function is currently not used (commented out in server.js).
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  * @param {Function} next - Express next function

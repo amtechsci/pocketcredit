@@ -151,17 +151,30 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const loginWithOTP = async (phone: string, otp: string): Promise<{ success: boolean; message: string }> => {
     try {
+      console.log('🔐 AuthContext: loginWithOTP called', { phone, otp });
       setIsLoading(true);
       const response = await apiService.verifyOTP(phone, otp);
+      console.log('📡 AuthContext: API response:', response);
       
       if (response.status === 'success' && response.data) {
+        console.log('✅ AuthContext: Success, updating user state:', response.data.user);
+        
+        // Store the JWT token in localStorage
+        if (response.data.token) {
+          console.log('🔑 AuthContext: Storing JWT token');
+          localStorage.setItem('pocket_user_token', response.data.token);
+        } else {
+          console.warn('⚠️ AuthContext: No token received from server');
+        }
+        
         updateUserState(response.data.user);
         return { success: true, message: response.message };
       } else {
+        console.log('❌ AuthContext: Failed:', response.message);
         return { success: false, message: response.message };
       }
     } catch (error: any) {
-      console.error('OTP verification error:', error);
+      console.error('❌ AuthContext: OTP verification error:', error);
       return { 
         success: false, 
         message: error.message || 'OTP verification failed' 

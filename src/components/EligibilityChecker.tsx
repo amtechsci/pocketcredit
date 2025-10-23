@@ -12,7 +12,6 @@ interface EligibilityCheckerProps {
 
 export function EligibilityChecker({ onApply }: EligibilityCheckerProps) {
   const [formData, setFormData] = useState({
-    panNumber: '',
     monthlyIncome: '',
     employmentType: '',
     loanAmount: '',
@@ -31,7 +30,7 @@ export function EligibilityChecker({ onApply }: EligibilityCheckerProps) {
   };
 
   const checkEligibility = async () => {
-    if (!formData.panNumber || !formData.monthlyIncome || !formData.employmentType || !formData.loanAmount) {
+    if (!formData.monthlyIncome || !formData.employmentType || !formData.loanAmount) {
       return;
     }
 
@@ -79,18 +78,6 @@ export function EligibilityChecker({ onApply }: EligibilityCheckerProps) {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor="pan">PAN Number</Label>
-          <Input
-            id="pan"
-            placeholder="ABCDE1234F"
-            value={formData.panNumber}
-            onChange={(e) => handleInputChange('panNumber', e.target.value.toUpperCase())}
-            maxLength={10}
-            className="input-mobile touch-manipulation"
-          />
-        </div>
-
-        <div className="space-y-2">
           <Label htmlFor="income">Monthly Income (₹)</Label>
           <Input
             id="income"
@@ -115,7 +102,7 @@ export function EligibilityChecker({ onApply }: EligibilityCheckerProps) {
           </Select>
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-2 sm:col-span-2">
           <Label htmlFor="amount">Desired Loan Amount (₹)</Label>
           <Input
             id="amount"
@@ -140,18 +127,12 @@ export function EligibilityChecker({ onApply }: EligibilityCheckerProps) {
                 <p className={`font-medium ${result.eligible ? 'text-green-800' : 'text-red-800'}`}>
                   {result.message}
                 </p>
-                {result.eligible && result.preApprovedAmount && result.interestRate && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-green-200">
+                {result.eligible && result.preApprovedAmount && (
+                  <div className="mt-4 pt-4 border-t border-green-200">
                     <div>
                       <p className="text-sm text-green-700">Pre-approved Amount</p>
                       <p className="text-lg font-semibold text-green-800">
                         ₹{result.preApprovedAmount.toLocaleString()}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-green-700">Interest Rate</p>
-                      <p className="text-lg font-semibold text-green-800">
-                        {result.interestRate}% p.a.
                       </p>
                     </div>
                   </div>
@@ -165,7 +146,7 @@ export function EligibilityChecker({ onApply }: EligibilityCheckerProps) {
       <div className="flex flex-col sm:flex-row gap-3">
         <Button
           onClick={checkEligibility}
-          disabled={loading || !formData.panNumber || !formData.monthlyIncome || !formData.employmentType || !formData.loanAmount}
+          disabled={loading || !formData.monthlyIncome || !formData.employmentType || !formData.loanAmount}
           style={{ backgroundColor: '#0052FF' }}
           className="flex-1"
         >

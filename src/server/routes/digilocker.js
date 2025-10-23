@@ -279,11 +279,12 @@ router.get('/get-details/:transactionId', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: apiResp.data?.msg || 'Failed to fetch details' });
     }
     const details = apiResp.data.model || apiResp.data.data;
-    // Persist under verification_data.kycData
+    // Persist under verification_data.kycData (parse if it's a string)
+    const kycDataParsed = typeof details === 'string' ? JSON.parse(details) : details;
     await executeQuery(
-      `UPDATE kyc_verifications SET verification_data = JSON_SET(COALESCE(verification_data,'{}'), '$.kycData', ?) 
+      `UPDATE kyc_verifications SET verification_data = JSON_SET(COALESCE(verification_data,'{}'), '$.kycData', CAST(? AS JSON)) 
        WHERE user_id = ? AND JSON_EXTRACT(verification_data, '$.transactionId') = ?`,
-      [JSON.stringify(details), userId, transactionId]
+      [JSON.stringify(kycDataParsed), userId, transactionId]
     );
     res.json({ success: true, data: details });
   } catch (e) {
@@ -315,11 +316,12 @@ router.get('/list-docs/:transactionId', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: apiResp.data?.msg || 'Failed to list docs' });
     }
     const docs = apiResp.data.model || apiResp.data.data;
-    // Persist under verification_data.docs
+    // Persist under verification_data.docs (parse if it's a string)
+    const docsParsed = typeof docs === 'string' ? JSON.parse(docs) : docs;
     await executeQuery(
-      `UPDATE kyc_verifications SET verification_data = JSON_SET(COALESCE(verification_data,'{}'), '$.docs', ?) 
+      `UPDATE kyc_verifications SET verification_data = JSON_SET(COALESCE(verification_data,'{}'), '$.docs', CAST(? AS JSON)) 
        WHERE user_id = ? AND JSON_EXTRACT(verification_data, '$.transactionId') = ?`,
-      [JSON.stringify(docs), userId, transactionId]
+      [JSON.stringify(docsParsed), userId, transactionId]
     );
     res.json({ success: true, data: docs });
   } catch (e) {

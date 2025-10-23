@@ -8,7 +8,7 @@ router.post('/', requireAuth, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;
-    const { employment_type, income_range, eligible_loan_amount, payment_mode, designation } = req.body;
+    const { employment_type, income_range, eligible_loan_amount, payment_mode, date_of_birth } = req.body;
 
     if (!userId) {
       return res.status(401).json({ success: false, message: 'Authentication required' });
@@ -51,10 +51,35 @@ router.post('/', requireAuth, async (req, res) => {
 
     // For salaried users - validate salary fields
     if (employment_type === 'salaried') {
-      if (!income_range || !eligible_loan_amount || !payment_mode || !designation) {
+      if (!income_range || !eligible_loan_amount || !payment_mode || !date_of_birth) {
         return res.status(400).json({ 
           success: false, 
-          message: 'Income range, payment mode, and designation are required for salaried users' 
+          message: 'Income range, payment mode, and date of birth are required for salaried users' 
+        });
+      }
+
+      // Age validation - hold permanently if age > 45
+      const dob = new Date(date_of_birth);
+      const today = new Date();
+      const age = today.getFullYear() - dob.getFullYear() - 
+        ((today.getMonth() < dob.getMonth() || 
+         (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate())) ? 1 : 0);
+
+      if (age > 45) {
+        // Hold application permanently due to age
+        await executeQuery(
+          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, date_of_birth = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
+          ['on_hold', 'not_eligible', `Application held: Age (${age} years) exceeds maximum limit of 45 years`, date_of_birth, userId]
+        );
+
+        return res.json({
+          success: true,
+          data: {
+            eligible: false,
+            message: 'Sorry, applicants above 45 years of age are not eligible at this time',
+            hold_reason: `Age: ${age} years (maximum 45 years allowed)`,
+            hold_permanent: true
+          }
         });
       }
 
@@ -123,24 +148,23 @@ router.post('/', requireAuth, async (req, res) => {
         // Use the loan amount calculated from income range
         const loanLimit = parseFloat(eligible_loan_amount);
         
-        // User is eligible - update profile step, set loan limit, income range, and save employment info
+        // User is eligible - update profile step, set loan limit, income range, date of birth, and save employment info
         await executeQuery(
-          'UPDATE users SET profile_completion_step = 2, status = ?, eligibility_status = ?, loan_limit = ?, income_range = ?, updated_at = NOW() WHERE id = ?',
-          ['active', 'eligible', loanLimit, income_range, userId]
+          'UPDATE users SET profile_completion_step = 2, status = ?, eligibility_status = ?, loan_limit = ?, income_range = ?, date_of_birth = ?, updated_at = NOW() WHERE id = ?',
+          ['active', 'eligible', loanLimit, income_range, date_of_birth, userId]
         );
 
         // Save employment data
         await executeQuery(`
           INSERT INTO employment_details 
-          (user_id, employment_type, income_range, salary_payment_mode, designation, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+          (user_id, employment_type, income_range, salary_payment_mode, created_at, updated_at)
+          VALUES (?, ?, ?, ?, NOW(), NOW())
           ON DUPLICATE KEY UPDATE 
             employment_type = VALUES(employment_type),
             income_range = VALUES(income_range),
             salary_payment_mode = VALUES(salary_payment_mode),
-            designation = VALUES(designation),
             updated_at = NOW()
-        `, [userId, employment_type, income_range, payment_mode, designation]);
+        `, [userId, employment_type, income_range, payment_mode]);
 
         return res.json({
           success: true,

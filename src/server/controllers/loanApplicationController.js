@@ -1,4 +1,3 @@
-const Joi = require('joi');
 const { findUserById } = require('../models/user');
 const { 
   createApplication, 
@@ -13,31 +12,8 @@ const {
  * Handles loan application business logic with profile validation
  */
 
-// Validation schemas
-const loanApplicationSchema = Joi.object({
-  loan_amount: Joi.number().min(50000).max(5000000).required().messages({
-    'number.min': 'Minimum loan amount is ₹50,000',
-    'number.max': 'Maximum loan amount is ₹5,000,000',
-    'any.required': 'Loan amount is required'
-  }),
-  tenure_months: Joi.number().min(6).max(60).required().messages({
-    'number.min': 'Minimum tenure is 6 months',
-    'number.max': 'Maximum tenure is 60 months',
-    'any.required': 'Tenure in months is required'
-  }),
-  loan_purpose: Joi.string().min(5).max(255).required().messages({
-    'string.min': 'Loan purpose must be at least 5 characters long',
-    'string.max': 'Loan purpose must not exceed 255 characters',
-    'any.required': 'Loan purpose is required'
-  }),
-  interest_rate: Joi.number().min(8).max(30).optional().messages({
-    'number.min': 'Interest rate must be at least 8%',
-    'number.max': 'Interest rate must not exceed 30%'
-  }),
-  emi_amount: Joi.number().min(1000).optional().messages({
-    'number.min': 'EMI amount must be at least ₹1,000'
-  })
-});
+// NOTE: Joi validation removed - using simple validation like the old /loans/apply endpoint
+// This allows flexibility for plan-based loans without strict schema constraints
 
 /**
  * Apply for a loan
@@ -46,10 +22,12 @@ const loanApplicationSchema = Joi.object({
  */
 const applyForLoan = async (req, res) => {
   try {
-    const userId = req.session.userId;
+    // Get userId from JWT auth (req.userId) or session (req.session.userId) for hybrid auth
+    const userId = req.userId || req.session?.userId;
 
     if (!userId) {
       return res.status(401).json({
+        success: false,
         status: 'error',
         message: 'Authentication required'
       });
@@ -59,19 +37,23 @@ const applyForLoan = async (req, res) => {
     const user = await findUserById(userId);
     if (!user) {
       return res.status(404).json({
+        success: false,
         status: 'error',
         message: 'User not found'
       });
     }
 
     // Critical prerequisite check: Profile must be complete
-    if (user.profile_completion_step < 4) {
+    // Changed from step < 4 to step < 2, as step 4 doesn't exist in the flow
+    // Step 2 = Employment quick check completed, which is the minimum to apply
+    if (user.profile_completion_step < 2) {
       return res.status(403).json({
+        success: false,
         status: 'error',
         message: 'Please complete your profile before applying for a loan',
         data: {
           profile_completion_step: user.profile_completion_step,
-          required_step: 4,
+          required_step: 2,
           profile_completed: false
         }
       });
@@ -81,47 +63,40 @@ const applyForLoan = async (req, res) => {
     const hasPending = await hasPendingApplications(userId);
     if (hasPending) {
       return res.status(400).json({
+        success: false,
         status: 'error',
         message: 'You already have a pending loan application. Please wait for it to be processed before applying for another loan.'
       });
     }
 
-    // Validate request body
-    const { error, value } = loanApplicationSchema.validate(req.body);
-    if (error) {
+    // Simple validation (removed Joi schema - like old /loans/apply endpoint)
+    const { loan_amount, loan_purpose } = req.body;
+    
+    if (!loan_amount || !loan_purpose) {
       return res.status(400).json({
+        success: false,
         status: 'error',
-        message: 'Validation failed',
-        details: error.details.map(detail => detail.message)
+        message: 'Loan amount and purpose are required'
       });
     }
 
-    // Calculate EMI if not provided
-    let emiAmount = value.emi_amount;
-    if (!emiAmount && value.interest_rate) {
-      // Simple EMI calculation: EMI = P * r * (1+r)^n / ((1+r)^n - 1)
-      const principal = value.loan_amount;
-      const rate = value.interest_rate / 100 / 12; // Monthly rate
-      const months = value.tenure_months;
-      
-      if (rate > 0) {
-        emiAmount = Math.round(principal * rate * Math.pow(1 + rate, months) / (Math.pow(1 + rate, months) - 1));
-      } else {
-        emiAmount = Math.round(principal / months);
-      }
+    if (loan_amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        status: 'error',
+        message: 'Loan amount must be greater than 0'
+      });
     }
 
-    // Prepare application data
-    const applicationData = {
-      ...value,
-      emi_amount: emiAmount
-    };
+    // Prepare application data from request body (no transformation needed)
+    const applicationData = req.body;
 
     // Create loan application
     const newApplication = await createApplication(userId, applicationData);
 
     if (!newApplication) {
       return res.status(500).json({
+        success: false,
         status: 'error',
         message: 'Failed to create loan application'
       });
@@ -131,10 +106,12 @@ const applyForLoan = async (req, res) => {
     const applicationSummary = getApplicationSummary(newApplication);
 
     res.status(201).json({
+      success: true,
       status: 'success',
       message: 'Loan application submitted successfully',
       data: {
         application: applicationSummary,
+        application_id: newApplication.id || applicationSummary.id,  // For backward compatibility
         next_steps: [
           'Your application is under review',
           'You will receive updates via SMS and email',
@@ -146,8 +123,10 @@ const applyForLoan = async (req, res) => {
   } catch (error) {
     console.error('Apply for loan error:', error);
     res.status(500).json({
+      success: false,
       status: 'error',
-      message: 'Failed to submit loan application'
+      message: 'Failed to submit loan application',
+      error: error.message
     });
   }
 };
@@ -159,7 +138,7 @@ const applyForLoan = async (req, res) => {
  */
 const getAllUserLoanApplications = async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = req.userId || req.session?.userId;
 
     if (!userId) {
       return res.status(401).json({
@@ -202,7 +181,7 @@ const getAllUserLoanApplications = async (req, res) => {
  */
 const getLoanApplicationById = async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = req.userId || req.session?.userId;
     const { applicationId } = req.params;
 
     if (!userId) {
@@ -255,7 +234,7 @@ const getLoanApplicationById = async (req, res) => {
  */
 const getLoanApplicationStats = async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = req.userId || req.session?.userId;
 
     if (!userId) {
       return res.status(401).json({

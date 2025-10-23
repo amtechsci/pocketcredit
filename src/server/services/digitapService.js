@@ -1,7 +1,15 @@
 const axios = require('axios');
 
 const DIGITAP_API_URL = process.env.DIGITAP_API_URL || 'https://svcint.digitap.work/wrap/demo/svc/mobile_prefill/request';
-const DIGITAP_API_KEY = process.env.DIGITAP_API_KEY || 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI='; // Default Basic auth
+const DIGITAP_CLIENT_ID = process.env.DIGITAP_CLIENT_ID || '27108750';
+const DIGITAP_CLIENT_SECRET = process.env.DIGITAP_CLIENT_SECRET || 'RTpc4iV2TBqMtXJEdzkPaDnBD5YNOAFB';
+
+// Generate Base64 encoded authorization header
+function getAuthHeader() {
+  const credentials = `${DIGITAP_CLIENT_ID}:${DIGITAP_CLIENT_SECRET}`;
+  const base64Credentials = Buffer.from(credentials).toString('base64');
+  return `Basic ${base64Credentials}`;
+}
 
 /**
  * Generate client reference number for Digitap API
@@ -29,6 +37,8 @@ async function fetchUserPrefillData(mobileNumber) {
     }
 
     console.log(`Calling Digitap API for mobile: ${mobileNumber}`);
+    console.log(`Using Digitap credentials - Client ID: ${DIGITAP_CLIENT_ID}`);
+    console.log(`Authorization header: ${getAuthHeader()}`);
 
     const clientRefNum = generateClientRefNum();
 
@@ -41,7 +51,7 @@ async function fetchUserPrefillData(mobileNumber) {
       },
       {
         headers: {
-          'Authorization': `Basic ${DIGITAP_API_KEY}`,
+          'Authorization': getAuthHeader(),
           'Content-Type': 'application/json'
         },
         timeout: 15000 // 15 seconds
@@ -49,6 +59,7 @@ async function fetchUserPrefillData(mobileNumber) {
     );
 
     console.log('Digitap API response received:', response.data?.result_code);
+    console.log('Full Digitap response:', JSON.stringify(response.data, null, 2));
 
     // Check if response is successful (result_code 101 = success)
     if (response.data && response.data.result_code === 101 && response.data.result) {
@@ -68,10 +79,22 @@ async function fetchUserPrefillData(mobileNumber) {
         }
       };
     } else {
-      console.warn('Digitap API returned non-success result:', response.data?.message);
+      const resultCode = response.data?.result_code;
+      const message = response.data?.message || 'API returned unsuccessful response';
+      
+      console.warn(`Digitap API returned non-success result_code: ${resultCode}`);
+      console.warn(`Digitap message: ${message}`);
+      
+      // Common Digitap result codes:
+      // 101 = Success
+      // 102 = No data found
+      // 103 = Invalid request
+      // 104 = Rate limit exceeded
+      
       return {
         success: false,
-        error: response.data?.message || 'API returned unsuccessful response',
+        error: `${message} (Code: ${resultCode})`,
+        result_code: resultCode,
         allow_manual: true
       };
     }

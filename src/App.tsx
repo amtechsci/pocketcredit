@@ -27,6 +27,8 @@ import { LoanApplicationStepsPage } from './components/pages/LoanApplicationStep
 import { DigilockerKYCPage } from './components/pages/DigilockerKYCPage';
 import { KYCCheckPage } from './components/pages/KYCCheckPage';
 import { EmploymentDetailsPage } from './components/pages/EmploymentDetailsPage';
+import { BankStatementUploadPage } from './components/pages/BankStatementUploadPage';
+import { AccountAggregatorFlow } from './components/pages/AccountAggregatorFlow';
 import { ApplicationFlow } from './components/ApplicationFlow';
 import { CreditScorePage } from './components/pages/CreditScorePage';
 import { ResourcesPage } from './components/pages/ResourcesPage';
@@ -365,6 +367,24 @@ function AppContent() {
             <DashboardLayout>
               <KYCCheckPage />
             </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+        
+        <Route path="/loan-application/bank-statement" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <BankStatementUploadPage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+        
+        <Route path="/loan-application/aa-flow" element={
+          isAuthenticated ? (
+            <AccountAggregatorFlow />
           ) : (
             <Navigate to="/auth" replace />
           )

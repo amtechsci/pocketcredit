@@ -84,16 +84,22 @@ export function AuthPage() {
   };
 
   const verifyOtp = async () => {
+    console.log('🔍 verifyOtp called with OTP:', otp);
+    
     if (otp.length !== 4) {
+      console.log('❌ OTP length invalid:', otp.length);
       toast.error('Please enter a valid 4-digit OTP');
       return;
     }
 
+    console.log('✅ OTP validation passed, calling loginWithOTP...');
     setLoading(true);
     try {
       const result = await loginWithOTP(mobileNumber, otp);
+      console.log('📥 loginWithOTP result:', result);
       
       if (result.success) {
+        console.log('✅ Login successful, navigating to dashboard...');
         toast.success('Login successful!');
         
         // Check if user needs to complete profile
@@ -101,9 +107,11 @@ export function AuthPage() {
         // For now, navigate to dashboard - the App component will handle routing
         navigate('/dashboard');
       } else {
+        console.log('❌ Login failed:', result.message);
         toast.error(result.message);
       }
     } catch (error) {
+      console.error('❌ OTP verification exception:', error);
       toast.error('OTP verification failed. Please try again.');
     } finally {
       setLoading(false);

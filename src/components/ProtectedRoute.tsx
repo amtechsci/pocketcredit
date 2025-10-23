@@ -29,7 +29,7 @@ export function ProtectedRoute({ children, redirectTo = '/dashboard' }: Protecte
 
 // Reverse protected route - only allows access if NOT authenticated
 export function AuthOnlyRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, user, loading } = useAuth();
+  const { isAuthenticated, user, isLoading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -40,7 +40,7 @@ export function AuthOnlyRoute({ children }: { children: React.ReactNode }) {
   }, [isAuthenticated, user, navigate]);
 
   // Show loading spinner while checking authentication
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>

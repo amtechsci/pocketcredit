@@ -26,21 +26,40 @@ const createApplication = async (userId, applicationData) => {
     const pool = getPool();
     const {
       loan_amount,
-      tenure_months,
       loan_purpose,
+      plan_id,
+      loan_plan_id, // alias for plan_id
+      plan_code,
+      plan_snapshot,
+      processing_fee,
+      processing_fee_percent,
+      total_interest,
+      interest_percent_per_day,
+      total_repayable,
+      late_fee_structure,
+      emi_schedule,
+      // Legacy fields (kept for backward compatibility)
+      tenure_months = null,
       interest_rate = null,
       emi_amount = null
     } = applicationData;
 
     // Generate unique application number
     const application_number = generateApplicationNumber();
+    
+    // Use plan_id or loan_plan_id (whichever is provided)
+    const planId = plan_id || loan_plan_id || null;
 
     const query = `
       INSERT INTO loan_applications (
         user_id, application_number, loan_amount, loan_purpose,
-        tenure_months, interest_rate, emi_amount, status,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        loan_plan_id, plan_code, plan_snapshot,
+        processing_fee, processing_fee_percent,
+        total_interest, interest_percent_per_day,
+        total_repayable, late_fee_structure, emi_schedule,
+        tenure_months, interest_rate, emi_amount,
+        status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', NOW(), NOW())
     `;
     
     const values = [
@@ -48,10 +67,19 @@ const createApplication = async (userId, applicationData) => {
       application_number,
       loan_amount,
       loan_purpose,
+      planId,
+      plan_code || null,
+      plan_snapshot ? JSON.stringify(plan_snapshot) : null,
+      processing_fee || null,
+      processing_fee_percent || null,
+      total_interest || null,
+      interest_percent_per_day || null,
+      total_repayable || null,
+      late_fee_structure ? JSON.stringify(late_fee_structure) : null,
+      emi_schedule ? JSON.stringify(emi_schedule) : null,
       tenure_months,
       interest_rate,
-      emi_amount,
-      'submitted' // Initial status
+      emi_amount
     ];
 
     const [result] = await pool.execute(query, values);

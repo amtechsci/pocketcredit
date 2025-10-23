@@ -77,7 +77,17 @@ class ApiService {
   private baseURL: string;
 
   constructor() {
-    this.baseURL = process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:3002/api';
+    // Dynamic API URL based on environment and current host
+    if (process.env.NODE_ENV === 'production') {
+      this.baseURL = '/api';
+    } else {
+      // In development, use the same host as the frontend but port 3002
+      const hostname = window.location.hostname;
+      this.baseURL = `http://${hostname}:3002/api`;
+    }
+    
+    console.log('🌐 API Base URL:', this.baseURL);
+    
     this.api = axios.create({
       baseURL: this.baseURL,
       timeout: 30000, // Increased timeout to 30 seconds
@@ -269,26 +279,8 @@ class ApiService {
     return this.request('GET', '/employment-details');
   }
 
-  async createLoanApplication(applicationData: {
-    desired_amount: number;
-    purpose: string;
-    loan_plan_id?: number;
-    plan_code?: string;
-    plan_snapshot?: any;
-    processing_fee?: number;
-    processing_fee_percent?: number;
-    total_interest?: number;
-    interest_percent_per_day?: number;
-    total_repayable?: number;
-    late_fee_structure?: any;
-    emi_schedule?: any;
-  }): Promise<ApiResponse<{
-    application_id: number;
-    application_number: string;
-    status: string;
-  }>> {
-    return this.request('POST', '/loans/apply', applicationData);
-  }
+  // NOTE: Old createLoanApplication method removed - use applyForLoan() instead
+  // which calls /loan-applications/apply
 
   async saveBankDetails(bankData: {
     application_id: number;
@@ -771,6 +763,39 @@ class ApiService {
     application_id: number;
   }): Promise<ApiResponse<{ message: string }>> {
     return this.request('POST', '/employment/details', data);
+  }
+
+  /**
+   * Account Aggregator - Initiate AA flow
+   */
+  async initiateAccountAggregator(data: {
+    mobile_number: string;
+    bank_name: string;
+    application_id: number;
+  }): Promise<ApiResponse<{ aaUrl: string; transactionId: string }>> {
+    return this.request('POST', '/aa/initiate', data);
+  }
+
+  /**
+   * Account Aggregator - Upload bank statement PDF
+   */
+  async uploadBankStatementPDF(formData: FormData): Promise<ApiResponse<any>> {
+    const token = localStorage.getItem('pocket_user_token');
+    const response = await fetch(`${this.baseURL}/aa/upload-statement`, {
+      method: 'POST',
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: formData
+    });
+    return response.json();
+  }
+
+  /**
+   * Account Aggregator - Get AA status
+   */
+  async getAccountAggregatorStatus(applicationId: number): Promise<ApiResponse<any>> {
+    return this.request('GET', `/aa/status/${applicationId}`);
   }
 }
 

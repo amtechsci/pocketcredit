@@ -15,7 +15,35 @@ import { toast } from 'sonner';
 interface LoanApplicationData {
   desiredAmount: number;
   purpose: string;
+  selectedPlanId: number | null;
   agreeToTerms: boolean;
+}
+
+interface LoanPlan {
+  id: number;
+  plan_name: string;
+  plan_code: string;
+  total_duration_days: number;
+}
+
+interface PlanCalculation {
+  plan: {
+    id: number;
+    name: string;
+    duration_days: number;
+  };
+  loan_amount: number;
+  processing_fee: number;
+  interest: number;
+  total_repayable: number;
+  emi_details: {
+    repayment_date?: string;
+    schedule?: any[];
+  };
+  breakdown: {
+    processing_fee_percent: number;
+    interest_percent_per_day: number;
+  };
 }
 
 const loanPurposes = [
@@ -40,8 +68,13 @@ export function SimplifiedLoanApplicationPage() {
   const [formData, setFormData] = useState<LoanApplicationData>({
     desiredAmount: 0,
     purpose: '',
+    selectedPlanId: null,
     agreeToTerms: false
   });
+  
+  // Plan selection states
+  const [availablePlans, setAvailablePlans] = useState<LoanPlan[]>([]);
+  const [calculation, setCalculation] = useState<PlanCalculation | null>(null);
 
   // Check if user can apply for a new loan and fetch loan limit
   useEffect(() => {
@@ -86,6 +119,52 @@ export function SimplifiedLoanApplicationPage() {
     }
   }, [isAuthenticated, navigate]);
 
+  // Load available loan plans
+  useEffect(() => {
+    const loadPlans = async () => {
+      try {
+        const response = await apiService.getAvailableLoanPlans();
+        if (response && (response as any).success && (response as any).data) {
+          setAvailablePlans((response as any).data);
+        }
+      } catch (error) {
+        console.error('Error loading plans:', error);
+        toast.error('Failed to load loan plans');
+      }
+    };
+
+    if (isAuthenticated && !checkingEligibility) {
+      loadPlans();
+    }
+  }, [isAuthenticated, checkingEligibility]);
+
+  // Calculate plan when amount and plan are selected
+  useEffect(() => {
+    if (formData.desiredAmount >= 1000 && formData.selectedPlanId) {
+      calculateLoanPlan();
+    } else {
+      setCalculation(null);
+    }
+  }, [formData.desiredAmount, formData.selectedPlanId]);
+
+  const calculateLoanPlan = async () => {
+    if (!formData.selectedPlanId || !formData.desiredAmount) return;
+
+    try {
+      const response = await apiService.calculateLoanPlan(
+        formData.desiredAmount,
+        formData.selectedPlanId
+      );
+
+      if (response && (response as any).success && (response as any).data) {
+        setCalculation((response as any).data);
+      }
+    } catch (error) {
+      console.error('Error calculating plan:', error);
+      // Silently fail - calculation is just for confirmation page
+    }
+  };
+
   const handleInputChange = (field: keyof LoanApplicationData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
@@ -114,18 +193,48 @@ export function SimplifiedLoanApplicationPage() {
       return;
     }
 
+    if (!formData.selectedPlanId) {
+      toast.error('Please select a repayment plan');
+      return;
+    }
+
     if (!formData.agreeToTerms) {
       toast.error('Please agree to the Terms of Use and Privacy Policy');
       return;
     }
 
-    // Redirect to plan selection instead of submitting directly
-    navigate('/loan-application/select-plan', {
-      state: {
-        loanAmount: formData.desiredAmount,
-        loanPurpose: formData.purpose
+    // Submit loan application directly
+    setLoading(true);
+    try {
+      const response = await apiService.applyForLoan({
+        loan_amount: formData.desiredAmount,
+        tenure_months: Math.ceil((calculation?.plan.duration_days || 15) / 30),
+        loan_purpose: formData.purpose,
+        plan_id: formData.selectedPlanId
+      } as any);
+
+      if (response && (response as any).success && (response as any).data) {
+        toast.success('Loan application submitted successfully!');
+        
+        const responseData = (response as any).data;
+        const applicationId = responseData.application?.id || responseData.application_id;
+        
+        // Navigate directly to KYC verification (skip confirmation page)
+        navigate('/loan-application/kyc-verification', {
+          state: {
+            applicationId: applicationId,
+            calculation: calculation
+          }
+        });
+      } else {
+        toast.error((response as any).message || 'Failed to submit loan application');
       }
-    });
+    } catch (error: any) {
+      console.error('Loan application error:', error);
+      toast.error(error.response?.data?.message || 'Failed to submit loan application');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (!isAuthenticated || checkingEligibility) {
@@ -231,6 +340,28 @@ export function SimplifiedLoanApplicationPage() {
                   {loanPurposes.map(purpose => (
                     <SelectItem key={purpose} value={purpose}>
                       {purpose}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Repayment Plan Selection */}
+            <div className="space-y-2">
+              <Label htmlFor="plan" className="text-base font-medium">
+                Choose Repayment Plan *
+              </Label>
+              <Select 
+                value={formData.selectedPlanId?.toString() || ''} 
+                onValueChange={(value) => handleInputChange('selectedPlanId', parseInt(value))}
+              >
+                <SelectTrigger className="h-12 text-base">
+                  <SelectValue placeholder="Select repayment plan" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availablePlans.map(plan => (
+                    <SelectItem key={plan.id} value={plan.id.toString()}>
+                      {plan.plan_name} - {plan.total_duration_days} days
                     </SelectItem>
                   ))}
                 </SelectContent>
