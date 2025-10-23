@@ -105,7 +105,7 @@ export function HomePage() {
               {/* Trust Badge */}
               <div className="inline-flex items-center gap-2 bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full border border-blue-100 shadow-sm">
                 <Shield className="w-4 h-4 text-blue-600" />
-                <span className="text-sm font-medium text-blue-700">RBI Registered NBFC Partner</span>
+                <span className="text-sm font-medium text-blue-700">Welcome to "PocketCredit" a product of Spheeti Fintech Pvt. Ltd., an RBI-registered NBFC.</span>
               </div>
               
               {/* Main Headline */}
@@ -122,7 +122,7 @@ export function HomePage() {
                   <span style={{ color: '#0052FF' }}>₹10 Lakhs</span>
                 </h1>
                 <p className="text-lg sm:text-xl lg:text-2xl text-gray-600 leading-relaxed max-w-2xl mx-auto lg:mx-0">
-                  <span className="font-semibold text-green-600">15-minute approval</span>, 
+                  <span className="font-semibold text-green-600">2-minute approval</span>, 
                   zero paperwork, and money in your account within 24 hours.
                 </p>
               </div>
@@ -131,15 +131,15 @@ export function HomePage() {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 sm:gap-6 py-4">
                 <div className="text-center lg:text-left">
                   <div className="text-2xl sm:text-3xl font-bold mb-1" style={{ color: '#0052FF' }}>15 min</div>
-                  <div className="text-xs sm:text-sm text-gray-600">Approval Time</div>
+                  <div className="text-xs sm:text-sm text-gray-600">Disbursal time</div>
                 </div>
                 <div className="text-center lg:text-left">
-                  <div className="text-2xl sm:text-3xl font-bold mb-1" style={{ color: '#00C49A' }}>14%</div>
-                  <div className="text-xs sm:text-sm text-gray-600">Starting Rate</div>
+                  <div className="text-2xl sm:text-3xl font-bold mb-1" style={{ color: '#00C49A' }}>100%</div>
+                  <div className="text-xs sm:text-sm text-gray-600">digital</div>
                 </div>
                 <div className="text-center lg:text-left col-span-2 sm:col-span-1">
-                  <div className="text-2xl sm:text-3xl font-bold mb-1" style={{ color: '#0052FF' }}>24 hrs</div>
-                  <div className="text-xs sm:text-sm text-gray-600">Disbursal</div>
+                  <div className="text-2xl sm:text-3xl font-bold mb-1" style={{ color: '#0052FF' }}>Best</div>
+                  <div className="text-xs sm:text-sm text-gray-600">interest rates & no collateral</div>
                 </div>
               </div>
 
@@ -153,15 +153,6 @@ export function HomePage() {
                 >
                   Apply Now - Get ₹10L
                   <ArrowRight className="ml-2 h-5 w-5" />
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="lg"
-                  onClick={() => setActiveCalculator('emi')}
-                  className="btn-mobile touch-manipulation w-full sm:w-auto text-base sm:text-lg px-8 py-4 border-2 hover:bg-blue-50 transition-all duration-300"
-                  style={{ borderColor: '#0052FF', color: '#0052FF' }}
-                >
-                  Calculate EMI
                 </Button>
               </div>
 
@@ -194,7 +185,7 @@ export function HomePage() {
                         <CheckCircle className="w-4 h-4 text-green-600" />
                       </div>
                       <div>
-                        <div className="text-sm font-bold text-green-600">₹5L</div>
+                        <div className="text-sm font-bold text-green-600">₹2 lakh</div>
                         <div className="text-xs text-gray-500">Approved</div>
                       </div>
                     </div>
@@ -206,8 +197,8 @@ export function HomePage() {
                         <Clock className="w-4 h-4 text-blue-600" />
                       </div>
                       <div>
-                        <div className="text-sm font-bold text-blue-600">15 min</div>
-                        <div className="text-xs text-gray-500">Fast</div>
+                        <div className="text-sm font-bold text-blue-600">2 min</div>
+                        <div className="text-xs text-gray-500">Approval</div>
                       </div>
                     </div>
                   </div>
