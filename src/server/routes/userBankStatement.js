@@ -164,14 +164,17 @@ router.post('/initiate-bank-statement', requireAuth, async (req, res) => {
 
     const clientRefNum = generateClientRefNum(userId, 0); // 0 for user-level
     
-    // Use localhost for development
-    const isDev = process.env.NODE_ENV !== 'production';
-    const frontendUrl = isDev ? 'http://localhost:3000' : (process.env.FRONTEND_URL || 'https://pocketcredit.in');
-    const apiUrl = isDev ? 'http://localhost:3002' : (process.env.APP_URL || 'https://api.pocketcredit.in');
+    // Determine URLs - prioritize environment variables, then use production URLs as default
+    // Only use localhost if explicitly in development mode
+    const isDevelopment = process.env.NODE_ENV === 'development' || (!process.env.NODE_ENV && !process.env.FRONTEND_URL);
+    const frontendUrl = process.env.FRONTEND_URL || (isDevelopment ? 'http://localhost:3000' : 'https://pocketcredit.in');
+    const apiUrl = process.env.APP_URL || (isDevelopment ? 'http://localhost:3002' : 'https://pocketcredit.in/api');
     
     // Return URL should point to backend first to log the callback, then redirect to frontend
-    const returnUrl = `${apiUrl}/api/user/bank-data/success`;
-    const webhookUrl = `${apiUrl}/api/user/bank-data/webhook`;
+    // Routes are mounted at /api/bank-statement, so paths are relative to that
+    // apiUrl: production includes /api, development doesn't
+    const returnUrl = isDevelopment ? `${apiUrl}/api/bank-statement/bank-data/success` : `${apiUrl}/bank-statement/bank-data/success`;
+    const webhookUrl = isDevelopment ? `${apiUrl}/api/bank-statement/bank-data/webhook` : `${apiUrl}/bank-statement/bank-data/webhook`;
     
     console.log('🔗 URLs configured:');
     console.log('   Return URL:', returnUrl);
@@ -639,7 +642,7 @@ router.post('/delete-pending-bank-statement', requireAuth, async (req, res) => {
 });
 
 /**
- * GET/POST /api/user/bank-data/webhook
+ * GET/POST /api/bank-statement/bank-data/webhook
  * Webhook endpoint - Digitap calls this when transaction completes
  * Supports both GET (query params) and POST (body) requests
  */
@@ -658,7 +661,7 @@ async function handleBankDataWebhook(req, res) {
   
   try {
     // Log webhook payload to database FIRST (before any processing)
-    await logWebhookPayload(req, 'bank_data_webhook', '/api/user/bank-data/webhook', false, null);
+    await logWebhookPayload(req, 'bank_data_webhook', '/api/bank-statement/bank-data/webhook', false, null);
     
     // Log full webhook payload for debugging
     console.log('📥 Digitap Webhook received - Full payload:', JSON.stringify(req.body, null, 2));
@@ -784,7 +787,7 @@ async function handleBankDataWebhook(req, res) {
     }
 
     // Update webhook log as processed
-    await logWebhookPayload(req, 'bank_data_webhook', '/api/user/bank-data/webhook', true, null);
+    await logWebhookPayload(req, 'bank_data_webhook', '/api/bank-statement/bank-data/webhook', true, null);
 
     res.json({
       success: true,
@@ -795,7 +798,7 @@ async function handleBankDataWebhook(req, res) {
     console.error('❌ Webhook processing error:', error);
     
     // Update webhook log with error
-    await logWebhookPayload(req, 'bank_data_webhook', '/api/user/bank-data/webhook', false, processingError);
+    await logWebhookPayload(req, 'bank_data_webhook', '/api/bank-statement/bank-data/webhook', false, processingError);
     
     res.status(500).json({
       success: false,
@@ -805,7 +808,7 @@ async function handleBankDataWebhook(req, res) {
 }
 
 /**
- * GET /api/user/bank-data/success
+ * GET /api/bank-statement/bank-data/success
  * Return URL endpoint - User lands here after completing on Digitap
  * This endpoint logs all query parameters and then redirects to frontend
  */
@@ -817,7 +820,7 @@ router.get('/bank-data/success', async (req, res) => {
     console.log('📥 Return URL callback received - Full query:', JSON.stringify(req.query, null, 2));
     console.log('📥 Return URL callback received - Full URL:', req.url);
     
-    await logWebhookPayload(req, 'bank_data_success', '/api/user/bank-data/success', false, null);
+    await logWebhookPayload(req, 'bank_data_success', '/api/bank-statement/bank-data/success', false, null);
     
     await initializeDatabase();
     
@@ -861,10 +864,11 @@ router.get('/bank-data/success', async (req, res) => {
     }
     
     // Mark webhook as processed
-    await logWebhookPayload(req, 'bank_data_success', '/api/user/bank-data/success', true, null);
+    await logWebhookPayload(req, 'bank_data_success', '/api/bank-statement/bank-data/success', true, null);
     
     // Redirect to frontend success page with all query parameters preserved
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const isDevelopment = process.env.NODE_ENV === 'development' || (!process.env.NODE_ENV && !process.env.FRONTEND_URL);
+    const frontendUrl = process.env.FRONTEND_URL || (isDevelopment ? 'http://localhost:3000' : 'https://pocketcredit.in');
     const queryString = new URLSearchParams(req.query).toString();
     const redirectUrl = `${frontendUrl}/bank-statement-success?${queryString}&complete=true`;
     
@@ -876,9 +880,10 @@ router.get('/bank-data/success', async (req, res) => {
     console.error('❌ Return URL error:', error);
     
     // Log the error
-    await logWebhookPayload(req, 'bank_data_success', '/api/user/bank-data/success', false, processingError);
+    await logWebhookPayload(req, 'bank_data_success', '/api/bank-statement/bank-data/success', false, processingError);
     
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const isDevelopment = process.env.NODE_ENV === 'development' || (!process.env.NODE_ENV && !process.env.FRONTEND_URL);
+    const frontendUrl = process.env.FRONTEND_URL || (isDevelopment ? 'http://localhost:3000' : 'https://pocketcredit.in');
     const queryString = new URLSearchParams(req.query).toString();
     res.redirect(`${frontendUrl}/bank-statement-success?${queryString}&error=true`);
   }

@@ -151,12 +151,23 @@ async function generateBankStatementURL(params) {
 
     const consent_request = [consentRequestObj];
 
+    // Determine API URL - prioritize environment variables, then use production URLs as default
+    // Only use localhost if explicitly in development mode
+    // API is on same domain as frontend: https://pocketcredit.in/api/
+    const isDevelopment = process.env.NODE_ENV === 'development' || (!process.env.NODE_ENV && !process.env.APP_URL);
+    const defaultApiUrl = process.env.APP_URL || (isDevelopment ? 'http://localhost:3002' : 'https://pocketcredit.in/api');
+    const defaultFrontendUrl = process.env.FRONTEND_URL || (isDevelopment ? 'http://localhost:3000' : 'https://pocketcredit.in');
+    
+    // Routes are mounted at /api/bank-statement, so add /api for dev, or just /bank-statement for prod (since defaultApiUrl already has /api)
+    const webhookPath = isDevelopment ? `${defaultApiUrl}/api/bank-statement/bank-data/webhook` : `${defaultApiUrl}/bank-statement/bank-data/webhook`;
+    const returnPath = isDevelopment ? `${defaultApiUrl}/api/bank-statement/bank-data/success` : `${defaultApiUrl}/bank-statement/bank-data/success`;
+    
     const requestBody = {
       client_ref_num,
-      txn_completed_cburl: txn_completed_cburl || `${process.env.APP_URL}/api/user/bank-data/webhook`,
+      txn_completed_cburl: txn_completed_cburl || webhookPath,
       destination: destination,
       acceptance_policy: acceptance_policy,
-      return_url: return_url || `${process.env.APP_URL || 'http://localhost:3000'}/bank-statement-success`,
+      return_url: return_url || returnPath,
       mobile_num: mobile_num,
       aa_vendor: aa_vendor,
       multi_aa: multi_aa,

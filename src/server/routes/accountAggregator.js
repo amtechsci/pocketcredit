@@ -132,10 +132,14 @@ router.post('/initiate', requireAuth, async (req, res) => {
       });
     }
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const appUrl = process.env.APP_URL || 'https://pocketcredit.in';
+    // Determine URLs - prioritize environment variables, then use production URLs as default
+    const isDevelopment = process.env.NODE_ENV === 'development' || (!process.env.NODE_ENV && !process.env.FRONTEND_URL);
+    const frontendUrl = process.env.FRONTEND_URL || (isDevelopment ? 'http://localhost:3000' : 'https://pocketcredit.in');
+    // APP_URL: production includes /api, development doesn't
+    const appUrl = process.env.APP_URL || (isDevelopment ? 'http://localhost:3002' : 'https://pocketcredit.in/api');
     const returnUrl = `${frontendUrl}/loan-application/bank-details?applicationId=${application_id}&bankStatementComplete=true`;
-    const webhookUrl = `${appUrl}/api/aa/webhook`;
+    // Routes are mounted at /api/aa, so add /api for dev, or just /aa for prod (since appUrl already has /api)
+    const webhookUrl = isDevelopment ? `${appUrl}/api/aa/webhook` : `${appUrl}/aa/webhook`;
 
     // Use Digitap's Bank Statement Collection API
     const result = await initiateBankStatementCollection(
