@@ -12,6 +12,69 @@ const {
   generateClientRefNum
 } = require('../services/digitapBankStatementService');
 
+/**
+ * Helper function to log webhook payloads to database
+ */
+async function logWebhookPayload(req, webhookType, endpoint, processed = false, error = null) {
+  try {
+    await initializeDatabase();
+    
+    const headers = {};
+    Object.keys(req.headers).forEach(key => {
+      headers[key] = req.headers[key];
+    });
+
+    const queryParams = req.query && Object.keys(req.query).length > 0 ? req.query : null;
+    const bodyData = req.body && Object.keys(req.body).length > 0 ? req.body : null;
+    
+    // Extract common fields
+    const requestId = req.body?.request_id || req.body?.requestId || req.query?.request_id || req.query?.requestId || null;
+    const clientRefNum = req.body?.client_ref_num || req.body?.client_ref_num || req.query?.client_ref_num || null;
+    const status = req.body?.status || req.query?.status || null;
+
+    // Get client IP
+    const ipAddress = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || null;
+    const userAgent = req.headers['user-agent'] || null;
+
+    // Store raw payload as string
+    const rawPayload = JSON.stringify({
+      method: req.method,
+      url: req.url,
+      headers: headers,
+      query: req.query,
+      body: req.body
+    }, null, 2);
+
+    await executeQuery(
+      `INSERT INTO webhook_logs 
+       (webhook_type, http_method, endpoint, headers, query_params, body_data, raw_payload, 
+        request_id, client_ref_num, status, ip_address, user_agent, processed, processing_error, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        webhookType,
+        req.method,
+        endpoint,
+        JSON.stringify(headers),
+        queryParams ? JSON.stringify(queryParams) : null,
+        bodyData ? JSON.stringify(bodyData) : null,
+        rawPayload,
+        requestId,
+        clientRefNum,
+        status,
+        ipAddress,
+        userAgent,
+        processed,
+        error
+      ]
+    );
+
+    console.log(`📝 Webhook logged: ${webhookType} - ${req.method} ${endpoint}`);
+  } catch (logError) {
+    console.error('❌ Error logging webhook:', logError);
+    // Don't throw - logging failure shouldn't break webhook processing
+  }
+}
+
 // Multer configuration for PDF uploads
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -575,19 +638,47 @@ router.post('/delete-pending-bank-statement', requireAuth, async (req, res) => {
 });
 
 /**
- * POST /api/user/bank-data/webhook
+ * GET/POST /api/user/bank-data/webhook
  * Webhook endpoint - Digitap calls this when transaction completes
+ * Supports both GET (query params) and POST (body) requests
  */
-router.post('/bank-data/webhook', async (req, res) => {
-  try {
-    const { request_id, txn_status, client_ref_num } = req.body;
+router.get('/bank-data/webhook', async (req, res) => {
+  // Handle GET request - log and process same as POST
+  await handleBankDataWebhook(req, res);
+});
 
-    console.log('📥 Digitap Webhook received:', { request_id, client_ref_num });
-    console.log('   Transaction status:', JSON.stringify(txn_status, null, 2));
+router.post('/bank-data/webhook', async (req, res) => {
+  // Handle POST request
+  await handleBankDataWebhook(req, res);
+});
+
+async function handleBankDataWebhook(req, res) {
+  let processingError = null;
+  
+  try {
+    // Log webhook payload to database FIRST (before any processing)
+    await logWebhookPayload(req, 'bank_data_webhook', '/api/user/bank-data/webhook', false, null);
+    
+    // Log full webhook payload for debugging
+    console.log('📥 Digitap Webhook received - Full payload:', JSON.stringify(req.body, null, 2));
+    
+    const { request_id, txn_status, client_ref_num, status, client_ref_num: clientRefNum } = req.body;
+
+    // Handle different webhook formats
+    const actualRequestId = request_id || req.body.requestId || req.body.request_id;
+    const actualTxnStatus = txn_status || req.body.txn_status || req.body.transaction_status || req.body.data;
+    const actualClientRefNum = client_ref_num || clientRefNum || req.body.client_ref_num;
+
+    console.log('📥 Parsed webhook data:', { 
+      request_id: actualRequestId, 
+      client_ref_num: actualClientRefNum,
+      has_txn_status: !!actualTxnStatus 
+    });
 
     await initializeDatabase();
 
-    if (!request_id) {
+    if (!actualRequestId) {
+      console.error('❌ Missing request_id in webhook payload');
       return res.status(400).json({
         success: false,
         message: 'Request ID is required'
@@ -596,12 +687,12 @@ router.post('/bank-data/webhook', async (req, res) => {
 
     // Find the bank statement by request_id
     const statements = await executeQuery(
-      'SELECT id, user_id FROM user_bank_statements WHERE request_id = ?',
-      [request_id]
+      'SELECT id, user_id, client_ref_num FROM user_bank_statements WHERE request_id = ?',
+      [actualRequestId]
     );
 
     if (statements.length === 0) {
-      console.warn('⚠️  No bank statement found for request_id:', request_id);
+      console.warn('⚠️  No bank statement found for request_id:', actualRequestId);
       return res.status(404).json({
         success: false,
         message: 'Bank statement record not found'
@@ -611,7 +702,23 @@ router.post('/bank-data/webhook', async (req, res) => {
     const statement = statements[0];
 
     // Check if all transactions are completed
-    const allCompleted = txn_status.every(txn => txn.status === 'Completed');
+    let allCompleted = false;
+    if (actualTxnStatus) {
+      if (Array.isArray(actualTxnStatus)) {
+        allCompleted = actualTxnStatus.every(txn => txn.status === 'Completed' || txn.status === 'completed');
+      } else if (typeof actualTxnStatus === 'object' && actualTxnStatus.status) {
+        // Handle single transaction object
+        allCompleted = actualTxnStatus.status === 'Completed' || actualTxnStatus.status === 'completed';
+      } else if (typeof actualTxnStatus === 'string' && (actualTxnStatus === 'Completed' || actualTxnStatus === 'completed')) {
+        allCompleted = true;
+      }
+    }
+    
+    // Also check if status field indicates completion
+    if (!allCompleted && (status === 'success' || status === 'completed' || status === 'Completed')) {
+      allCompleted = true;
+    }
+
     const newStatus = allCompleted ? 'completed' : 'InProgress';
 
     // Update database with transaction data
@@ -621,29 +728,80 @@ router.post('/bank-data/webhook', async (req, res) => {
            transaction_data = ?, 
            updated_at = NOW() 
        WHERE request_id = ?`,
-      [newStatus, JSON.stringify(txn_status), request_id]
+      [newStatus, JSON.stringify(actualTxnStatus || req.body), actualRequestId]
     );
 
-    console.log(`✅ Bank statement updated: status = ${newStatus}`);
+    console.log(`✅ Bank statement updated: status = ${newStatus}, allCompleted = ${allCompleted}`);
 
-    // If completed, try to fetch the report
+    // If completed, automatically fetch and save the report
     if (allCompleted) {
-      console.log('📊 All transactions completed, can fetch report later');
-      // Note: Report fetching will be done separately via another API call
+      console.log('📊 All transactions completed, fetching report...');
+      
+      try {
+        const clientRefNum = statement.client_ref_num || actualClientRefNum;
+        
+        if (!clientRefNum) {
+          console.warn('⚠️  No client_ref_num found, cannot fetch report');
+        } else {
+          // Wait a bit for Digitap to process
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          
+          // Check status first using request_id
+          const statusResult = await checkBankStatementStatus(actualRequestId);
+          
+          console.log('📊 Status check result:', JSON.stringify(statusResult, null, 2));
+          
+          if (statusResult.success && (statusResult.data.overall_status === 'completed' || statusResult.data.is_complete)) {
+            // Fetch the report using client_ref_num
+            console.log('📥 Fetching report for client_ref_num:', clientRefNum);
+            const reportResult = await retrieveBankStatementReport(clientRefNum, 'json');
+            
+            console.log('📥 Report fetch result:', reportResult.success ? 'Success' : reportResult.error);
+            
+            if (reportResult.success && reportResult.data && reportResult.data.report) {
+              // Save report to database
+              await executeQuery(
+                `UPDATE user_bank_statements 
+                 SET report_data = ?, status = 'completed', updated_at = NOW() 
+                 WHERE request_id = ?`,
+                [JSON.stringify(reportResult.data.report), actualRequestId]
+              );
+              
+              console.log('✅ Report fetched and saved successfully to database');
+            } else {
+              console.log('⚠️  Report not ready yet or fetch failed:', reportResult.error || 'Unknown error');
+            }
+          } else {
+            console.log('⚠️  Status check indicates report not ready yet. Status:', statusResult.data?.overall_status);
+          }
+        }
+      } catch (reportError) {
+        console.error('❌ Error fetching report in webhook:', reportError);
+        console.error('   Error details:', reportError.message);
+        // Don't fail the webhook if report fetch fails - it can be fetched later
+      }
     }
+
+    // Update webhook log as processed
+    await logWebhookPayload(req, 'bank_data_webhook', '/api/user/bank-data/webhook', true, null);
 
     res.json({
       success: true,
       message: 'Webhook processed successfully'
     });
   } catch (error) {
+    processingError = error.message || 'Unknown error';
     console.error('❌ Webhook processing error:', error);
+    
+    // Update webhook log with error
+    await logWebhookPayload(req, 'bank_data_webhook', '/api/user/bank-data/webhook', false, processingError);
+    
     res.status(500).json({
       success: false,
       message: 'Failed to process webhook'
     });
   }
-});
+}
 
 /**
  * GET /api/user/bank-data/success
@@ -651,6 +809,9 @@ router.post('/bank-data/webhook', async (req, res) => {
  */
 router.get('/bank-data/success', async (req, res) => {
   try {
+    // Log the success callback
+    await logWebhookPayload(req, 'bank_data_success', '/api/user/bank-data/success', true, null);
+    
     await initializeDatabase();
     
     // Get user ID from session/JWT (if available)
@@ -659,6 +820,7 @@ router.get('/bank-data/success', async (req, res) => {
     res.redirect(`${frontendUrl}/bank-statement-success?complete=true`);
   } catch (error) {
     console.error('Return URL error:', error);
+    await logWebhookPayload(req, 'bank_data_success', '/api/user/bank-data/success', false, error.message);
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     res.redirect(`${frontendUrl}/bank-statement-success?error=true`);
   }

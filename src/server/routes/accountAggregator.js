@@ -12,6 +12,69 @@ const {
   retrieveBankStatementReport
 } = require('../services/digitapBankStatementService');
 
+/**
+ * Helper function to log webhook payloads to database
+ */
+async function logWebhookPayload(req, webhookType, endpoint, processed = false, error = null) {
+  try {
+    await initializeDatabase();
+    
+    const headers = {};
+    Object.keys(req.headers).forEach(key => {
+      headers[key] = req.headers[key];
+    });
+
+    const queryParams = req.query && Object.keys(req.query).length > 0 ? req.query : null;
+    const bodyData = req.body && Object.keys(req.body).length > 0 ? req.body : null;
+    
+    // Extract common fields
+    const requestId = req.body?.request_id || req.body?.requestId || req.query?.request_id || req.query?.requestId || null;
+    const clientRefNum = req.body?.client_ref_num || req.body?.client_ref_num || req.query?.client_ref_num || null;
+    const status = req.body?.status || req.query?.status || null;
+
+    // Get client IP
+    const ipAddress = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || null;
+    const userAgent = req.headers['user-agent'] || null;
+
+    // Store raw payload as string
+    const rawPayload = JSON.stringify({
+      method: req.method,
+      url: req.url,
+      headers: headers,
+      query: req.query,
+      body: req.body
+    }, null, 2);
+
+    await executeQuery(
+      `INSERT INTO webhook_logs 
+       (webhook_type, http_method, endpoint, headers, query_params, body_data, raw_payload, 
+        request_id, client_ref_num, status, ip_address, user_agent, processed, processing_error, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        webhookType,
+        req.method,
+        endpoint,
+        JSON.stringify(headers),
+        queryParams ? JSON.stringify(queryParams) : null,
+        bodyData ? JSON.stringify(bodyData) : null,
+        rawPayload,
+        requestId,
+        clientRefNum,
+        status,
+        ipAddress,
+        userAgent,
+        processed,
+        error
+      ]
+    );
+
+    console.log(`📝 Webhook logged: ${webhookType} - ${req.method} ${endpoint}`);
+  } catch (logError) {
+    console.error('❌ Error logging webhook:', logError);
+    // Don't throw - logging failure shouldn't break webhook processing
+  }
+}
+
 // Multer configuration for PDF uploads
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -524,13 +587,26 @@ router.post('/init-table', async (req, res) => {
 });
 
 /**
- * POST /api/aa/webhook
+ * GET/POST /api/aa/webhook
  * Webhook endpoint for Digitap callbacks
  * Digitap will call this when bank statement processing is complete
  */
+router.get('/webhook', async (req, res) => {
+  await handleAAWebhook(req, res);
+});
+
 router.post('/webhook', async (req, res) => {
+  await handleAAWebhook(req, res);
+});
+
+async function handleAAWebhook(req, res) {
+  let processingError = null;
+  
   try {
-    const { client_ref_num, status, event_type } = req.body;
+    // Log webhook payload to database FIRST
+    await logWebhookPayload(req, 'aa_webhook', '/api/aa/webhook', false, null);
+    
+    const { client_ref_num, status, event_type } = req.body || req.query;
 
     console.log('📥 Digitap Webhook received:', { client_ref_num, status, event_type });
 
@@ -562,19 +638,27 @@ router.post('/webhook', async (req, res) => {
       }
     }
 
+    // Update webhook log as processed
+    await logWebhookPayload(req, 'aa_webhook', '/api/aa/webhook', true, null);
+
     // Send success response to Digitap
     res.json({
       success: true,
       message: 'Webhook processed successfully'
     });
   } catch (error) {
+    processingError = error.message || 'Unknown error';
     console.error('❌ Webhook processing error:', error);
+    
+    // Update webhook log with error
+    await logWebhookPayload(req, 'aa_webhook', '/api/aa/webhook', false, processingError);
+    
     res.status(500).json({
       success: false,
       message: 'Failed to process webhook'
     });
   }
-});
+}
 
 module.exports = router;
 

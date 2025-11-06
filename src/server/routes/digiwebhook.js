@@ -3,6 +3,69 @@ const router = express.Router();
 const { executeQuery, initializeDatabase } = require('../config/database');
 
 /**
+ * Helper function to log webhook payloads to database
+ */
+async function logWebhookPayload(req, webhookType, endpoint, processed = false, error = null) {
+  try {
+    await initializeDatabase();
+    
+    const headers = {};
+    Object.keys(req.headers).forEach(key => {
+      headers[key] = req.headers[key];
+    });
+
+    const queryParams = req.query && Object.keys(req.query).length > 0 ? req.query : null;
+    const bodyData = req.body && Object.keys(req.body).length > 0 ? req.body : null;
+    
+    // Extract common fields
+    const requestId = req.body?.txnId || req.body?.transactionId || req.query?.txnId || req.query?.transactionId || null;
+    const clientRefNum = req.body?.client_ref_num || req.query?.client_ref_num || null;
+    const status = req.body?.success || req.query?.success || req.body?.status || null;
+
+    // Get client IP
+    const ipAddress = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || null;
+    const userAgent = req.headers['user-agent'] || null;
+
+    // Store raw payload as string
+    const rawPayload = JSON.stringify({
+      method: req.method,
+      url: req.url,
+      headers: headers,
+      query: req.query,
+      body: req.body
+    }, null, 2);
+
+    await executeQuery(
+      `INSERT INTO webhook_logs 
+       (webhook_type, http_method, endpoint, headers, query_params, body_data, raw_payload, 
+        request_id, client_ref_num, status, ip_address, user_agent, processed, processing_error, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        webhookType,
+        req.method,
+        endpoint,
+        JSON.stringify(headers),
+        queryParams ? JSON.stringify(queryParams) : null,
+        bodyData ? JSON.stringify(bodyData) : null,
+        rawPayload,
+        requestId,
+        clientRefNum,
+        status,
+        ipAddress,
+        userAgent,
+        processed,
+        error
+      ]
+    );
+
+    console.log(`📝 Webhook logged: ${webhookType} - ${req.method} ${endpoint}`);
+  } catch (logError) {
+    console.error('❌ Error logging webhook:', logError);
+    // Don't throw - logging failure shouldn't break webhook processing
+  }
+}
+
+/**
  * GET /api/digiwebhook
  * Webhook endpoint to receive KYC completion callback from Digilocker
  * Example: /api/digiwebhook?txnId=201647298824594329&success=true
@@ -26,8 +89,12 @@ function renderDebugPage(req, res) {
 }
 
 router.get('/', async (req, res) => {
+  let processingError = null;
   const debug = req.query.debug === '1' || req.query.debug === 'true';
   const { txnId, success } = req.query;
+
+  // Log webhook payload to database FIRST
+  await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', false, null);
 
   console.log('🔔 Digilocker Webhook (GET):', { txnId, success });
 
@@ -98,6 +165,9 @@ router.get('/', async (req, res) => {
 
       console.log('✅ KYC Verified successfully for user:', kycRecord.user_id);
 
+      // Update webhook log as processed
+      await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', true, null);
+
       // Redirect WITHOUT kycSuccess param - frontend will check DB
       res.redirect(`${process.env.FRONTEND_URL || 'https://pocketcredit.in'}/loan-application/kyc-check?applicationId=${kycRecord.application_id}`);
     } else {
@@ -112,22 +182,34 @@ router.get('/', async (req, res) => {
 
       console.log('❌ KYC Failed for user:', kycRecord.user_id);
 
+      // Update webhook log as processed
+      await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', true, null);
+
       // Redirect WITHOUT kycFailed param - frontend will check DB
       res.redirect(`${process.env.FRONTEND_URL || 'https://pocketcredit.in'}/loan-application/kyc-check?applicationId=${kycRecord.application_id}`);
     }
 
   } catch (error) {
+    processingError = error.message || 'Unknown error';
     console.error('❌ Webhook processing error:', error);
+    
+    // Update webhook log with error
+    await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', false, processingError);
+    
     res.redirect(`${process.env.FRONTEND_URL || 'https://pocketcredit.in'}/kyc-failed?reason=processing_error`);
   }
 });
 
 // Support POST webhook as well (some providers send POST with JSON/form)
 router.post('/', async (req, res) => {
+  let processingError = null;
   const debug = (req.query && (req.query.debug === '1' || req.query.debug === 'true')) || false;
   const txnId = (req.body && (req.body.txnId || req.body.transactionId)) || req.query.txnId;
   const successParam = (req.body && (req.body.success || req.body.status)) || req.query.success;
   const isSuccess = successParam === 'true' || successParam === true || successParam === 'success';
+
+  // Log webhook payload to database FIRST
+  await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', false, null);
 
   console.log('🔔 Digilocker Webhook (POST):', { txnId, success: successParam });
 
@@ -172,6 +254,10 @@ router.post('/', async (req, res) => {
       );
 
       console.log('✅ KYC Verified successfully for user (POST):', kycRecord.user_id);
+      
+      // Update webhook log as processed
+      await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', true, null);
+      
       return res.status(200).json({ success: true, message: 'KYC verified' });
     } else {
       await executeQuery(
@@ -183,10 +269,19 @@ router.post('/', async (req, res) => {
       );
 
       console.log('❌ KYC Failed for user (POST):', kycRecord.user_id);
+      
+      // Update webhook log as processed
+      await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', true, null);
+      
       return res.status(200).json({ success: false, message: 'KYC failed' });
     }
   } catch (error) {
+    processingError = error.message || 'Unknown error';
     console.error('❌ Webhook POST processing error:', error);
+    
+    // Update webhook log with error
+    await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', false, processingError);
+    
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
