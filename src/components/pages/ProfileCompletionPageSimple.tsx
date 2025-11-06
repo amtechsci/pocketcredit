@@ -46,6 +46,7 @@ const ProfileCompletionPageSimple = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const stepUpdatedRef = useRef(false);
+  const digitapCalledRef = useRef(false);
 
   const [basicFormData, setBasicFormData] = useState<BasicProfileForm>({
     full_name: '',
@@ -86,7 +87,8 @@ const ProfileCompletionPageSimple = () => {
 
   // Initialize current step from user data
   useEffect(() => {
-    if (user && user.profile_completion_step) {
+    // Don't reset step if profile is already completed
+    if (user && user.profile_completion_step && !user.profile_completed) {
       const newStep = user.profile_completion_step;
       if (newStep !== currentStep && !stepUpdatedRef.current) {
         stepUpdatedRef.current = true;
@@ -94,7 +96,7 @@ const ProfileCompletionPageSimple = () => {
         setTimeout(() => { stepUpdatedRef.current = false; }, 100);
       }
     }
-  }, [user?.profile_completion_step]);
+  }, [user?.profile_completion_step, user?.profile_completed]);
 
   // Initialize form data when user loads
   useEffect(() => {
@@ -147,22 +149,27 @@ const ProfileCompletionPageSimple = () => {
   // Auto-call Digitap API when Step 2 is reached (only for salaried)
   useEffect(() => {
     const isSalaried = user?.employment_type === 'salaried' || employmentQuickCheckData.employment_type === 'salaried';
+    const profileComplete = user?.profile_completed;
     
     console.log('Digitap trigger check:', {
       currentStep,
       userEmploymentType: user?.employment_type,
       formEmploymentType: employmentQuickCheckData.employment_type,
       isSalaried,
-      digitapCalled
+      profileComplete,
+      digitapCalled: digitapCalled,
+      digitapCalledRef: digitapCalledRef.current
     });
     
-    if (currentStep === 2 && isSalaried && !digitapCalled) {
+    // Don't call Digitap if profile is already complete or if it's already been called
+    if (currentStep === 2 && isSalaried && !digitapCalled && !digitapCalledRef.current && !profileComplete) {
       console.log('✅ Triggering Digitap API call...');
+      digitapCalledRef.current = true; // Set ref immediately to prevent multiple calls
       fetchDigitapData();
       
       // Safety: Show manual form after 20 seconds if Digitap hasn't responded
       const timeoutId = setTimeout(() => {
-        if (!showPrefillConfirm && !showManualForm) {
+        if (!showPrefillConfirm && !showManualForm && !loading) {
           console.log('⏰ Digitap timeout - showing manual form');
           setShowManualForm(true);
           toast.info('Taking too long? You can enter details manually');
@@ -171,7 +178,7 @@ const ProfileCompletionPageSimple = () => {
       
       return () => clearTimeout(timeoutId);
     }
-  }, [currentStep, user?.employment_type, employmentQuickCheckData.employment_type, digitapCalled]);
+  }, [currentStep, user?.employment_type, employmentQuickCheckData.employment_type, digitapCalled, user?.profile_completed]);
   
   // Skip Step 2 for students - go directly to Step 3
   useEffect(() => {
@@ -234,6 +241,8 @@ const ProfileCompletionPageSimple = () => {
       
       if (response && response.data) {
         console.log('Digitap data received:', response.data);
+        
+        // Show confirmation dialog with the fetched data
         setDigitapData(response.data);
         setShowPrefillConfirm(true);
         setShowManualForm(false); // Hide manual form when Digitap succeeds
@@ -241,7 +250,6 @@ const ProfileCompletionPageSimple = () => {
       } else if ((response as any)?.hold_applied) {
         // Credit score too low - hold applied
         const creditScore = (response as any).credit_score;
-        const holdUntil = (response as any).hold_until;
         const holdDays = (response as any).hold_days || 60;
         
         console.log(`❌ Credit score (${creditScore}) below 630 - applying ${holdDays}-day hold`);
@@ -254,7 +262,9 @@ const ProfileCompletionPageSimple = () => {
         );
         
         // Wait a bit then redirect to dashboard where hold banner will be shown
-        setTimeout(() => navigate('/dashboard'), 4000);
+        setTimeout(() => {
+          window.location.href = '/dashboard';
+        }, 4000);
       } else {
         // API failed or returned no data - allow manual entry
         console.log('Digitap API failed or no data, proceeding with manual entry');
@@ -277,29 +287,23 @@ const ProfileCompletionPageSimple = () => {
     try {
       // Save Digitap prefill data to database
       const saveResponse = await apiService.saveDigitapPrefill({
-        name: digitapData.name,
-        dob: digitapData.dob,
-        pan: digitapData.pan,
+        name: digitapData.name || '',
+        dob: digitapData.dob || '',
+        pan: digitapData.pan || '',
         gender: digitapData.gender ? digitapData.gender.toLowerCase() : '',
-        email: digitapData.email,
-        address: digitapData.address
+        email: digitapData.email || '',
+        address: digitapData.address || []
       });
 
-      // Check if save was successful
-      if (saveResponse && saveResponse.data) {
+      if (saveResponse && saveResponse.status === 'success') {
         console.log('Digitap data saved to database');
+        toast.success('Profile completed! Redirecting to dashboard...');
         
-        // Pre-fill the form with Digitap data
-        setBasicFormData(prev => ({
-          ...prev,
-          full_name: digitapData.name || prev.full_name,
-          pan_number: digitapData.pan || prev.pan_number,
-          date_of_birth: digitapData.dob || prev.date_of_birth,
-          gender: digitapData.gender ? digitapData.gender.toLowerCase() : prev.gender
-        }));
-        
-        setShowPrefillConfirm(false);
-        toast.success('Details saved and filled automatically!');
+        // Use window.location.href for a hard redirect to avoid React state timing issues
+        console.log('✅ Redirecting to dashboard with full page reload...');
+        setTimeout(() => {
+          window.location.href = '/dashboard';
+        }, 500);
       } else {
         console.error('Save prefill response:', saveResponse);
         toast.error('Failed to save details');
@@ -690,15 +694,17 @@ const ProfileCompletionPageSimple = () => {
                           <Button
                             type="button"
                             onClick={handlePrefillConfirm}
+                            disabled={loading}
                             className="bg-green-600 hover:bg-green-700"
                           >
-                            Use These Details
+                            {loading ? 'Saving...' : 'Use These Details'}
                           </Button>
                           <Button
                             type="button"
                             onClick={handlePrefillReject}
                             variant="outline"
                             className="border-gray-300"
+                            disabled={loading}
                           >
                             Enter Manually
                           </Button>

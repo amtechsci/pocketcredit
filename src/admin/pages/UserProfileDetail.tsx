@@ -138,6 +138,10 @@ export function UserProfileDetail() {
   const [validationHistory, setValidationHistory] = useState([]);
   const [validationHistoryLoading, setValidationHistoryLoading] = useState(false);
 
+  // Credit Analytics data from API
+  const [creditAnalyticsData, setCreditAnalyticsData] = useState<any>(null);
+  const [creditAnalyticsLoading, setCreditAnalyticsLoading] = useState(false);
+
   // Validation options from API
   const [documentOptions, setDocumentOptions] = useState([]);
   const [reasonOptions, setReasonOptions] = useState([]);
@@ -218,6 +222,25 @@ export function UserProfileDetail() {
       setValidationHistory([]);
     } finally {
       setValidationHistoryLoading(false);
+    }
+  };
+
+  // Fetch credit analytics data
+  const fetchCreditAnalytics = async () => {
+    if (!userData?.id) return;
+    
+    try {
+      setCreditAnalyticsLoading(true);
+      const response = await adminApiService.getUserCreditAnalytics(userData.id);
+      
+      if (response.status === 'success') {
+        setCreditAnalyticsData(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching credit analytics:', error);
+      setCreditAnalyticsData(null);
+    } finally {
+      setCreditAnalyticsLoading(false);
     }
   };
 
@@ -327,6 +350,13 @@ export function UserProfileDetail() {
   useEffect(() => {
     if (activeTab === 'validation' && userData?.id) {
       fetchValidationHistory();
+    }
+  }, [activeTab, userData?.id]);
+
+  // Fetch credit analytics when credit analytics tab is active
+  useEffect(() => {
+    if (activeTab === 'credit-analytics' && userData?.id) {
+      fetchCreditAnalytics();
     }
   }, [activeTab, userData?.id]);
 
@@ -1136,6 +1166,7 @@ export function UserProfileDetail() {
     { id: 'loans', label: 'Loans', icon: Building },
     { id: 'transactions', label: 'Transaction Details', icon: IndianRupee },
     { id: 'validation', label: 'Validation', icon: Shield },
+    { id: 'credit-analytics', label: 'Credit Analytics', icon: TrendingUp },
     { id: 'follow-up', label: 'Follow Up', icon: MessageSquare },
     { id: 'notes', label: 'Note', icon: FileText },
     { id: 'sms', label: 'SMS', icon: MessageSquare },
@@ -3105,6 +3136,574 @@ export function UserProfileDetail() {
       )}
     </div>
   );
+  };
+
+  // Credit Analytics Tab
+  const renderCreditAnalyticsTab = () => {
+    if (creditAnalyticsLoading) {
+      return (
+        <div className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <RefreshCw className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-2" />
+            <p className="text-gray-600">Loading credit analytics data...</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (!creditAnalyticsData) {
+      return (
+        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+          <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Credit Analytics Data</h3>
+          <p className="text-gray-600">This user has not completed a credit check yet.</p>
+        </div>
+      );
+    }
+
+    const { credit_score, is_eligible, rejection_reasons, full_report, checked_at, request_id, client_ref_num } = creditAnalyticsData;
+    
+    // Parse the full report to extract detailed information
+    const reportData = full_report?.result?.result_json?.INProfileResponse || {};
+    const accountSummary = reportData.CAIS_Account?.CAIS_Account_DETAILS || [];
+    const enquirySummary = reportData.CAPS?.CAPS_Summary || {};
+    const capsApplications = reportData.CAPS?.CAPS_Application_Details || [];
+    const currentApplication = reportData.Current_Application || {};
+    
+    // Get credit score from report if not in database
+    const displayScore = credit_score || reportData.SCORE?.BureauScore || 'N/A';
+    
+    // Extract PAN from report if not in userData
+    const panNumber = userData?.panNumber || userData?.pan_number || userData?.pan || currentApplication.CreditReportInquiry?.InquiryPurpose || '-';
+    
+
+    return (
+      <div className="space-y-6">
+        {/* Current Application Information */}
+        <div className="bg-green-50 rounded-lg border border-green-200 p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <CheckCircle className="w-6 h-6 text-green-600" />
+            <h3 className="text-lg font-semibold text-gray-900">Current Application Information</h3>
+          </div>
+          <p className="text-sm text-orange-600 italic mb-4">These are the details you gave us when you apply for your Experian Credit Report.</p>
+          
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div>
+              <p className="text-sm font-semibold text-gray-700">Name</p>
+              <p className="text-sm text-gray-900">{userData?.name || `${userData?.first_name || ''} ${userData?.last_name || ''}`.trim() || '-'}</p>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-700">Mobile Phone</p>
+              <p className="text-sm text-gray-900">{userData?.mobile || userData?.phone || '-'}</p>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-700">PAN</p>
+              <p className="text-sm text-gray-900 uppercase">{panNumber}</p>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-700">Email</p>
+              <p className="text-sm text-gray-900">{userData?.email && userData.email !== 'N/A' ? userData.email : '-'}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Experian Credit Score */}
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200 p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <CheckCircle className="w-6 h-6 text-blue-600" />
+            <h3 className="text-lg font-semibold text-gray-900">Experian Credit Score</h3>
+          </div>
+          <p className="text-sm text-orange-600 italic mb-6">Your Experian Credit Report is summarized in the form of Experian Credit Score which ranges from 300 - 900.</p>
+          
+          <div className="flex items-center gap-8">
+            {/* Credit Score Gauge */}
+            <div className="relative">
+              <div className="w-40 h-40 rounded-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 flex items-center justify-center">
+                <div className="w-36 h-36 rounded-full bg-white flex items-center justify-center">
+                  <div className="text-center">
+                    <div className="text-5xl font-bold text-blue-600">{displayScore}</div>
+                    <div className="text-xs text-gray-500 mt-1">Credit Score</div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-between text-xs text-gray-600 mt-2">
+                <span>300</span>
+                <span>900</span>
+              </div>
+            </div>
+
+            {/* Score Factors */}
+            <div className="flex-1 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-700">1. Recency:</span>
+                <span className="text-sm text-gray-900">Recent Credit Account Defaults</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-700">2. Leverage:</span>
+                <span className="text-sm text-gray-900">Credit Accounts with on-time re-payment history</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-700">3. Coverage:</span>
+                <span className="text-sm text-gray-900">Non-delinquent and delinquent Credit Accounts</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-700">4. Delinquency Status:</span>
+                <span className="text-sm text-gray-900">Defaults on Credit Accounts (current & recent periodic intervals)</span>
+              </div>
+            </div>
+
+            {/* Eligibility Badge */}
+            <div className="text-center">
+              <div className={`inline-flex items-center justify-center w-24 h-24 rounded-full shadow-lg mb-2 ${
+                is_eligible ? 'bg-green-100' : 'bg-red-100'
+              }`}>
+                {is_eligible ? (
+                  <CheckCircle className="w-12 h-12 text-green-600" />
+                ) : (
+                  <XCircle className="w-12 h-12 text-red-600" />
+                )}
+              </div>
+              <p className="text-sm font-semibold text-gray-900">
+                {is_eligible ? 'Eligible' : 'Not Eligible'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Rejection Reasons */}
+        {rejection_reasons && rejection_reasons.length > 0 && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <AlertCircle className="w-6 h-6 text-red-600" />
+              <h3 className="text-lg font-semibold text-red-900">Rejection Reasons</h3>
+            </div>
+            <ul className="space-y-2">
+              {rejection_reasons.map((reason, index) => (
+                <li key={index} className="flex items-start gap-2 text-sm text-red-800">
+                  <span className="text-red-600 mt-0.5">•</span>
+                  <span>{reason}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Report Summary */}
+        {reportData.CAIS_Account?.CAIS_Summary && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <CheckCircle className="w-6 h-6 text-green-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Report Summary</h3>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Credit Account Summary */}
+              <div>
+                <h4 className="font-semibold text-blue-600 mb-3 text-sm">Credit Account Summary</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Total number of Accounts</span>
+                    <span className="font-semibold">{reportData.CAIS_Account?.CAIS_Summary?.Credit_Account?.CreditAccountTotal || 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Active Accounts</span>
+                    <span className="font-semibold">{reportData.CAIS_Account?.CAIS_Summary?.Credit_Account?.CreditAccountActive || 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Closed Accounts</span>
+                    <span className="font-semibold">{reportData.CAIS_Account?.CAIS_Summary?.Credit_Account?.CreditAccountClosed || 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">CC/CO</span>
+                    <span className="font-semibold">-</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Current Balance Amount Summary */}
+              <div>
+                <h4 className="font-semibold text-blue-600 mb-3 text-sm">Current Balance Amount Summary</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Total Current Bal. amt</span>
+                    <span className="font-semibold">₹{reportData.CAIS_Account?.CAIS_Summary?.Total_Outstanding_Balance?.Outstanding_Balance_All || 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">SF/WD/WO/Settled amt</span>
+                    <span className="font-semibold">₹0</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Secured Accounts amt</span>
+                    <span className="font-semibold">₹{reportData.CAIS_Account?.CAIS_Summary?.Total_Outstanding_Balance?.Outstanding_Balance_Secured || 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Unsecured Accounts amt</span>
+                    <span className="font-semibold">₹{reportData.CAIS_Account?.CAIS_Summary?.Total_Outstanding_Balance?.Outstanding_Balance_UnSecured || 0}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Credit Enquiry Summary */}
+              <div>
+                <h4 className="font-semibold text-blue-600 mb-3 text-sm">Credit Enquiry Summary</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Last 7 days credit enquiries</span>
+                    <span className="font-semibold">{enquirySummary.CAPSLast7Days || 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Last 30 days credit enquiries</span>
+                    <span className="font-semibold">{enquirySummary.CAPSLast30Days || 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Last 90 days credit enquiries</span>
+                    <span className="font-semibold">{enquirySummary.CAPSLast90Days || 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Last 180 days credit enquiries</span>
+                    <span className="font-semibold">{enquirySummary.CAPSLast180Days || 0}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Credit Account Information */}
+        {accountSummary && accountSummary.length > 0 && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <CheckCircle className="w-6 h-6 text-green-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Summary: Credit Account Information</h3>
+            </div>
+            <p className="text-sm text-orange-600 italic mb-4">This section displays summary of all your reported credit accounts found in the Experian Credit Bureau database.</p>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="bg-blue-600 text-white">
+                    <th className="border border-gray-300 px-2 py-2 text-left">#</th>
+                    <th className="border border-gray-300 px-2 py-2 text-left">Lender</th>
+                    <th className="border border-gray-300 px-2 py-2 text-left">Account type</th>
+                    <th className="border border-gray-300 px-2 py-2 text-left">Account No</th>
+                    <th className="border border-gray-300 px-2 py-2 text-left">Ownership</th>
+                    <th className="border border-gray-300 px-2 py-2 text-left">Date Reported</th>
+                    <th className="border border-gray-300 px-2 py-2 text-left">Account Status</th>
+                    <th className="border border-gray-300 px-2 py-2 text-left">Date Opened</th>
+                    <th className="border border-gray-300 px-2 py-2 text-left">Sanction Amt</th>
+                    <th className="border border-gray-300 px-2 py-2 text-left">Current Balance</th>
+                    <th className="border border-gray-300 px-2 py-2 text-left">Amount Overdue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {accountSummary.slice(0, 20).map((account, index) => (
+                    <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <td className="border border-gray-300 px-2 py-2 text-blue-600 font-semibold">
+                        Acct {index + 1}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-2 text-blue-600">
+                        {account.Subscriber_Name || 'N/A'}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-2">
+                        {account.Account_Type || 'N/A'}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-2 font-mono">
+                        {account.Account_Number ? account.Account_Number.replace(/\d(?=\d{4})/g, 'X') : 'N/A'}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-2">
+                        {account.Ownership_Indicator || 'Individual'}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-2">
+                        {account.Date_Reported || '-'}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-2">
+                        <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                          account.Account_Status === 'CLOSED' ? 'bg-gray-200 text-gray-700' :
+                          account.Account_Status === 'ACTIVE' ? 'bg-green-200 text-green-700' :
+                          'bg-yellow-200 text-yellow-700'
+                        }`}>
+                          {account.Account_Status || 'N/A'}
+                        </span>
+                      </td>
+                      <td className="border border-gray-300 px-2 py-2">
+                        {account.Open_Date || '-'}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-2 text-right">
+                        {account.Highest_Credit_or_Original_Loan_Amount ? 
+                          `₹${parseInt(account.Highest_Credit_or_Original_Loan_Amount).toLocaleString('en-IN')}` : 
+                          '-'}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-2 text-right">
+                        {account.Current_Balance ? 
+                          `₹${parseInt(account.Current_Balance).toLocaleString('en-IN')}` : 
+                          '₹0'}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-2 text-right">
+                        {account.Amount_Overdue ? 
+                          `₹${parseInt(account.Amount_Overdue).toLocaleString('en-IN')}` : 
+                          '₹0'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {accountSummary.length > 20 && (
+              <p className="text-sm text-gray-500 mt-3 text-center">
+                Showing 20 of {accountSummary.length} accounts
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Credit Utilization Chart */}
+        {accountSummary && accountSummary.length > 0 && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <CheckCircle className="w-6 h-6 text-purple-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Credit Utilization Analysis</h3>
+            </div>
+            <p className="text-sm text-orange-600 italic mb-4">Credit utilization shows how much of your available credit you're currently using.</p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {accountSummary.filter((acc: any) => acc.Credit_Limit_Amount && parseInt(acc.Credit_Limit_Amount) > 0).map((account: any, index: number) => {
+                const limit = parseInt(account.Credit_Limit_Amount || '0');
+                const balance = parseInt(account.Current_Balance || '0');
+                const utilization = limit > 0 ? ((balance / limit) * 100).toFixed(1) : '0';
+                const utilizationNum = parseFloat(utilization);
+                const utilizationColor = utilizationNum > 70 ? 'bg-red-500' : utilizationNum > 30 ? 'bg-yellow-500' : 'bg-green-500';
+                
+                return (
+                  <div key={index} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <p className="font-semibold text-sm text-gray-900">{account.Subscriber_Name}</p>
+                        <p className="text-xs text-gray-500">{account.Account_Type}</p>
+                      </div>
+                      <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                        account.Account_Status === 'ACTIVE' || account.Account_Status === '11' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+                      }`}>
+                        {account.Account_Status === '11' ? 'ACTIVE' : account.Account_Status}
+                      </span>
+                    </div>
+                    
+                    <div className="mt-3">
+                      <div className="flex justify-between text-xs text-gray-600 mb-1">
+                        <span>₹{balance.toLocaleString('en-IN')} used</span>
+                        <span>₹{limit.toLocaleString('en-IN')} limit</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div className={`${utilizationColor} h-2 rounded-full transition-all`} style={{ width: `${Math.min(utilization, 100)}%` }}></div>
+                      </div>
+                      <p className="text-xs text-center mt-1 font-semibold">{utilization}% utilized</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Account Age Analysis */}
+        {accountSummary && accountSummary.length > 0 && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <CheckCircle className="w-6 h-6 text-indigo-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Account Age Analysis</h3>
+            </div>
+            <p className="text-sm text-orange-600 italic mb-4">Older accounts with good payment history positively impact your credit score.</p>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-indigo-50">
+                    <th className="px-4 py-2 text-left font-semibold text-gray-700">Lender</th>
+                    <th className="px-4 py-2 text-left font-semibold text-gray-700">Account Type</th>
+                    <th className="px-4 py-2 text-left font-semibold text-gray-700">Opened Date</th>
+                    <th className="px-4 py-2 text-left font-semibold text-gray-700">Account Age</th>
+                    <th className="px-4 py-2 text-left font-semibold text-gray-700">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {accountSummary.map((account: any, index: number) => {
+                    const openDate = account.Open_Date;
+                    let accountAge = 'N/A';
+                    if (openDate && openDate.length === 8) {
+                      const year = parseInt(openDate.substring(0, 4));
+                      const month = parseInt(openDate.substring(4, 6));
+                      const day = parseInt(openDate.substring(6, 8));
+                      const opened = new Date(year, month - 1, day);
+                      const now = new Date();
+                      const years = now.getFullYear() - opened.getFullYear();
+                      const months = now.getMonth() - opened.getMonth();
+                      const totalMonths = years * 12 + months;
+                      accountAge = totalMonths > 12 ? `${Math.floor(totalMonths / 12)} years ${totalMonths % 12} months` : `${totalMonths} months`;
+                    }
+                    
+                    return (
+                      <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                        <td className="px-4 py-3 text-blue-600 font-medium">{account.Subscriber_Name}</td>
+                        <td className="px-4 py-3">{account.Account_Type}</td>
+                        <td className="px-4 py-3">{openDate ? `${openDate.substring(6, 8)}/${openDate.substring(4, 6)}/${openDate.substring(0, 4)}` : '-'}</td>
+                        <td className="px-4 py-3 font-semibold text-indigo-600">{accountAge}</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                            account.Account_Status === 'CLOSED' || account.Account_Status === '13' ? 'bg-gray-200 text-gray-700' :
+                            account.Account_Status === 'ACTIVE' || account.Account_Status === '11' ? 'bg-green-200 text-green-700' :
+                            'bg-yellow-200 text-yellow-700'
+                          }`}>
+                            {account.Account_Status === '11' ? 'ACTIVE' : account.Account_Status === '13' ? 'CLOSED' : account.Account_Status}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Detailed CAPS Enquiry History */}
+        {capsApplications && capsApplications.length > 0 && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <CheckCircle className="w-6 h-6 text-orange-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Credit Enquiry History (CAPS)</h3>
+            </div>
+            <p className="text-sm text-orange-600 italic mb-4">Recent credit enquiries made by lenders when you applied for credit.</p>
+            
+            <div className="space-y-4">
+              {capsApplications.map((enquiry: any, index: number) => (
+                <div key={index} className="border border-orange-200 rounded-lg p-4 bg-orange-50">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <p className="text-xs text-gray-600">Lender</p>
+                      <p className="font-semibold text-sm text-gray-900">{enquiry.Subscriber_Name}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-600">Date of Request</p>
+                      <p className="font-semibold text-sm text-gray-900">
+                        {enquiry.Date_of_Request ? 
+                          `${enquiry.Date_of_Request.substring(6, 8)}/${enquiry.Date_of_Request.substring(4, 6)}/${enquiry.Date_of_Request.substring(0, 4)}` : 
+                          'N/A'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-600">Amount Financed</p>
+                      <p className="font-semibold text-sm text-gray-900">₹{parseInt(enquiry.Amount_Financed || 0).toLocaleString('en-IN')}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-600">Report Number</p>
+                      <p className="font-semibold text-sm text-gray-900 font-mono">{enquiry.ReportNumber}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Payment History Timeline */}
+        {accountSummary && accountSummary.length > 0 && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <CheckCircle className="w-6 h-6 text-teal-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Payment History Timeline</h3>
+            </div>
+            <p className="text-sm text-orange-600 italic mb-4">Payment history for your credit accounts. "0" means on-time payment, "?" means no data reported.</p>
+            
+            <div className="space-y-6">
+              {accountSummary.slice(0, 5).map((account: any, index: number) => {
+                const history = account.CAIS_Account_History || [];
+                if (history.length === 0) return null;
+                
+                return (
+                  <div key={index} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <p className="font-semibold text-sm text-gray-900">{account.Subscriber_Name}</p>
+                        <p className="text-xs text-gray-500">{account.Account_Type} - {account.Account_Number}</p>
+                      </div>
+                      <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                        account.Account_Status === 'CLOSED' || account.Account_Status === '13' ? 'bg-gray-200 text-gray-700' :
+                        account.Account_Status === 'ACTIVE' || account.Account_Status === '11' ? 'bg-green-200 text-green-700' :
+                        'bg-yellow-200 text-yellow-700'
+                      }`}>
+                        {account.Account_Status === '11' ? 'ACTIVE' : account.Account_Status === '13' ? 'CLOSED' : account.Account_Status}
+                      </span>
+                    </div>
+                    
+                    <div className="flex flex-wrap gap-1">
+                      {history.slice(0, 24).reverse().map((month: any, idx: number) => {
+                        const dpd = month.Days_Past_Due;
+                        const bgColor = dpd === '0' ? 'bg-green-500' : 
+                                       dpd === '?' ? 'bg-gray-300' : 
+                                       parseInt(dpd) > 90 ? 'bg-red-500' :
+                                       parseInt(dpd) > 30 ? 'bg-orange-500' : 'bg-yellow-500';
+                        
+                        return (
+                          <div key={idx} className="group relative">
+                            <div className={`w-6 h-6 ${bgColor} rounded flex items-center justify-center text-white text-xs font-bold cursor-pointer`}>
+                              {dpd}
+                            </div>
+                            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
+                              {month.Month}/{month.Year}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    
+                    <div className="flex items-center gap-4 mt-3 text-xs">
+                      <div className="flex items-center gap-1">
+                        <div className="w-4 h-4 bg-green-500 rounded"></div>
+                        <span>On-time (0)</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-4 h-4 bg-gray-300 rounded"></div>
+                        <span>No data (?)</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-4 h-4 bg-yellow-500 rounded"></div>
+                        <span>1-30 days</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-4 h-4 bg-orange-500 rounded"></div>
+                        <span>31-90 days</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-4 h-4 bg-red-500 rounded"></div>
+                        <span>90+ days</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Technical Details */}
+        <div className="bg-gray-50 rounded-lg border border-gray-200 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Technical Details</h3>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <span className="text-gray-600">Request ID:</span>
+              <span className="ml-2 font-mono text-xs">{request_id || 'N/A'}</span>
+            </div>
+            <div>
+              <span className="text-gray-600">Client Ref:</span>
+              <span className="ml-2 font-mono text-xs">{client_ref_num || 'N/A'}</span>
+            </div>
+            <div>
+              <span className="text-gray-600">Report Date:</span>
+              <span className="ml-2">{checked_at ? new Date(checked_at).toLocaleString('en-IN') : 'N/A'}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
 
@@ -5494,6 +6093,7 @@ export function UserProfileDetail() {
         {activeTab === 'loans' && renderLoansTab()}
         {activeTab === 'transactions' && renderTransactionsTab()}
         {activeTab === 'validation' && renderValidationTab()}
+        {activeTab === 'credit-analytics' && renderCreditAnalyticsTab()}
         {activeTab === 'follow-up' && renderFollowUpTab()}
         {activeTab === 'notes' && renderNotesTab()}
         {activeTab === 'sms' && renderSmsTab()}

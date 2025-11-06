@@ -12,7 +12,6 @@ import {
   User, 
   TrendingUp, 
   Calendar,
-  IndianRupee,
   CheckCircle,
   Clock,
   AlertCircle,
@@ -20,9 +19,15 @@ import {
   Wallet,
   CreditCard as CreditCardIcon,
   Home,
-  ArrowUpRight,
-  Target,
-  Shield
+  Phone,
+  Mail,
+  Headphones,
+  ChevronRight,
+  Share2,
+  Info,
+  FileText,
+  ShieldCheck,
+  Star
 } from 'lucide-react';
 import { DashboardHeader } from '../DashboardHeader';
 import { ApplicationFlow } from '../ApplicationFlow';
@@ -768,17 +773,6 @@ export function DynamicDashboardPage() {
                 )}
               </button>
               <button
-                onClick={() => setActiveTab('payments')}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
-                  activeTab === 'payments' 
-                    ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700' 
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                <Calendar className="w-5 h-5" />
-                Payments
-              </button>
-              <button
                 onClick={() => setActiveTab('profile')}
                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
                   activeTab === 'profile' 
@@ -817,7 +811,6 @@ export function DynamicDashboardPage() {
                     </span>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="payments" className="rounded-none whitespace-nowrap flex-1 text-xs px-2">Payments</TabsTrigger>
                 <TabsTrigger value="profile" className="rounded-none whitespace-nowrap flex-1 text-xs px-2">Profile</TabsTrigger>
               </TabsList>
             </Tabs>
@@ -1074,114 +1067,228 @@ export function DynamicDashboardPage() {
             </div>
           </TabsContent>
           
-          <TabsContent value="payments">
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xl font-semibold">Payment History</h3>
-                <Button 
-                  variant="outline"
-                  onClick={() => navigate('/payment-history')}
-                >
-                  View All Payments
-                </Button>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card className="p-4 text-center">
-                  <p className="text-2xl font-bold text-green-600">
-                    {formatCurrency(active_loans.reduce((sum, loan) => sum + (loan.emi_amount * loan.completed_tenure), 0))}
-                  </p>
-                  <p className="text-sm text-gray-600">Total Paid</p>
-                </Card>
-                
-                <Card className="p-4 text-center">
-                  <p className="text-2xl font-bold text-blue-600">
-                    {active_loans.reduce((sum, loan) => sum + loan.completed_tenure, 0)}
-                  </p>
-                  <p className="text-sm text-gray-600">EMIs Paid</p>
-                </Card>
-                
-                <Card className="p-4 text-center">
-                  <p className="text-2xl font-bold text-orange-600">
-                    {upcoming_payments.length > 0 ? formatCurrency(upcoming_payments[0].emi_amount) : '₹0'}
-                  </p>
-                  <p className="text-sm text-gray-600">Next EMI</p>
-                </Card>
-              </div>
-              
-              {upcoming_payments.length > 0 && (
-                <Card className="p-6">
-                  <h4 className="text-lg font-semibold mb-4">Upcoming Payments</h4>
-                  <div className="space-y-3">
-                    {upcoming_payments.slice(0, 3).map((payment, index) => (
-                      <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
-                        <div>
-                          <p className="font-semibold">{formatCurrency(payment.emi_amount)} EMI</p>
-                          <p className="text-sm text-gray-600">Due: {formatDate(payment.next_emi_date)}</p>
-                        </div>
-                        <Badge variant="outline" className="border-orange-300 text-orange-600">
-                          {payment.status}
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              )}
-            </div>
-          </TabsContent>
-          
           <TabsContent value="profile">
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xl font-semibold">Profile Settings</h3>
-                <Button 
-                  variant="outline"
-                  onClick={() => navigate('/profile-completion')}
-                >
-                  Edit Profile
-                </Button>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Card className="p-6">
-                  <h4 className="text-lg font-semibold mb-4">Personal Information</h4>
-                  <div className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Name</span>
-                      <span className="font-semibold">{userData.name}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Phone</span>
-                      <span className="font-semibold">{userData.phone}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Email</span>
-                      <span className="font-semibold">{userData.email}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Member Since</span>
-                      <span className="font-semibold">{formatDate(userData.member_since)}</span>
-                    </div>
+              {/* Profile Header */}
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-4 text-white">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center text-xl font-bold">
+                    {userData.name?.charAt(0).toUpperCase() || 'U'}
                   </div>
-                </Card>
+                  <div className="flex-1">
+                    <h2 className="text-lg font-bold mb-0.5">{userData.name || 'User'}</h2>
+                    <p className="text-blue-100 text-xs">Member since {formatDate(userData.member_since)}</p>
+                  </div>
+                </div>
                 
-                <Card className="p-6">
-                  <h4 className="text-lg font-semibold mb-4">Credit Information</h4>
-                  <div className="text-center">
-                    <div className="w-20 h-20 bg-blue-100 rounded-full mx-auto mb-4 flex items-center justify-center">
-                      <TrendingUp className="w-10 h-10 text-blue-600" />
+                {/* User Info Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <div className="bg-white/10 backdrop-blur-sm rounded-lg p-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
+                        <Phone className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-blue-100 text-[10px] mb-0.5">Phone Number</p>
+                        <p className="font-medium text-white truncate text-sm">{userData.phone || 'N/A'}</p>
+                      </div>
                     </div>
-                    <p className={`text-4xl font-bold mb-2 ${getCreditScoreColor(summary.credit_score)}`}>
-                      {summary.credit_score}
-                    </p>
-                    <p className="text-sm text-gray-600 mb-4">Credit Score</p>
-                    <Badge className="bg-blue-100 text-blue-800">
-                      {getCreditScoreCategory(summary.credit_score)}
-                    </Badge>
                   </div>
-                </Card>
+                  
+                  <div className="bg-white/10 backdrop-blur-sm rounded-lg p-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
+                        <Mail className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-blue-100 text-[10px] mb-0.5">Email Address</p>
+                        <p className="font-medium text-white truncate text-xs">{userData.email || 'N/A'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
-              
+
+              {/* Contact Us Section */}
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Contact Us</h3>
+                
+                <div className="space-y-2">
+                  {/* Send E-mail */}
+                  <button
+                    onClick={() => window.location.href = 'mailto:support@pocketcredit.in'}
+                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                        <Mail className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <span className="text-base font-medium text-gray-900">Send E-mail</span>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                  </button>
+
+                  {/* Help Desk */}
+                  <button
+                    onClick={() => navigate('/contact')}
+                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                        <Headphones className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <span className="text-base font-medium text-gray-900">Help Desk</span>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                  </button>
+
+                  {/* Change Mobile Number */}
+                  <button
+                    onClick={() => navigate('/profile-completion')}
+                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                        <Phone className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <span className="text-base font-medium text-gray-900">Change Mobile Number</span>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                  </button>
+
+                  {/* Change Email ID */}
+                  <button
+                    onClick={() => navigate('/profile-completion')}
+                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                        <Mail className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <span className="text-base font-medium text-gray-900">Change Email ID</span>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                  </button>
+                </div>
+              </div>
+
+              {/* App Section */}
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">App</h3>
+                
+                <div className="space-y-2">
+                  {/* Rate Us */}
+                  <button
+                    onClick={() => {
+                      // Open app store/play store for rating
+                      const userAgent = navigator.userAgent || navigator.vendor;
+                      if (/android/i.test(userAgent)) {
+                        window.open('https://play.google.com/store/apps/details?id=com.pocketcredit', '_blank');
+                      } else if (/iPad|iPhone|iPod/.test(userAgent)) {
+                        window.open('https://apps.apple.com/app/pocketcredit', '_blank');
+                      }
+                    }}
+                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                        <Star className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <span className="text-base font-medium text-gray-900">Rate Us</span>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                  </button>
+
+                  {/* Share App */}
+                  <button
+                    onClick={() => {
+                      if (navigator.share) {
+                        navigator.share({
+                          title: 'Pocket Credit',
+                          text: 'Check out Pocket Credit - Quick and easy loans!',
+                          url: window.location.origin
+                        }).catch(() => {});
+                      } else {
+                        // Fallback for desktop
+                        navigator.clipboard.writeText(window.location.origin);
+                        alert('App link copied to clipboard!');
+                      }
+                    }}
+                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                        <Share2 className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <span className="text-base font-medium text-gray-900">Share App</span>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                  </button>
+
+                  {/* App Security */}
+                  <button
+                    onClick={() => navigate('/profile-completion')}
+                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                        <ShieldCheck className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <span className="text-base font-medium text-gray-900">App Security</span>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Legal Section */}
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Legal</h3>
+                
+                <div className="space-y-2">
+                  {/* About Us */}
+                  <button
+                    onClick={() => navigate('/about')}
+                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                        <Info className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <span className="text-base font-medium text-gray-900">About Us</span>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                  </button>
+
+                  {/* Terms & Conditions */}
+                  <button
+                    onClick={() => navigate('/terms-conditions')}
+                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                        <FileText className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <span className="text-base font-medium text-gray-900">Terms & Conditions</span>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                  </button>
+
+                  {/* Privacy Policy */}
+                  <button
+                    onClick={() => navigate('/privacy-policy')}
+                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                        <ShieldCheck className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <span className="text-base font-medium text-gray-900">Privacy Policy</span>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                  </button>
+                </div>
+              </div>
             </div>
               </TabsContent>
             </Tabs>

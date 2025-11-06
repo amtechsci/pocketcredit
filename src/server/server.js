@@ -7,6 +7,18 @@ const fs = require('fs');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
+// Validate required environment variables
+const requiredEnvVars = ['JWT_SECRET', 'DB_HOST', 'DB_USER', 'DB_NAME'];
+const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+if (missingEnvVars.length > 0 && process.env.NODE_ENV === 'production') {
+  console.error('❌ Missing required environment variables:', missingEnvVars.join(', '));
+  console.error('💡 Please set these variables in your .env file');
+  process.exit(1);
+} else if (missingEnvVars.length > 0) {
+  console.warn('⚠️  Missing environment variables (using defaults):', missingEnvVars.join(', '));
+}
+
 // Import configuration
 const { initializeDatabase } = require('./config/database');
 const { initializeRedis } = require('./config/redis');
@@ -19,12 +31,8 @@ const loanApplicationRoutes = require('./routes/loanApplicationRoutes');
 const loanRoutes = require('./routes/loans');
 const adminAuthRoutes = require('./routes/adminAuth');
 const adminManagementRoutes = require('./routes/adminManagement');
-const documentRoutes = require('./routes/documents');
-const dashboardRoutes = require('./routes/dashboard');
+const dashboardRoutes = require('./routes/dashboardRoutes');
 const calculatorRoutes = require('./routes/calculators');
-const verificationRoutes = require('./routes/verification');
-const transactionRoutes = require('./routes/transactions');
-const notificationRoutes = require('./routes/notifications');
 const employmentRoutes = require('./routes/employment');
 const bankDetailsRoutes = require('./routes/bankDetails');
 const referencesRoutes = require('./routes/references');
@@ -38,7 +46,6 @@ const adminLoanPlansRoutes = require('./routes/adminLoanPlans');
 const adminLateFeesRoutes = require('./routes/adminLateFees');
 const activityLogsRoutes = require('./routes/activityLogsSimple');
 const eligibilityRoutes = require('./routes/eligibilityConfig');
-// const adminKYCRoutes = require('./routes/adminKYC'); // Commented out - not needed yet
 const employmentQuickCheckRoutes = require('./routes/employmentQuickCheck');
 const loanPlansRoutes = require('./routes/loanPlans');
 const validationRoutes = require('./routes/validation');
@@ -55,10 +62,10 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// Rate limiting (more lenient for development)
+// Rate limiting (stricter in production)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // limit each IP to 1000 requests per windowMs (increased for development)
+  max: process.env.NODE_ENV === 'production' ? 100 : 1000, // Strict in production, lenient in dev
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -115,9 +122,6 @@ app.use(activityLoggerMiddleware());
 // Session middleware
 app.use(initializeSession());
 
-// Session cleanup middleware
-// app.use(sessionCleanup());
-
 // Static file serving for uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -140,12 +144,8 @@ app.use('/api/loan-applications', loanApplicationRoutes);
 app.use('/api/loans', loanRoutes);
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin', adminManagementRoutes);
-app.use('/api/documents', documentRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/calculators', calculatorRoutes);
-app.use('/api/verification', verificationRoutes);
-app.use('/api/transactions', transactionRoutes);
-app.use('/api/notifications', notificationRoutes);
 app.use('/api/employment-details', employmentRoutes);
 app.use('/api/bank-details', bankDetailsRoutes);
 app.use('/api/references', referencesRoutes);
@@ -158,7 +158,6 @@ app.use('/api/admin/loan-tiers', adminLoanTiersRoutes);
 app.use('/api/admin/loan-plans', adminLoanPlansRoutes);
 app.use('/api/admin/late-fees', adminLateFeesRoutes);
 app.use('/api/admin/activities', activityLogsRoutes);
-// app.use('/api/admin/kyc', adminKYCRoutes); // Commented out - not needed yet
 app.use('/api/eligibility', eligibilityRoutes);
 app.use('/api/employment-quick-check', employmentQuickCheckRoutes);
 app.use('/api/loan-plans', loanPlansRoutes);
@@ -189,9 +188,28 @@ app.use('/api/digiwebhook', digiwebhookRoutes);
 const accountAggregatorRoutes = require('./routes/accountAggregator');
 app.use('/api/aa', accountAggregatorRoutes);
 
+// User Bank Statement routes (profile-level, one-time)
+const userBankStatementRoutes = require('./routes/userBankStatement');
+app.use('/api/bank-statement', userBankStatementRoutes);
+
+// Development-only routes (disabled in production for security)
+if (process.env.NODE_ENV !== 'production') {
+  const testDigitapRoutes = require('./routes/testDigitap');
+  app.use('/api/test-digitap', testDigitapRoutes);
+  
+  const checkTableRoutes = require('./routes/checkTable');
+  app.use('/api/check-table', checkTableRoutes);
+  
+  console.log('🧪 Development routes enabled');
+}
+
 // Companies autocomplete
 const companiesRoutes = require('./routes/companies');
 app.use('/api/companies', companiesRoutes);
+
+// Credit Analytics (Experian credit check)
+const creditAnalyticsRoutes = require('./routes/creditAnalytics');
+app.use('/api/credit-analytics', creditAnalyticsRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

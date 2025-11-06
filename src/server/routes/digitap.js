@@ -201,6 +201,7 @@ router.post('/save-prefill', requireAuth, checkHoldStatus, async (req, res) => {
     }
 
     // Update users table with Digitap data
+    // For salaried users, Digitap provides all required info so mark profile as complete
     await executeQuery(`
       UPDATE users 
       SET 
@@ -212,6 +213,8 @@ router.post('/save-prefill', requireAuth, checkHoldStatus, async (req, res) => {
         pan_number = COALESCE(?, pan_number),
         pincode = COALESCE(?, pincode),
         address_data = COALESCE(?, address_data),
+        profile_completion_step = 5,
+        profile_completed = true,
         updated_at = NOW()
       WHERE id = ?
     `, [
@@ -226,12 +229,15 @@ router.post('/save-prefill', requireAuth, checkHoldStatus, async (req, res) => {
       userId
     ]);
 
-    console.log('Digitap prefill data saved to users table');
+    console.log('Digitap prefill data saved to users table and profile marked as complete');
 
     res.json({
       status: 'success',
-      message: 'Details saved successfully',
-      data: { saved: true }
+      message: 'Profile completed successfully with your details',
+      data: { 
+        saved: true,
+        profile_completed: true
+      }
     });
 
   } catch (error) {

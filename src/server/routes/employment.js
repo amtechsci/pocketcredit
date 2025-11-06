@@ -202,7 +202,54 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 /**
- * POST /api/employment/details
+ * GET /api/employment-details/status/:applicationId
+ * Check if employment details are already completed for an application
+ */
+router.get('/status/:applicationId', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+    const { applicationId } = req.params;
+
+    // Verify the application belongs to the user
+    const application = await executeQuery(
+      'SELECT id FROM loan_applications WHERE id = ? AND user_id = ?',
+      [applicationId, userId]
+    );
+
+    if (!application || application.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan application not found'
+      });
+    }
+
+    // Check if employment details exist
+    const employmentDetails = await executeQuery(
+      'SELECT id FROM application_employment_details WHERE application_id = ?',
+      [applicationId]
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Employment status retrieved',
+      data: {
+        completed: employmentDetails.length > 0
+      }
+    });
+
+  } catch (error) {
+    console.error('Employment status check error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to check employment status',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/employment-details/details
  * Submit detailed employment information for loan application
  */
 router.post('/details', requireAuth, async (req, res) => {

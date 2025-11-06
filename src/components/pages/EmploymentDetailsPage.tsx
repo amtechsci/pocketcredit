@@ -4,7 +4,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Briefcase, Building, Users, Award, ArrowRight, Check, Search } from 'lucide-react';
+import { Briefcase, Building, Users, Award, ArrowRight, Check, Search, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../services/api';
 
@@ -101,6 +101,42 @@ export const EmploymentDetailsPage: React.FC = () => {
   const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
   const suggestionRef = useRef<HTMLDivElement>(null);
   const companyInputRef = useRef<HTMLInputElement>(null);
+
+  // Check if employment details already completed on mount
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    const checkEmploymentStatus = async () => {
+      if (!applicationId) {
+        setChecking(false);
+        return;
+      }
+
+      try {
+        // Check if employment details already exist for this application
+        const response = await apiService.getEmploymentDetailsStatus(applicationId);
+        
+        if (response.status === 'success' && response.data?.completed) {
+          // Employment details already completed - redirect to next step
+          toast.success('Employment details already submitted! Proceeding to next step...');
+          setTimeout(() => {
+            navigate('/loan-application/credit-check', {
+              state: { applicationId }
+            });
+          }, 1500);
+        } else {
+          // Not complete - show the form
+          setChecking(false);
+        }
+      } catch (error) {
+        console.error('Error checking employment status:', error);
+        // On error, show the form anyway
+        setChecking(false);
+      }
+    };
+
+    checkEmploymentStatus();
+  }, [applicationId, navigate]);
 
   // Load initial companies on mount
   useEffect(() => {
@@ -237,8 +273,10 @@ export const EmploymentDetailsPage: React.FC = () => {
       if (response.success) {
         toast.success('Employment details saved successfully!');
         
-        // Navigate to loan application steps
-        navigate(`/loan-application/steps?applicationId=${applicationId}`);
+        // Navigate to credit check (next step after employment)
+        navigate('/loan-application/credit-check', {
+          state: { applicationId }
+        });
       } else {
         toast.error(response.message || 'Failed to save employment details');
       }
@@ -249,6 +287,18 @@ export const EmploymentDetailsPage: React.FC = () => {
       setLoading(false);
     }
   };
+
+  // Show loading while checking employment status
+  if (checking) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-blue-600 mx-auto mb-4" />
+          <p className="text-gray-600">Checking employment details status...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">

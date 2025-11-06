@@ -1,135 +1,199 @@
-import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { ArrowLeft, Upload, Cloud, FileText, AlertCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Cloud, FileText, AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Label } from '../ui/label';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { toast } from 'sonner';
 import { apiService } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
 
 export const BankStatementUploadPage = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  const applicationId = location.state?.applicationId;
+  const { user } = useAuth();
 
   const [uploadMethod, setUploadMethod] = useState<'online' | 'manual'>('online');
-  const [mobileNumber, setMobileNumber] = useState('');
-  const [selectedBank, setSelectedBank] = useState('');
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [onlineMethod, setOnlineMethod] = useState<'netbanking' | 'accountaggregator'>('accountaggregator');
+  const [mobileNumber, setMobileNumber] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(true);
+  const [hasPendingUpload, setHasPendingUpload] = useState(false);
+  const [pendingData, setPendingData] = useState<{
+    digitapUrl: string;
+    expiresAt: string;
+    status: string;
+  } | null>(null);
 
-  const banks = [
-    'ICICI Bank',
-    'HDFC Bank',
-    'State Bank of India',
-    'Axis Bank',
-    'Kotak Mahindra Bank',
-    'IndusInd Bank Ltd.',
-    'IDFC FIRST BANK',
-    'Canara Bank',
-    'Union Bank Of India',
-    'Punjab National Bank',
-    'Bank of Baroda',
-    'Yes Bank'
-  ];
-
-  const handleOnlineUpload = async () => {
-    if (!mobileNumber || mobileNumber.length !== 10) {
-      toast.error('Please enter a valid 10-digit mobile number');
-      return;
+  // Set mobile number from user context on mount
+  useEffect(() => {
+    if (user?.phone) {
+      setMobileNumber(user.phone);
     }
-    if (!selectedBank) {
-      toast.error('Please select your bank');
-      return;
-    }
+  }, [user]);
 
-    // Navigate to complete AA flow
-    navigate('/loan-application/aa-flow', {
-      state: {
-        applicationId,
-        mobileNumber,
-        selectedBank
+  // Check if bank statement already uploaded or pending
+  useEffect(() => {
+    const checkBankStatementStatus = async () => {
+      try {
+        const response = await apiService.getUserBankStatementStatus();
+        
+        if (!response.success || !response.data) {
+          setCheckingStatus(false);
+          return;
+        }
+
+        const { status, digitapUrl, expiresAt } = response.data as any;
+
+        // Check if completed
+        if (status === 'completed') {
+          toast.success('Bank statement already uploaded! Proceeding to dashboard...');
+          setTimeout(() => navigate('/dashboard'), 1500);
+          return;
+        }
+
+        // Check if pending, InProgress, or failed (needs retry)
+        if ((status === 'pending' || status === 'InProgress' || status === 'failed') && digitapUrl) {
+          // Check if expired
+          if (expiresAt && new Date(expiresAt) < new Date()) {
+            // Expired - delete and show form
+            toast.info('Previous session expired. Please start a new upload.');
+            await handleDeletePending();
+            setCheckingStatus(false);
+          } else {
+            // Not expired - show pending/retry message
+            setPendingData({ digitapUrl, expiresAt, status });
+            setHasPendingUpload(true);
+            setCheckingStatus(false);
+          }
+        } else {
+          // No pending upload - show form
+          setCheckingStatus(false);
+        }
+      } catch (error) {
+        console.error('Error checking bank statement status:', error);
+        setCheckingStatus(false);
       }
-    });
+    };
 
-    /* PRODUCTION CODE - Uncomment when backend is ready
-    try {
-      const response = await apiService.initiateAccountAggregator({
-        mobile_number: mobileNumber,
-        bank_name: selectedBank,
-        application_id: applicationId
-      });
+    checkBankStatementStatus();
+  }, [navigate]);
 
-      if (response.success) {
-        window.location.href = response.data.aaUrl;
-      } else {
-        toast.error(response.message || 'Failed to initiate bank statement upload');
-      }
-    } catch (error) {
-      console.error('AA initiation error:', error);
-      toast.error('Failed to connect to Account Aggregator');
-    } finally {
-      setIsLoading(false);
+  const handleContinuePending = () => {
+    if (pendingData?.digitapUrl) {
+      toast.info('Redirecting to your pending upload...');
+      window.location.href = pendingData.digitapUrl;
     }
-    */
   };
 
-  const handleManualUpload = async () => {
-    if (!pdfFile) {
-      toast.error('Please select a PDF file');
+  const handleDeletePending = async () => {
+    try {
+      const response = await apiService.deletePendingBankStatement();
+      if (response.success) {
+        toast.success('Starting fresh upload...');
+        setHasPendingUpload(false);
+        setPendingData(null);
+      }
+    } catch (error) {
+      console.error('Error deleting pending upload:', error);
+      toast.error('Could not reset. Please try again.');
+    }
+  };
+
+  const handleOnlineUpload = async () => {
+    // Validate mobile number for Account Aggregator
+    if (onlineMethod === 'accountaggregator' && !mobileNumber) {
+      toast.error('Please enter your mobile number');
       return;
     }
 
-    if (pdfFile.type !== 'application/pdf') {
-      toast.error('Only PDF files are allowed');
+    // Validate mobile number format
+    if (onlineMethod === 'accountaggregator' && !/^[6-9]\d{9}$/.test(mobileNumber)) {
+      toast.error('Please enter a valid 10-digit mobile number');
       return;
     }
 
     setIsLoading(true);
-    
-    // DEMO MODE - Frontend only, no backend calls
-    setTimeout(() => {
-      toast.success(`Bank statement "${pdfFile.name}" uploaded successfully!`);
-      toast.info('File size: ' + (pdfFile.size / 1024).toFixed(2) + ' KB');
-      setIsLoading(false);
-      
-      console.log('Demo Manual Upload:', {
-        fileName: pdfFile.name,
-        fileSize: pdfFile.size,
-        fileType: pdfFile.type,
-        message: 'In production, this would be uploaded to S3 and saved to database'
-      });
-      
-      // Optional: Navigate to next step after 2 seconds
-      // setTimeout(() => {
-      //   navigate('/loan-application/employment-details', { state: { applicationId } });
-      // }, 2000);
-    }, 1500);
 
-    /* PRODUCTION CODE - Uncomment when backend is ready
     try {
-      const formData = new FormData();
-      formData.append('statement', pdfFile);
-      formData.append('application_id', applicationId.toString());
+      const response = await apiService.initiateUserBankStatement({
+        mobile_number: mobileNumber || '',
+        bank_name: '',
+        destination: onlineMethod
+      });
 
-      const response = await apiService.uploadBankStatementPDF(formData);
-
-      if (response.success) {
-        toast.success('Bank statement uploaded successfully');
-        navigate('/loan-application/employment-details', { state: { applicationId } });
+      if (response.success && response.data) {
+        toast.success('Redirecting to bank verification...');
+        // Redirect to Digitap's secure URL
+        window.location.href = response.data.digitapUrl;
       } else {
-        toast.error(response.message || 'Failed to upload bank statement');
+        // Check if it's a demo mode error
+        if (response.message && response.message.includes('demo credentials')) {
+          toast.error('Online upload requires production credentials', {
+            description: 'Please use Manual Upload option instead',
+            duration: 5000
+          });
+          // Auto-switch to manual upload
+          setUploadMethod('manual');
+        } else {
+          toast.error(response.message || 'Failed to initiate bank statement upload');
+        }
       }
-    } catch (error) {
-      console.error('Manual upload error:', error);
-      toast.error('Failed to upload bank statement');
+    } catch (error: any) {
+      console.error('Bank statement initiation error:', error);
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to connect to bank verification';
+      
+      // Check if demo mode error
+      if (errorMessage.includes('demo credentials') || errorMessage.includes('unavailable')) {
+        toast.error('Online upload not available', {
+          description: 'Please switch to Manual Upload tab',
+          duration: 5000
+        });
+        setUploadMethod('manual');
+      } else {
+        toast.error(errorMessage);
+      }
     } finally {
       setIsLoading(false);
     }
-    */
   };
+
+  const handleManualUpload = async () => {
+    setIsLoading(true);
+
+    try {
+      // Manual also uses Digitap generateurl with destination: "statementupload"
+      const response = await apiService.initiateUserBankStatement({
+        mobile_number: '',
+        bank_name: '',
+        destination: 'statementupload'
+      });
+
+      if (response.success && response.data) {
+        toast.success('Redirecting to upload page...');
+        // Redirect to Digitap's upload page
+        window.location.href = response.data.digitapUrl;
+      } else {
+        toast.error(response.message || 'Failed to initiate upload');
+      }
+    } catch (error: any) {
+      console.error('Manual upload error:', error);
+      toast.error(error.message || 'Failed to initiate upload');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Show loading while checking status
+  if (checkingStatus) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-blue-600 mx-auto mb-4" />
+          <p className="text-gray-600">Checking bank statement status...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
@@ -139,82 +203,159 @@ export const BankStatementUploadPage = () => {
           <button onClick={() => navigate(-1)} className="p-2 hover:bg-gray-100 rounded-lg">
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <h1 className="text-lg font-semibold">BANK_ACCOUNT_STATEMENT</h1>
+          <h1 className="text-lg font-semibold">Bank Statement Upload</h1>
         </div>
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-        {/* Upload Method Tabs */}
-        <div className="relative">
-          <div className="flex gap-3">
-            <button
-              onClick={() => setUploadMethod('online')}
-              className={`flex-1 relative py-3 px-4 rounded-lg font-medium transition-all ${
-                uploadMethod === 'online'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Online Upload
-              {uploadMethod === 'online' && (
-                <Badge className="absolute -top-2 left-1/2 -translate-x-1/2 bg-green-500 text-white text-xs px-2 py-0.5">
-                  For Faster Processing
-                </Badge>
-              )}
-            </button>
-            <button
-              onClick={() => setUploadMethod('manual')}
-              className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
-                uploadMethod === 'manual'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Manual Upload
-            </button>
-          </div>
-        </div>
+        {/* Pending/Failed Upload Message */}
+        {hasPendingUpload && pendingData && (
+          <Card className="p-6 border-2 border-yellow-400 bg-yellow-50">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-6 h-6 text-yellow-600 flex-shrink-0 mt-1" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-yellow-900 mb-2">
+                  {pendingData.status === 'failed' 
+                    ? 'Previous bank statement upload failed'
+                    : 'You have a pending bank statement upload'
+                  }
+                </h3>
+                <p className="text-sm text-yellow-800 mb-4">
+                  {pendingData.status === 'failed'
+                    ? 'Your previous upload attempt failed. You can try again with the same method or choose a different one.'
+                    : 'You started an upload process but didn\'t complete it. You can continue where you left off or start fresh with a different method.'
+                  }
+                </p>
+                <div className="flex gap-3">
+                  <Button
+                    onClick={handleContinuePending}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    {pendingData.status === 'failed' ? 'Try Again' : 'Continue Upload'}
+                  </Button>
+                  <Button
+                    onClick={handleDeletePending}
+                    variant="outline"
+                    className="border-yellow-600 text-yellow-900 hover:bg-yellow-100"
+                  >
+                    Try Other Method
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </Card>
+        )}
 
-        {/* Online Upload Section */}
-        {uploadMethod === 'online' && (
+        {/* Upload Method Tabs - Only show if no pending upload */}
+        {!hasPendingUpload && (
           <>
-            {/* Mobile Number Input */}
-            <Card className="p-6 space-y-4">
-              <div>
-                <h3 className="text-lg font-semibold mb-1">Enter Mobile no. linked with your bank</h3>
-              </div>
-              <div className="relative">
-                <Input
-                  type="tel"
-                  placeholder="Enter your mobile number"
-                  value={mobileNumber}
-                  onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                  className="pl-10 h-12 text-base"
-                  maxLength={10}
-                />
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">📱</span>
-              </div>
-            </Card>
-
-            {/* Bank Selection */}
-            <Card className="p-6 space-y-4">
-              <div>
-                <h3 className="text-lg font-semibold mb-1">Select your Bank Name</h3>
-                <p className="text-sm text-gray-600">Choose Your bank where salary is created</p>
-              </div>
-              <div>
-                <select
-                  value={selectedBank}
-                  onChange={(e) => setSelectedBank(e.target.value)}
-                  className="w-full h-12 px-4 border border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            <div className="relative">
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setUploadMethod('online')}
+                  className={`flex-1 relative py-3 px-4 rounded-lg font-medium transition-all ${
+                    uploadMethod === 'online'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  <option value="">Select Salaried Bank account name</option>
-                  {banks.map((bank) => (
-                    <option key={bank} value={bank}>
-                      {bank}
-                    </option>
-                  ))}
-                </select>
+                  Online Upload
+                  {uploadMethod === 'online' && (
+                    <Badge className="absolute -top-2 left-1/2 -translate-x-1/2 bg-green-500 text-white text-xs px-2 py-0.5">
+                      For Faster Processing
+                    </Badge>
+                  )}
+                </button>
+                <button
+                  onClick={() => setUploadMethod('manual')}
+                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
+                    uploadMethod === 'manual'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Manual Upload
+                </button>
+              </div>
+            </div>
+
+            {/* Online Upload Section */}
+            {uploadMethod === 'online' && (
+              <>
+                {/* Online Method Selection */}
+                <Card className="p-6 space-y-4">
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3">Choose Verification Method</h3>
+                  </div>
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all hover:border-blue-500 hover:bg-blue-50"
+                  style={{
+                    borderColor: onlineMethod === 'accountaggregator' ? '#3b82f6' : '#e5e7eb',
+                    backgroundColor: onlineMethod === 'accountaggregator' ? '#eff6ff' : 'white'
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="onlineMethod"
+                    value="accountaggregator"
+                    checked={onlineMethod === 'accountaggregator'}
+                    onChange={(e) => setOnlineMethod(e.target.value as 'accountaggregator')}
+                    className="w-5 h-5 text-blue-600"
+                  />
+                  <div className="flex-1">
+                    <div className="font-semibold text-gray-900">By Mobile (Account Aggregator)</div>
+                    <div className="text-sm text-gray-600">Secure, RBI-approved method</div>
+                  </div>
+                </label>
+
+                {/* Mobile Number Input - Only show when Account Aggregator is selected */}
+                {onlineMethod === 'accountaggregator' && (
+                  <Card className="p-4 bg-gray-50 border border-gray-200">
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">
+                        Mobile Number <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="tel"
+                        value={mobileNumber}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/\D/g, ''); // Only numbers
+                          if (value.length <= 10) {
+                            setMobileNumber(value);
+                          }
+                        }}
+                        placeholder="Enter your mobile number"
+                        className="w-full h-12 px-4 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        maxLength={10}
+                      />
+                      {user?.phone && mobileNumber === user.phone && (
+                        <p className="text-xs text-green-600 mt-1">
+                          ✓ Using your registered mobile number
+                        </p>
+                      )}
+                    </div>
+                  </Card>
+                )}
+
+                <label className="flex items-center gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all hover:border-blue-500 hover:bg-blue-50"
+                  style={{
+                    borderColor: onlineMethod === 'netbanking' ? '#3b82f6' : '#e5e7eb',
+                    backgroundColor: onlineMethod === 'netbanking' ? '#eff6ff' : 'white'
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="onlineMethod"
+                    value="netbanking"
+                    checked={onlineMethod === 'netbanking'}
+                    onChange={(e) => setOnlineMethod(e.target.value as 'netbanking')}
+                    className="w-5 h-5 text-blue-600"
+                  />
+                  <div className="flex-1">
+                    <div className="font-semibold text-gray-900">Net Banking</div>
+                    <div className="text-sm text-gray-600">Login to your bank directly</div>
+                  </div>
+                </label>
               </div>
             </Card>
 
@@ -225,28 +366,8 @@ export const BankStatementUploadPage = () => {
               className="w-full h-14 text-lg font-semibold bg-blue-600 hover:bg-blue-700"
             >
               <Cloud className="mr-2 h-5 w-5" />
-              {isLoading ? 'Connecting...' : 'Upload'}
+              {isLoading ? 'Connecting...' : 'Continue'}
             </Button>
-
-            {/* How AA Works */}
-            <Card className="p-6 space-y-3">
-              <h3 className="font-semibold text-base">How Account Aggregator Works</h3>
-              <p className="text-sm text-gray-600">
-                If you are facing any kind of problem in using the Account Aggregator then this are the following
-                links for you to use.
-              </p>
-              <div className="space-y-2">
-                <p className="text-sm font-semibold">IN ENGLISH</p>
-                <a
-                  href="https://youtu.be/7eSxyKe0WZ4"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-blue-600 hover:underline block"
-                >
-                  https://youtu.be/7eSxyKe0WZ4
-                </a>
-              </div>
-            </Card>
           </>
         )}
 
@@ -255,52 +376,30 @@ export const BankStatementUploadPage = () => {
           <>
             <Card className="p-6 space-y-4">
               <div className="flex items-start gap-2">
-                <h3 className="text-lg font-semibold flex-1">Upload Bank Statement PDF</h3>
+                <h3 className="text-lg font-semibold flex-1">Manual Statement Upload</h3>
                 <AlertCircle className="h-5 w-5 text-blue-600" />
               </div>
               <p className="text-sm text-gray-600">
-                Upload last 6 months Bank Statement. Download the statement from your bank account and upload the PDF
-                file.
+                Upload last 6 months Bank Statement PDF through Digitap's secure platform
               </p>
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                <p className="text-sm text-yellow-800 font-medium">
-                  ⚠️ Do Not create PDF files from photos of your Bank Statement
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-sm text-blue-800 font-medium">
+                  ℹ️ This method lets you upload your PDF statement for automatic analysis
                 </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="pdf-upload" className="text-sm font-medium">
-                  Select PDF File
-                </Label>
-                <div className="flex items-center gap-3">
-                  <label
-                    htmlFor="pdf-upload"
-                    className="cursor-pointer px-4 py-2 border border-blue-600 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors"
-                  >
-                    Choose File
-                  </label>
-                  <input
-                    id="pdf-upload"
-                    type="file"
-                    accept="application/pdf"
-                    onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
-                    className="hidden"
-                  />
-                  <span className="text-sm text-gray-600">
-                    {pdfFile ? pdfFile.name : 'no file selected'}
-                  </span>
-                </div>
               </div>
             </Card>
 
             {/* Upload Button */}
             <Button
               onClick={handleManualUpload}
-              disabled={isLoading || !pdfFile}
+              disabled={isLoading}
               className="w-full h-14 text-lg font-semibold bg-blue-600 hover:bg-blue-700"
             >
               <FileText className="mr-2 h-5 w-5" />
-              {isLoading ? 'Uploading...' : 'Upload Statement'}
+              {isLoading ? 'Uploading...' : 'Continue to Upload'}
             </Button>
+          </>
+            )}
           </>
         )}
       </div>

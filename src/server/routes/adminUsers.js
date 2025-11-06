@@ -186,6 +186,30 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
     }
     
     const user = users[0];
+    
+    // If PAN is not in users table, try to get it from digitap_responses
+    let panNumber = user.pan_number;
+    if (!panNumber) {
+      try {
+        const digitapQuery = `
+          SELECT response_data 
+          FROM digitap_responses 
+          WHERE user_id = ? 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        `;
+        const digitapResults = await executeQuery(digitapQuery, [id]);
+        if (digitapResults.length > 0 && digitapResults[0].response_data) {
+          const responseData = typeof digitapResults[0].response_data === 'string' 
+            ? JSON.parse(digitapResults[0].response_data) 
+            : digitapResults[0].response_data;
+          panNumber = responseData.pan || null;
+        }
+      } catch (e) {
+        console.error('Error fetching PAN from digitap_responses:', e);
+      }
+    }
+    
     const userData = {
       id: user.id,
       name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Unknown User',
@@ -198,7 +222,7 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
       dateOfBirth: user.date_of_birth,
       gender: user.gender,
       maritalStatus: user.marital_status,
-      panNumber: user.pan_number,
+      panNumber: panNumber,
       aadharNumber: user.aadhar_number,
       totalApplications: parseInt(user.totalApplications) || 0,
       approvedApplications: parseInt(user.approvedApplications) || 0,
@@ -296,6 +320,94 @@ router.delete('/:id', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to delete user'
+    });
+  }
+});
+
+// Get user credit analytics data
+router.get('/:id/credit-analytics', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    
+    const { id } = req.params;
+    
+    // Fetch credit check data from credit_checks table
+    const query = `
+      SELECT 
+        id,
+        user_id,
+        request_id,
+        client_ref_num,
+        credit_score,
+        is_eligible,
+        rejection_reasons,
+        has_settlements,
+        has_writeoffs,
+        has_suit_files,
+        has_wilful_default,
+        negative_indicators,
+        full_report,
+        checked_at,
+        created_at,
+        updated_at
+      FROM credit_checks
+      WHERE user_id = ?
+      ORDER BY checked_at DESC
+      LIMIT 1
+    `;
+    
+    const results = await executeQuery(query, [id]);
+    
+    if (results.length === 0) {
+      return res.json({
+        status: 'success',
+        message: 'No credit analytics data found for this user',
+        data: null
+      });
+    }
+    
+    const creditData = results[0];
+    
+    // Parse JSON fields
+    if (creditData.rejection_reasons) {
+      try {
+        creditData.rejection_reasons = JSON.parse(creditData.rejection_reasons);
+      } catch (e) {
+        creditData.rejection_reasons = [];
+      }
+    }
+    
+    if (creditData.negative_indicators) {
+      try {
+        creditData.negative_indicators = JSON.parse(creditData.negative_indicators);
+      } catch (e) {
+        creditData.negative_indicators = null;
+      }
+    }
+    
+    if (creditData.full_report) {
+      try {
+        // Check if it's already an object or needs parsing
+        if (typeof creditData.full_report === 'string') {
+          creditData.full_report = JSON.parse(creditData.full_report);
+        }
+      } catch (e) {
+        console.error('❌ Error parsing credit report full_report:', e);
+        creditData.full_report = null;
+      }
+    }
+    
+    res.json({
+      status: 'success',
+      message: 'Credit analytics data retrieved successfully',
+      data: creditData
+    });
+    
+  } catch (error) {
+    console.error('Get credit analytics error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to retrieve credit analytics data'
     });
   }
 });

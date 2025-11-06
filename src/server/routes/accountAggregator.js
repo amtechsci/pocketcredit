@@ -5,6 +5,12 @@ const path = require('path');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
 const { uploadToS3 } = require('../services/s3Service');
+const {
+  initiateBankStatementCollection,
+  uploadBankStatementPDF,
+  checkBankStatementStatus,
+  retrieveBankStatementReport
+} = require('../services/digitapBankStatementService');
 
 // Multer configuration for PDF uploads
 const storage = multer.memoryStorage();
@@ -22,16 +28,20 @@ const upload = multer({
 
 /**
  * POST /api/aa/initiate
- * Initiate Account Aggregator flow
+ * Initiate Bank Statement Collection using Digitap
+ * This generates a secure URL where users can:
+ * - Login to Net Banking
+ * - Upload PDF statements
+ * - Use Account Aggregator
  */
 router.post('/initiate', requireAuth, async (req, res) => {
   const { mobile_number, bank_name, application_id } = req.body;
   const userId = req.userId;
 
-  if (!mobile_number || !bank_name || !application_id) {
+  if (!mobile_number || !application_id) {
     return res.status(400).json({
       success: false,
-      message: 'Mobile number, bank name, and application ID are required'
+      message: 'Mobile number and application ID are required'
     });
   }
 
@@ -46,40 +56,67 @@ router.post('/initiate', requireAuth, async (req, res) => {
   try {
     await initializeDatabase();
 
-    // Generate unique transaction ID
-    const transactionId = `AA_${userId}_${application_id}_${Date.now()}`;
-
-    // In production, you would call actual AA provider API (NADL, Finvu, Sahamati, etc.)
-    // For demo, we'll create a mock URL
-    const aaProviderUrl = process.env.AA_PROVIDER_URL || 'https://aa-provider.example.com';
-    const callbackUrl = `${process.env.APP_URL || 'https://pocketcredit.in'}/api/aa/callback`;
-
-    // Store AA request in database
-    await executeQuery(
-      `INSERT INTO account_aggregator_requests 
-       (user_id, application_id, transaction_id, mobile_number, bank_name, status, callback_url, created_at) 
-       VALUES (?, ?, ?, ?, ?, 'pending', ?, NOW())`,
-      [userId, application_id, transactionId, mobile_number, bank_name, callbackUrl]
+    // Verify application belongs to user
+    const applications = await executeQuery(
+      'SELECT id FROM loan_applications WHERE id = ? AND user_id = ?',
+      [application_id, userId]
     );
 
-    // Mock AA URL (in production, this would be from AA provider)
-    const aaUrl = `${aaProviderUrl}/consent?txnId=${transactionId}&mobile=${mobile_number}&bank=${encodeURIComponent(
-      bank_name
-    )}&callback=${encodeURIComponent(callbackUrl)}`;
+    if (!applications || applications.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan application not found'
+      });
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const appUrl = process.env.APP_URL || 'https://pocketcredit.in';
+    const returnUrl = `${frontendUrl}/loan-application/bank-details?applicationId=${application_id}&bankStatementComplete=true`;
+    const webhookUrl = `${appUrl}/api/aa/webhook`;
+
+    // Use Digitap's Bank Statement Collection API
+    const result = await initiateBankStatementCollection(
+      userId,
+      application_id,
+      returnUrl,
+      webhookUrl,
+      mobile_number
+    );
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        message: result.error || 'Failed to initiate bank statement collection'
+      });
+    }
+
+    // Store in database for tracking
+    await executeQuery(
+      `INSERT INTO digitap_bank_statements 
+       (user_id, application_id, client_ref_num, mobile_number, bank_name, status, digitap_url, created_at) 
+       VALUES (?, ?, ?, ?, ?, 'pending', ?, NOW())
+       ON DUPLICATE KEY UPDATE 
+       client_ref_num = VALUES(client_ref_num),
+       digitap_url = VALUES(digitap_url),
+       status = 'pending',
+       updated_at = NOW()`,
+      [userId, application_id, result.data.client_ref_num, mobile_number, bank_name || null, result.data.url]
+    );
 
     res.json({
       success: true,
       data: {
-        aaUrl,
-        transactionId
+        aaUrl: result.data.url,
+        transactionId: result.data.client_ref_num,
+        expiryTime: result.data.expiry_time
       },
-      message: 'Account Aggregator initiated successfully'
+      message: 'Bank statement collection initiated successfully'
     });
   } catch (error) {
-    console.error('AA initiation error:', error);
+    console.error('Bank statement initiation error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to initiate Account Aggregator'
+      message: 'Failed to initiate bank statement collection'
     });
   }
 });
@@ -127,11 +164,11 @@ router.get('/callback', async (req, res) => {
 
       console.log('AA Consent approved for user:', aaRequest.user_id);
 
-      // Redirect to next step
+      // Redirect to next step (bank details after bank statement)
       res.redirect(
-        `${process.env.FRONTEND_URL || 'https://pocketcredit.in'}/loan-application/employment-details?applicationId=${
+        `${process.env.FRONTEND_URL || 'http://localhost:3000'}/loan-application/bank-details?applicationId=${
           aaRequest.application_id
-        }&aaSuccess=true`
+        }&bankStatementComplete=true`
       );
     } else {
       // Update status to failed
@@ -145,7 +182,7 @@ router.get('/callback', async (req, res) => {
       console.log('AA Consent failed for user:', aaRequest.user_id);
 
       res.redirect(
-        `${process.env.FRONTEND_URL || 'https://pocketcredit.in'}/loan-application/bank-statement?applicationId=${
+        `${process.env.FRONTEND_URL || 'http://localhost:3000'}/loan-application/bank-statement?applicationId=${
           aaRequest.application_id
         }&aaFailed=true`
       );
@@ -158,11 +195,11 @@ router.get('/callback', async (req, res) => {
 
 /**
  * POST /api/aa/upload-statement
- * Manual upload of bank statement PDF
+ * Manual upload of bank statement PDF to Digitap for analysis
  */
 router.post('/upload-statement', requireAuth, upload.single('statement'), async (req, res) => {
   const userId = req.userId;
-  const { application_id } = req.body;
+  const { application_id, bank_name, password } = req.body;
 
   if (!req.file) {
     return res.status(400).json({
@@ -181,40 +218,68 @@ router.post('/upload-statement', requireAuth, upload.single('statement'), async 
   try {
     await initializeDatabase();
 
-    // Upload to S3
-    const s3Key = `bank-statements/${userId}/${application_id}/${Date.now()}_${req.file.originalname}`;
-    const uploadResult = await uploadToS3(req.file.buffer, s3Key, req.file.mimetype, false);
+    // Get user's mobile number
+    const users = await executeQuery(
+      'SELECT phone FROM users WHERE id = ?',
+      [userId]
+    );
 
-    if (!uploadResult.success) {
-      return res.status(500).json({
+    if (!users || users.length === 0) {
+      return res.status(404).json({
         success: false,
-        message: 'Failed to upload file to storage'
+        message: 'User not found'
       });
     }
 
-    // Construct full S3 URL
+    const mobileNumber = users[0].phone;
+    const { generateClientRefNum } = require('../services/digitapBankStatementService');
+    const clientRefNum = generateClientRefNum(userId, application_id);
+
+    // Upload to Digitap for analysis
+    const digitapResult = await uploadBankStatementPDF({
+      mobile_no: mobileNumber,
+      client_ref_num: clientRefNum,
+      file_buffer: req.file.buffer,
+      file_name: req.file.originalname,
+      bank_name: bank_name || null,
+      password: password || null
+    });
+
+    if (!digitapResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: digitapResult.error || 'Failed to upload to Digitap'
+      });
+    }
+
+    // Also upload to S3 for backup
+    const s3Key = `bank-statements/${userId}/${application_id}/${Date.now()}_${req.file.originalname}`;
+    await uploadToS3(req.file.buffer, s3Key, req.file.mimetype, false);
     const fileUrl = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`;
 
     // Store in database
     await executeQuery(
-      `INSERT INTO bank_statements 
-       (user_id, application_id, upload_method, file_path, file_name, file_size, status, created_at) 
-       VALUES (?, ?, 'manual', ?, ?, ?, 'uploaded', NOW())
+      `INSERT INTO digitap_bank_statements 
+       (user_id, application_id, client_ref_num, mobile_number, bank_name, status, file_path, file_name, file_size, upload_method, created_at) 
+       VALUES (?, ?, ?, ?, ?, 'processing', ?, ?, ?, 'manual', NOW())
        ON DUPLICATE KEY UPDATE 
+       client_ref_num = VALUES(client_ref_num),
        file_path = VALUES(file_path), 
        file_name = VALUES(file_name), 
        file_size = VALUES(file_size), 
-       status = 'uploaded', 
+       status = 'processing', 
        updated_at = NOW()`,
-      [userId, application_id, fileUrl, req.file.originalname, req.file.size]
+      [userId, application_id, clientRefNum, mobileNumber, bank_name || null, fileUrl, req.file.originalname, req.file.size]
     );
 
     res.json({
       success: true,
-      message: 'Bank statement uploaded successfully',
+      message: 'Bank statement uploaded successfully and sent for analysis',
       data: {
         fileName: req.file.originalname,
         fileSize: req.file.size,
+        clientRefNum: clientRefNum,
+        status: digitapResult.data?.status || 'processing',
         uploadedAt: new Date().toISOString()
       }
     });
@@ -229,7 +294,7 @@ router.post('/upload-statement', requireAuth, upload.single('statement'), async 
 
 /**
  * GET /api/aa/status/:applicationId
- * Get AA status for an application
+ * Get bank statement status for an application (from Digitap)
  */
 router.get('/status/:applicationId', requireAuth, async (req, res) => {
   const { applicationId } = req.params;
@@ -238,41 +303,275 @@ router.get('/status/:applicationId', requireAuth, async (req, res) => {
   try {
     await initializeDatabase();
 
-    // Check AA request status
-    const aaRequests = await executeQuery(
-      `SELECT status, consent_id, approved_at, created_at 
-       FROM account_aggregator_requests 
+    // Check Digitap bank statement status
+    const statements = await executeQuery(
+      `SELECT client_ref_num, status, file_name, report_data, created_at, updated_at 
+       FROM digitap_bank_statements 
        WHERE user_id = ? AND application_id = ? 
        ORDER BY created_at DESC LIMIT 1`,
       [userId, applicationId]
     );
 
-    // Check manual upload status
-    const bankStatements = await executeQuery(
-      `SELECT status, file_name, created_at 
-       FROM bank_statements 
-       WHERE user_id = ? AND application_id = ? 
-       ORDER BY created_at DESC LIMIT 1`,
-      [userId, applicationId]
-    );
+    if (statements.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          hasStatement: false,
+          method: null,
+          status: null
+        }
+      });
+    }
 
-    const hasAA = aaRequests.length > 0 && aaRequests[0].status === 'approved';
-    const hasManual = bankStatements.length > 0 && bankStatements[0].status === 'uploaded';
+    const statement = statements[0];
+
+    // If we have a client_ref_num and status is processing, check with Digitap
+    if (statement.client_ref_num && (statement.status === 'pending' || statement.status === 'processing')) {
+      const digitapStatus = await checkBankStatementStatus(statement.client_ref_num);
+      
+      if (digitapStatus.success && digitapStatus.data) {
+        // Update our database with latest status
+        await executeQuery(
+          `UPDATE digitap_bank_statements 
+           SET status = ?, updated_at = NOW() 
+           WHERE client_ref_num = ?`,
+          [digitapStatus.data.status, statement.client_ref_num]
+        );
+        
+        statement.status = digitapStatus.data.status;
+      }
+    }
+
+    const hasStatement = statement.status === 'completed' || statement.status === 'ReportGenerated';
 
     res.json({
       success: true,
       data: {
-        hasStatement: hasAA || hasManual,
-        method: hasAA ? 'account_aggregator' : hasManual ? 'manual' : null,
-        aaStatus: aaRequests[0] || null,
-        manualStatus: bankStatements[0] || null
+        hasStatement,
+        method: statement.upload_method || 'digitap',
+        status: statement.status,
+        clientRefNum: statement.client_ref_num,
+        fileName: statement.file_name,
+        hasReport: !!statement.report_data,
+        createdAt: statement.created_at,
+        updatedAt: statement.updated_at
       }
     });
   } catch (error) {
-    console.error('AA status check error:', error);
+    console.error('Bank statement status check error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to check AA status'
+      message: 'Failed to check bank statement status'
+    });
+  }
+});
+
+/**
+ * POST /api/aa/check-and-retrieve/:applicationId
+ * Check status and retrieve report if ready
+ */
+router.post('/check-and-retrieve/:applicationId', requireAuth, async (req, res) => {
+  const { applicationId } = req.params;
+  const userId = req.userId;
+
+  try {
+    await initializeDatabase();
+
+    // Get the bank statement record
+    const statements = await executeQuery(
+      `SELECT client_ref_num, status, report_data 
+       FROM digitap_bank_statements 
+       WHERE user_id = ? AND application_id = ? 
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId, applicationId]
+    );
+
+    if (statements.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No bank statement found for this application'
+      });
+    }
+
+    const statement = statements[0];
+
+    // Check status with Digitap
+    const statusResult = await checkBankStatementStatus(statement.client_ref_num);
+
+    if (!statusResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to check status with Digitap'
+      });
+    }
+
+    const currentStatus = statusResult.data.status;
+
+    // Update status in database
+    await executeQuery(
+      `UPDATE digitap_bank_statements 
+       SET status = ?, updated_at = NOW() 
+       WHERE client_ref_num = ?`,
+      [currentStatus, statement.client_ref_num]
+    );
+
+    // If report is ready, retrieve it
+    if (currentStatus === 'ReportGenerated') {
+      // Check if we already have the report
+      if (statement.report_data) {
+        return res.json({
+          success: true,
+          data: {
+            status: currentStatus,
+            report: JSON.parse(statement.report_data),
+            cached: true
+          }
+        });
+      }
+
+      // Retrieve report from Digitap
+      const reportResult = await retrieveBankStatementReport(statement.client_ref_num, 'json');
+
+      if (!reportResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to retrieve report from Digitap'
+        });
+      }
+
+      // Save report to database
+      await executeQuery(
+        `UPDATE digitap_bank_statements 
+         SET report_data = ?, status = 'completed', updated_at = NOW() 
+         WHERE client_ref_num = ?`,
+        [JSON.stringify(reportResult.data.report), statement.client_ref_num]
+      );
+
+      return res.json({
+        success: true,
+        data: {
+          status: 'completed',
+          report: reportResult.data.report,
+          cached: false
+        }
+      });
+    }
+
+    // Report not ready yet
+    res.json({
+      success: true,
+      data: {
+        status: currentStatus,
+        message: 'Report is being processed',
+        report: null
+      }
+    });
+  } catch (error) {
+    console.error('Check and retrieve error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check and retrieve report'
+    });
+  }
+});
+
+/**
+ * POST /api/aa/init-table
+ * Initialize digitap_bank_statements table (one-time setup)
+ */
+router.post('/init-table', async (req, res) => {
+  try {
+    await initializeDatabase();
+
+    // Create table
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS digitap_bank_statements (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        user_id INT NOT NULL,
+        application_id INT NOT NULL,
+        client_ref_num VARCHAR(255) NOT NULL UNIQUE,
+        mobile_number VARCHAR(15) NOT NULL,
+        bank_name VARCHAR(100) DEFAULT NULL,
+        upload_method ENUM('online', 'manual', 'aa') DEFAULT 'online',
+        file_path VARCHAR(500) DEFAULT NULL,
+        file_name VARCHAR(255) DEFAULT NULL,
+        file_size INT DEFAULT NULL,
+        digitap_url TEXT DEFAULT NULL,
+        status ENUM('pending', 'processing', 'completed', 'failed', 'ReportGenerated') DEFAULT 'pending',
+        report_data LONGTEXT DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_user_id (user_id),
+        INDEX idx_application_id (application_id),
+        INDEX idx_client_ref_num (client_ref_num),
+        INDEX idx_status (status),
+        UNIQUE KEY unique_application (application_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    res.json({
+      success: true,
+      message: 'digitap_bank_statements table created successfully'
+    });
+  } catch (error) {
+    console.error('Table creation error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create table',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/aa/webhook
+ * Webhook endpoint for Digitap callbacks
+ * Digitap will call this when bank statement processing is complete
+ */
+router.post('/webhook', async (req, res) => {
+  try {
+    const { client_ref_num, status, event_type } = req.body;
+
+    console.log('📥 Digitap Webhook received:', { client_ref_num, status, event_type });
+
+    await initializeDatabase();
+
+    // Update status in database
+    await executeQuery(
+      `UPDATE digitap_bank_statements 
+       SET status = ?, updated_at = NOW() 
+       WHERE client_ref_num = ?`,
+      [status, client_ref_num]
+    );
+
+    // If report is ready, fetch and store it
+    if (status === 'ReportGenerated') {
+      console.log('📊 Report ready, fetching from Digitap...');
+      
+      const reportResult = await retrieveBankStatementReport(client_ref_num, 'json');
+      
+      if (reportResult.success) {
+        await executeQuery(
+          `UPDATE digitap_bank_statements 
+           SET report_data = ?, status = 'completed', updated_at = NOW() 
+           WHERE client_ref_num = ?`,
+          [JSON.stringify(reportResult.data.report), client_ref_num]
+        );
+        
+        console.log('✅ Report saved to database');
+      }
+    }
+
+    // Send success response to Digitap
+    res.json({
+      success: true,
+      message: 'Webhook processed successfully'
+    });
+  } catch (error) {
+    console.error('❌ Webhook processing error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to process webhook'
     });
   }
 });

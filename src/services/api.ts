@@ -4,6 +4,7 @@ import axios, { AxiosInstance, AxiosResponse } from 'axios';
 // Types for API responses
 export interface ApiResponse<T = any> {
   status: 'success' | 'error';
+  success?: boolean;
   message: string;
   data?: T;
 }
@@ -777,6 +778,15 @@ class ApiService {
   }
 
   /**
+   * Check Employment Details Status
+   */
+  async getEmploymentDetailsStatus(applicationId: number | string): Promise<ApiResponse<{
+    completed: boolean;
+  }>> {
+    return this.request('GET', `/employment-details/status/${applicationId}`);
+  }
+
+  /**
    * Search Companies (autocomplete)
    */
   async searchCompanies(query: string, limit: number = 15): Promise<ApiResponse<Array<{
@@ -796,6 +806,30 @@ class ApiService {
     industry?: string;
   }): Promise<ApiResponse<any>> {
     return this.request('POST', '/companies/add', data);
+  }
+
+  /**
+   * Perform Credit Check (Experian via Digitap)
+   */
+  async performCreditCheck(): Promise<ApiResponse<{
+    is_eligible: boolean;
+    credit_score: number | null;
+    reasons: string[];
+    request_id: string;
+  }>> {
+    return this.request('POST', '/credit-analytics/check');
+  }
+
+  /**
+   * Get Credit Check Status
+   */
+  async getCreditCheckStatus(): Promise<ApiResponse<{
+    completed: boolean;
+    credit_score: number | null;
+    is_eligible: boolean | null;
+    checked_at: string | null;
+  }>> {
+    return this.request('GET', '/credit-analytics/status');
   }
 
   /**
@@ -829,6 +863,77 @@ class ApiService {
    */
   async getAccountAggregatorStatus(applicationId: number): Promise<ApiResponse<any>> {
     return this.request('GET', `/aa/status/${applicationId}`);
+  }
+
+  /**
+   * User Bank Statement - Initiate (one-time per user)
+   */
+  async initiateUserBankStatement(data: {
+    mobile_number?: string;
+    bank_name?: string;
+    destination?: 'netbanking' | 'accountaggregator' | 'statementupload';
+  }): Promise<ApiResponse<{
+    digitapUrl: string;
+    clientRefNum: string;
+    requestId?: number;
+    expiryTime?: string;
+  }>> {
+    return this.request('POST', '/bank-statement/initiate-bank-statement', data);
+  }
+
+  /**
+   * User Bank Statement - Upload PDF (one-time per user)
+   */
+  async uploadUserBankStatementPDF(formData: FormData): Promise<ApiResponse<any>> {
+    const token = localStorage.getItem('pocket_user_token');
+    const response = await fetch(`${this.baseURL}/bank-statement/upload-bank-statement`, {
+      method: 'POST',
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: formData
+    });
+    return response.json();
+  }
+
+  /**
+   * User Bank Statement - Get Status
+   */
+  async getUserBankStatementStatus(): Promise<ApiResponse<{
+    hasStatement: boolean;
+    status: string | null;
+    clientRefNum?: string;
+    requestId?: number;
+    fileName?: string;
+    hasReport: boolean;
+    digitapUrl?: string;
+    expiresAt?: string;
+    transactionData?: any[];
+    createdAt?: string;
+    updatedAt?: string;
+  }>> {
+    return this.request('GET', '/bank-statement/bank-statement-status');
+  }
+
+  /**
+   * User Bank Statement - Fetch Report
+   */
+  async fetchUserBankReport(): Promise<ApiResponse<{
+    status: string;
+    report?: any;
+    message?: string;
+    cached?: boolean;
+  }>> {
+    return this.request('POST', '/bank-statement/fetch-bank-report');
+  }
+
+  /**
+   * User Bank Statement - Delete Pending Upload
+   */
+  async deletePendingBankStatement(): Promise<ApiResponse<{
+    message: string;
+  }>> {
+    return this.request('POST', '/bank-statement/delete-pending-bank-statement');
   }
 }
 

@@ -902,6 +902,15 @@ class AdminApiService {
     });
     return response.data;
   }
+
+  async getUserCreditAnalytics(userId: number): Promise<ApiResponse<any>> {
+    const response = await axios.get(`/api/admin/users/${userId}/credit-analytics`, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
 }
 
 // Export singleton instance

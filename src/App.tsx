@@ -16,7 +16,6 @@ import { AuthOnlyRoute, ProtectedRoute } from './components/ProtectedRoute';
 import { PayEMIPage } from './components/pages/PayEMIPage';
 import { DynamicLoanDetailsPage as LoanDetailsPage } from './components/pages/DynamicLoanDetailsPage';
 import { DynamicPaymentHistoryPage as PaymentHistoryPage } from './components/pages/DynamicPaymentHistoryPage';
-import { DynamicDocumentUploadPage as DocumentUploadPage } from './components/pages/DynamicDocumentUploadPage';
 import { SimplifiedLoanApplicationPage } from './components/pages/SimplifiedLoanApplicationPage';
 import LoanPlanSelection from './components/pages/LoanPlanSelection';
 import LoanApplicationConfirmation from './components/pages/LoanApplicationConfirmation';
@@ -27,7 +26,9 @@ import { LoanApplicationStepsPage } from './components/pages/LoanApplicationStep
 import { DigilockerKYCPage } from './components/pages/DigilockerKYCPage';
 import { KYCCheckPage } from './components/pages/KYCCheckPage';
 import { EmploymentDetailsPage } from './components/pages/EmploymentDetailsPage';
+import { CreditCheckPage } from './components/pages/CreditCheckPage';
 import { BankStatementUploadPage } from './components/pages/BankStatementUploadPage';
+import { BankStatementSuccessPage } from './components/pages/BankStatementSuccessPage';
 import { AccountAggregatorFlow } from './components/pages/AccountAggregatorFlow';
 import { ApplicationFlow } from './components/ApplicationFlow';
 import { CreditScorePage } from './components/pages/CreditScorePage';
@@ -381,6 +382,24 @@ function AppContent() {
             <Navigate to="/auth" replace />
           )
         } />
+
+        <Route path="/bank-statement" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <BankStatementUploadPage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+
+        <Route path="/bank-statement-success" element={
+          isAuthenticated ? (
+            <BankStatementSuccessPage />
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
         
         <Route path="/loan-application/aa-flow" element={
           isAuthenticated ? (
@@ -394,6 +413,16 @@ function AppContent() {
           isAuthenticated ? (
             <DashboardLayout>
               <EmploymentDetailsPage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+        
+        <Route path="/loan-application/credit-check" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <CreditCheckPage />
             </DashboardLayout>
           ) : (
             <Navigate to="/auth" replace />
@@ -453,12 +482,6 @@ function AppContent() {
           </DashboardLayout>
         } />
         
-        <Route path="/upload-document" element={
-          <DashboardLayout>
-            <DocumentUploadPage />
-          </DashboardLayout>
-        } />
-        
         {/* Additional Dashboard Routes */}
         <Route path="/my-loans" element={
           <DashboardLayout>
@@ -467,25 +490,6 @@ function AppContent() {
         } />
         
         <Route path="/profile" element={
-          <DashboardLayout>
-            <DashboardPage />
-          </DashboardLayout>
-        } />
-        
-        <Route path="/documents" element={
-          <DashboardLayout>
-            <DocumentUploadPage />
-          </DashboardLayout>
-        } />
-        
-        
-        <Route path="/support" element={
-          <DashboardLayout>
-            <DashboardPage />
-          </DashboardLayout>
-        } />
-        
-        <Route path="/emi-calculator" element={
           <DashboardLayout>
             <DashboardPage />
           </DashboardLayout>
