@@ -666,12 +666,14 @@ async function handleBankDataWebhook(req, res) {
     // Log full webhook payload for debugging
     console.log('📥 Digitap Webhook received - Full payload:', JSON.stringify(req.body, null, 2));
     
-    const { request_id, txn_status, client_ref_num, status, client_ref_num: clientRefNum } = req.body;
+    const { request_id, txn_status, client_ref_num, status, code, client_ref_num: clientRefNum } = req.body;
 
     // Handle different webhook formats
     const actualRequestId = request_id || req.body.requestId || req.body.request_id;
     const actualTxnStatus = txn_status || req.body.txn_status || req.body.transaction_status || req.body.data;
     const actualClientRefNum = client_ref_num || clientRefNum || req.body.client_ref_num;
+    const actualCode = code || req.body.code;
+    const actualStatus = status || req.body.status;
 
     console.log('📥 Parsed webhook data:', { 
       request_id: actualRequestId, 
@@ -707,7 +709,15 @@ async function handleBankDataWebhook(req, res) {
 
     // Check if all transactions are completed
     let allCompleted = false;
-    if (actualTxnStatus) {
+    
+    // Check for Digitap's "ReportGenerated" code format
+    if (actualCode === 'ReportGenerated' && (actualStatus === 'Success' || actualStatus === 'success')) {
+      allCompleted = true;
+      console.log('✅ Report generated detected from code and status');
+    }
+    
+    // Check transaction status array format
+    if (!allCompleted && actualTxnStatus) {
       if (Array.isArray(actualTxnStatus)) {
         allCompleted = actualTxnStatus.every(txn => txn.status === 'Completed' || txn.status === 'completed');
       } else if (typeof actualTxnStatus === 'object' && actualTxnStatus.status) {
@@ -719,7 +729,7 @@ async function handleBankDataWebhook(req, res) {
     }
     
     // Also check if status field indicates completion
-    if (!allCompleted && (status === 'success' || status === 'completed' || status === 'Completed')) {
+    if (!allCompleted && (actualStatus === 'success' || actualStatus === 'Success' || actualStatus === 'completed' || actualStatus === 'Completed')) {
       allCompleted = true;
     }
 
@@ -747,17 +757,9 @@ async function handleBankDataWebhook(req, res) {
         if (!clientRefNum) {
           console.warn('⚠️  No client_ref_num found, cannot fetch report');
         } else {
-          // Wait a bit for Digitap to process
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          
-          // Check status first using request_id
-          const statusResult = await checkBankStatementStatus(actualRequestId);
-          
-          console.log('📊 Status check result:', JSON.stringify(statusResult, null, 2));
-          
-          if (statusResult.success && (statusResult.data.overall_status === 'completed' || statusResult.data.is_complete)) {
-            // Fetch the report using client_ref_num
-            console.log('📥 Fetching report for client_ref_num:', clientRefNum);
+          // If we have "ReportGenerated" code, report is definitely ready - fetch directly
+          if (actualCode === 'ReportGenerated') {
+            console.log('📥 ReportGenerated code detected - fetching report directly for client_ref_num:', clientRefNum);
             const reportResult = await retrieveBankStatementReport(clientRefNum, 'json');
             
             console.log('📥 Report fetch result:', reportResult.success ? 'Success' : reportResult.error);
@@ -773,10 +775,39 @@ async function handleBankDataWebhook(req, res) {
               
               console.log('✅ Report fetched and saved successfully to database');
             } else {
-              console.log('⚠️  Report not ready yet or fetch failed:', reportResult.error || 'Unknown error');
+              console.log('⚠️  Report fetch failed:', reportResult.error || 'Unknown error');
             }
           } else {
-            console.log('⚠️  Status check indicates report not ready yet. Status:', statusResult.data?.overall_status);
+            // For other completion formats, check status first
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            const statusResult = await checkBankStatementStatus(actualRequestId);
+            
+            console.log('📊 Status check result:', JSON.stringify(statusResult, null, 2));
+            
+            if (statusResult.success && (statusResult.data.overall_status === 'completed' || statusResult.data.is_complete)) {
+              // Fetch the report using client_ref_num
+              console.log('📥 Fetching report for client_ref_num:', clientRefNum);
+              const reportResult = await retrieveBankStatementReport(clientRefNum, 'json');
+              
+              console.log('📥 Report fetch result:', reportResult.success ? 'Success' : reportResult.error);
+              
+              if (reportResult.success && reportResult.data && reportResult.data.report) {
+                // Save report to database
+                await executeQuery(
+                  `UPDATE user_bank_statements 
+                   SET report_data = ?, status = 'completed', updated_at = NOW() 
+                   WHERE request_id = ?`,
+                  [JSON.stringify(reportResult.data.report), actualRequestId]
+                );
+                
+                console.log('✅ Report fetched and saved successfully to database');
+              } else {
+                console.log('⚠️  Report not ready yet or fetch failed:', reportResult.error || 'Unknown error');
+              }
+            } else {
+              console.log('⚠️  Status check indicates report not ready yet. Status:', statusResult.data?.overall_status);
+            }
           }
         }
       } catch (reportError) {
