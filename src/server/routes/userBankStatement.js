@@ -169,7 +169,8 @@ router.post('/initiate-bank-statement', requireAuth, async (req, res) => {
     const frontendUrl = isDev ? 'http://localhost:3000' : (process.env.FRONTEND_URL || 'https://pocketcredit.in');
     const apiUrl = isDev ? 'http://localhost:3002' : (process.env.APP_URL || 'https://api.pocketcredit.in');
     
-    const returnUrl = `${frontendUrl}/bank-statement-success?complete=true`;
+    // Return URL should point to backend first to log the callback, then redirect to frontend
+    const returnUrl = `${apiUrl}/api/user/bank-data/success`;
     const webhookUrl = `${apiUrl}/api/user/bank-data/webhook`;
     
     console.log('🔗 URLs configured:');
@@ -806,23 +807,80 @@ async function handleBankDataWebhook(req, res) {
 /**
  * GET /api/user/bank-data/success
  * Return URL endpoint - User lands here after completing on Digitap
+ * This endpoint logs all query parameters and then redirects to frontend
  */
 router.get('/bank-data/success', async (req, res) => {
+  let processingError = null;
+  
   try {
-    // Log the success callback
-    await logWebhookPayload(req, 'bank_data_success', '/api/user/bank-data/success', true, null);
+    // Log the success callback FIRST with all query parameters
+    console.log('📥 Return URL callback received - Full query:', JSON.stringify(req.query, null, 2));
+    console.log('📥 Return URL callback received - Full URL:', req.url);
+    
+    await logWebhookPayload(req, 'bank_data_success', '/api/user/bank-data/success', false, null);
     
     await initializeDatabase();
     
-    // Get user ID from session/JWT (if available)
-    // For now, redirect to frontend success page
+    // Try to extract and save any data from query parameters
+    const { request_id, client_ref_num, status, txnId, success } = req.query;
+    
+    // If we have request_id or client_ref_num, try to update the bank statement record
+    if (request_id || client_ref_num) {
+      try {
+        const updateFields = [];
+        const updateValues = [];
+        
+        if (status) {
+          updateFields.push('status = ?');
+          updateValues.push(status);
+        }
+        
+        if (request_id) {
+          updateFields.push('request_id = ?');
+          updateValues.push(request_id);
+        }
+        
+        if (updateFields.length > 0) {
+          updateFields.push('updated_at = NOW()');
+          const whereClause = request_id ? 'WHERE request_id = ?' : 'WHERE client_ref_num = ?';
+          const whereValue = request_id || client_ref_num;
+          
+          await executeQuery(
+            `UPDATE user_bank_statements 
+             SET ${updateFields.join(', ')} 
+             ${whereClause}`,
+            [...updateValues, whereValue]
+          );
+          
+          console.log(`✅ Updated bank statement record: ${whereClause} = ${whereValue}`);
+        }
+      } catch (updateError) {
+        console.error('⚠️  Error updating bank statement from return URL:', updateError);
+        // Don't fail the redirect if update fails
+      }
+    }
+    
+    // Mark webhook as processed
+    await logWebhookPayload(req, 'bank_data_success', '/api/user/bank-data/success', true, null);
+    
+    // Redirect to frontend success page with all query parameters preserved
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    res.redirect(`${frontendUrl}/bank-statement-success?complete=true`);
+    const queryString = new URLSearchParams(req.query).toString();
+    const redirectUrl = `${frontendUrl}/bank-statement-success?${queryString}&complete=true`;
+    
+    console.log(`🔄 Redirecting to frontend: ${redirectUrl}`);
+    res.redirect(redirectUrl);
+    
   } catch (error) {
-    console.error('Return URL error:', error);
-    await logWebhookPayload(req, 'bank_data_success', '/api/user/bank-data/success', false, error.message);
+    processingError = error.message || 'Unknown error';
+    console.error('❌ Return URL error:', error);
+    
+    // Log the error
+    await logWebhookPayload(req, 'bank_data_success', '/api/user/bank-data/success', false, processingError);
+    
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    res.redirect(`${frontendUrl}/bank-statement-success?error=true`);
+    const queryString = new URLSearchParams(req.query).toString();
+    res.redirect(`${frontendUrl}/bank-statement-success?${queryString}&error=true`);
   }
 });
 
