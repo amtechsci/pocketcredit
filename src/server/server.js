@@ -62,14 +62,37 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// Rate limiting (stricter in production)
+// Rate limiting (configurable via environment variables)
+const rateLimitWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS) || (15 * 60 * 1000); // Default: 15 minutes
+const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 
+  (process.env.NODE_ENV === 'production' ? 200 : 5000); // Increased limits: 200 in prod, 5000 in dev
+
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 100 : 1000, // Strict in production, lenient in dev
-  message: 'Too many requests from this IP, please try again later.',
-  standardHeaders: true,
+  windowMs: rateLimitWindowMs,
+  max: rateLimitMax,
+  message: {
+    status: 'error',
+    message: 'Too many requests from this IP, please try again later.',
+    retryAfter: Math.ceil(rateLimitWindowMs / 1000) // seconds
+  },
+  standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
   legacyHeaders: false,
+  skip: (req) => {
+    // Skip rate limiting for health checks
+    return req.path === '/api/health';
+  },
+  handler: (req, res) => {
+    res.status(429).json({
+      status: 'error',
+      message: 'Too many requests from this IP, please try again later.',
+      retryAfter: Math.ceil(rateLimitWindowMs / 1000),
+      limit: rateLimitMax,
+      window: Math.ceil(rateLimitWindowMs / 60000) + ' minutes'
+    });
+  }
 });
+
+console.log(`🛡️  Rate limiting: ${rateLimitMax} requests per ${Math.ceil(rateLimitWindowMs / 60000)} minutes (${process.env.NODE_ENV || 'development'} mode)`);
 app.use('/api/', limiter);
 
 // CORS configuration - Allow localhost and local network IPs

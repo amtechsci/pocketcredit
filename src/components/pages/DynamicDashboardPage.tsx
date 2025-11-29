@@ -364,6 +364,19 @@ export function DynamicDashboardPage() {
                 <p className={`text-xs ${getCreditScoreColor(summary.credit_score)}`}>
                   {getCreditScoreCategory(summary.credit_score)} (+25 this month)
                 </p>
+                <div className="mt-3 pt-3 border-t border-white/20">
+                  <p className="text-[10px] text-blue-100 leading-tight">
+                    For any dispute related concerns please reach out to{' '}
+                    <a
+                      href="https://consumer.experian.in/ECSINDIA-DCE/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-white hover:text-blue-200 hover:underline font-semibold"
+                    >
+                      Experian Customer Dispute Portal
+                    </a>
+                  </p>
+                </div>
               </div>
             )}
             <div className="bg-white/10 rounded-lg p-4">
@@ -425,6 +438,19 @@ export function DynamicDashboardPage() {
                 <p className={`text-xs ${getCreditScoreColor(summary.credit_score)}`}>
                   {getCreditScoreCategory(summary.credit_score)}
                 </p>
+                <div className="mt-2 pt-2 border-t border-white/20">
+                  <p className="text-[10px] text-blue-100 leading-tight">
+                    For any dispute related concerns please reach out to{' '}
+                    <a
+                      href="https://consumer.experian.in/ECSINDIA-DCE/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-white hover:text-blue-200 hover:underline font-semibold"
+                    >
+                      Experian Customer Dispute Portal
+                    </a>
+                  </p>
+                </div>
               </div>
             )}
             <div className="bg-white/10 rounded-lg p-3">
@@ -625,7 +651,7 @@ export function DynamicDashboardPage() {
                     {getCreditScoreCategory(summary.credit_score)}
                   </Badge>
                 </div>
-                <div className="text-xs text-gray-500 space-y-1">
+                <div className="text-xs text-gray-500 space-y-1 mb-4">
                   <div className="flex justify-between">
                     <span>Last updated:</span>
                     <span>{formatDate(new Date().toISOString())}</span>
@@ -633,6 +659,21 @@ export function DynamicDashboardPage() {
                   <div className="flex justify-between">
                     <span>Status:</span>
                     <span className="text-blue-600">Good</span>
+                  </div>
+                </div>
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <div className="bg-blue-50 rounded-lg p-3">
+                    <p className="text-xs text-gray-700 leading-relaxed text-center">
+                      For any dispute related concerns please reach out to{' '}
+                      <a
+                        href="https://consumer.experian.in/ECSINDIA-DCE/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
+                      >
+                        Experian Customer Dispute Portal
+                      </a>
+                    </p>
                   </div>
                 </div>
               </Card>
