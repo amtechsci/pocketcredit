@@ -10,8 +10,13 @@ import { apiService } from '../../services/api';
 
 interface EmploymentData {
   company_name: string;
+  monthly_net_income: string;
+  income_confirmed: boolean;
+  education: string;
   industry: string;
+  industry_other: string;
   department: string;
+  department_other: string;
   designation: string;
 }
 
@@ -23,6 +28,8 @@ interface CompanySuggestion {
 }
 
 const INDUSTRIES = [
+  'Police / Army',
+  'Lawyer / Advocate / Judge / Law related',
   'IT (Information Technology) / Software',
   'Health Care',
   'Education',
@@ -41,7 +48,23 @@ const INDUSTRIES = [
   'Others'
 ];
 
+const EDUCATION_OPTIONS = [
+  'Below 10th',
+  'Secondary School (10th)',
+  '12th / +2 / Intermediate',
+  'Diploma / Degree',
+  "Bachelor's / Graduate",
+  "PG / Master's"
+];
+
 const DEPARTMENTS = [
+  'Driving',
+  'Teaching',
+  'Lawyer / Advocate / Judge / Law related',
+  'Police',
+  'Doctor',
+  'Army',
+  'Collections / Recovery Team',
   'Administration',
   'Business Development',
   'Client Relations / Account Management',
@@ -73,12 +96,18 @@ const DEPARTMENTS = [
 ];
 
 const DESIGNATIONS = [
-  'Executive Level 1',
-  'Executive Level 2',
+  'Lawyer / Advocate / Judge / Law related',
+  'Police',
+  'Driver',
+  'Doctor',
+  'Army',
+  'Collection Agent / Recovery officer',
+  'Executive level 1',
+  'Executive level 2',
   'Team Leader',
   'Manager',
   'Senior Manager',
-  'CEO / Director / Vice President / Authorised Signatory / CBO / CFO / Company Secretary (CS)'
+  'CEO/ director / Vice President / Authorised signatory / CBO / CFO / Company Secretary (CS)'
 ];
 
 export const EmploymentDetailsPage: React.FC = () => {
@@ -89,8 +118,13 @@ export const EmploymentDetailsPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<EmploymentData>({
     company_name: '',
+    monthly_net_income: '',
+    income_confirmed: false,
+    education: '',
     industry: '',
+    industry_other: '',
     department: '',
+    department_other: '',
     designation: ''
   });
 
@@ -213,12 +247,12 @@ export const EmploymentDetailsPage: React.FC = () => {
     setSearchTimeout(timeout);
   };
 
-  const handleInputChange = (field: keyof EmploymentData, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+  const handleInputChange = (field: keyof EmploymentData, value: string | boolean) => {
+    setFormData(prev => ({ ...prev, [field]: value as any }));
     
     // Trigger company search when company_name changes
     if (field === 'company_name') {
-      searchCompanies(value);
+      searchCompanies(value as string);
     }
   };
 
@@ -242,13 +276,38 @@ export const EmploymentDetailsPage: React.FC = () => {
       return;
     }
 
+    if (!formData.monthly_net_income || parseFloat(formData.monthly_net_income) <= 0) {
+      toast.error('Please enter a valid monthly net income');
+      return;
+    }
+
+    if (!formData.income_confirmed) {
+      toast.error('Please confirm your income details');
+      return;
+    }
+
+    if (!formData.education) {
+      toast.error('Please select your education level');
+      return;
+    }
+
     if (!formData.industry) {
       toast.error('Please select industry');
       return;
     }
 
+    if (formData.industry === 'Others' && !formData.industry_other.trim()) {
+      toast.error('Please specify the industry');
+      return;
+    }
+
     if (!formData.department) {
       toast.error('Please select department');
+      return;
+    }
+
+    if (formData.department === 'Others' && !formData.department_other.trim()) {
+      toast.error('Please specify the department');
       return;
     }
 
@@ -266,7 +325,13 @@ export const EmploymentDetailsPage: React.FC = () => {
 
     try {
       const response = await apiService.submitEmploymentDetails({
-        ...formData,
+        company_name: formData.company_name,
+        monthly_net_income: parseFloat(formData.monthly_net_income),
+        income_confirmed: formData.income_confirmed,
+        education: formData.education,
+        industry: formData.industry === 'Others' ? formData.industry_other : formData.industry,
+        department: formData.department === 'Others' ? formData.department_other : formData.department,
+        designation: formData.designation,
         application_id: applicationId
       });
 
@@ -404,6 +469,70 @@ export const EmploymentDetailsPage: React.FC = () => {
                 </p>
               </div>
 
+              {/* Monthly Net Income */}
+              <div className="space-y-2">
+                <Label htmlFor="monthly_net_income" className="text-base">
+                  Monthly Net Income (₹) <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="monthly_net_income"
+                  type="number"
+                  value={formData.monthly_net_income}
+                  onChange={(e) => handleInputChange('monthly_net_income', e.target.value)}
+                  placeholder="Enter monthly net income"
+                  className="h-11"
+                  min="0"
+                  step="1000"
+                  disabled={loading}
+                  required
+                />
+              </div>
+
+              {/* Income Confirmation Checkbox */}
+              <div className="space-y-2">
+                <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <input
+                    type="checkbox"
+                    id="income_confirmed"
+                    checked={formData.income_confirmed}
+                    onChange={(e) => setFormData(prev => ({ ...prev, income_confirmed: e.target.checked }))}
+                    className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    disabled={loading}
+                    required
+                  />
+                  <label htmlFor="income_confirmed" className="text-sm text-gray-700 cursor-pointer">
+                    I hereby confirm that the monthly income of my household (me & my family, including my spouse & unmarried children) exceeds Rs.25,000 & the annual income exceeds Rs.3,00,000. <span className="text-red-500">*</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Education */}
+              <div className="space-y-2">
+                <Label className="text-base">
+                  Education <span className="text-red-500">*</span>
+                </Label>
+                <div className="space-y-2">
+                  {EDUCATION_OPTIONS.map((edu) => (
+                    <div key={edu} className="flex items-center gap-3 p-3 border border-gray-200 rounded-md hover:bg-gray-50">
+                      <input
+                        type="radio"
+                        id={`education_${edu}`}
+                        name="education"
+                        value={edu}
+                        checked={formData.education === edu}
+                        onChange={(e) => handleInputChange('education', e.target.value)}
+                        className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                        disabled={loading}
+                        required
+                      />
+                      <label htmlFor={`education_${edu}`} className="text-sm text-gray-700 cursor-pointer flex-1">
+                        {edu}
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               {/* Industry */}
               <div className="space-y-2">
                 <Label htmlFor="industry" className="text-base">
@@ -423,6 +552,18 @@ export const EmploymentDetailsPage: React.FC = () => {
                     </option>
                   ))}
                 </select>
+                {formData.industry === 'Others' && (
+                  <Input
+                    id="industry_other"
+                    type="text"
+                    value={formData.industry_other}
+                    onChange={(e) => handleInputChange('industry_other', e.target.value)}
+                    placeholder="Please specify the industry"
+                    className="h-11 mt-2"
+                    disabled={loading}
+                    required
+                  />
+                )}
               </div>
 
               {/* Department */}
@@ -445,6 +586,18 @@ export const EmploymentDetailsPage: React.FC = () => {
                     </option>
                   ))}
                 </select>
+                {formData.department === 'Others' && (
+                  <Input
+                    id="department_other"
+                    type="text"
+                    value={formData.department_other}
+                    onChange={(e) => handleInputChange('department_other', e.target.value)}
+                    placeholder="Please specify the department"
+                    className="h-11 mt-2"
+                    disabled={loading}
+                    required
+                  />
+                )}
               </div>
 
               {/* Designation */}

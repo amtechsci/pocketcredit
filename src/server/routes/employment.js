@@ -256,13 +256,43 @@ router.post('/details', requireAuth, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;
-    const { company_name, industry, department, designation, application_id } = req.body;
+    const { 
+      company_name, 
+      monthly_net_income,
+      income_confirmed,
+      education,
+      industry, 
+      department, 
+      designation, 
+      application_id 
+    } = req.body;
 
     // Validation
     if (!company_name || !industry || !department || !designation) {
       return res.status(400).json({
         success: false,
         message: 'All employment fields are required'
+      });
+    }
+
+    if (!monthly_net_income || parseFloat(monthly_net_income) <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Monthly net income is required and must be greater than 0'
+      });
+    }
+
+    if (!income_confirmed) {
+      return res.status(400).json({
+        success: false,
+        message: 'Income confirmation is required'
+      });
+    }
+
+    if (!education) {
+      return res.status(400).json({
+        success: false,
+        message: 'Education level is required'
       });
     }
 
@@ -297,20 +327,23 @@ router.post('/details', requireAuth, async (req, res) => {
       await executeQuery(
         `UPDATE application_employment_details 
          SET company_name = ?, 
+             monthly_net_income = ?,
+             income_confirmed = ?,
+             education = ?,
              industry = ?, 
              department = ?, 
              designation = ?, 
              updated_at = NOW() 
          WHERE application_id = ?`,
-        [company_name, industry, department, designation, application_id]
+        [company_name, monthly_net_income, income_confirmed ? 1 : 0, education, industry, department, designation, application_id]
       );
     } else {
       // Insert new record
       await executeQuery(
         `INSERT INTO application_employment_details 
-         (application_id, user_id, company_name, industry, department, designation, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-        [application_id, userId, company_name, industry, department, designation]
+         (application_id, user_id, company_name, monthly_net_income, income_confirmed, education, industry, department, designation, created_at, updated_at) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [application_id, userId, company_name, monthly_net_income, income_confirmed ? 1 : 0, education, industry, department, designation]
       );
     }
 
@@ -343,6 +376,9 @@ router.post('/details', requireAuth, async (req, res) => {
       message: 'Employment details saved successfully',
       data: {
         company_name,
+        monthly_net_income,
+        income_confirmed,
+        education,
         industry,
         department,
         designation

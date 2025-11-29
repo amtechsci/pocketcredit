@@ -787,6 +787,9 @@ class ApiService {
    */
   async submitEmploymentDetails(data: {
     company_name: string;
+    monthly_net_income: number;
+    income_confirmed: boolean;
+    education: string;
     industry: string;
     department: string;
     designation: string;
