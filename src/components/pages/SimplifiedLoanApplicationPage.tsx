@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, IndianRupee, FileText, Shield, ExternalLink } from 'lucide-react';
+import { ArrowLeft, FileText, Shield, ExternalLink } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
-import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 // import { Checkbox } from '../ui/checkbox';
@@ -125,7 +124,14 @@ export function SimplifiedLoanApplicationPage() {
       try {
         const response = await apiService.getAvailableLoanPlans();
         if (response && (response as any).success && (response as any).data) {
-          setAvailablePlans((response as any).data);
+          const plans = (response as any).data;
+          setAvailablePlans(plans);
+          
+          // Auto-select if only one plan is available
+          if (plans.length === 1) {
+            console.log('Only one plan available, auto-selecting:', plans[0].plan_name);
+            handleInputChange('selectedPlanId', plans[0].id);
+          }
         }
       } catch (error) {
         console.error('Error loading plans:', error);
@@ -167,6 +173,60 @@ export function SimplifiedLoanApplicationPage() {
 
   const handleInputChange = (field: keyof LoanApplicationData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  // Generate loan amount options based on user's limit
+  const generateLoanAmountOptions = (limit: number): number[] => {
+    if (limit < 5000) {
+      // For very small limits, just return the limit
+      return [limit];
+    }
+
+    // Calculate base increment (limit / 5)
+    const baseIncrement = limit / 5;
+    
+    // Round to nearest nice number from common increments
+    const niceNumbers = [1000, 2000, 4000, 5000, 10000, 20000, 50000, 100000];
+    const roundToNiceNumber = (num: number): number => {
+      // Find the closest nice number
+      let closest = niceNumbers[0];
+      let minDiff = Math.abs(num - closest);
+      
+      for (const nice of niceNumbers) {
+        const diff = Math.abs(num - nice);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = nice;
+        }
+      }
+      
+      // Special cases: prefer 5000 over 4000 when close, and 4000 over 2000 when close
+      if (num >= 4500 && num <= 5500) return 5000;
+      if (num >= 3500 && num <= 4500) return 4000;
+      
+      return closest;
+    };
+
+    const increment = roundToNiceNumber(baseIncrement);
+    
+    // Generate 4 options with the increment
+    const options: number[] = [];
+    for (let i = 1; i <= 4; i++) {
+      const amount = increment * i;
+      if (amount < limit) {
+        options.push(amount);
+      }
+    }
+    
+    // Always add the max limit as the last option
+    options.push(limit);
+    
+    // Ensure we have at least 2 options and at most 5
+    if (options.length < 2) {
+      return [Math.min(increment, limit), limit];
+    }
+    
+    return options.slice(0, 5);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -266,11 +326,8 @@ export function SimplifiedLoanApplicationPage() {
             variant="ghost"
             onClick={() => navigate('/dashboard')}
             className="mb-4 p-0 h-auto text-gray-600 hover:text-gray-900"
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Dashboard
+          ><ArrowLeft className="w-4 h-4 mr-2" />
           </Button>
-          
           <div className="text-center">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Apply for Loan</h1>
             <p className="text-gray-600">
@@ -285,43 +342,29 @@ export function SimplifiedLoanApplicationPage() {
             {/* Loan Amount */}
             <div className="space-y-2">
               <Label htmlFor="desiredAmount" className="text-base font-medium">
-                Desired Loan Amount (₹) *
+                Loan Amount (₹) *
                 <span className="text-sm text-blue-600 ml-2 font-normal">
                   (Max: ₹{userLoanLimit.toLocaleString()})
                 </span>
               </Label>
-              <div className="relative">
-                <IndianRupee className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <Input
-                  id="desiredAmount"
-                  type="number"
-                  value={formData.desiredAmount || ''}
-                  style={{border: '2px solid #e5e7eb'}}
-                  className="pl-10 h-12 text-base"
-                  onChange={(e) => {
-                    const value = parseInt(e.target.value) || 0;
-                    // Enforce maximum limit in real-time
-                    if (value > userLoanLimit) {
-                      toast.error(`Maximum loan limit is ₹${userLoanLimit.toLocaleString()}`);
-                      handleInputChange('desiredAmount', userLoanLimit);
-                    } else {
-                      handleInputChange('desiredAmount', value);
-                    }
-                  }}
-                  onBlur={(e) => {
-                    // Validate on blur as well
-                    const value = parseInt(e.target.value) || 0;
-                    if (value > userLoanLimit) {
-                      handleInputChange('desiredAmount', userLoanLimit);
-                    }
-                  }}
-                  placeholder="Enter loan amount"
-                  min="1000"
-                  max={userLoanLimit}
-                  step="1000"
-                  required
-                />
-              </div>
+              <Select 
+                value={formData.desiredAmount && formData.desiredAmount > 0 ? formData.desiredAmount.toString() : undefined} 
+                onValueChange={(value) => handleInputChange('desiredAmount', parseInt(value))}
+              >
+                <SelectTrigger className="h-12 text-base">
+                  <SelectValue placeholder="Select amount" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[300px]">
+                  {generateLoanAmountOptions(userLoanLimit).map((amount) => (
+                    <SelectItem key={amount} value={amount.toString()} className="cursor-pointer">
+                      ₹{amount.toLocaleString('en-IN')}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!formData.desiredAmount && (
+                <p className="text-xs text-gray-500 mt-1">Click to select a loan amount from the options</p>
+              )}
             </div>
 
             {/* Loan Purpose */}
@@ -346,41 +389,40 @@ export function SimplifiedLoanApplicationPage() {
               </Select>
             </div>
 
-            {/* Repayment Plan Selection */}
-            <div className="space-y-2">
-              <Label htmlFor="plan" className="text-base font-medium">
-                Choose Repayment Plan *
-              </Label>
-              <Select 
-                value={formData.selectedPlanId?.toString() || ''} 
-                onValueChange={(value) => handleInputChange('selectedPlanId', parseInt(value))}
-              >
-                <SelectTrigger className="h-12 text-base">
-                  <SelectValue placeholder="Select repayment plan" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availablePlans.map(plan => (
-                    <SelectItem key={plan.id} value={plan.id.toString()}>
-                      {plan.plan_name} - {plan.total_duration_days} days
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Repayment Plan Selection - Only show if multiple plans available */}
+            {availablePlans.length > 1 && (
+              <div className="space-y-2">
+                <Label htmlFor="plan" className="text-base font-medium">
+                  Choose Repayment Plan *
+                </Label>
+                <Select 
+                  value={formData.selectedPlanId?.toString() || ''} 
+                  onValueChange={(value) => handleInputChange('selectedPlanId', parseInt(value))}
+                >
+                  <SelectTrigger className="h-12 text-base">
+                    <SelectValue placeholder="Select repayment plan" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availablePlans.map(plan => (
+                      <SelectItem key={plan.id} value={plan.id.toString()}>
+                        {plan.plan_name} - {plan.total_duration_days} days
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {/* Disclaimer Section */}
-            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+            <div className="bg-gray-50 p-4 rounded-lg border-l-4 border-blue-500">
               <div className="flex items-start gap-3">
-                <Shield className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                <div className="text-sm text-gray-600 leading-relaxed">
+                {/* <Shield className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" /> */}
+                <div className="flex-1 text-sm text-gray-600 leading-relaxed">
                   <p className="mb-2">
                     <strong>Final tenure, loan amount, interest rate, and processing fee</strong> are subject to the credit risk assessment of the partnered NBFC.
                   </p>
                   <p className="mb-2">
                     Details of this assessment will be fully disclosed in the <strong>Key Facts Statement (KFS)</strong> and loan agreement prior to loan disbursement.
-                  </p>
-                  <p>
-                    Please note that <strong>"pocketcredit"</strong> is just a facilitator/platform between borrowers & NBFC.
                   </p>
                 </div>
               </div>

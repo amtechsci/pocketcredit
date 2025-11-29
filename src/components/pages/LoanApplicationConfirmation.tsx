@@ -90,7 +90,7 @@ export const LoanApplicationConfirmation: React.FC = () => {
         {/* Header */}
         <div className="mb-8">
           <button
-            onClick={() => navigate('/loan-application/select-plan', { state: { loanAmount, loanPurpose } })}
+            onClick={() => navigate('/application')}
             className="flex items-center gap-2 text-blue-600 hover:text-blue-700 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -227,11 +227,11 @@ export const LoanApplicationConfirmation: React.FC = () => {
         <div className="flex gap-4">
           <Button
             variant="outline"
-            onClick={() => navigate('/loan-application/select-plan', { state: { loanAmount, loanPurpose } })}
+            onClick={() => navigate('/application')}
             className="flex-1"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Plans
+            Back to Application
           </Button>
           <Button
             onClick={handleSubmit}

@@ -169,7 +169,7 @@ router.post('/calculate', requireAuth, async (req, res) => {
 
     const plan = plans[0];
 
-    // Get user's member tier for interest and processing fee rates
+    // Get user's member tier for interest and processing fee rates, and salary date
     const users = await executeQuery(
       `SELECT u.*, mt.processing_fee_percent, mt.interest_percent_per_day, mt.tier_name
        FROM users u
@@ -196,10 +196,87 @@ router.post('/calculate', requireAuth, async (req, res) => {
     // Calculate processing fee (deducted from principal upfront)
     const processingFee = Math.round((loanAmount * processingFeePercent) / 100);
 
+    // Calculate repayment days based on plan settings
+    let totalDays = plan.total_duration_days || plan.repayment_days || 15;
+    let actualRepaymentDays = plan.repayment_days || 15;
+    
+    // If plan is configured to calculate by salary date, adjust repayment days
+    if (plan.plan_type === 'single' && plan.calculate_by_salary_date === 1 && user.salary_date) {
+      const salaryDate = parseInt(user.salary_date);
+      if (salaryDate >= 1 && salaryDate <= 31) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Normalize to start of day
+        
+        // Helper function to get next valid salary date
+        const getNextSalaryDate = (startDate, targetDay) => {
+          let year = startDate.getFullYear();
+          let month = startDate.getMonth();
+          let day = targetDay;
+          
+          // Create date for this month's salary date
+          let salaryDate = new Date(year, month, day);
+          
+          // If salary date has passed or is today, move to next month
+          if (salaryDate <= startDate) {
+            month += 1;
+            if (month > 11) {
+              month = 0;
+              year += 1;
+            }
+            salaryDate = new Date(year, month, day);
+          }
+          
+          // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
+          if (salaryDate.getDate() !== day) {
+            // Get last day of the month
+            const lastDay = new Date(year, month + 1, 0).getDate();
+            salaryDate = new Date(year, month, Math.min(day, lastDay));
+          }
+          
+          return salaryDate;
+        };
+        
+        // Calculate next salary date
+        let nextSalaryDate = getNextSalaryDate(today, salaryDate);
+        
+        // Calculate days from today to next salary date
+        let daysToNextSalary = Math.ceil((nextSalaryDate - today) / (1000 * 60 * 60 * 24));
+        
+        // If days to next salary date is less than required duration, extend to following month
+        if (daysToNextSalary < actualRepaymentDays) {
+          // Keep adding months until we reach or exceed the required duration
+          let targetSalaryDate = new Date(nextSalaryDate);
+          let daysToTarget = daysToNextSalary;
+          
+          while (daysToTarget < actualRepaymentDays) {
+            targetSalaryDate = getNextSalaryDate(
+              new Date(targetSalaryDate.getFullYear(), targetSalaryDate.getMonth() + 1, 1),
+              salaryDate
+            );
+            daysToTarget = Math.ceil((targetSalaryDate - today) / (1000 * 60 * 60 * 24));
+          }
+          
+          totalDays = daysToTarget;
+          actualRepaymentDays = daysToTarget;
+        } else {
+          totalDays = daysToNextSalary;
+          actualRepaymentDays = daysToNextSalary;
+        }
+      } else {
+        // Invalid salary date, use default
+        console.warn(`Invalid salary date for user ${userId}: ${user.salary_date}`);
+        totalDays = 30;
+        actualRepaymentDays = 30;
+      }
+    } else if (plan.plan_type === 'single' && plan.calculate_by_salary_date === 1 && !user.salary_date) {
+      // If calculate by salary date is enabled but user has no salary date, use default 30 days
+      totalDays = 30;
+      actualRepaymentDays = 30;
+    }
+
     // Calculate interest based on plan duration
     // Interest = Principal × Interest Rate (decimal) × Days
     // Note: interestPercentPerDay is already in decimal format (e.g., 0.001 = 0.1% per day)
-    const totalDays = plan.total_duration_days || plan.repayment_days || 15;
     const totalInterest = Math.round(loanAmount * interestPercentPerDay * totalDays);
 
     // Calculate total repayable (Principal + Interest)
@@ -244,11 +321,11 @@ router.post('/calculate', requireAuth, async (req, res) => {
     } else {
       // Single payment plan
       const dueDate = new Date();
-      dueDate.setDate(dueDate.getDate() + plan.repayment_days);
+      dueDate.setDate(dueDate.getDate() + actualRepaymentDays);
       
       emiDetails = {
         repayment_date: dueDate.toISOString().split('T')[0],
-        repayment_days: plan.repayment_days
+        repayment_days: actualRepaymentDays
       };
     }
 

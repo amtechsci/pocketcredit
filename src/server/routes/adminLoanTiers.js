@@ -66,13 +66,13 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
 router.post('/', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
-    const { tier_name, min_salary, max_salary, loan_limit, is_active, tier_order } = req.body;
+    const { tier_name, min_salary, max_salary, loan_limit, income_range, hold_permanent, is_active, tier_order } = req.body;
 
     // Validate required fields
-    if (!tier_name || !min_salary || !loan_limit || tier_order === undefined) {
+    if (!tier_name || !min_salary || !loan_limit || !income_range || tier_order === undefined) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: tier_name, min_salary, loan_limit, tier_order'
+        message: 'Missing required fields: tier_name, min_salary, loan_limit, income_range, tier_order'
       });
     }
 
@@ -89,11 +89,24 @@ router.post('/', authenticateAdmin, async (req, res) => {
       });
     }
 
+    // Check if income_range already exists
+    const existingIncomeRange = await executeQuery(
+      'SELECT id FROM loan_limit_tiers WHERE income_range = ?',
+      [income_range]
+    );
+
+    if (existingIncomeRange.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'A tier with this income range already exists'
+      });
+    }
+
     const result = await executeQuery(
       `INSERT INTO loan_limit_tiers 
-        (tier_name, min_salary, max_salary, loan_limit, is_active, tier_order)
-      VALUES (?, ?, ?, ?, ?, ?)`,
-      [tier_name, min_salary, max_salary || null, loan_limit, is_active !== false ? 1 : 0, tier_order]
+        (tier_name, min_salary, max_salary, loan_limit, income_range, hold_permanent, is_active, tier_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [tier_name, min_salary, max_salary || null, loan_limit, income_range, hold_permanent ? 1 : 0, is_active !== false ? 1 : 0, tier_order]
     );
 
     res.json({
@@ -119,7 +132,7 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
     const { id } = req.params;
-    const { tier_name, min_salary, max_salary, loan_limit, is_active, tier_order } = req.body;
+    const { tier_name, min_salary, max_salary, loan_limit, income_range, hold_permanent, is_active, tier_order } = req.body;
 
     // Check if tier exists
     const existing = await executeQuery(
@@ -149,11 +162,26 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       }
     }
 
+    // Check if income_range conflicts with another tier
+    if (income_range) {
+      const conflictingIncomeRange = await executeQuery(
+        'SELECT id FROM loan_limit_tiers WHERE income_range = ? AND id != ?',
+        [income_range, id]
+      );
+
+      if (conflictingIncomeRange.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'A tier with this income range already exists'
+        });
+      }
+    }
+
     await executeQuery(
       `UPDATE loan_limit_tiers 
-      SET tier_name = ?, min_salary = ?, max_salary = ?, loan_limit = ?, is_active = ?, tier_order = ?, updated_at = NOW()
+      SET tier_name = ?, min_salary = ?, max_salary = ?, loan_limit = ?, income_range = ?, hold_permanent = ?, is_active = ?, tier_order = ?, updated_at = NOW()
       WHERE id = ?`,
-      [tier_name, min_salary, max_salary || null, loan_limit, is_active !== false ? 1 : 0, tier_order, id]
+      [tier_name, min_salary, max_salary || null, loan_limit, income_range, hold_permanent ? 1 : 0, is_active !== false ? 1 : 0, tier_order, id]
     );
 
     res.json({

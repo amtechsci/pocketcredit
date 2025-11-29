@@ -70,7 +70,8 @@ router.post('/', authenticateAdmin, async (req, res) => {
       plan_name, 
       plan_code, 
       plan_type, 
-      repayment_days, 
+      repayment_days,
+      calculate_by_salary_date,
       emi_frequency, 
       emi_count,
       min_credit_score,
@@ -134,15 +135,16 @@ router.post('/', authenticateAdmin, async (req, res) => {
 
     const result = await executeQuery(
       `INSERT INTO loan_plans 
-        (plan_name, plan_code, plan_type, repayment_days, emi_frequency, emi_count, 
+        (plan_name, plan_code, plan_type, repayment_days, calculate_by_salary_date, emi_frequency, emi_count, 
          total_duration_days, min_credit_score, eligible_member_tiers, eligible_employment_types,
          is_active, plan_order, description, terms_conditions)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         plan_name, 
         plan_code, 
         plan_type, 
         repayment_days || null,
+        calculate_by_salary_date ? 1 : 0,
         emi_frequency || null,
         emi_count || null,
         totalDurationDays,
@@ -183,7 +185,8 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       plan_name, 
       plan_code, 
       plan_type, 
-      repayment_days, 
+      repayment_days,
+      calculate_by_salary_date,
       emi_frequency, 
       emi_count,
       min_credit_score,
@@ -224,7 +227,7 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
 
     await executeQuery(
       `UPDATE loan_plans 
-      SET plan_name = ?, plan_code = ?, plan_type = ?, repayment_days = ?, 
+      SET plan_name = ?, plan_code = ?, plan_type = ?, repayment_days = ?, calculate_by_salary_date = ?,
           emi_frequency = ?, emi_count = ?, total_duration_days = ?, 
           min_credit_score = ?, eligible_member_tiers = ?, eligible_employment_types = ?,
           is_active = ?, plan_order = ?, description = ?, terms_conditions = ?,
@@ -235,6 +238,7 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
         plan_code, 
         plan_type, 
         repayment_days || null,
+        calculate_by_salary_date ? 1 : 0,
         emi_frequency || null,
         emi_count || null,
         totalDurationDays,

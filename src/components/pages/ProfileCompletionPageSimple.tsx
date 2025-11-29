@@ -85,6 +85,18 @@ const ProfileCompletionPageSimple = () => {
     marks_memo?: any;
   }>({});
 
+  // Income ranges from database
+  const [incomeRanges, setIncomeRanges] = useState<Array<{
+    value: string;
+    label: string;
+    min_salary: number;
+    max_salary: number | null;
+    loan_limit: number;
+    hold_permanent: boolean;
+    tier_name: string;
+  }>>([]);
+  const [loadingIncomeRanges, setLoadingIncomeRanges] = useState(false);
+
   // Initialize current step from user data
   useEffect(() => {
     // Don't reset step if profile is already completed
@@ -216,19 +228,54 @@ const ProfileCompletionPageSimple = () => {
     );
   };
 
+  // Fetch income ranges from API
+  useEffect(() => {
+    const fetchIncomeRanges = async () => {
+      setLoadingIncomeRanges(true);
+      try {
+        console.log('Fetching income ranges from API...');
+        const response = await fetch('/api/employment-quick-check/income-ranges');
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log('Income ranges API response:', result);
+        
+        if (result.success && result.data && Array.isArray(result.data) && result.data.length > 0) {
+          console.log('Setting income ranges:', result.data);
+          setIncomeRanges(result.data);
+        } else {
+          console.warn('No income ranges found in response, using fallback');
+          // Fallback to default ranges if API returns empty or invalid data
+          setIncomeRanges([
+            { value: '1k-20k', label: '₹1,000 to ₹20,000', min_salary: 1000, max_salary: 20000, loan_limit: 10000, hold_permanent: true, tier_name: 'Basic' },
+            { value: '20k-30k', label: '₹20,000 to ₹30,000', min_salary: 20000, max_salary: 30000, loan_limit: 15000, hold_permanent: false, tier_name: 'Standard' },
+            { value: '30k-40k', label: '₹30,000 to ₹40,000', min_salary: 30000, max_salary: 40000, loan_limit: 25000, hold_permanent: false, tier_name: 'Premium' },
+            { value: 'above-40k', label: 'Above ₹40,000', min_salary: 40000, max_salary: null, loan_limit: 50000, hold_permanent: false, tier_name: 'Elite' }
+          ]);
+        }
+      } catch (error) {
+        console.error('Failed to fetch income ranges:', error);
+        // Fallback to default ranges if API fails
+        setIncomeRanges([
+          { value: '1k-20k', label: '₹1,000 to ₹20,000', min_salary: 1000, max_salary: 20000, loan_limit: 10000, hold_permanent: true, tier_name: 'Basic' },
+          { value: '20k-30k', label: '₹20,000 to ₹30,000', min_salary: 20000, max_salary: 30000, loan_limit: 15000, hold_permanent: false, tier_name: 'Standard' },
+          { value: '30k-40k', label: '₹30,000 to ₹40,000', min_salary: 30000, max_salary: 40000, loan_limit: 25000, hold_permanent: false, tier_name: 'Premium' },
+          { value: 'above-40k', label: 'Above ₹40,000', min_salary: 40000, max_salary: null, loan_limit: 50000, hold_permanent: false, tier_name: 'Elite' }
+        ]);
+      } finally {
+        setLoadingIncomeRanges(false);
+      }
+    };
+
+    fetchIncomeRanges();
+  }, []);
+
   const calculateLoanAmount = (incomeRange: string): number => {
-    switch(incomeRange) {
-      case '1k-15k':
-        return 6000;
-      case '15k-25k':
-        return 10000;
-      case '25k-35k':
-        return 15000;
-      case 'above-35k':
-        return 50000;
-      default:
-        return 0;
-    }
+    const range = incomeRanges.find(r => r.value === incomeRange);
+    return range ? range.loan_limit : 0;
   };
 
   const fetchDigitapData = async () => {
@@ -390,59 +437,42 @@ const ProfileCompletionPageSimple = () => {
   const handleBasicProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!basicFormData.latitude || !basicFormData.longitude) {
-      toast.error('Capturing your location... Please wait and try again.');
+    if (!basicFormData.pan_number || basicFormData.pan_number.length !== 10) {
+      toast.error('Please enter a valid PAN number (10 characters)');
+      return;
+    }
+
+    // Validate PAN format
+    const panPattern = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+    if (!panPattern.test(basicFormData.pan_number.toUpperCase())) {
+      toast.error('Invalid PAN format. Please enter a valid PAN number (e.g., ABCDE1234F)');
       return;
     }
 
     setLoading(true);
     try {
-      // Split full name into first and last name
-      const nameParts = basicFormData.full_name.trim().split(' ');
-      const firstName = nameParts[0] || '';
-      const lastName = nameParts.slice(1).join(' ') || nameParts[0] || '';
-
-      // Prepare data for API
-      // Note: DOB is captured in Step 1 for salaried users, so we use existing user DOB
-      const profileData = {
-        first_name: firstName,
-        last_name: lastName,
-        email: user?.email || '',
-        date_of_birth: user?.date_of_birth || basicFormData.date_of_birth || '',
-        gender: basicFormData.gender,
-        pan_number: basicFormData.pan_number,
-        latitude: basicFormData.latitude,
-        longitude: basicFormData.longitude
-      };
-
-      const response = await apiService.updateBasicProfile(profileData);
+      // Call PAN validation API
+      console.log('Validating PAN:', basicFormData.pan_number);
+      const response = await apiService.validatePAN(basicFormData.pan_number.toUpperCase());
       
       if (response.status === 'success' && response.data) {
-        // Check if hold was applied
-        if (response.data.hold_permanent || response.data.hold_until) {
-          // Age restriction hold applied
-          const holdMessage = response.data.hold_reason || response.message;
-          toast.error(holdMessage);
-          
-          // Redirect to dashboard where they can see the hold banner
-          setTimeout(() => navigate('/dashboard'), 2000);
-          return;
-        }
+        console.log('PAN validated successfully, data saved:', response.data);
         
-        updateUser(response.data.user);
-        toast.success(response.message || 'Profile updated successfully!');
+        toast.success('PAN validated! Your details have been saved automatically.');
         
-        if (response.data.next_step === 'dashboard') {
-          navigate('/dashboard');
-        } else if (response.data.next_step === 'college_details') {
-          setCurrentStep(3);
-        }
+        // Refresh user data
+        await refreshUser();
+        
+        // Redirect to dashboard
+        setTimeout(() => {
+          window.location.href = '/dashboard';
+        }, 500);
       } else {
-        toast.error(response.message || 'Failed to update profile');
+        toast.error(response.message || 'Failed to validate PAN. Please try again.');
       }
     } catch (error: any) {
-      console.error('Profile update error:', error);
-      toast.error(error.message || 'Failed to update profile');
+      console.error('Error validating PAN:', error);
+      toast.error(error.response?.data?.message || 'Failed to validate PAN. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -601,12 +631,16 @@ const ProfileCompletionPageSimple = () => {
                           }}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                           required
+                          disabled={loadingIncomeRanges}
                         >
-                          <option value="">Select income range</option>
-                          <option value="1k-15k">₹1,000 to ₹15,000</option>
-                          <option value="15k-25k">₹15,000 to ₹25,000</option>
-                          <option value="25k-35k">₹25,000 to ₹35,000</option>
-                          <option value="above-35k">Above ₹35,000</option>
+                          <option value="">
+                            {loadingIncomeRanges ? 'Loading income ranges...' : 'Select income range'}
+                          </option>
+                          {incomeRanges.map((range) => (
+                            <option key={range.value} value={range.value}>
+                              {range.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
 
@@ -668,96 +702,79 @@ const ProfileCompletionPageSimple = () => {
 
                 {/* Prefill Confirmation Dialog */}
                 {showPrefillConfirm && digitapData && !fetchingPrefill && (
-                  <div className="mb-6 p-6 bg-green-50 border-2 border-green-200 rounded-lg">
-                    <div className="flex items-start space-x-3">
-                      <div className="flex-shrink-0">
-                        <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-lg font-semibold text-green-900 mb-2">
-                          We found your details!
-                        </h3>
-                        <div className="space-y-2 text-sm text-gray-700 mb-4">
-                          <p><strong>Name:</strong> {digitapData.name}</p>
-                          <p><strong>PAN:</strong> {digitapData.pan}</p>
-                          <p><strong>DOB:</strong> {digitapData.dob}</p>
-                          {digitapData.gender && (
-                            <p><strong>Gender:</strong> {digitapData.gender}</p>
-                          )}
-                          {digitapData.credit_score && (
-                            <p><strong>Credit Score:</strong> {digitapData.credit_score}</p>
-                          )}
+                  <>
+                    <div className="mb-4 p-4 sm:p-6 bg-green-50 border border-green-200 rounded-lg">
+                      <div className="flex items-start space-x-3 mb-4">
+                        <div className="flex-shrink-0 mt-0.5">
+                          <svg className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
                         </div>
-                        <div className="flex space-x-3">
-                          <Button
-                            type="button"
-                            onClick={handlePrefillConfirm}
-                            disabled={loading}
-                            className="bg-green-600 hover:bg-green-700"
-                          >
-                            {loading ? 'Saving...' : 'Use These Details'}
-                          </Button>
-                          <Button
-                            type="button"
-                            onClick={handlePrefillReject}
-                            variant="outline"
-                            className="border-gray-300"
-                            disabled={loading}
-                          >
-                            Enter Manually
-                          </Button>
+                        <div className="flex-1">
+                          <h3 className="text-base sm:text-lg font-semibold text-green-900 mb-3">
+                            We found your details!
+                          </h3>
+                          <div className="space-y-1.5 sm:space-y-2 text-sm text-gray-700 mb-4">
+                            <p><strong>Name:</strong> {digitapData.name}</p>
+                            <p><strong>PAN:</strong> {digitapData.pan}</p>
+                            <p><strong>DOB:</strong> {digitapData.dob}</p>
+                            {digitapData.gender && (
+                              <p><strong>Gender:</strong> {digitapData.gender}</p>
+                            )}
+                            {digitapData.credit_score && (
+                              <p><strong>Credit Score:</strong> {digitapData.credit_score}</p>
+                            )}
+                          </div>
+                          <div className="flex flex-col sm:flex-row gap-3">
+                            <Button
+                              type="button"
+                              onClick={handlePrefillConfirm}
+                              disabled={loading}
+                              className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white"
+                            >
+                              {loading ? 'Saving...' : 'Use These Details'}
+                            </Button>
+                            <Button
+                              type="button"
+                              onClick={handlePrefillReject}
+                              variant="outline"
+                              className="w-full sm:w-auto border-gray-300 text-gray-700"
+                              disabled={loading}
+                            >
+                              Enter Manually
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
+                    {/* Security Message */}
+                    <div className="mb-6 p-3 sm:p-4 bg-green-50 border border-green-200 rounded-lg flex items-center space-x-2">
+                      <Shield className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 flex-shrink-0" />
+                      <p className="text-xs sm:text-sm text-green-700">
+                        Your information is secured with 256-bit encryption
+                      </p>
+                    </div>
+                  </>
                 )}
 
                 {/* Manual Form - Only show when Digitap fails or user clicks "Enter Manually" */}
                 {showManualForm && (
                   <form onSubmit={handleBasicProfileSubmit} className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="full_name">Full Name as per PAN Card *</Label>
-                        <Input
-                          id="full_name"
-                          value={basicFormData.full_name}
-                          onChange={(e) => setBasicFormData(prev => ({ ...prev, full_name: e.target.value }))}
-                          placeholder="Enter your full name"
-                          required
-                          className="h-11"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="pan_number">PAN Number *</Label>
-                        <Input
-                          id="pan_number"
-                          value={basicFormData.pan_number}
-                          onChange={(e) => setBasicFormData(prev => ({ ...prev, pan_number: e.target.value.toUpperCase() }))}
-                          placeholder="Enter PAN number"
-                          className="uppercase h-11"
-                          maxLength={10}
-                          required
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="gender">Gender *</Label>
-                        <select
-                          id="gender"
-                          value={basicFormData.gender}
-                          onChange={(e) => setBasicFormData(prev => ({ ...prev, gender: e.target.value }))}
-                          className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          required
-                        >
-                          <option value="">Select gender</option>
-                          <option value="male">Male</option>
-                          <option value="female">Female</option>
-                          <option value="other">Other</option>
-                        </select>
-                      </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="pan_number">PAN Number *</Label>
+                      <Input
+                        id="pan_number"
+                        value={basicFormData.pan_number}
+                        onChange={(e) => setBasicFormData(prev => ({ ...prev, pan_number: e.target.value.toUpperCase() }))}
+                        placeholder="Enter PAN number (e.g., ABCDE1234F)"
+                        className="uppercase h-11"
+                        maxLength={10}
+                        pattern="[A-Z]{5}[0-9]{4}[A-Z]{1}"
+                        required
+                      />
+                      <p className="text-xs text-gray-500">
+                        We'll fetch your details automatically using your PAN number
+                      </p>
                     </div>
 
                     <div className="flex justify-end pt-2">
@@ -766,7 +783,7 @@ const ProfileCompletionPageSimple = () => {
                         disabled={loading}
                         className="bg-blue-600 hover:bg-blue-700 h-11 w-full md:w-auto"
                       >
-                        {loading ? 'Saving...' : 'Continue'}
+                        {loading ? 'Validating PAN...' : 'Continue'}
                         <ArrowRight className="w-4 h-4 ml-2" />
                       </Button>
                     </div>

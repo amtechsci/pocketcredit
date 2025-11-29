@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import adminApiService from '../../services/adminApi';
 import { 
   Settings, 
@@ -73,6 +74,8 @@ interface LoanTier {
   min_salary: number;
   max_salary: number | null;
   loan_limit: number;
+  income_range: string | null; // e.g., '1k-20k', '20k-30k', etc.
+  hold_permanent: boolean; // Whether to hold permanently for this income range
   is_active: boolean;
   tier_order: number;
   created_at: string;
@@ -85,6 +88,7 @@ interface LoanPlan {
   plan_code: string;
   plan_type: 'single' | 'multi_emi';
   repayment_days: number | null;
+  calculate_by_salary_date: boolean;
   emi_frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly' | null;
   emi_count: number | null;
   total_duration_days: number | null;
@@ -339,7 +343,8 @@ const EmailTestForm: React.FC<{
 };
 
 export function AdminSettings() {
-  const [activeTab, setActiveTab] = useState('sms');
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState('members');
   const [showTestModal, setShowTestModal] = useState(false);
   const [testingConfig, setTestingConfig] = useState<ApiConfig | null>(null);
   const [userConfig, setUserConfig] = useState<UserConfigData | null>(null);
@@ -408,6 +413,8 @@ export function AdminSettings() {
     min_salary: '',
     max_salary: '',
     loan_limit: '',
+    income_range: '',
+    hold_permanent: false,
     tier_order: ''
   });
 
@@ -421,13 +428,15 @@ export function AdminSettings() {
     plan_code: '',
     plan_type: 'single' as 'single' | 'multi_emi',
     repayment_days: '',
+    calculate_by_salary_date: false,
     emi_frequency: 'monthly' as 'daily' | 'weekly' | 'biweekly' | 'monthly',
     emi_count: '',
     min_credit_score: '0',
     eligible_member_tiers: [] as string[],
     eligible_employment_types: [] as string[],
     plan_order: '',
-    description: ''
+    description: '',
+    is_active: true
   });
 
   const [showPasswords, setShowPasswords] = useState<{ [key: string]: boolean }>({});
@@ -545,9 +554,6 @@ export function AdminSettings() {
   ];
 
   const tabs = [
-    { id: 'sms', label: 'SMS APIs', icon: MessageSquare, count: 0 },
-    { id: 'email', label: 'Email APIs', icon: Mail, count: 0 },
-    { id: 'cloud', label: 'Cloud Storage', icon: Cloud, count: 0 },
     { id: 'members', label: 'Member Tiers', icon: Shield, count: 0 },
     { id: 'loan-tiers', label: 'Loan Limits', icon: DollarSign, count: 0 },
     { id: 'loan-plans', label: 'Loan Plans', icon: CreditCard, count: 0 },
@@ -1051,6 +1057,8 @@ export function AdminSettings() {
         min_salary: parseFloat(loanTierForm.min_salary),
         max_salary: loanTierForm.max_salary ? parseFloat(loanTierForm.max_salary) : null,
         loan_limit: parseFloat(loanTierForm.loan_limit),
+        income_range: loanTierForm.income_range || null,
+        hold_permanent: loanTierForm.hold_permanent,
         tier_order: parseInt(loanTierForm.tier_order),
         is_active: true
       };
@@ -1065,7 +1073,7 @@ export function AdminSettings() {
 
       setShowLoanTierForm(false);
       setEditingTier(null);
-      setLoanTierForm({ tier_name: '', min_salary: '', max_salary: '', loan_limit: '', tier_order: '' });
+      setLoanTierForm({ tier_name: '', min_salary: '', max_salary: '', loan_limit: '', income_range: '', hold_permanent: false, tier_order: '' });
       loadLoanTiers();
     } catch (error: any) {
       console.error('Error saving loan tier:', error);
@@ -1081,6 +1089,8 @@ export function AdminSettings() {
       min_salary: tier.min_salary.toString(),
       max_salary: tier.max_salary ? tier.max_salary.toString() : '',
       loan_limit: tier.loan_limit.toString(),
+      income_range: tier.income_range || '',
+      hold_permanent: tier.hold_permanent || false,
       tier_order: tier.tier_order.toString()
     });
     setShowLoanTierForm(true);
@@ -1115,7 +1125,7 @@ export function AdminSettings() {
   const cancelEditTier = () => {
     setShowLoanTierForm(false);
     setEditingTier(null);
-    setLoanTierForm({ tier_name: '', min_salary: '', max_salary: '', loan_limit: '', tier_order: '' });
+    setLoanTierForm({ tier_name: '', min_salary: '', max_salary: '', loan_limit: '', income_range: '', hold_permanent: false, tier_order: '' });
   };
 
   // ==================== Loan Plans Functions ====================
@@ -1142,6 +1152,7 @@ export function AdminSettings() {
         plan_code: planForm.plan_code,
         plan_type: planForm.plan_type,
         repayment_days: planForm.plan_type === 'single' ? parseInt(planForm.repayment_days) : undefined,
+        calculate_by_salary_date: planForm.plan_type === 'single' ? planForm.calculate_by_salary_date : false,
         emi_frequency: planForm.plan_type === 'multi_emi' ? planForm.emi_frequency : undefined,
         emi_count: planForm.plan_type === 'multi_emi' ? parseInt(planForm.emi_count) : undefined,
         min_credit_score: parseInt(planForm.min_credit_score),
@@ -1149,7 +1160,7 @@ export function AdminSettings() {
         eligible_employment_types: planForm.eligible_employment_types,
         plan_order: parseInt(planForm.plan_order),
         description: planForm.description,
-        is_active: true
+        is_active: planForm.is_active
       };
 
       if (editingPlan) {
@@ -1177,13 +1188,15 @@ export function AdminSettings() {
       plan_code: plan.plan_code,
       plan_type: plan.plan_type,
       repayment_days: plan.repayment_days?.toString() || '',
+      calculate_by_salary_date: plan.calculate_by_salary_date || false,
       emi_frequency: plan.emi_frequency || 'monthly',
       emi_count: plan.emi_count?.toString() || '',
       min_credit_score: plan.min_credit_score.toString(),
       eligible_member_tiers: plan.eligible_member_tiers ? JSON.parse(plan.eligible_member_tiers) : [],
       eligible_employment_types: plan.eligible_employment_types ? JSON.parse(plan.eligible_employment_types) : [],
       plan_order: plan.plan_order.toString(),
-      description: plan.description || ''
+      description: plan.description || '',
+      is_active: plan.is_active
     });
     setShowPlanForm(true);
   };
@@ -1217,13 +1230,15 @@ export function AdminSettings() {
       plan_code: '',
       plan_type: 'single',
       repayment_days: '',
+      calculate_by_salary_date: false,
       emi_frequency: 'monthly',
       emi_count: '',
       min_credit_score: '0',
       eligible_member_tiers: [],
       eligible_employment_types: [],
       plan_order: '',
-      description: ''
+      description: '',
+      is_active: true
     });
   };
 
@@ -1242,10 +1257,6 @@ export function AdminSettings() {
       loadLoanPlans();
     } else if (activeTab === 'user-config') {
       loadUserConfig();
-    } else if (activeTab === 'email') {
-      loadEmailConfigs();
-    } else if (activeTab === 'cloud') {
-      loadCloudConfigs();
     } else if (activeTab === 'eligibility') {
       loadEligibilityConfig();
     }
@@ -1257,17 +1268,16 @@ export function AdminSettings() {
       <div className="bg-white border-b border-gray-200 px-6 py-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">API Settings</h1>
-            <p className="text-sm text-gray-600 mt-1">Manage API keys, credentials, and third-party integrations</p>
+            <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+            <p className="text-sm text-gray-600 mt-1">Manage application settings and configurations</p>
           </div>
           <div className="flex items-center gap-3">
-            <button className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-              <RefreshCw className="w-4 h-4" />
-              Refresh All
-            </button>
-            <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-              <Save className="w-4 h-4" />
-              Save All Changes
+            <button 
+              onClick={() => navigate('/admin/system-settings')}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Settings className="w-4 h-4" />
+              System Settings
             </button>
           </div>
         </div>
@@ -1609,7 +1619,7 @@ export function AdminSettings() {
                         {editingTier ? 'Edit Loan Tier' : 'Add New Loan Tier'}
                       </h3>
                       <form onSubmit={saveLoanTier} className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                               Tier Name *
@@ -1649,7 +1659,7 @@ export function AdminSettings() {
                               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                               placeholder="Leave empty for no limit"
                               min="0"
-                              step="1000"
+                              step="1"
                             />
                           </div>
                           <div>
@@ -1669,6 +1679,20 @@ export function AdminSettings() {
                           </div>
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Income Range Code *
+                            </label>
+                            <input
+                              type="text"
+                              value={loanTierForm.income_range}
+                              onChange={(e) => setLoanTierForm({ ...loanTierForm, income_range: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="e.g., 1k-20k, 20k-30k"
+                              required
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Used for profile completion dropdown</p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
                               Order *
                             </label>
                             <input
@@ -1681,6 +1705,18 @@ export function AdminSettings() {
                               min="1"
                             />
                           </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id="hold_permanent"
+                            checked={loanTierForm.hold_permanent}
+                            onChange={(e) => setLoanTierForm({ ...loanTierForm, hold_permanent: e.target.checked })}
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                          <label htmlFor="hold_permanent" className="text-sm font-medium text-gray-700">
+                            Hold Permanently (Application will be held permanently for this income range)
+                          </label>
                         </div>
                         <div className="flex gap-2">
                           <button
@@ -1717,7 +1753,13 @@ export function AdminSettings() {
                             Salary Range
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Income Range
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Loan Limit
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Hold
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Status
@@ -1730,7 +1772,7 @@ export function AdminSettings() {
                       <tbody className="bg-white divide-y divide-gray-200">
                         {loanTiers.length === 0 ? (
                           <tr>
-                            <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                            <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
                               No loan tiers configured. Click "Add New Tier" to create one.
                             </td>
                           </tr>
@@ -1750,8 +1792,22 @@ export function AdminSettings() {
                                   : ' and above'
                                 }
                               </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                {tier.income_range || '-'}
+                              </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-600">
                                 ₹{parseFloat(tier.loan_limit.toString()).toLocaleString('en-IN')}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                {tier.hold_permanent ? (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                    Permanent Hold
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                    No Hold
+                                  </span>
+                                )}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <button
@@ -1893,21 +1949,45 @@ export function AdminSettings() {
 
                         {/* Conditional Fields based on Plan Type */}
                         {planForm.plan_type === 'single' ? (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Repayment Days *
-                              </label>
-                              <input
-                                type="number"
-                                value={planForm.repayment_days}
-                                onChange={(e) => setPlanForm({ ...planForm, repayment_days: e.target.value })}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="e.g., 15"
-                                required
-                                min="1"
-                              />
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Duration (Days) *
+                                </label>
+                                <input
+                                  type="number"
+                                  value={planForm.repayment_days}
+                                  onChange={(e) => setPlanForm({ ...planForm, repayment_days: e.target.value })}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  placeholder="e.g., 15"
+                                  required
+                                  min="1"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">Base duration for repayment calculation</p>
+                              </div>
                             </div>
+                            <div className="flex items-center space-x-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                              <input
+                                type="checkbox"
+                                id="calculate_by_salary_date"
+                                checked={planForm.calculate_by_salary_date}
+                                onChange={(e) => setPlanForm({ ...planForm, calculate_by_salary_date: e.target.checked })}
+                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                              />
+                              <label htmlFor="calculate_by_salary_date" className="text-sm font-medium text-gray-700 cursor-pointer">
+                                Calculate by salary date
+                              </label>
+                            </div>
+                            {planForm.calculate_by_salary_date && (
+                              <div className="ml-6 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded">
+                                <p className="text-xs text-yellow-800">
+                                  <strong>How it works:</strong> The repayment date will be calculated based on the user's salary date. 
+                                  If the duration to the next salary date is less than the specified duration, it will extend to the following month's salary date. 
+                                  If the user has no salary date, the base duration will be used.
+                                </p>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1987,6 +2067,20 @@ export function AdminSettings() {
                             placeholder="Brief description of this plan"
                             rows={2}
                           />
+                        </div>
+
+                        {/* Status */}
+                        <div className="flex items-center space-x-2 p-3 bg-gray-50 border border-gray-200 rounded-md">
+                          <input
+                            type="checkbox"
+                            id="plan_is_active"
+                            checked={planForm.is_active}
+                            onChange={(e) => setPlanForm({ ...planForm, is_active: e.target.checked })}
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                          <label htmlFor="plan_is_active" className="text-sm font-medium text-gray-700 cursor-pointer">
+                            Active (uncheck to make this plan inactive)
+                          </label>
                         </div>
 
                         <div className="flex gap-2">
@@ -2289,8 +2383,8 @@ export function AdminSettings() {
           </div>
         )}
 
-        {/* Configuration Cards */}
-        {activeTab !== 'members' && activeTab !== 'user-config' && activeTab !== 'eligibility' && (
+        {/* Configuration Cards - Removed SMS, Email, Cloud Storage tabs (moved to System Settings) */}
+        {false && (
         <div className="space-y-6">
           {filteredConfigs.map((config) => {
             const TypeIcon = getTypeIcon(config.type);

@@ -167,7 +167,7 @@ const fetchDashboardData = async (userId) => {
   }
 
   // Get financial details from employment_details
-  // Note: income_range is now stored as text (e.g., '1k-15k'), not a numeric value
+  // Note: income_range is now stored as text (e.g., '1k-20k'), not a numeric value
   const financialQuery = `
     SELECT income_range, monthly_salary_old, 0 as monthly_expenses, 0 as existing_loans
     FROM employment_details 
@@ -176,20 +176,87 @@ const fetchDashboardData = async (userId) => {
   const financialDetails = await executeQuery(financialQuery, [userId]);
   console.log('💰 Financial details result:', financialDetails);
   
-  // Convert income_range to approximate monthly_income for display
+  // Fetch tier information from loan_limit_tiers based on income_range
+  let tierInfo = null;
   let monthly_income = 0;
-  if (financialDetails && financialDetails[0]) {
+  let salary_range_display = null;
+  
+  if (financialDetails && financialDetails[0] && financialDetails[0].income_range) {
     const incomeRange = financialDetails[0].income_range;
-    if (incomeRange === '1k-15k') monthly_income = 10000;
-    else if (incomeRange === '15k-25k') monthly_income = 20000;
-    else if (incomeRange === '25k-35k') monthly_income = 30000;
-    else if (incomeRange === 'above-35k') monthly_income = 50000;
-    else if (financialDetails[0].monthly_salary_old) monthly_income = financialDetails[0].monthly_salary_old;
+    
+    // Fetch tier from loan_limit_tiers table
+    const tierQuery = `
+      SELECT 
+        id, tier_name, min_salary, max_salary, loan_limit, hold_permanent, income_range
+      FROM loan_limit_tiers 
+      WHERE income_range = ? AND is_active = 1
+      LIMIT 1
+    `;
+    const tiers = await executeQuery(tierQuery, [incomeRange]);
+    
+    if (tiers && tiers.length > 0) {
+      tierInfo = tiers[0];
+      
+      // Check if loan_limit is 0 - hold user permanently
+      if (tierInfo.loan_limit === 0 || tierInfo.hold_permanent === 1) {
+        const holdReason = `Application held: Gross monthly income ${tierInfo.max_salary ? `₹${parseInt(tierInfo.min_salary).toLocaleString('en-IN')} to ₹${parseInt(tierInfo.max_salary).toLocaleString('en-IN')}` : `₹${parseInt(tierInfo.min_salary).toLocaleString('en-IN')} and above`} (Loan limit: ₹0)`;
+        
+        // Hold user permanently if not already on hold
+        if (user.status !== 'on_hold') {
+          await executeQuery(
+            `UPDATE users 
+             SET status = ?, eligibility_status = ?, application_hold_reason = ?, updated_at = NOW()
+             WHERE id = ?`,
+            [
+              'on_hold',
+              'not_eligible',
+              holdReason,
+              userId
+            ]
+          );
+          
+          // Update user object for consistency
+          user.status = 'on_hold';
+          user.eligibility_status = 'not_eligible';
+          user.application_hold_reason = holdReason;
+        }
+        
+        // Update holdInfo
+        holdInfo = {
+          is_on_hold: true,
+          hold_reason: holdReason,
+          hold_type: 'permanent'
+        };
+      }
+      
+      // Calculate monthly income (average of min and max, or min if no max)
+      monthly_income = tierInfo.max_salary 
+        ? Math.round((parseFloat(tierInfo.min_salary) + parseFloat(tierInfo.max_salary)) / 2)
+        : parseFloat(tierInfo.min_salary);
+      
+      // Format salary range for display
+      if (tierInfo.max_salary) {
+        salary_range_display = `₹${parseInt(tierInfo.min_salary).toLocaleString('en-IN')} to ₹${parseInt(tierInfo.max_salary).toLocaleString('en-IN')}`;
+      } else {
+        salary_range_display = `₹${parseInt(tierInfo.min_salary).toLocaleString('en-IN')} and above`;
+      }
+    } else {
+      // Fallback to old logic if tier not found
+      if (incomeRange === '1k-20k') monthly_income = 10000;
+      else if (incomeRange === '20k-30k') monthly_income = 25000;
+      else if (incomeRange === '30k-40k') monthly_income = 35000;
+      else if (incomeRange === 'above-40k') monthly_income = 50000;
+      else if (financialDetails[0].monthly_salary_old) monthly_income = financialDetails[0].monthly_salary_old;
+    }
+  } else if (financialDetails && financialDetails[0] && financialDetails[0].monthly_salary_old) {
+    monthly_income = financialDetails[0].monthly_salary_old;
   }
   
   const financial = financialDetails && financialDetails[0] ? {
     ...financialDetails[0],
-    monthly_income
+    monthly_income,
+    salary_range_display,
+    tier_info: tierInfo
   } : { monthly_income: 0, monthly_expenses: 0, existing_loans: 0 };
 
   // Get loan statistics from loan_applications
@@ -280,6 +347,7 @@ const fetchDashboardData = async (userId) => {
       graduation_status: user.graduation_status,
       loan_limit: user.loan_limit
     },
+    financial: financial, // Include financial details with salary range
     hold_info: holdInfo, // Add hold information if user is on hold
     loan_status: {
       can_apply: canApplyForLoan && !holdInfo, // Cannot apply if on hold

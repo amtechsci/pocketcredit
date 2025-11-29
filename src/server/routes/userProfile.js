@@ -79,10 +79,10 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     const getMonthlyIncomeFromRange = (range) => {
       if (!range) return 0;
       const rangeMap = {
-        '1k-15k': 7500,
-        '15k-25k': 20000,
-        '25k-35k': 30000,
-        'above-35k': 40000
+        '1k-20k': 10000,
+        '20k-30k': 25000,
+        '30k-40k': 35000,
+        'above-40k': 50000
       };
       return rangeMap[range] || 0;
     };

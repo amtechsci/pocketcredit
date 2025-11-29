@@ -704,6 +704,24 @@ class ApiService {
   }
 
   /**
+   * Validate PAN and fetch details from Digitap API
+   */
+  async validatePAN(pan: string): Promise<ApiResponse<{
+    saved: boolean;
+    profile_completed: boolean;
+    pan_data?: {
+      name: string;
+      first_name: string;
+      last_name: string;
+      dob: string;
+      gender: string;
+      address: any;
+    };
+  }>> {
+    return this.request('POST', '/digitap/validate-pan', { pan });
+  }
+
+  /**
    * Email OTP Verification Methods
    */
   async sendEmailOtp(email: string, type: 'personal' | 'official'): Promise<ApiResponse<{ message: string }>> {

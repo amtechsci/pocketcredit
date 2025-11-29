@@ -3,7 +3,7 @@ const router = express.Router();
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
 const { checkHoldStatus } = require('../middleware/checkHoldStatus');
-const { fetchUserPrefillData } = require('../services/digitapService');
+const { fetchUserPrefillData, validatePANDetails } = require('../services/digitapService');
 
 // POST /api/digitap/prefill - Fetch user data from Digitap API
 // NOTE: No checkHoldStatus here - allow fetching data even if on hold
@@ -245,6 +245,126 @@ router.post('/save-prefill', requireAuth, checkHoldStatus, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to save details'
+    });
+  }
+});
+
+// POST /api/digitap/validate-pan - Validate PAN and fetch details
+// NOTE: checkHoldStatus added - block validation if on hold
+router.post('/validate-pan', requireAuth, checkHoldStatus, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+    const { pan } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+
+    if (!pan) {
+      return res.status(400).json({
+        success: false,
+        message: 'PAN number is required'
+      });
+    }
+
+    console.log(`Validating PAN for user ${userId}: ${pan}`);
+
+    // Call PAN validation API
+    const result = await validatePANDetails(pan.toUpperCase());
+
+    if (!result.success) {
+      return res.json({
+        success: false,
+        message: result.error || 'Failed to validate PAN',
+        allow_manual: true
+      });
+    }
+
+    const panData = result.data;
+
+    // Split name into first and last name
+    let first_name = panData.first_name || '';
+    let last_name = panData.last_name || '';
+    if (!first_name && panData.name) {
+      const nameParts = panData.name.trim().split(' ');
+      first_name = nameParts[0] || '';
+      last_name = nameParts.slice(1).join(' ') || '';
+    }
+
+    // Parse address data to extract pincode
+    let pincode = null;
+    let address_data = null;
+    if (panData.address && Array.isArray(panData.address) && panData.address.length > 0) {
+      const firstAddress = panData.address[0];
+      pincode = firstAddress.postal_code || firstAddress.pincode || null;
+      address_data = JSON.stringify(panData.address);
+    }
+
+    // Update users table with PAN validation data
+    await executeQuery(`
+      UPDATE users 
+      SET 
+        first_name = COALESCE(?, first_name),
+        last_name = COALESCE(?, last_name),
+        email = COALESCE(?, email),
+        date_of_birth = COALESCE(?, date_of_birth),
+        gender = COALESCE(?, gender),
+        pan_number = ?,
+        pincode = COALESCE(?, pincode),
+        address_data = COALESCE(?, address_data),
+        profile_completion_step = 5,
+        profile_completed = true,
+        updated_at = NOW()
+      WHERE id = ?
+    `, [
+      first_name,
+      last_name,
+      panData.email || null,
+      panData.dob || null,
+      panData.gender || null,
+      pan.toUpperCase(),
+      pincode,
+      address_data,
+      userId
+    ]);
+
+    // Save PAN in verification_records table
+    await executeQuery(`
+      INSERT INTO verification_records (user_id, document_type, document_number, verification_status, created_at, updated_at)
+      VALUES (?, 'pan', ?, 'pending', NOW(), NOW())
+      ON DUPLICATE KEY UPDATE
+        document_number = VALUES(document_number),
+        updated_at = NOW()
+    `, [userId, pan.toUpperCase()]);
+
+    console.log('PAN validation data saved to users table');
+
+    res.json({
+      status: 'success',
+      message: 'PAN validated and profile completed successfully',
+      data: {
+        saved: true,
+        profile_completed: true,
+        pan_data: {
+          name: panData.name,
+          first_name: first_name,
+          last_name: last_name,
+          dob: panData.dob,
+          gender: panData.gender,
+          address: panData.address
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error validating PAN:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to validate PAN'
     });
   }
 });

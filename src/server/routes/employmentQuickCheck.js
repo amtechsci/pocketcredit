@@ -3,6 +3,61 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
 const router = express.Router();
 
+/**
+ * GET /api/employment-quick-check/income-ranges - Get active income ranges (Public)
+ */
+router.get('/income-ranges', async (req, res) => {
+  try {
+    await initializeDatabase();
+    
+    console.log('📊 Fetching income ranges from loan_limit_tiers...');
+    
+    // Get active loan tiers with income ranges
+    const tiers = await executeQuery(
+      `SELECT 
+        income_range, 
+        min_salary, 
+        max_salary, 
+        loan_limit, 
+        hold_permanent,
+        tier_name
+      FROM loan_limit_tiers 
+      WHERE is_active = 1 AND income_range IS NOT NULL AND income_range != ''
+      ORDER BY tier_order ASC`
+    );
+
+    console.log(`✅ Found ${tiers ? tiers.length : 0} active income range tiers`);
+
+    // Format for frontend
+    const incomeRanges = (tiers || []).map(tier => ({
+      value: tier.income_range,
+      label: tier.max_salary 
+        ? `₹${parseInt(tier.min_salary).toLocaleString('en-IN')} to ₹${parseInt(tier.max_salary).toLocaleString('en-IN')}`
+        : `Above ₹${parseInt(tier.min_salary).toLocaleString('en-IN')}`,
+      min_salary: tier.min_salary,
+      max_salary: tier.max_salary,
+      loan_limit: tier.loan_limit,
+      hold_permanent: tier.hold_permanent === 1 || tier.hold_permanent === true,
+      tier_name: tier.tier_name
+    }));
+
+    console.log('📋 Formatted income ranges:', incomeRanges);
+
+    res.json({
+      success: true,
+      data: incomeRanges
+    });
+  } catch (error) {
+    console.error('❌ Get income ranges error:', error);
+    console.error('Error details:', error.message, error.stack);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch income ranges',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 // POST /api/employment-quick-check - Initial eligibility check
 router.post('/', requireAuth, async (req, res) => {
   try {
@@ -96,12 +151,43 @@ router.post('/', requireAuth, async (req, res) => {
       const issues = [];
       let eligible = true;
 
-      // Income range is already validated on frontend, but double-check
-      const validRanges = ['1k-15k', '15k-25k', '25k-35k', 'above-35k'];
-      if (!validRanges.includes(income_range)) {
+      // Get income range configuration from database
+      const incomeRangeConfig = await executeQuery(
+        `SELECT income_range, hold_permanent, min_salary, max_salary, loan_limit, tier_name
+         FROM loan_limit_tiers 
+         WHERE income_range = ? AND is_active = 1
+         LIMIT 1`,
+        [income_range]
+      );
+
+      if (incomeRangeConfig.length === 0) {
         return res.status(400).json({
           success: false,
           message: 'Invalid income range selected'
+        });
+      }
+
+      const rangeConfig = incomeRangeConfig[0];
+
+      // Check if this income range requires permanent hold
+      if (rangeConfig.hold_permanent === 1) {
+        const salaryRange = rangeConfig.max_salary 
+          ? `₹${parseInt(rangeConfig.min_salary).toLocaleString('en-IN')} to ₹${parseInt(rangeConfig.max_salary).toLocaleString('en-IN')}`
+          : `₹${parseInt(rangeConfig.min_salary).toLocaleString('en-IN')} and above`;
+        
+        await executeQuery(
+          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
+          ['on_hold', 'not_eligible', `Application held: Gross monthly income ${salaryRange}`, userId]
+        );
+
+        return res.json({
+          success: true,
+          data: {
+            eligible: false,
+            message: `Application has been placed on hold due to income range (${salaryRange})`,
+            hold_reason: `Gross monthly income ${salaryRange}`,
+            hold_permanent: true
+          }
         });
       }
 
@@ -145,8 +231,8 @@ router.post('/', requireAuth, async (req, res) => {
       }
 
       if (eligible) {
-        // Use the loan amount calculated from income range
-        const loanLimit = parseFloat(eligible_loan_amount);
+        // Use the loan limit from database tier configuration, or fallback to calculated amount
+        const loanLimit = rangeConfig?.loan_limit ? parseFloat(rangeConfig.loan_limit) : parseFloat(eligible_loan_amount);
         
         // User is eligible - update profile step, set loan limit, income range, date of birth, and save employment info
         await executeQuery(

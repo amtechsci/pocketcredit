@@ -245,13 +245,14 @@ const updateBasicProfile = async (req, res) => {
       message = 'Basic information completed! Please provide your college details.';
     }
 
-    // Prepare update data with names, gender, location
+    // Prepare update data with names, gender, location, and PAN
     const updateData = {
       first_name,
       last_name,
       gender: value.gender,
       latlong,
       date_of_birth: value.date_of_birth,
+      pan_number: value.pan_number.toUpperCase(), // Save PAN to users table
       profile_completion_step: employmentType === 'student' ? 3 : 2, // Step 3 for students, Step 2 for others
       profile_completed: profileCompleted
     };
@@ -259,7 +260,7 @@ const updateBasicProfile = async (req, res) => {
     // Update user profile
     const updatedUser = await updateProfileById(userId, updateData);
 
-    // Save PAN in verification_records table
+    // Save PAN in verification_records table (for verification tracking)
     await executeQuery(`
       INSERT INTO verification_records (user_id, document_type, document_number, verification_status, created_at, updated_at)
       VALUES (?, 'pan', ?, 'pending', NOW(), NOW())

@@ -17,7 +17,6 @@ import { PayEMIPage } from './components/pages/PayEMIPage';
 import { DynamicLoanDetailsPage as LoanDetailsPage } from './components/pages/DynamicLoanDetailsPage';
 import { DynamicPaymentHistoryPage as PaymentHistoryPage } from './components/pages/DynamicPaymentHistoryPage';
 import { SimplifiedLoanApplicationPage } from './components/pages/SimplifiedLoanApplicationPage';
-import LoanPlanSelection from './components/pages/LoanPlanSelection';
 import LoanApplicationConfirmation from './components/pages/LoanApplicationConfirmation';
 import { BankDetailsPage } from './components/pages/BankDetailsPage';
 import { ReferenceDetailsPage } from './components/pages/ReferenceDetailsPage';
@@ -323,11 +322,6 @@ function AppContent() {
           </DashboardLayout>
         } />
 
-        <Route path="/loan-application/select-plan" element={
-          <DashboardLayout>
-            <LoanPlanSelection />
-          </DashboardLayout>
-        } />
 
         <Route path="/loan-application/confirm" element={
           <DashboardLayout>
