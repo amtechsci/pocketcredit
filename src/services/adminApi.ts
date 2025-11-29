@@ -911,6 +911,15 @@ class AdminApiService {
     });
     return response.data;
   }
+
+  async performCreditCheck(userId: number): Promise<ApiResponse<any>> {
+    const response = await axios.post(`/api/admin/users/${userId}/perform-credit-check`, {}, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
 }
 
 // Export singleton instance

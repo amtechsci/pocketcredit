@@ -141,6 +141,7 @@ export function UserProfileDetail() {
   // Credit Analytics data from API
   const [creditAnalyticsData, setCreditAnalyticsData] = useState<any>(null);
   const [creditAnalyticsLoading, setCreditAnalyticsLoading] = useState(false);
+  const [performingCreditCheck, setPerformingCreditCheck] = useState(false);
 
   // Validation options from API
   const [documentOptions, setDocumentOptions] = useState([]);
@@ -241,6 +242,37 @@ export function UserProfileDetail() {
       setCreditAnalyticsData(null);
     } finally {
       setCreditAnalyticsLoading(false);
+    }
+  };
+
+  // Perform credit check for user
+  const handlePerformCreditCheck = async () => {
+    if (!userData?.id) return;
+    
+    if (!confirm('Are you sure you want to perform a credit check for this user? This will fetch credit analytics data from Experian.')) {
+      return;
+    }
+
+    try {
+      setPerformingCreditCheck(true);
+      const response = await adminApiService.performCreditCheck(userData.id);
+      
+      if (response.status === 'success') {
+        if (response.data?.already_checked) {
+          alert('Credit check already performed for this user. Refreshing data...');
+        } else {
+          alert(`Credit check completed! Score: ${response.data?.credit_score || 'N/A'}, Eligible: ${response.data?.is_eligible ? 'Yes' : 'No'}`);
+        }
+        // Refresh credit analytics data
+        await fetchCreditAnalytics();
+      } else {
+        alert(response.message || 'Failed to perform credit check');
+      }
+    } catch (error: any) {
+      console.error('Error performing credit check:', error);
+      alert(error.response?.data?.message || error.message || 'Failed to perform credit check');
+    } finally {
+      setPerformingCreditCheck(false);
     }
   };
 
@@ -3156,7 +3188,27 @@ export function UserProfileDetail() {
         <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
           <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-3" />
           <h3 className="text-lg font-semibold text-gray-900 mb-2">No Credit Analytics Data</h3>
-          <p className="text-gray-600">This user has not completed a credit check yet.</p>
+          <p className="text-gray-600 mb-4">This user has not completed a credit check yet.</p>
+          <button
+            onClick={handlePerformCreditCheck}
+            disabled={performingCreditCheck || !userData?.id}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+          >
+            {performingCreditCheck ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                Performing Credit Check...
+              </>
+            ) : (
+              <>
+                <TrendingUp className="w-4 h-4" />
+                Perform Credit Check
+              </>
+            )}
+          </button>
+          {performingCreditCheck && (
+            <p className="text-sm text-gray-500 mt-3">This may take a few moments...</p>
+          )}
         </div>
       );
     }

@@ -330,29 +330,36 @@ router.post('/details', requireAuth, async (req, res) => {
       [application_id]
     );
 
+    // Update users table with monthly_net_income and salary_date
+    await executeQuery(
+      `UPDATE users 
+       SET monthly_net_income = ?, 
+           salary_date = ?,
+           updated_at = NOW() 
+       WHERE id = ?`,
+      [monthly_net_income, parseInt(salary_date), userId]
+    );
+
     if (existing.length > 0) {
       // Update existing record
       await executeQuery(
         `UPDATE application_employment_details 
          SET company_name = ?, 
-             monthly_net_income = ?,
-             income_confirmed = ?,
              education = ?,
-             salary_date = ?,
              industry = ?, 
              department = ?, 
              designation = ?, 
              updated_at = NOW() 
          WHERE application_id = ?`,
-        [company_name, monthly_net_income, income_confirmed ? 1 : 0, education, parseInt(salary_date), industry, department, designation, application_id]
+        [company_name, education, industry, department, designation, application_id]
       );
     } else {
       // Insert new record
       await executeQuery(
         `INSERT INTO application_employment_details 
-         (application_id, user_id, company_name, monthly_net_income, income_confirmed, education, salary_date, industry, department, designation, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-        [application_id, userId, company_name, monthly_net_income, income_confirmed ? 1 : 0, education, parseInt(salary_date), industry, department, designation]
+         (application_id, user_id, company_name, education, industry, department, designation, created_at, updated_at) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [application_id, userId, company_name, education, industry, department, designation]
       );
     }
 
@@ -385,8 +392,6 @@ router.post('/details', requireAuth, async (req, res) => {
       message: 'Employment details saved successfully',
       data: {
         company_name,
-        monthly_net_income,
-        income_confirmed,
         education,
         industry,
         department,

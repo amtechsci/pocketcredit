@@ -156,7 +156,7 @@ export const EmploymentDetailsPage: React.FC = () => {
           // Employment details already completed - redirect to next step
           toast.success('Employment details already submitted! Proceeding to next step...');
           setTimeout(() => {
-            navigate('/loan-application/credit-check', {
+            navigate('/loan-application/bank-statement', {
               state: { applicationId }
             });
           }, 1500);
@@ -346,8 +346,8 @@ export const EmploymentDetailsPage: React.FC = () => {
       if (response.success) {
         toast.success('Employment details saved successfully!');
         
-        // Navigate to credit check (next step after employment)
-        navigate('/loan-application/credit-check', {
+        // Navigate to bank statement (next step after employment)
+        navigate('/loan-application/bank-statement', {
           state: { applicationId }
         });
       } else {

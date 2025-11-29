@@ -412,4 +412,174 @@ router.get('/:id/credit-analytics', authenticateAdmin, async (req, res) => {
   }
 });
 
+// Perform credit check for a user (admin only)
+router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { id } = req.params;
+    const userId = parseInt(id);
+
+    if (!userId || isNaN(userId)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid user ID'
+      });
+    }
+
+    // Check if credit check already exists for this user
+    const existingCheck = await executeQuery(
+      'SELECT id, credit_score, is_eligible, checked_at FROM credit_checks WHERE user_id = ?',
+      [userId]
+    );
+
+    if (existingCheck.length > 0) {
+      return res.json({
+        status: 'success',
+        message: 'Credit check already performed for this user',
+        data: {
+          already_checked: true,
+          credit_score: existingCheck[0].credit_score,
+          is_eligible: existingCheck[0].is_eligible,
+          checked_at: existingCheck[0].checked_at
+        }
+      });
+    }
+
+    // Get user details for credit check
+    const user = await executeQuery(
+      'SELECT first_name, last_name, phone, email, pan_number, date_of_birth FROM users WHERE id = ?',
+      [userId]
+    );
+
+    if (!user || user.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+
+    const userData = user[0];
+
+    // If PAN or DOB not in users table, try to get from digitap_responses (pre-fill data)
+    if (!userData.pan_number || !userData.date_of_birth) {
+      const digitapData = await executeQuery(
+        'SELECT response_data FROM digitap_responses WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+        [userId]
+      );
+
+      if (digitapData && digitapData.length > 0 && digitapData[0].response_data) {
+        const prefillData = typeof digitapData[0].response_data === 'string' 
+          ? JSON.parse(digitapData[0].response_data) 
+          : digitapData[0].response_data;
+
+        // Use pre-fill data if available
+        if (!userData.pan_number && prefillData.pan) {
+          userData.pan_number = prefillData.pan;
+        }
+        if (!userData.date_of_birth && prefillData.dob) {
+          // Convert DD/MM/YYYY to YYYY-MM-DD if needed
+          if (prefillData.dob.includes('/')) {
+            const dobParts = prefillData.dob.split('/');
+            if (dobParts.length === 3) {
+              userData.date_of_birth = `${dobParts[2]}-${dobParts[1]}-${dobParts[0]}`;
+            }
+          } else {
+            userData.date_of_birth = prefillData.dob;
+          }
+        }
+      }
+    }
+
+    // Validate required fields after checking digitap data
+    if (!userData.pan_number || !userData.date_of_birth) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'PAN and Date of Birth are required for credit check. User profile is incomplete.'
+      });
+    }
+
+    // Import credit analytics service
+    const creditAnalyticsService = require('../services/creditAnalyticsService');
+
+    // Request credit report from Experian
+    const clientRefNum = `PC${userId}_${Date.now()}`;
+    
+    const creditReportResponse = await creditAnalyticsService.requestCreditReport({
+      client_ref_num: clientRefNum,
+      mobile_no: userData.phone,
+      first_name: userData.first_name || 'User',
+      last_name: userData.last_name || '',
+      date_of_birth: userData.date_of_birth, // YYYY-MM-DD
+      email: userData.email || `user${userId}@pocketcredit.in`,
+      pan: userData.pan_number,
+      device_ip: req.ip || '192.168.1.1'
+    });
+
+    // Validate eligibility
+    const validation = creditAnalyticsService.validateEligibility(creditReportResponse);
+
+    // Save credit check to database
+    await executeQuery(
+      `INSERT INTO credit_checks (
+        user_id, request_id, client_ref_num, 
+        credit_score, result_code, api_message, 
+        is_eligible, rejection_reasons,
+        has_settlements, has_writeoffs, has_suit_files, has_wilful_default,
+        negative_indicators, full_report
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        creditReportResponse.request_id,
+        clientRefNum,
+        validation.creditScore,
+        creditReportResponse.result_code,
+        creditReportResponse.message,
+        validation.isEligible,
+        validation.reasons.length > 0 ? JSON.stringify(validation.reasons) : null,
+        validation.negativeIndicators.hasSettlements,
+        validation.negativeIndicators.hasWriteOffs,
+        validation.negativeIndicators.hasSuitFiles,
+        validation.negativeIndicators.hasWilfulDefault,
+        JSON.stringify(validation.negativeIndicators),
+        JSON.stringify(creditReportResponse)
+      ]
+    );
+
+    // If not eligible, update user profile to on_hold
+    if (!validation.isEligible) {
+      const holdReason = `Credit check failed: ${validation.reasons.join(', ')}`;
+      const holdDuration = 60; // 60 days hold
+
+      await executeQuery(
+        `UPDATE users 
+         SET status = 'on_hold', 
+             eligibility_status = 'not_eligible',
+             application_hold_reason = ?, 
+             updated_at = NOW()
+         WHERE id = ?`,
+        [holdReason, userId]
+      );
+    }
+
+    res.json({
+      status: 'success',
+      message: validation.isEligible ? 'Credit check passed' : 'Credit check failed',
+      data: {
+        is_eligible: validation.isEligible,
+        credit_score: validation.creditScore,
+        reasons: validation.reasons,
+        request_id: creditReportResponse.request_id
+      }
+    });
+
+  } catch (error) {
+    console.error('Admin perform credit check error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to perform credit check',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
