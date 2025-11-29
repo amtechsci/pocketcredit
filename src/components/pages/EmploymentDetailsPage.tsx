@@ -13,6 +13,7 @@ interface EmploymentData {
   monthly_net_income: string;
   income_confirmed: boolean;
   education: string;
+  salary_date: string;
   industry: string;
   industry_other: string;
   department: string;
@@ -121,6 +122,7 @@ export const EmploymentDetailsPage: React.FC = () => {
     monthly_net_income: '',
     income_confirmed: false,
     education: '',
+    salary_date: '',
     industry: '',
     industry_other: '',
     department: '',
@@ -291,6 +293,11 @@ export const EmploymentDetailsPage: React.FC = () => {
       return;
     }
 
+    if (!formData.salary_date) {
+      toast.error('Please select your salary date');
+      return;
+    }
+
     if (!formData.industry) {
       toast.error('Please select industry');
       return;
@@ -329,6 +336,7 @@ export const EmploymentDetailsPage: React.FC = () => {
         monthly_net_income: parseFloat(formData.monthly_net_income),
         income_confirmed: formData.income_confirmed,
         education: formData.education,
+        salary_date: parseInt(formData.salary_date),
         industry: formData.industry === 'Others' ? formData.industry_other : formData.industry,
         department: formData.department === 'Others' ? formData.department_other : formData.department,
         designation: formData.designation,
@@ -531,6 +539,31 @@ export const EmploymentDetailsPage: React.FC = () => {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Salary Date */}
+              <div className="space-y-2">
+                <Label htmlFor="salary_date" className="text-base">
+                  Salary Date <span className="text-red-500">*</span>
+                </Label>
+                <select
+                  id="salary_date"
+                  value={formData.salary_date}
+                  onChange={(e) => handleInputChange('salary_date', e.target.value)}
+                  className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={loading}
+                  required
+                >
+                  <option value="">Select salary date</option>
+                  {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                    <option key={day} value={day.toString()}>
+                      {day}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Select the day of the month when you receive your salary
+                </p>
               </div>
 
               {/* Industry */}

@@ -261,6 +261,7 @@ router.post('/details', requireAuth, async (req, res) => {
       monthly_net_income,
       income_confirmed,
       education,
+      salary_date,
       industry, 
       department, 
       designation, 
@@ -293,6 +294,13 @@ router.post('/details', requireAuth, async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Education level is required'
+      });
+    }
+
+    if (!salary_date || parseInt(salary_date) < 1 || parseInt(salary_date) > 31) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid salary date (1-31) is required'
       });
     }
 
@@ -330,20 +338,21 @@ router.post('/details', requireAuth, async (req, res) => {
              monthly_net_income = ?,
              income_confirmed = ?,
              education = ?,
+             salary_date = ?,
              industry = ?, 
              department = ?, 
              designation = ?, 
              updated_at = NOW() 
          WHERE application_id = ?`,
-        [company_name, monthly_net_income, income_confirmed ? 1 : 0, education, industry, department, designation, application_id]
+        [company_name, monthly_net_income, income_confirmed ? 1 : 0, education, parseInt(salary_date), industry, department, designation, application_id]
       );
     } else {
       // Insert new record
       await executeQuery(
         `INSERT INTO application_employment_details 
-         (application_id, user_id, company_name, monthly_net_income, income_confirmed, education, industry, department, designation, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-        [application_id, userId, company_name, monthly_net_income, income_confirmed ? 1 : 0, education, industry, department, designation]
+         (application_id, user_id, company_name, monthly_net_income, income_confirmed, education, salary_date, industry, department, designation, created_at, updated_at) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [application_id, userId, company_name, monthly_net_income, income_confirmed ? 1 : 0, education, parseInt(salary_date), industry, department, designation]
       );
     }
 

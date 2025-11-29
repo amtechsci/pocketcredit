@@ -20,6 +20,7 @@ export const DigilockerKYCPage: React.FC = () => {
   const [checking, setChecking] = useState(true); // Check if KYC already complete
   const [attempts, setAttempts] = useState(0);
   const [verificationStatus, setVerificationStatus] = useState<'idle' | 'success' | 'failed'>('idle');
+  const [kycDeclaration, setKycDeclaration] = useState(false);
   const maxAttempts = 2;
 
   // Check if KYC is already verified on page load
@@ -63,6 +64,11 @@ export const DigilockerKYCPage: React.FC = () => {
   const handleVerifyKYC = async () => {
     if (mobileNumber.length !== 10) {
       toast.error('Please enter a valid 10-digit mobile number');
+      return;
+    }
+
+    if (!kycDeclaration) {
+      toast.error('Please accept the KYC declaration');
       return;
     }
 
@@ -226,13 +232,31 @@ export const DigilockerKYCPage: React.FC = () => {
                   </ul>
                 </div>
 
+                {/* KYC Declaration */}
+                <div className="space-y-2">
+                  <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <input
+                      type="checkbox"
+                      id="kyc_declaration"
+                      checked={kycDeclaration}
+                      onChange={(e) => setKycDeclaration(e.target.checked)}
+                      className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      disabled={loading || attempts >= maxAttempts}
+                      required
+                    />
+                    <label htmlFor="kyc_declaration" className="text-sm text-gray-700 cursor-pointer flex-1">
+                      I hereby declare that I have not opened and will not open any other account using OTP-based KYC in non-face-to-face mode with any other Entity <span className="text-red-500">*</span>
+                    </label>
+                  </div>
+                </div>
+
                 {/* Action Buttons */}
                 <div className="flex flex-col sm:flex-row gap-3 pt-4">
                   {attempts < maxAttempts ? (
                     <>
                       <Button
                         onClick={handleVerifyKYC}
-                        disabled={loading || mobileNumber.length !== 10}
+                        disabled={loading || mobileNumber.length !== 10 || !kycDeclaration}
                         className="flex-1 h-12 text-base"
                       >
                         {loading ? (

@@ -790,6 +790,7 @@ class ApiService {
     monthly_net_income: number;
     income_confirmed: boolean;
     education: string;
+    salary_date: number;
     industry: string;
     department: string;
     designation: string;
