@@ -282,6 +282,20 @@ export const BankStatementUploadPage = () => {
             {/* Online Upload Section */}
             {uploadMethod === 'online' && (
               <>
+                {/* Important Instructions */}
+                <Card className="p-4 bg-yellow-50 border-2 border-yellow-300">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-yellow-900">Important Instructions:</p>
+                      <ul className="text-xs text-yellow-800 space-y-1 list-none">
+                        <li>Please enter only the <strong>"mobile number"</strong> linked to your <strong>"salary bank account"</strong>.</li>
+                        <li>Select only your <strong>"salary bank account"</strong> from the list.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </Card>
+
                 {/* Online Method Selection */}
                 <Card className="p-6 space-y-4">
                   <div>
