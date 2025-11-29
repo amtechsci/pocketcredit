@@ -26,7 +26,7 @@ export const BankStatementUploadPage = () => {
 
   // Set mobile number from user context on mount
   useEffect(() => {
-    if (user?.phone) {
+    if (user?.phone && !mobileNumber) {
       setMobileNumber(user.phone);
     }
   }, [user]);
@@ -106,7 +106,7 @@ export const BankStatementUploadPage = () => {
       return;
     }
 
-    // Validate mobile number format
+    // Validate mobile number format (10 digits starting with 6-9)
     if (onlineMethod === 'accountaggregator' && !/^[6-9]\d{9}$/.test(mobileNumber)) {
       toast.error('Please enter a valid 10-digit mobile number');
       return;
@@ -115,6 +115,7 @@ export const BankStatementUploadPage = () => {
     setIsLoading(true);
 
     try {
+      
       const response = await apiService.initiateUserBankStatement({
         mobile_number: mobileNumber || '',
         bank_name: '',
@@ -329,19 +330,23 @@ export const BankStatementUploadPage = () => {
                       <label className="block text-sm font-medium text-gray-700">
                         Mobile Number <span className="text-red-500">*</span>
                       </label>
-                      <input
-                        type="tel"
-                        value={mobileNumber}
-                        onChange={(e) => {
-                          const value = e.target.value.replace(/\D/g, ''); // Only numbers
-                          if (value.length <= 10) {
-                            setMobileNumber(value);
-                          }
-                        }}
-                        placeholder="Enter your mobile number"
-                        className="w-full h-12 px-4 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        maxLength={10}
-                      />
+                      <div className="relative">
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600 font-medium">+91</span>
+                        <input
+                          type="tel"
+                          value={mobileNumber}
+                          onChange={(e) => {
+                            // Only allow numbers
+                            const value = e.target.value.replace(/\D/g, '');
+                            if (value.length <= 10) {
+                              setMobileNumber(value);
+                            }
+                          }}
+                          placeholder="Enter your mobile number"
+                          className="w-full h-12 pl-16 pr-4 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          maxLength={10}
+                        />
+                      </div>
                       {user?.phone && mobileNumber === user.phone && (
                         <p className="text-xs text-green-600 mt-1">
                           ✓ Using your registered mobile number
@@ -350,6 +355,12 @@ export const BankStatementUploadPage = () => {
                     </div>
                   </Card>
                 )}
+
+                <div className="flex items-center gap-3 my-2">
+                  <div className="flex-1 border-t border-gray-300"></div>
+                  <span className="text-sm text-gray-500 font-medium">or</span>
+                  <div className="flex-1 border-t border-gray-300"></div>
+                </div>
 
                 <label className="flex items-center gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all hover:border-blue-500 hover:bg-blue-50"
                   style={{
