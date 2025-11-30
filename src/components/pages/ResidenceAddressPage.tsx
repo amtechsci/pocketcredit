@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Home, MapPin, CheckCircle, Plus, AlertCircle } from 'lucide-react';
+import { Home, MapPin, CheckCircle, Plus, AlertCircle, ArrowLeft } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -53,30 +53,36 @@ export const ResidenceAddressPage = () => {
       const response = await apiService.getAvailableAddresses();
       
       if (response.success && response.data) {
+        console.log('📋 Received address data:', response.data);
         const addresses: AddressOption[] = [];
         
         // Add Digilocker address
         if (response.data.digilocker_address) {
-          addresses.push({
+          const digilockerAddr = {
             id: 'digilocker',
             source: 'digilocker',
             ...response.data.digilocker_address,
             label: 'Address from Digilocker'
-          });
+          };
+          console.log('📋 Digilocker address:', digilockerAddr);
+          addresses.push(digilockerAddr);
         }
         
         // Add Experian addresses
         if (response.data.experian_addresses && Array.isArray(response.data.experian_addresses)) {
           response.data.experian_addresses.forEach((addr: any, index: number) => {
-            addresses.push({
+            const experianAddr = {
               id: `experian_${index}`,
               source: 'experian',
               ...addr,
               label: `Address ${index + 1} from Experian`
-            });
+            };
+            console.log(`📋 Experian address ${index + 1}:`, experianAddr);
+            addresses.push(experianAddr);
           });
         }
         
+        console.log('📋 All formatted addresses:', addresses);
         setAddressOptions(addresses);
         
         // Auto-select if only one address
@@ -107,6 +113,58 @@ export const ResidenceAddressPage = () => {
     if (address.country && address.country !== 'India') parts.push(address.country);
     
     return parts.join(', ') || 'Address details not available';
+  };
+
+  const formatAddressDetailed = (address: AddressOption) => {
+    // Build complete address from all available fields
+    const addressParts: string[] = [];
+    
+    if (address.address_line1) addressParts.push(address.address_line1);
+    if (address.address_line2) addressParts.push(address.address_line2);
+    
+    const cityStatePincode = [address.city, address.state, address.pincode].filter(Boolean);
+    if (cityStatePincode.length > 0) {
+      addressParts.push(cityStatePincode.join(', '));
+    }
+    
+    if (address.country && address.country !== 'India') {
+      addressParts.push(address.country);
+    }
+    
+    const completeAddress = addressParts.join(', ');
+    
+    // Show full_address if available, otherwise show constructed address
+    const displayAddress = address.full_address || completeAddress || 'Address details not available';
+    
+    return (
+      <div className="space-y-1">
+        {address.full_address ? (
+          // If full_address exists, show it (may contain line breaks)
+          <p className="text-xs md:text-sm text-gray-700 whitespace-pre-line leading-relaxed">
+            {address.full_address}
+          </p>
+        ) : (
+          // Otherwise, show individual fields in structured format
+          <>
+            {address.address_line1 && (
+              <p className="text-xs md:text-sm text-gray-700">{address.address_line1}</p>
+            )}
+            {address.address_line2 && (
+              <p className="text-xs md:text-sm text-gray-700">{address.address_line2}</p>
+            )}
+            {(address.city || address.state || address.pincode) && (
+              <p className="text-xs md:text-sm text-gray-700">
+                {[address.city, address.state, address.pincode].filter(Boolean).join(', ')}
+                {address.country && address.country !== 'India' && `, ${address.country}`}
+              </p>
+            )}
+            {!address.address_line1 && !address.address_line2 && !address.city && !address.state && !address.pincode && (
+              <p className="text-xs md:text-sm text-gray-500 italic">Address details not available</p>
+            )}
+          </>
+        )}
+      </div>
+    );
   };
 
   const handleSelectAddress = (addressId: string) => {
@@ -181,7 +239,7 @@ export const ResidenceAddressPage = () => {
       if (response.success) {
         toast.success('Residence address saved successfully!');
         setTimeout(() => {
-          navigate('/application-under-review');
+          navigate('/additional-information');
         }, 1500);
       } else {
         toast.error(response.message || 'Failed to save address');
@@ -208,26 +266,38 @@ export const ResidenceAddressPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-3xl mx-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Residence Address</h1>
-          <p className="text-gray-600">Select your residence type and address</p>
+    <div className="min-h-screen bg-gray-50 pb-24 overflow-y-auto">
+      {/* Header with Back Button */}
+      <div className="bg-white border-b sticky top-0 z-10 mb-4 md:mb-6">
+        <div className="max-w-3xl mx-auto px-4 py-3 md:py-4 flex items-center gap-3">
+          <button 
+            onClick={() => navigate('/dashboard')} 
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            aria-label="Back to dashboard"
+          >
+            <ArrowLeft className="h-5 w-5 text-gray-700" />
+          </button>
+          <div className="flex-1">
+            <h1 className="text-lg md:text-2xl font-bold text-gray-900">Residence Address</h1>
+            <p className="text-gray-600 text-xs md:text-sm mt-1">Select your residence type and address</p>
+          </div>
         </div>
+      </div>
+
+      <div className="max-w-3xl mx-auto px-4">
 
         {/* Residence Type Selection */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-xl flex items-center gap-2">
-              <Home className="w-5 h-5 text-blue-600" />
+        <Card className="mb-4 md:mb-6">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base md:text-xl flex items-center gap-2 flex-wrap">
+              <Home className="w-4 h-4 md:w-5 md:h-5 text-blue-600" />
               Residence Type
-              <span className="text-red-500 text-base">*</span>
+              <span className="text-red-500 text-sm md:text-base">*</span>
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <label className="flex items-center gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all hover:border-blue-500 hover:bg-blue-50"
+          <CardContent className="pt-0">
+            <div className="space-y-2 md:space-y-3">
+              <label className="flex items-center gap-2 md:gap-3 p-3 md:p-4 border-2 rounded-lg cursor-pointer transition-all hover:border-blue-500 hover:bg-blue-50"
                 style={{
                   borderColor: residenceType === 'owned' ? '#3b82f6' : '#e5e7eb',
                   backgroundColor: residenceType === 'owned' ? '#eff6ff' : 'white'
@@ -239,17 +309,17 @@ export const ResidenceAddressPage = () => {
                   value="owned"
                   checked={residenceType === 'owned'}
                   onChange={(e) => setResidenceType(e.target.value as 'owned')}
-                  className="w-5 h-5 text-blue-600"
+                  className="w-4 h-4 md:w-5 md:h-5 text-blue-600"
                 />
                 <div className="flex-1">
-                  <div className="font-semibold text-gray-900">Owned</div>
+                  <div className="font-semibold text-gray-900 text-sm md:text-base">Owned</div>
                 </div>
                 {residenceType === 'owned' && (
-                  <CheckCircle className="w-5 h-5 text-blue-600" />
+                  <CheckCircle className="w-4 h-4 md:w-5 md:h-5 text-blue-600" />
                 )}
               </label>
 
-              <label className="flex items-center gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all hover:border-blue-500 hover:bg-blue-50"
+              <label className="flex items-center gap-2 md:gap-3 p-3 md:p-4 border-2 rounded-lg cursor-pointer transition-all hover:border-blue-500 hover:bg-blue-50"
                 style={{
                   borderColor: residenceType === 'rented' ? '#3b82f6' : '#e5e7eb',
                   backgroundColor: residenceType === 'rented' ? '#eff6ff' : 'white'
@@ -261,13 +331,13 @@ export const ResidenceAddressPage = () => {
                   value="rented"
                   checked={residenceType === 'rented'}
                   onChange={(e) => setResidenceType(e.target.value as 'rented')}
-                  className="w-5 h-5 text-blue-600"
+                  className="w-4 h-4 md:w-5 md:h-5 text-blue-600"
                 />
                 <div className="flex-1">
-                  <div className="font-semibold text-gray-900">Rented</div>
+                  <div className="font-semibold text-gray-900 text-sm md:text-base">Rented</div>
                 </div>
                 {residenceType === 'rented' && (
-                  <CheckCircle className="w-5 h-5 text-blue-600" />
+                  <CheckCircle className="w-4 h-4 md:w-5 md:h-5 text-blue-600" />
                 )}
               </label>
             </div>
@@ -276,26 +346,26 @@ export const ResidenceAddressPage = () => {
 
         {/* Address Selection */}
         {residenceType && (
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle className="text-xl flex items-center gap-2">
-                <MapPin className="w-5 h-5 text-blue-600" />
+          <Card className="mb-4 md:mb-6">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base md:text-xl flex items-center gap-2 flex-wrap">
+                <MapPin className="w-4 h-4 md:w-5 md:h-5 text-blue-600" />
                 Select Your Residence Address
-                <span className="text-red-500 text-base">*</span>
+                <span className="text-red-500 text-sm md:text-base">*</span>
               </CardTitle>
-              <p className="text-sm text-gray-600 mt-1">
+              <p className="text-xs md:text-sm text-gray-600 mt-1">
                 Select one of the addresses below or enter manually
               </p>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-3 md:space-y-4 pt-0">
               {/* Available Addresses */}
               {addressOptions.length > 0 && (
-                <div className="space-y-3">
+                <div className="space-y-2 md:space-y-3">
                   {addressOptions.map((address) => (
                     <div
                       key={address.id}
                       onClick={() => handleSelectAddress(address.id)}
-                      className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                      className={`p-3 md:p-4 border-2 rounded-lg cursor-pointer transition-all ${
                         selectedAddressId === address.id
                           ? 'border-blue-600 bg-blue-50'
                           : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
@@ -303,18 +373,16 @@ export const ResidenceAddressPage = () => {
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <MapPin className={`w-4 h-4 ${selectedAddressId === address.id ? 'text-blue-600' : 'text-gray-400'}`} />
+                          <div className="flex items-center gap-2 mb-2 md:mb-3 flex-wrap">
+                            <MapPin className={`w-3 h-3 md:w-4 md:h-4 ${selectedAddressId === address.id ? 'text-blue-600' : 'text-gray-400'}`} />
                             <span className="text-xs font-medium text-gray-500 uppercase">
                               {address.label}
                             </span>
                             {selectedAddressId === address.id && (
-                              <CheckCircle className="w-4 h-4 text-blue-600" />
+                              <CheckCircle className="w-3 h-3 md:w-4 md:h-4 text-blue-600" />
                             )}
                           </div>
-                          <p className="text-sm text-gray-700">
-                            {formatAddress(address)}
-                          </p>
+                          {formatAddressDetailed(address)}
                         </div>
                       </div>
                     </div>
@@ -325,74 +393,74 @@ export const ResidenceAddressPage = () => {
               {/* Manual Entry Option */}
               <div
                 onClick={handleManualEntry}
-                className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                className={`p-3 md:p-4 border-2 rounded-lg cursor-pointer transition-all ${
                   selectedAddressId === 'manual'
                     ? 'border-blue-600 bg-blue-50'
                     : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                 }`}
               >
                 <div className="flex items-center gap-2">
-                  <Plus className={`w-4 h-4 ${selectedAddressId === 'manual' ? 'text-blue-600' : 'text-gray-400'}`} />
-                  <span className="font-medium text-gray-900">Enter full residence address manually</span>
+                  <Plus className={`w-3 h-3 md:w-4 md:h-4 ${selectedAddressId === 'manual' ? 'text-blue-600' : 'text-gray-400'}`} />
+                  <span className="font-medium text-gray-900 text-sm md:text-base">Enter full residence address manually</span>
                   {selectedAddressId === 'manual' && (
-                    <CheckCircle className="w-4 h-4 text-blue-600 ml-auto" />
+                    <CheckCircle className="w-3 h-3 md:w-4 md:h-4 text-blue-600 ml-auto" />
                   )}
                 </div>
               </div>
 
               {/* Manual Entry Form */}
               {showManualEntry && selectedAddressId === 'manual' && (
-                <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-4">
+                <div className="mt-3 md:mt-4 p-3 md:p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-3 md:space-y-4">
                   <div>
-                    <Label htmlFor="address_line1">Address Line 1 *</Label>
+                    <Label htmlFor="address_line1" className="text-sm md:text-base">Address Line 1 *</Label>
                     <Input
                       id="address_line1"
                       value={manualAddress.address_line1}
                       onChange={(e) => setManualAddress({ ...manualAddress, address_line1: e.target.value })}
                       placeholder="Enter address line 1"
-                      className="mt-1"
+                      className="mt-1 text-sm md:text-base"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="address_line2">Address Line 2</Label>
+                    <Label htmlFor="address_line2" className="text-sm md:text-base">Address Line 2</Label>
                     <Input
                       id="address_line2"
                       value={manualAddress.address_line2}
                       onChange={(e) => setManualAddress({ ...manualAddress, address_line2: e.target.value })}
                       placeholder="Enter address line 2 (optional)"
-                      className="mt-1"
+                      className="mt-1 text-sm md:text-base"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
                     <div>
-                      <Label htmlFor="city">City *</Label>
+                      <Label htmlFor="city" className="text-sm md:text-base">City *</Label>
                       <Input
                         id="city"
                         value={manualAddress.city}
                         onChange={(e) => setManualAddress({ ...manualAddress, city: e.target.value })}
                         placeholder="Enter city"
-                        className="mt-1"
+                        className="mt-1 text-sm md:text-base"
                       />
                     </div>
                     <div>
-                      <Label htmlFor="state">State *</Label>
+                      <Label htmlFor="state" className="text-sm md:text-base">State *</Label>
                       <Input
                         id="state"
                         value={manualAddress.state}
                         onChange={(e) => setManualAddress({ ...manualAddress, state: e.target.value })}
                         placeholder="Enter state"
-                        className="mt-1"
+                        className="mt-1 text-sm md:text-base"
                       />
                     </div>
                   </div>
                   <div>
-                    <Label htmlFor="pincode">Pin Code *</Label>
+                    <Label htmlFor="pincode" className="text-sm md:text-base">Pin Code *</Label>
                     <Input
                       id="pincode"
                       value={manualAddress.pincode}
                       onChange={(e) => setManualAddress({ ...manualAddress, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) })}
                       placeholder="Enter 6-digit pincode"
-                      className="mt-1"
+                      className="mt-1 text-sm md:text-base"
                       maxLength={6}
                     />
                   </div>
@@ -404,17 +472,11 @@ export const ResidenceAddressPage = () => {
 
         {/* Submit Button */}
         {residenceType && selectedAddressId && (
-          <div className="flex justify-end gap-4">
-            <Button
-              variant="outline"
-              onClick={() => navigate('/dashboard')}
-            >
-              Skip for now
-            </Button>
+          <div className="flex justify-end gap-3 md:gap-4 mt-4 md:mt-6 sticky bottom-0 bg-gray-50 pt-4 pb-4 -mx-4 px-4 md:mx-0 md:px-0 md:static">
             <Button
               onClick={handleSubmit}
               disabled={submitting}
-              className="bg-blue-600 hover:bg-blue-700 min-w-[120px]"
+              className="bg-blue-600 hover:bg-blue-700 min-w-[120px] w-full sm:w-auto"
             >
               {submitting ? 'Saving...' : 'Submit'}
             </Button>

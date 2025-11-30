@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Mail, CheckCircle, Clock, AlertCircle, ArrowRight, Info, Building2 } from 'lucide-react';
+import { Mail, CheckCircle, Clock, AlertCircle, ArrowRight, Info, Building2, ArrowLeft } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -208,32 +208,44 @@ export const EmailVerificationPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-3xl mx-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Email Verification</h1>
-          <p className="text-gray-600">Verify your email addresses to continue</p>
+    <div className="min-h-screen bg-gray-50 pb-24 overflow-y-auto">
+      {/* Header with Back Button */}
+      <div className="bg-white border-b sticky top-0 z-10 mb-4 md:mb-6">
+        <div className="max-w-3xl mx-auto px-4 py-3 md:py-4 flex items-center gap-3">
+          <button 
+            onClick={() => navigate('/dashboard')} 
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            aria-label="Back to dashboard"
+          >
+            <ArrowLeft className="h-5 w-5 text-gray-700" />
+          </button>
+          <div className="flex-1">
+            <h1 className="text-lg md:text-2xl font-bold text-gray-900">Email Verification</h1>
+            <p className="text-gray-600 text-xs md:text-sm mt-1">Verify your email addresses to continue</p>
+          </div>
         </div>
+      </div>
+
+      <div className="max-w-3xl mx-auto px-4">
 
         {/* Personal Email Section - Mandatory */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-xl flex items-center gap-2">
-              <Mail className="w-5 h-5 text-blue-600" />
+        <Card className="mb-4 md:mb-6">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base md:text-xl flex items-center gap-2 flex-wrap">
+              <Mail className="w-4 h-4 md:w-5 md:h-5 text-blue-600" />
               Enter personal mail id & validate via OTP
-              <span className="text-red-500 text-base">*</span>
+              <span className="text-red-500 text-sm md:text-base">*</span>
             </CardTitle>
-            <p className="text-sm text-gray-600 mt-1">
-              This is a mandatory field
+            <p className="text-xs md:text-sm text-gray-600 mt-1">
+              This is a mandatory field. Check your mail inbox & spam box also.
             </p>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 md:space-y-4 pt-0">
             {!personalVerified ? (
               <>
                 <div>
-                  <Label htmlFor="personal_email">Personal Email Address</Label>
-                  <div className="flex gap-2 mt-1">
+                  <Label htmlFor="personal_email" className="text-sm md:text-base">Personal Email Address</Label>
+                  <div className="flex flex-col sm:flex-row gap-2 mt-1">
                     <Input
                       id="personal_email"
                       type="email"
@@ -244,14 +256,14 @@ export const EmailVerificationPage = () => {
                         setPersonalOtp('');
                       }}
                       placeholder="Enter your personal email"
-                      className="flex-1"
+                      className="flex-1 text-sm md:text-base"
                       disabled={personalOtpSent}
                     />
                     {!personalOtpSent && (
                       <Button
                         onClick={handleSendPersonalOtp}
                         disabled={personalSending || !personalEmail}
-                        className="bg-blue-600 hover:bg-blue-700"
+                        className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto whitespace-nowrap"
                       >
                         {personalSending ? 'Sending...' : 'Send OTP'}
                       </Button>
@@ -262,28 +274,28 @@ export const EmailVerificationPage = () => {
                 {personalOtpSent && (
                   <>
                     <div>
-                      <Label htmlFor="personal_otp">Enter OTP</Label>
-                      <div className="flex gap-2 mt-1">
+                      <Label htmlFor="personal_otp" className="text-sm md:text-base">Enter OTP</Label>
+                      <div className="flex flex-col sm:flex-row gap-2 mt-1">
                         <Input
                           id="personal_otp"
                           type="text"
                           value={personalOtp}
                           onChange={(e) => setPersonalOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
                           placeholder="Enter 6-digit OTP"
-                          className="flex-1"
+                          className="flex-1 text-sm md:text-base"
                           maxLength={6}
                         />
                         <Button
                           onClick={handleVerifyPersonalOtp}
                           disabled={personalVerifying || personalOtp.length !== 6}
-                          className="bg-green-600 hover:bg-green-700"
+                          className="bg-green-600 hover:bg-green-700 w-full sm:w-auto whitespace-nowrap"
                         >
                           {personalVerifying ? 'Verifying...' : 'Verify'}
                         </Button>
                       </div>
                       {personalTimer > 0 && (
-                        <p className="text-sm text-gray-500 mt-1 flex items-center gap-1">
-                          <Clock className="w-4 h-4" />
+                        <p className="text-xs md:text-sm text-gray-500 mt-1 flex items-center gap-1">
+                          <Clock className="w-3 h-3 md:w-4 md:h-4" />
                           OTP expires in {formatTimer(personalTimer)}
                         </p>
                       )}
@@ -292,60 +304,44 @@ export const EmailVerificationPage = () => {
                           variant="outline"
                           size="sm"
                           onClick={handleSendPersonalOtp}
-                          className="mt-2"
+                          className="mt-2 text-xs md:text-sm"
                         >
                           Resend OTP
                         </Button>
                       )}
                     </div>
-
-                    <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded">
-                      <p className="text-sm text-yellow-800 flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                        <span>
-                          <strong>Note:</strong> Check your mail inbox & spam box also
-                        </span>
-                      </p>
-                    </div>
                   </>
                 )}
               </>
             ) : (
-              <div className="bg-green-50 border-l-4 border-green-400 p-4 rounded flex items-center gap-3">
-                <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+              <div className="bg-green-50 border-l-4 border-green-400 p-3 md:p-4 rounded flex items-center gap-2 md:gap-3">
+                <CheckCircle className="w-4 h-4 md:w-5 md:h-5 text-green-600 flex-shrink-0" />
                 <div>
-                  <p className="font-semibold text-green-900">Personal Email Verified</p>
-                  <p className="text-sm text-green-700">{personalEmail}</p>
+                  <p className="font-semibold text-green-900 text-sm md:text-base">Personal Email Verified</p>
+                  <p className="text-xs md:text-sm text-green-700">{personalEmail}</p>
                 </div>
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Divider */}
-        <div className="flex items-center gap-4 mb-6">
-          <div className="flex-1 border-t border-gray-300"></div>
-          <span className="text-gray-500 text-sm">OR</span>
-          <div className="flex-1 border-t border-gray-300"></div>
-        </div>
-
         {/* Official Email Section - Optional */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-xl flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-blue-600" />
+        <Card className="mb-4 md:mb-6">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base md:text-xl flex items-center gap-2 flex-wrap">
+              <Building2 className="w-4 h-4 md:w-5 md:h-5 text-blue-600" />
               Enter your official/company mail id & validate via OTP
             </CardTitle>
-            <p className="text-sm text-gray-600 mt-1">
-              This is optional, not mandatory. You can skip this option.
+            <p className="text-xs md:text-sm text-gray-600 mt-1">
+              This is optional, not mandatory.
             </p>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 md:space-y-4 pt-0">
             {!skipOfficial && !officialVerified && (
               <>
-                <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded mb-4">
-                  <p className="text-sm text-blue-800 flex items-start gap-2">
-                    <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <div className="bg-blue-50 border-l-4 border-blue-400 p-3 md:p-4 rounded mb-3 md:mb-4">
+                  <p className="text-xs md:text-sm text-blue-800 flex items-start gap-2">
+                    <Info className="w-3 h-3 md:w-4 md:h-4 mt-0.5 flex-shrink-0" />
                     <span>
                       <strong>Note:</strong> By providing your official/company mail, you will get higher limits & your loan will be processed quickly
                     </span>
@@ -353,8 +349,8 @@ export const EmailVerificationPage = () => {
                 </div>
 
                 <div>
-                  <Label htmlFor="official_email">Official/Company Email Address</Label>
-                  <div className="flex gap-2 mt-1">
+                  <Label htmlFor="official_email" className="text-sm md:text-base">Official/Company Email Address</Label>
+                  <div className="flex flex-col sm:flex-row gap-2 mt-1">
                     <Input
                       id="official_email"
                       type="email"
@@ -365,14 +361,14 @@ export const EmailVerificationPage = () => {
                         setOfficialOtp('');
                       }}
                       placeholder="Enter your official/company email"
-                      className="flex-1"
+                      className="flex-1 text-sm md:text-base"
                       disabled={officialOtpSent}
                     />
                     {!officialOtpSent && (
                       <Button
                         onClick={handleSendOfficialOtp}
                         disabled={officialSending || !officialEmail}
-                        className="bg-blue-600 hover:bg-blue-700"
+                        className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto whitespace-nowrap"
                       >
                         {officialSending ? 'Sending...' : 'Send OTP'}
                       </Button>
@@ -383,28 +379,28 @@ export const EmailVerificationPage = () => {
                 {officialOtpSent && (
                   <>
                     <div>
-                      <Label htmlFor="official_otp">Enter OTP</Label>
-                      <div className="flex gap-2 mt-1">
+                      <Label htmlFor="official_otp" className="text-sm md:text-base">Enter OTP</Label>
+                      <div className="flex flex-col sm:flex-row gap-2 mt-1">
                         <Input
                           id="official_otp"
                           type="text"
                           value={officialOtp}
                           onChange={(e) => setOfficialOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
                           placeholder="Enter 6-digit OTP"
-                          className="flex-1"
+                          className="flex-1 text-sm md:text-base"
                           maxLength={6}
                         />
                         <Button
                           onClick={handleVerifyOfficialOtp}
                           disabled={officialVerifying || officialOtp.length !== 6}
-                          className="bg-green-600 hover:bg-green-700"
+                          className="bg-green-600 hover:bg-green-700 w-full sm:w-auto whitespace-nowrap"
                         >
                           {officialVerifying ? 'Verifying...' : 'Verify'}
                         </Button>
                       </div>
                       {officialTimer > 0 && (
-                        <p className="text-sm text-gray-500 mt-1 flex items-center gap-1">
-                          <Clock className="w-4 h-4" />
+                        <p className="text-xs md:text-sm text-gray-500 mt-1 flex items-center gap-1">
+                          <Clock className="w-3 h-3 md:w-4 md:h-4" />
                           OTP expires in {formatTimer(officialTimer)}
                         </p>
                       )}
@@ -413,7 +409,7 @@ export const EmailVerificationPage = () => {
                           variant="outline"
                           size="sm"
                           onClick={handleSendOfficialOtp}
-                          className="mt-2"
+                          className="mt-2 text-xs md:text-sm"
                         >
                           Resend OTP
                         </Button>
@@ -425,39 +421,23 @@ export const EmailVerificationPage = () => {
             )}
 
             {officialVerified && (
-              <div className="bg-green-50 border-l-4 border-green-400 p-4 rounded flex items-center gap-3">
-                <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+              <div className="bg-green-50 border-l-4 border-green-400 p-3 md:p-4 rounded flex items-center gap-2 md:gap-3">
+                <CheckCircle className="w-4 h-4 md:w-5 md:h-5 text-green-600 flex-shrink-0" />
                 <div>
-                  <p className="font-semibold text-green-900">Official Email Verified</p>
-                  <p className="text-sm text-green-700">{officialEmail}</p>
+                  <p className="font-semibold text-green-900 text-sm md:text-base">Official Email Verified</p>
+                  <p className="text-xs md:text-sm text-green-700">{officialEmail}</p>
                 </div>
               </div>
-            )}
-
-            {!officialVerified && (
-              <Button
-                variant="outline"
-                onClick={() => setSkipOfficial(true)}
-                className="w-full"
-              >
-                Skip Official Email
-              </Button>
             )}
           </CardContent>
         </Card>
 
         {/* Continue Button */}
-        <div className="flex justify-end gap-4">
-          <Button
-            variant="outline"
-            onClick={() => navigate('/dashboard')}
-          >
-            Skip for now
-          </Button>
+        <div className="flex justify-end gap-3 md:gap-4 mt-4 md:mt-6 sticky bottom-0 bg-gray-50 pt-4 pb-4 -mx-4 px-4 md:mx-0 md:px-0 md:static">
           <Button
             onClick={handleContinue}
             disabled={submitting || !personalVerified}
-            className="bg-blue-600 hover:bg-blue-700 min-w-[120px]"
+            className="bg-blue-600 hover:bg-blue-700 min-w-[120px] w-full sm:w-auto"
           >
             {submitting ? 'Processing...' : (
               <>

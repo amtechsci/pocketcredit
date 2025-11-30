@@ -470,25 +470,79 @@ async function retrieveBankStatementReport(client_ref_num = null, format = 'json
       }
     );
 
-    console.log('✅ Report Retrieved:', response.data?.result_code);
+    console.log('✅ Report Retrieved, status:', response.status);
     console.log('📊 Report response structure:', {
       hasResult: !!response.data?.result,
       hasData: !!response.data?.data,
       resultCode: response.data?.result_code,
       httpResponseCode: response.data?.http_response_code,
-      responseKeys: response.data ? Object.keys(response.data) : []
+      statusCode: response.status,
+      responseKeys: response.data ? Object.keys(response.data) : [],
+      hasBanks: !!response.data?.banks,
+      hasStatus: !!response.data?.status
     });
 
     // Handle different response formats
-    // The API might return the report in response.data.result or response.data directly
+    // The API can return the report in different ways:
+    // 1. Nested: { result_code: 101, result: {...} }
+    // 2. Direct: { banks: [...], status: '...', ... } (the entire response.data IS the report)
     let reportData = null;
     
     if (response.data) {
-      // Check if result_code is 101 (success) or http_response_code is 200
-      if (response.data.result_code === 101 || response.data.http_response_code === 200) {
-        // Report might be in result, data, or directly in response.data
-        // For large responses, the entire response.data might be the report
-        reportData = response.data.result || response.data.data || response.data;
+      // Check for error status first
+      if (response.data.status === 'error' || response.data.code === 'error') {
+        console.error('❌ API returned error status:', response.data);
+        return {
+          success: false,
+          error: response.data.msg || response.data.message || 'API returned error status',
+          code: response.data.code,
+          statusCode: response.status
+        };
+      }
+      
+      // Check if response has report-related keys (banks, status, request_level_summary_var, etc.)
+      // This indicates the response.data itself IS the report
+      // Key indicators: banks array, request_level_summary_var, source_report, statement dates
+      const hasReportKeys = Array.isArray(response.data.banks) || 
+                           response.data.request_level_summary_var !== undefined ||
+                           response.data.source_report !== undefined ||
+                           response.data.statement_start_date !== undefined ||
+                           response.data.statement_end_date !== undefined ||
+                           response.data.multiple_accounts_found !== undefined;
+      
+      // Check if it's a nested response with result_code
+      const hasResultCode = response.data.result_code === 101 || response.data.http_response_code === 200;
+      
+      // Check HTTP status code (200 = success)
+      const isHttpSuccess = response.status === 200;
+      
+      console.log('📊 Report detection:', {
+        hasReportKeys,
+        hasResultCode,
+        isHttpSuccess,
+        hasBanks: !!response.data.banks,
+        isBanksArray: Array.isArray(response.data.banks),
+        hasStatus: !!response.data.status,
+        statusValue: response.data.status,
+        hasRequestLevelSummary: !!response.data.request_level_summary_var
+      });
+      
+      // If HTTP status is 200 and we have data, and it's not an error, treat it as a report
+      if (hasReportKeys || hasResultCode || (isHttpSuccess && response.data && !response.data.code)) {
+        // Extract report data
+        if (response.data.result) {
+          // Nested in result field
+          reportData = response.data.result;
+        } else if (response.data.data) {
+          // Nested in data field
+          reportData = response.data.data;
+        } else if (hasReportKeys || isHttpSuccess) {
+          // The entire response.data IS the report (most common case for large reports)
+          reportData = response.data;
+        } else {
+          // Fallback: use response.data
+          reportData = response.data;
+        }
         
         // If reportData is a string, try to parse it
         if (typeof reportData === 'string') {
@@ -501,14 +555,15 @@ async function retrieveBankStatementReport(client_ref_num = null, format = 'json
         
         // If we have report data (even if it's the entire response), return it
         if (reportData && (typeof reportData === 'object' || typeof reportData === 'string')) {
-          console.log('✅ Report data extracted successfully, size:', JSON.stringify(reportData).length, 'characters');
+          const reportSize = typeof reportData === 'string' ? reportData.length : JSON.stringify(reportData).length;
+          console.log('✅ Report data extracted successfully, size:', reportSize, 'characters');
           
           return {
             success: true,
             data: {
               report: reportData,
-              client_ref_num: client_ref_num || null,
-              txn_id: txn_id || null,
+              client_ref_num: client_ref_num || reportData.client_ref_num || null,
+              txn_id: txn_id || reportData.txn_id || null,
               format,
               message: response.data.message || 'Report retrieved successfully'
             }
@@ -521,14 +576,17 @@ async function retrieveBankStatementReport(client_ref_num = null, format = 'json
     console.error('❌ Report retrieval failed:', {
       result_code: response.data?.result_code,
       http_response_code: response.data?.http_response_code,
-      message: response.data?.message
+      statusCode: response.status,
+      message: response.data?.message,
+      hasReportKeys: response.data ? (!!response.data.banks || !!response.data.status) : false
     });
     
     return {
       success: false,
-      error: response.data?.message || 'Failed to retrieve report',
+      error: response.data?.message || response.data?.msg || 'Failed to retrieve report',
       result_code: response.data?.result_code,
-      http_response_code: response.data?.http_response_code
+      http_response_code: response.data?.http_response_code,
+      statusCode: response.status
     };
   } catch (error) {
     console.error('❌ Report Retrieval Error:', error.message);

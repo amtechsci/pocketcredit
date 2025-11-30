@@ -17,6 +17,54 @@ router.get('/available-addresses', requireAuth, async (req, res) => {
       experian_addresses: []
     };
 
+    // Helper function to extract address fields from any source (Experian, Digitap, etc.)
+    const extractAddressFields = (addr) => {
+      if (!addr || typeof addr !== 'object') return null;
+      
+      // Log all available fields for debugging
+      console.log('📋 Address Raw Fields:', Object.keys(addr || {}));
+      console.log('📋 Address Raw Values:', JSON.stringify(addr, null, 2));
+      
+      // Check all possible field name variations
+      const addressLine1 = addr.address_line1 || addr.line1 || addr.building_name || addr.house || addr.house_number || 
+                          addr.address1 || addr.street || addr.street_address || addr.building || 
+                          addr.house_number || '';
+      
+      const addressLine2 = addr.address_line2 || addr.line2 || addr.street_name || addr.locality || addr.area || 
+                          addr.address2 || addr.landmark || addr.area_name || addr.loc || '';
+      
+      const city = addr.city || addr.district || addr.town || addr.village || addr.vtc || '';
+      
+      const district = addr.dist || addr.district || '';
+      
+      const state = addr.state || addr.state_name || '';
+      
+      const pincode = addr.pincode || addr.postal_code || addr.pin_code || addr.postcode || addr.zip || addr.pc || '';
+      
+      const country = addr.country || 'India';
+      
+      // Build full address from all available fields
+      const addressParts = [];
+      if (addressLine1) addressParts.push(addressLine1);
+      if (addressLine2) addressParts.push(addressLine2);
+      if (city) addressParts.push(city);
+      if (district && district !== city) addressParts.push(district);
+      if (state) addressParts.push(state);
+      if (pincode) addressParts.push(pincode);
+      if (country && country !== 'India') addressParts.push(country);
+      
+      return {
+        address_line1: addressLine1,
+        address_line2: addressLine2,
+        city: city,
+        state: state,
+        pincode: pincode,
+        country: country,
+        full_address: addr.full_address || addr.complete_address || addr.address || 
+                    (addressParts.length > 0 ? addressParts.join(', ') : null)
+      };
+    };
+
     // Fetch Digilocker address from kyc_verifications
     try {
       const kycVerifications = await executeQuery(
@@ -36,6 +84,8 @@ router.get('/available-addresses', requireAuth, async (req, res) => {
         } else {
           kycData = verificationData;
         }
+        
+        console.log('📋 Raw Digilocker KYC Data:', JSON.stringify(kycData, null, 2));
 
         // Extract address from Digilocker KYC data
         // Structure may vary, check common paths
@@ -45,25 +95,81 @@ router.get('/available-addresses', requireAuth, async (req, res) => {
           // Check for address in various possible locations
           if (kycDataObj.address) {
             const addr = kycDataObj.address;
+            
+            // Digilocker uses specific field names: house, loc, vtc, dist, subdist, po, pc, state, country
+            // Build address_line1 from house/house_number/building_name
+            const addressLine1 = addr.address_line1 || addr.building_name || addr.line1 || addr.house || addr.house_number || '';
+            
+            // Build address_line2 from locality/loc/street_name/area
+            const addressLine2 = addr.address_line2 || addr.street_name || addr.line2 || addr.locality || addr.loc || addr.area || '';
+            
+            // Build city from vtc (village/town/city) or city or district
+            const city = addr.city || addr.vtc || addr.district || '';
+            
+            // Build district from dist
+            const district = addr.dist || addr.district || '';
+            
+            // Build pincode from pc or pincode
+            const pincode = addr.pincode || addr.postal_code || addr.pin_code || addr.pc || '';
+            
+            // Build full address from all available fields
+            const addressParts = [];
+            if (addressLine1) addressParts.push(addressLine1);
+            if (addressLine2) addressParts.push(addressLine2);
+            if (city) addressParts.push(city);
+            if (district && district !== city) addressParts.push(district);
+            if (addr.subdist && addr.subdist !== city && addr.subdist !== district) addressParts.push(addr.subdist);
+            if (addr.state) addressParts.push(addr.state);
+            if (pincode) addressParts.push(pincode);
+            if (addr.country && addr.country !== 'India') addressParts.push(addr.country);
+            
             addresses.digilocker_address = {
-              address_line1: addr.address_line1 || addr.building_name || addr.line1 || '',
-              address_line2: addr.address_line2 || addr.street_name || addr.line2 || '',
-              city: addr.city || '',
+              address_line1: addressLine1,
+              address_line2: addressLine2,
+              city: city,
               state: addr.state || '',
-              pincode: addr.pincode || addr.postal_code || addr.pin_code || '',
+              pincode: pincode,
               country: addr.country || 'India',
-              full_address: addr.full_address || addr.complete_address || null
+              full_address: addr.full_address || addr.complete_address || (addressParts.length > 0 ? addressParts.join(', ') : null)
             };
           } else if (kycDataObj.aadhaar && kycDataObj.aadhaar.address) {
             const addr = kycDataObj.aadhaar.address;
+            
+            // Digilocker uses specific field names: house, loc, vtc, dist, subdist, po, pc, state, country
+            // Build address_line1 from house/house_number/building_name
+            const addressLine1 = addr.address_line1 || addr.building_name || addr.line1 || addr.house || addr.house_number || '';
+            
+            // Build address_line2 from locality/loc/street_name/area
+            const addressLine2 = addr.address_line2 || addr.street_name || addr.line2 || addr.locality || addr.loc || addr.area || '';
+            
+            // Build city from vtc (village/town/city) or city or district
+            const city = addr.city || addr.vtc || addr.district || '';
+            
+            // Build district from dist
+            const district = addr.dist || addr.district || '';
+            
+            // Build pincode from pc or pincode
+            const pincode = addr.pincode || addr.postal_code || addr.pin_code || addr.pc || '';
+            
+            // Build full address from all available fields
+            const addressParts = [];
+            if (addressLine1) addressParts.push(addressLine1);
+            if (addressLine2) addressParts.push(addressLine2);
+            if (city) addressParts.push(city);
+            if (district && district !== city) addressParts.push(district);
+            if (addr.subdist && addr.subdist !== city && addr.subdist !== district) addressParts.push(addr.subdist);
+            if (addr.state) addressParts.push(addr.state);
+            if (pincode) addressParts.push(pincode);
+            if (addr.country && addr.country !== 'India') addressParts.push(addr.country);
+            
             addresses.digilocker_address = {
-              address_line1: addr.address_line1 || addr.building_name || addr.line1 || '',
-              address_line2: addr.address_line2 || addr.street_name || addr.line2 || '',
-              city: addr.city || '',
+              address_line1: addressLine1,
+              address_line2: addressLine2,
+              city: city,
               state: addr.state || '',
-              pincode: addr.pincode || addr.postal_code || addr.pin_code || '',
+              pincode: pincode,
               country: addr.country || 'India',
-              full_address: addr.full_address || addr.complete_address || null
+              full_address: addr.full_address || addr.complete_address || (addressParts.length > 0 ? addressParts.join(', ') : null)
             };
           }
         }
@@ -92,6 +198,9 @@ router.get('/available-addresses', requireAuth, async (req, res) => {
         } else {
           reportData = fullReport;
         }
+        
+        console.log('📋 Raw Experian Report Data (Top Level Keys):', Object.keys(reportData || {}));
+        console.log('📋 Raw Experian Report Data (Full):', JSON.stringify(reportData, null, 2));
 
         // Extract addresses from Experian report
         // Experian may return multiple addresses
@@ -99,49 +208,113 @@ router.get('/available-addresses', requireAuth, async (req, res) => {
           const addressesList = [];
           
           // Check for addresses in various possible locations
+          console.log('🔍 Checking for addresses in reportData.addresses:', !!reportData.addresses);
+          console.log('🔍 Checking for addresses in reportData.address:', !!reportData.address);
+          console.log('🔍 Checking for addresses in reportData.result:', !!reportData.result);
+          console.log('🔍 Checking for addresses in reportData.data:', !!reportData.data);
+          
           if (reportData.addresses && Array.isArray(reportData.addresses)) {
+            console.log('✅ Found addresses array with', reportData.addresses.length, 'items');
             reportData.addresses.forEach((addr, index) => {
-              addressesList.push({
-                address_line1: addr.address_line1 || addr.line1 || addr.building_name || '',
-                address_line2: addr.address_line2 || addr.line2 || addr.street_name || '',
-                city: addr.city || '',
-                state: addr.state || '',
-                pincode: addr.pincode || addr.postal_code || addr.pin_code || '',
-                country: addr.country || 'India',
-                full_address: addr.full_address || addr.complete_address || null,
-                index: index + 1
-              });
+              const extractedAddr = extractAddressFields(addr);
+              if (extractedAddr) {
+                extractedAddr.index = index + 1;
+                addressesList.push(extractedAddr);
+              }
             });
           } else if (reportData.address) {
+            console.log('✅ Found single address object');
             // Single address
-            const addr = reportData.address;
-            addressesList.push({
-              address_line1: addr.address_line1 || addr.line1 || addr.building_name || '',
-              address_line2: addr.address_line2 || addr.line2 || addr.street_name || '',
-              city: addr.city || '',
-              state: addr.state || '',
-              pincode: addr.pincode || addr.postal_code || addr.pin_code || '',
-              country: addr.country || 'India',
-              full_address: addr.full_address || addr.complete_address || null,
-              index: 1
-            });
+            const addr = Array.isArray(reportData.address) ? reportData.address[0] : reportData.address;
+            const extractedAddr = extractAddressFields(addr);
+            if (extractedAddr) {
+              extractedAddr.index = 1;
+              addressesList.push(extractedAddr);
+            }
           } else if (reportData.result && reportData.result.addresses) {
             // Nested in result
             if (Array.isArray(reportData.result.addresses)) {
               reportData.result.addresses.forEach((addr, index) => {
-                addressesList.push({
-                  address_line1: addr.address_line1 || addr.line1 || addr.building_name || '',
-                  address_line2: addr.address_line2 || addr.line2 || addr.street_name || '',
-                  city: addr.city || '',
-                  state: addr.state || '',
-                  pincode: addr.pincode || addr.postal_code || addr.pin_code || '',
-                  country: addr.country || 'India',
-                  full_address: addr.full_address || addr.complete_address || null,
-                  index: index + 1
-                });
+                const extractedAddr = extractAddressFields(addr);
+                if (extractedAddr) {
+                  extractedAddr.index = index + 1;
+                  addressesList.push(extractedAddr);
+                }
               });
             }
+          } else if (reportData.result && reportData.result.address) {
+            // Single address nested in result
+            const addr = Array.isArray(reportData.result.address) ? reportData.result.address[0] : reportData.result.address;
+            const extractedAddr = extractAddressFields(addr);
+            if (extractedAddr) {
+              extractedAddr.index = 1;
+              addressesList.push(extractedAddr);
+            }
+          } else if (reportData.data && reportData.data.addresses) {
+            // Nested in data
+            if (Array.isArray(reportData.data.addresses)) {
+              reportData.data.addresses.forEach((addr, index) => {
+                const extractedAddr = extractAddressFields(addr);
+                if (extractedAddr) {
+                  extractedAddr.index = index + 1;
+                  addressesList.push(extractedAddr);
+                }
+              });
+            }
+          } else if (reportData.data && reportData.data.address) {
+            // Single address nested in data
+            const addr = Array.isArray(reportData.data.address) ? reportData.data.address[0] : reportData.data.address;
+            const extractedAddr = extractAddressFields(addr);
+            if (extractedAddr) {
+              extractedAddr.index = 1;
+              addressesList.push(extractedAddr);
+            }
           }
+          
+          // If still no addresses found, check for common Experian response structures
+          if (addressesList.length === 0) {
+            console.log('⚠️ No addresses found in standard locations, checking alternative fields...');
+            // Check if address info is directly in the response
+            const possibleAddressFields = ['address', 'addresses', 'current_address', 'permanent_address', 'residence_address'];
+            for (const field of possibleAddressFields) {
+              if (reportData[field]) {
+                console.log(`✅ Found address in field: ${field}`);
+                const addr = Array.isArray(reportData[field]) ? reportData[field][0] : reportData[field];
+                const extractedAddr = extractAddressFields(addr);
+                if (extractedAddr) {
+                  extractedAddr.index = addressesList.length + 1;
+                  addressesList.push(extractedAddr);
+                }
+                break;
+              }
+            }
+            
+            // Also check nested structures more deeply
+            if (addressesList.length === 0 && reportData.result) {
+              console.log('🔍 Checking nested result structure...');
+              const resultKeys = Object.keys(reportData.result);
+              console.log('📋 Result keys:', resultKeys);
+              
+              // Check if address is nested deeper
+              for (const key of resultKeys) {
+                if (typeof reportData.result[key] === 'object' && reportData.result[key] !== null) {
+                  const nestedObj = reportData.result[key];
+                  if (nestedObj.address || nestedObj.addresses || nestedObj.state || nestedObj.pincode) {
+                    console.log(`✅ Found potential address in result.${key}`);
+                    const addr = nestedObj.address || nestedObj.addresses?.[0] || nestedObj;
+                    const extractedAddr = extractAddressFields(addr);
+                    if (extractedAddr) {
+                      extractedAddr.index = addressesList.length + 1;
+                      addressesList.push(extractedAddr);
+                    }
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          
+          console.log(`📊 Total Experian addresses extracted: ${addressesList.length}`);
 
           addresses.experian_addresses = addressesList;
         }
@@ -151,8 +324,44 @@ router.get('/available-addresses', requireAuth, async (req, res) => {
       // Continue even if Experian fetch fails
     }
 
-    // Also check digitap_responses for addresses
+    // Also check users.address_data and digitap_responses for addresses
     try {
+      // Check users.address_data first
+      const userData = await executeQuery(
+        `SELECT address_data, pincode, state 
+         FROM users 
+         WHERE id = ?`,
+        [userId]
+      );
+
+      if (userData && userData.length > 0 && userData[0].address_data) {
+        let addressData = userData[0].address_data;
+        
+        if (typeof addressData === 'string') {
+          addressData = JSON.parse(addressData);
+        }
+        
+        console.log('📋 Users address_data:', JSON.stringify(addressData, null, 2));
+        
+        // address_data can be an array or object
+        if (Array.isArray(addressData) && addressData.length > 0) {
+          addressData.forEach((addr, index) => {
+            const extractedAddr = extractAddressFields(addr);
+            if (extractedAddr) {
+              extractedAddr.index = addresses.experian_addresses.length + 1;
+              addresses.experian_addresses.push(extractedAddr);
+            }
+          });
+        } else if (addressData && typeof addressData === 'object') {
+          const extractedAddr = extractAddressFields(addressData);
+          if (extractedAddr) {
+            extractedAddr.index = addresses.experian_addresses.length + 1;
+            addresses.experian_addresses.push(extractedAddr);
+          }
+        }
+      }
+
+      // Check digitap_responses
       const digitapResponses = await executeQuery(
         `SELECT response_data 
          FROM digitap_responses 
@@ -171,35 +380,43 @@ router.get('/available-addresses', requireAuth, async (req, res) => {
           data = responseData;
         }
 
+        console.log('📋 Digitap response_data:', JSON.stringify(data, null, 2));
+
         // Extract address from Digitap response
         if (data && data.address) {
           const addr = Array.isArray(data.address) ? data.address[0] : data.address;
+          const extractedAddr = extractAddressFields(addr);
           
-          // Add to Experian addresses if not already present
-          const addrStr = JSON.stringify(addr);
-          const exists = addresses.experian_addresses.some((a) => 
-            JSON.stringify(a) === addrStr
-          );
-          
-          if (!exists) {
-            addresses.experian_addresses.push({
-              address_line1: addr.address_line1 || addr.building_name || addr.line1 || '',
-              address_line2: addr.address_line2 || addr.street_name || addr.line2 || '',
-              city: addr.city || '',
-              state: addr.state || '',
-              pincode: addr.pincode || addr.postal_code || addr.pin_code || '',
-              country: addr.country || 'India',
-              full_address: addr.full_address || addr.complete_address || null,
-              index: addresses.experian_addresses.length + 1
-            });
+          if (extractedAddr) {
+            // Check if this address already exists
+            const exists = addresses.experian_addresses.some((a) => 
+              a.state === extractedAddr.state && 
+              a.pincode === extractedAddr.pincode &&
+              a.city === extractedAddr.city
+            );
+            
+            if (!exists) {
+              extractedAddr.index = addresses.experian_addresses.length + 1;
+              addresses.experian_addresses.push(extractedAddr);
+            }
           }
         }
       }
     } catch (digitapError) {
-      console.error('Error fetching Digitap address:', digitapError);
-      // Continue even if Digitap fetch fails
+      console.error('Error fetching Digitap/user address:', digitapError);
+      // Continue even if fetch fails
     }
 
+    // Log addresses for debugging - detailed output
+    console.log('\n📋 ========== AVAILABLE ADDRESSES RESPONSE ==========');
+    console.log('📋 Digilocker Address:', JSON.stringify(addresses.digilocker_address, null, 2));
+    console.log('📋 Experian Addresses Count:', addresses.experian_addresses?.length || 0);
+    addresses.experian_addresses?.forEach((addr, idx) => {
+      console.log(`📋 Experian Address ${idx + 1}:`, JSON.stringify(addr, null, 2));
+    });
+    console.log('📋 Full Addresses Object:', JSON.stringify(addresses, null, 2));
+    console.log('📋 ====================================================\n');
+    
     res.json({
       success: true,
       data: addresses
@@ -375,6 +592,123 @@ router.post('/residence-address', requireAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to save residence address',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * POST /api/user/additional-information
+ * Save marital status, spoken language, and work experience
+ */
+router.post('/additional-information', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+
+    const {
+      marital_status,
+      spoken_language,
+      work_experience
+    } = req.body;
+
+    // Validation
+    if (!marital_status || !['single', 'married', 'divorced', 'widow'].includes(marital_status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Marital status is required and must be one of: single, married, divorced, widow'
+      });
+    }
+
+    if (!spoken_language || spoken_language.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'Spoken language is required'
+      });
+    }
+
+    if (!work_experience || !['0-2', '2-5', '5-8', '8+'].includes(work_experience)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Work experience is required and must be one of: 0-2, 2-5, 5-8, 8+'
+      });
+    }
+
+    // Convert work experience to years (for database storage)
+    let work_experience_years = null;
+    if (work_experience === '0-2') {
+      work_experience_years = 1; // Average of 0-2
+    } else if (work_experience === '2-5') {
+      work_experience_years = 3; // Average of 2-5
+    } else if (work_experience === '5-8') {
+      work_experience_years = 6; // Average of 5-8
+    } else if (work_experience === '8+') {
+      work_experience_years = 10; // Default for 8+
+    }
+
+    // Check if columns exist before updating
+    const checkColumns = await executeQuery(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'users' 
+        AND COLUMN_NAME IN ('spoken_language', 'work_experience_range')
+    `);
+
+    const existingColumns = checkColumns.map(row => row.COLUMN_NAME);
+    const updateFields = ['marital_status = ?'];
+    const updateValues = [marital_status];
+
+    // Add spoken_language if column exists
+    if (existingColumns.includes('spoken_language')) {
+      updateFields.push('spoken_language = ?');
+      updateValues.push(spoken_language);
+    }
+
+    // Add work_experience_range if column exists
+    if (existingColumns.includes('work_experience_range')) {
+      updateFields.push('work_experience_range = ?');
+      updateValues.push(work_experience);
+    }
+
+    updateFields.push('updated_at = NOW()');
+    updateValues.push(userId);
+
+    // Update users table
+    await executeQuery(
+      `UPDATE users 
+       SET ${updateFields.join(', ')} 
+       WHERE id = ?`,
+      updateValues
+    );
+
+    // Update work experience in application_employment_details if exists
+    const existingEmployment = await executeQuery(
+      `SELECT id FROM application_employment_details 
+       WHERE user_id = ? 
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId]
+    );
+
+    if (existingEmployment && existingEmployment.length > 0) {
+      await executeQuery(
+        `UPDATE application_employment_details 
+         SET work_experience_years = ?, updated_at = NOW() 
+         WHERE id = ?`,
+        [work_experience_years, existingEmployment[0].id]
+      );
+    }
+
+    res.json({
+      success: true,
+      message: 'Additional information saved successfully'
+    });
+
+  } catch (error) {
+    console.error('Save additional information error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to save additional information',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

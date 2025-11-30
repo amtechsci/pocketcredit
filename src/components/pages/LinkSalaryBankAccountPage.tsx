@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, Plus, CheckCircle, Info, CreditCard, Shield } from 'lucide-react';
+import { Building2, Plus, CheckCircle, Info, ArrowLeft } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { toast } from 'sonner';
@@ -30,7 +30,6 @@ export const LinkSalaryBankAccountPage = () => {
   const [selectedBankId, setSelectedBankId] = useState<number | null>(null);
   const [showAddNew, setShowAddNew] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [showENachInfo, setShowENachInfo] = useState(false);
 
   // Form state for adding new bank
   const [newBankForm, setNewBankForm] = useState({
@@ -56,7 +55,7 @@ export const LinkSalaryBankAccountPage = () => {
       const statusResponse = await apiService.getUserBankStatementStatus();
       
       if (statusResponse.success && statusResponse.data) {
-        const { status, hasReport, reportJustFetched } = statusResponse.data as any;
+        const { status, reportJustFetched } = statusResponse.data as any;
         
         // If status is completed but report was just fetched, wait a moment for bank details extraction
         if (status === 'completed' && reportJustFetched) {
@@ -142,18 +141,25 @@ export const LinkSalaryBankAccountPage = () => {
     try {
       setSubmitting(true);
       
-      // Call API to save bank details
-      // Note: This requires an application_id, but for profile-level bank details,
-      // we'll create a temporary application or use a different endpoint
-      // For now, we'll add it locally and refresh the list
-      await fetchBankDetails();
+      // Call API to save bank details for user
+      const response = await apiService.saveUserBankDetails({
+        account_number: newBankForm.account_number,
+        ifsc_code: newBankForm.ifsc_code.toUpperCase(),
+        bank_name: newBankForm.bank_name || undefined
+      });
       
-      setShowAddNew(false);
-      setNewBankForm({ account_number: '', ifsc_code: '', bank_name: '' });
-      toast.success('Bank account added successfully');
-    } catch (error) {
+      if (response.success) {
+        toast.success('Bank account added successfully!');
+        setShowAddNew(false);
+        setNewBankForm({ account_number: '', ifsc_code: '', bank_name: '' });
+        // Refresh bank details list
+        await fetchBankDetails();
+      } else {
+        toast.error(response.message || 'Failed to add bank account');
+      }
+    } catch (error: any) {
       console.error('Error adding bank:', error);
-      toast.error('Failed to add bank account');
+      toast.error(error.response?.data?.message || 'Failed to add bank account');
     } finally {
       setSubmitting(false);
     }
@@ -165,14 +171,28 @@ export const LinkSalaryBankAccountPage = () => {
       return;
     }
 
-    // Mark as primary/salary account
-    // In a real scenario, you'd call an API to save this selection
-    toast.success('Salary bank account linked successfully!');
-    
-    // Navigate to email verification page
-    setTimeout(() => {
-      navigate('/email-verification');
-    }, 1500);
+    setSubmitting(true);
+
+    try {
+      // Register the selected bank account for e-NACH
+      const response = await apiService.registerEnach(selectedBankId);
+
+      if (response.success) {
+        toast.success('Salary bank account registered for e-NACH successfully!');
+        
+        // Navigate to email verification page
+        setTimeout(() => {
+          navigate('/email-verification');
+        }, 1500);
+      } else {
+        toast.error(response.message || 'Failed to register bank account');
+      }
+    } catch (error: any) {
+      console.error('Error registering e-NACH:', error);
+      toast.error(error.message || 'Failed to register bank account. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const maskAccountNumber = (accountNumber: string) => {
@@ -194,33 +214,35 @@ export const LinkSalaryBankAccountPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Link your salary bank account</h1>
-          <p className="text-gray-600">Select your salary bank account to proceed with e-NACH registration</p>
+    <div className="min-h-screen bg-gray-50 pb-24 overflow-y-auto">
+      {/* Header with Back Button */}
+      <div className="bg-white border-b sticky top-0 z-10 mb-4 md:mb-6">
+        <div className="max-w-4xl mx-auto px-4 py-3 md:py-4 flex items-center gap-3">
+          <button 
+            onClick={() => navigate('/dashboard')} 
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            aria-label="Back to dashboard"
+          >
+            <ArrowLeft className="h-5 w-5 text-gray-700" />
+          </button>
+          <div className="flex-1">
+            <h1 className="text-lg md:text-2xl font-bold text-gray-900">Link your salary bank account</h1>
+            <p className="text-gray-600 text-xs md:text-sm mt-1">Select your salary bank account to proceed with e-NACH registration</p>
+          </div>
         </div>
+      </div>
 
-        {/* e-NACH Information Section */}
-        <Card className="mb-6">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-xl flex items-center gap-2">
-                <Info className="w-5 h-5 text-blue-600" />
-                What is e-NACH / e-Mandate?
-              </CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowENachInfo(!showENachInfo)}
-              >
-                {showENachInfo ? 'Hide' : 'Show Details'}
-              </Button>
-            </div>
+      <div className="max-w-4xl mx-auto px-4">
+
+        {/* e-NACH Information Section - Always Visible */}
+        <Card className="mb-4 md:mb-6">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base md:text-xl flex items-center gap-2">
+              <Info className="w-4 h-4 md:w-5 md:h-5 text-blue-600" />
+              What is e-NACH / e-Mandate?
+            </CardTitle>
           </CardHeader>
-          {showENachInfo && (
-            <CardContent className="space-y-4 text-sm text-gray-700">
+          <CardContent className="space-y-3 md:space-y-4 text-xs md:text-sm text-gray-700 pt-0">
               <div>
                 <p className="mb-2">
                   <strong>Electronic National Automated Clearing House (e-NACH)</strong> is a financial system that helps automate recurring payments for loans.
@@ -236,43 +258,42 @@ export const LinkSalaryBankAccountPage = () => {
                 </p>
               </div>
 
-              <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
-                <p className="font-semibold text-blue-900 mb-2">Period or Tenure of E-NACH:</p>
-                <p className="text-blue-800">
+              <div className="bg-blue-50 border-l-4 border-blue-400 p-3 md:p-4 rounded">
+                <p className="font-semibold text-blue-900 mb-1 md:mb-2 text-xs md:text-sm">Period or Tenure of E-NACH:</p>
+                <p className="text-blue-800 text-xs md:text-sm leading-relaxed">
                   The "Period or Tenure of E-NACH" refers to the validity of your E-mandate or e-NACH registration. It does not imply that your account will be debited throughout this period. Instead, it signifies that the E-mandate remains valid for transactions during this time. If you wish to apply for a loan, you can do so directly without having to go through the E-NACH registration process again, as the existing mandate remains valid.
                 </p>
               </div>
 
-              <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
-                <p className="font-semibold text-blue-900 mb-2">Maximum amount:</p>
-                <p className="text-blue-800">
+              <div className="bg-blue-50 border-l-4 border-blue-400 p-3 md:p-4 rounded">
+                <p className="font-semibold text-blue-900 mb-1 md:mb-2 text-xs md:text-sm">Maximum amount:</p>
+                <p className="text-blue-800 text-xs md:text-sm leading-relaxed">
                   The maximum amount refers to the highest total sum that can be debited throughout the duration of the mandate. This includes the principal loan amount, as well as any accrued interest and charges specified in the loan agreement. We set up an e-mandate for an amount higher than your current loan balance to accommodate potential future increases in your loan limit. This way, you won't need to register again if your limit changes, as the one-time registration will cover the higher amount.
                 </p>
               </div>
 
-              <div className="bg-green-50 border-l-4 border-green-400 p-4 rounded">
-                <p className="font-semibold text-green-900 mb-2">Benefits:</p>
-                <ul className="list-disc list-inside space-y-1 text-green-800">
+              <div className="bg-green-50 border-l-4 border-green-400 p-3 md:p-4 rounded">
+                <p className="font-semibold text-green-900 mb-1 md:mb-2 text-xs md:text-sm">Benefits:</p>
+                <ul className="list-disc list-inside space-y-1 text-green-800 text-xs md:text-sm">
                   <li>One-time authorization: No need to submit fresh mandates for each transaction.</li>
                   <li>Easy digital authentication: Using Netbanking or Debit Card credentials</li>
                 </ul>
               </div>
 
-              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
-                <p className="font-semibold text-yellow-900 mb-2">Note:</p>
-                <p className="text-yellow-800">
+              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 md:p-4 rounded">
+                <p className="font-semibold text-yellow-900 mb-1 md:mb-2 text-xs md:text-sm">Note:</p>
+                <p className="text-yellow-800 text-xs md:text-sm leading-relaxed">
                   Make sure you are ready with your debit card or net banking details linked to the bank shown below to proceed with e-NACH registration.
                 </p>
               </div>
             </CardContent>
-          )}
         </Card>
 
         {/* Bank Accounts List */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-xl">Select Your Salary Bank Account</CardTitle>
-            <p className="text-sm text-gray-600 mt-1">
+        <Card className="mb-4 md:mb-6">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg md:text-xl">Select Your Salary Bank Account</CardTitle>
+            <p className="text-xs md:text-sm text-gray-600 mt-1">
               Choose the bank account where you receive your salary
             </p>
           </CardHeader>
@@ -345,17 +366,11 @@ export const LinkSalaryBankAccountPage = () => {
 
         {/* Continue Button */}
         {selectedBankId && (
-          <div className="flex justify-end gap-4">
-            <Button
-              variant="outline"
-              onClick={() => navigate('/dashboard')}
-            >
-              Skip for now
-            </Button>
+          <div className="flex flex-col sm:flex-row justify-end gap-3 md:gap-4 mt-4 md:mt-6 sticky bottom-0 bg-gray-50 pt-4 pb-4 -mx-4 px-4 md:mx-0 md:px-0 md:static">
             <Button
               onClick={handleContinue}
               disabled={submitting}
-              className="bg-blue-600 hover:bg-blue-700 min-w-[120px]"
+              className="bg-blue-600 hover:bg-blue-700 min-w-[120px] w-full sm:w-auto"
             >
               {submitting ? 'Processing...' : 'Continue'}
             </Button>

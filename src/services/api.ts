@@ -325,6 +325,31 @@ class ApiService {
     return this.request('GET', `/bank-details/user/${userId}`);
   }
 
+  /**
+   * Save bank details for user (without application_id)
+   */
+  async registerEnach(bankDetailId: number): Promise<ApiResponse<{
+    enach_id: number;
+    bank_detail_id: number;
+    application_id: number;
+  }>> {
+    return this.request('POST', '/bank-details/register-enach', { bank_detail_id: bankDetailId });
+  }
+
+  async saveUserBankDetails(data: {
+    account_number: string;
+    ifsc_code: string;
+    bank_name?: string;
+  }): Promise<ApiResponse<{
+    id: number;
+    account_number: string;
+    ifsc_code: string;
+    bank_name: string;
+    account_holder_name: string;
+  }>> {
+    return this.request('POST', '/bank-details/user', data);
+  }
+
   async chooseBankDetails(data: {
     application_id: number;
     bank_details_id: number;
@@ -745,6 +770,14 @@ class ApiService {
   /**
    * Save residence address and type
    */
+  async saveAdditionalInformation(data: {
+    marital_status: string;
+    spoken_language: string;
+    work_experience: string;
+  }): Promise<ApiResponse<any>> {
+    return this.request('POST', '/user/additional-information', data);
+  }
+
   async saveResidenceAddress(data: {
     residence_type: 'owned' | 'rented';
     source: string;

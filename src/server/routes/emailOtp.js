@@ -4,15 +4,18 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
 const nodemailer = require('nodemailer');
 
-// Email transporter configuration
+// Email transporter configuration - Using environment variables
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT || 587,
-  secure: false,
+  host: process.env.SMTP_HOST || 'smtp.hostinger.com',
+  port: parseInt(process.env.SMTP_PORT || '587'),
+  secure: false, // TLS
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  tls: {
+    rejectUnauthorized: false
+  }
 });
 
 // Generate 6-digit OTP
@@ -85,8 +88,15 @@ router.post('/send', requireAuth, async (req, res) => {
 
     // Send email
     const emailType = type === 'personal' ? 'Personal' : 'Official';
+    const fromEmail = process.env.SMTP_USER;
+    if (!fromEmail) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'SMTP configuration is missing. Please configure SMTP_USER in environment variables.'
+      });
+    }
     const mailOptions = {
-      from: process.env.SMTP_USER,
+      from: `"Pocket Credit" <${fromEmail}>`,
       to: email,
       subject: `Verify Your ${emailType} Email - Pocket Credit`,
       html: `

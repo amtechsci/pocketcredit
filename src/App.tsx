@@ -31,6 +31,7 @@ import { BankStatementSuccessPage } from './components/pages/BankStatementSucces
 import { LinkSalaryBankAccountPage } from './components/pages/LinkSalaryBankAccountPage';
 import { EmailVerificationPage } from './components/pages/EmailVerificationPage';
 import { ResidenceAddressPage } from './components/pages/ResidenceAddressPage';
+import { AdditionalInformationPage } from './components/pages/AdditionalInformationPage';
 import { ApplicationUnderReviewPage } from './components/pages/ApplicationUnderReviewPage';
 import { AccountAggregatorFlow } from './components/pages/AccountAggregatorFlow';
 import { ApplicationFlow } from './components/ApplicationFlow';
@@ -418,6 +419,14 @@ function AppContent() {
         <Route path="/residence-address" element={
           isAuthenticated ? (
             <ResidenceAddressPage />
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+        
+        <Route path="/additional-information" element={
+          isAuthenticated ? (
+            <AdditionalInformationPage />
           ) : (
             <Navigate to="/auth" replace />
           )
