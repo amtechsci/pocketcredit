@@ -11,7 +11,7 @@ import { useAuth } from '../../contexts/AuthContext';
 
 export const EmailVerificationPage = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   
   // Personal Email State
   const [personalEmail, setPersonalEmail] = useState('');
@@ -33,18 +33,57 @@ export const EmailVerificationPage = () => {
   const [skipOfficial, setSkipOfficial] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(true);
 
   useEffect(() => {
-    // Load existing verified emails if any
-    if (user?.personal_email && user?.personal_email_verified) {
-      setPersonalEmail(user.personal_email);
-      setPersonalVerified(true);
-    }
-    if (user?.official_email && user?.official_email_verified) {
-      setOfficialEmail(user.official_email);
-      setOfficialVerified(true);
-    }
-  }, [user]);
+    // Check if email verification is already completed
+    const checkAndRedirect = async () => {
+      if (!user?.id) {
+        setCheckingStatus(false);
+        return;
+      }
+
+      try {
+        // Fetch latest user data directly from API to get current verification status
+        const profileResponse = await apiService.getUserProfile();
+        const latestUser = profileResponse.status === 'success' && profileResponse.data?.user 
+          ? profileResponse.data.user 
+          : user;
+        
+        // Check if personal email is verified (mandatory requirement)
+        // Only personal email is required, official email is optional
+        if (latestUser?.personal_email_verified) {
+          console.log('Personal email already verified, redirecting to residence address');
+          navigate('/residence-address', { replace: true });
+          return;
+        }
+
+        // Load existing verified emails if any
+        if (latestUser?.personal_email && latestUser?.personal_email_verified) {
+          setPersonalEmail(latestUser.personal_email);
+          setPersonalVerified(true);
+        }
+        if (latestUser?.official_email && latestUser?.official_email_verified) {
+          setOfficialEmail(latestUser.official_email);
+          setOfficialVerified(true);
+        }
+
+        // Also refresh context for future use
+        await refreshUser();
+        setCheckingStatus(false);
+      } catch (error) {
+        console.error('Error checking email status:', error);
+        // Fallback: check current user context
+        if (user?.personal_email_verified) {
+          navigate('/residence-address', { replace: true });
+          return;
+        }
+        setCheckingStatus(false);
+      }
+    };
+
+    checkAndRedirect();
+  }, [user?.id, refreshUser, navigate]);
 
   // Timer countdown for personal email
   useEffect(() => {
@@ -114,6 +153,8 @@ export const EmailVerificationPage = () => {
       if (response.success) {
         setPersonalVerified(true);
         toast.success('Personal email verified successfully!');
+        // Refresh user data to update context
+        await refreshUser();
       } else {
         toast.error(response.message || 'Invalid OTP');
       }
@@ -168,6 +209,8 @@ export const EmailVerificationPage = () => {
       if (response.success) {
         setOfficialVerified(true);
         toast.success('Official email verified successfully!');
+        // Refresh user data to update context with latest verification status
+        await refreshUser();
       } else {
         toast.error(response.message || 'Invalid OTP');
       }
@@ -206,6 +249,20 @@ export const EmailVerificationPage = () => {
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
+
+  // Show loading while checking status
+  if (checkingStatus) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-2xl w-full">
+          <CardContent className="py-12 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Checking status...</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24 overflow-y-auto">

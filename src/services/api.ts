@@ -18,6 +18,8 @@ export interface User {
   date_of_birth?: string;
   gender?: string;
   marital_status?: string;
+  spoken_language?: string;
+  work_experience_range?: string;
   employment_type?: string;
   graduation_status?: string;
   loan_limit?: number;
@@ -26,6 +28,11 @@ export interface User {
   pincode?: string;
   phone_verified: boolean;
   email_verified?: boolean;
+  personal_email?: string;
+  personal_email_verified?: boolean;
+  official_email?: string;
+  official_email_verified?: boolean;
+  residence_type?: 'owned' | 'rented' | null;
   kyc_completed?: boolean;
   profile_completion_step: number;
   profile_completed: boolean;
@@ -328,6 +335,13 @@ class ApiService {
   /**
    * Save bank details for user (without application_id)
    */
+  async getEnachStatus(): Promise<ApiResponse<{
+    registered: boolean;
+    data?: any;
+  }>> {
+    return this.request('GET', '/bank-details/enach-status');
+  }
+
   async registerEnach(bankDetailId: number): Promise<ApiResponse<{
     enach_id: number;
     bank_detail_id: number;

@@ -26,6 +26,7 @@ export const LinkSalaryBankAccountPage = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [checkingEnach, setCheckingEnach] = useState(true);
   const [bankDetails, setBankDetails] = useState<BankDetail[]>([]);
   const [selectedBankId, setSelectedBankId] = useState<number | null>(null);
   const [showAddNew, setShowAddNew] = useState(false);
@@ -39,8 +40,68 @@ export const LinkSalaryBankAccountPage = () => {
   });
 
   useEffect(() => {
-    checkAndFetchReport();
-  }, []);
+    // Check if user has already completed this step by checking:
+    // 1. If user has a primary bank account (set during e-NACH registration)
+    // 2. If email is already verified (comes after e-NACH)
+    const checkCompletionAndRedirect = async () => {
+      if (!user?.id) {
+        setCheckingEnach(false);
+        return;
+      }
+
+      try {
+        // Method 1: Check if email is already verified (this step comes after e-NACH)
+        if (user.personal_email_verified) {
+          console.log('Email already verified, skipping e-NACH page');
+          navigate('/email-verification', { replace: true });
+          return;
+        }
+
+        // Method 2: Check if user has a primary bank account (set during e-NACH registration)
+        try {
+          const bankDetailsResponse = await apiService.getUserBankDetails(user.id);
+          if (bankDetailsResponse.success && bankDetailsResponse.data) {
+            const hasPrimaryBank = bankDetailsResponse.data.some((bank: BankDetail) => {
+              const isPrimary = bank.is_primary;
+              // Check if is_primary is truthy (handles boolean true, number 1, string '1')
+              return Boolean(isPrimary);
+            });
+            if (hasPrimaryBank) {
+              console.log('Primary bank account found, e-NACH likely completed, redirecting');
+              navigate('/email-verification', { replace: true });
+              return;
+            }
+          }
+        } catch (bankError) {
+          console.log('Error checking bank details:', bankError);
+        }
+
+        // Method 3: Try the e-NACH status API as fallback (if it works)
+        try {
+          const enachStatusResponse = await apiService.getEnachStatus();
+          if (enachStatusResponse.success && enachStatusResponse.data?.registered) {
+            console.log('e-NACH already registered, redirecting to email verification');
+            navigate('/email-verification', { replace: true });
+            return;
+          }
+        } catch (enachError) {
+          // API might not be available, that's okay - we'll use other methods
+          console.log('e-NACH status API not available, using other checks');
+        }
+        
+        // If none of the checks indicate completion, continue with normal flow
+        setCheckingEnach(false);
+        checkAndFetchReport();
+      } catch (error) {
+        console.error('Error checking completion status:', error);
+        // Continue to show the page if check fails
+        setCheckingEnach(false);
+        checkAndFetchReport();
+      }
+    };
+
+    checkCompletionAndRedirect();
+  }, [user?.id, user?.personal_email_verified, navigate]);
 
   const checkAndFetchReport = async () => {
     try {
@@ -174,6 +235,17 @@ export const LinkSalaryBankAccountPage = () => {
     setSubmitting(true);
 
     try {
+      // First check if e-NACH is already registered
+      const enachStatusResponse = await apiService.getEnachStatus();
+      if (enachStatusResponse.success && enachStatusResponse.data?.registered) {
+        // e-NACH already registered, just redirect to next page
+        toast.info('e-NACH already registered. Continuing...');
+        setTimeout(() => {
+          navigate('/email-verification');
+        }, 1000);
+        return;
+      }
+
       // Register the selected bank account for e-NACH
       const response = await apiService.registerEnach(selectedBankId);
 
@@ -185,11 +257,28 @@ export const LinkSalaryBankAccountPage = () => {
           navigate('/email-verification');
         }, 1500);
       } else {
-        toast.error(response.message || 'Failed to register bank account');
+        // If error is about already existing, just redirect
+        if (response.message && response.message.includes('already exists')) {
+          toast.info('e-NACH already registered. Continuing...');
+          setTimeout(() => {
+            navigate('/email-verification');
+          }, 1000);
+        } else {
+          toast.error(response.message || 'Failed to register bank account');
+        }
       }
     } catch (error: any) {
       console.error('Error registering e-NACH:', error);
-      toast.error(error.message || 'Failed to register bank account. Please try again.');
+      
+      // If error is about already existing, just redirect
+      if (error.message && error.message.includes('already exists')) {
+        toast.info('e-NACH already registered. Continuing...');
+        setTimeout(() => {
+          navigate('/email-verification');
+        }, 1000);
+      } else {
+        toast.error(error.message || 'Failed to register bank account. Please try again.');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -199,6 +288,20 @@ export const LinkSalaryBankAccountPage = () => {
     if (accountNumber.length <= 4) return accountNumber;
     return '****' + accountNumber.slice(-4);
   };
+
+  // Don't render anything while checking e-NACH status
+  if (checkingEnach) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-2xl w-full">
+          <CardContent className="py-12 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Checking status...</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

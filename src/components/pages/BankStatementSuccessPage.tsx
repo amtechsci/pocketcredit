@@ -66,6 +66,22 @@ export const BankStatementSuccessPage = () => {
       if (status === 'completed') {
         toast.success('Bank statement submitted successfully!');
         setChecking(false);
+        
+        // Check if e-NACH is already registered
+        try {
+          const enachStatusResponse = await apiService.getEnachStatus();
+          if (enachStatusResponse.success && enachStatusResponse.data?.registered) {
+            // e-NACH already registered, skip to email verification
+            setTimeout(() => {
+              navigate('/email-verification');
+            }, 1500);
+            return;
+          }
+        } catch (enachError) {
+          console.error('Error checking e-NACH status:', enachError);
+          // Continue to e-NACH page if check fails
+        }
+        
         // Redirect to link salary bank account page
         setTimeout(() => {
           navigate('/link-salary-bank-account');
@@ -74,6 +90,22 @@ export const BankStatementSuccessPage = () => {
         // Still processing or unknown state
         setChecking(false);
         toast.info('Your bank statement is being processed');
+        
+        // Check if e-NACH is already registered
+        try {
+          const enachStatusResponse = await apiService.getEnachStatus();
+          if (enachStatusResponse.success && enachStatusResponse.data?.registered) {
+            // e-NACH already registered, skip to email verification
+            setTimeout(() => {
+              navigate('/email-verification');
+            }, 2000);
+            return;
+          }
+        } catch (enachError) {
+          console.error('Error checking e-NACH status:', enachError);
+          // Continue to e-NACH page if check fails
+        }
+        
         // Redirect to link salary bank account page after processing
         setTimeout(() => {
           navigate('/link-salary-bank-account');
@@ -83,6 +115,22 @@ export const BankStatementSuccessPage = () => {
       console.error('Error checking status:', error);
       setChecking(false);
       toast.success('Bank statement submitted! Redirecting...');
+      
+      // Check if e-NACH is already registered
+      try {
+        const enachStatusResponse = await apiService.getEnachStatus();
+        if (enachStatusResponse.success && enachStatusResponse.data?.registered) {
+          // e-NACH already registered, skip to email verification
+          setTimeout(() => {
+            navigate('/email-verification');
+          }, 1500);
+          return;
+        }
+      } catch (enachError) {
+        console.error('Error checking e-NACH status:', enachError);
+        // Continue to e-NACH page if check fails
+      }
+      
       // Redirect to link salary bank account page
       setTimeout(() => {
         navigate('/link-salary-bank-account');

@@ -682,22 +682,9 @@ router.post('/additional-information', requireAuth, async (req, res) => {
       updateValues
     );
 
-    // Update work experience in application_employment_details if exists
-    const existingEmployment = await executeQuery(
-      `SELECT id FROM application_employment_details 
-       WHERE user_id = ? 
-       ORDER BY created_at DESC LIMIT 1`,
-      [userId]
-    );
-
-    if (existingEmployment && existingEmployment.length > 0) {
-      await executeQuery(
-        `UPDATE application_employment_details 
-         SET work_experience_years = ?, updated_at = NOW() 
-         WHERE id = ?`,
-        [work_experience_years, existingEmployment[0].id]
-      );
-    }
+    // Note: work_experience_range is saved to users table above
+    // No need to update application_employment_details as work_experience_range
+    // is a user-level field, not employment-details-specific
 
     res.json({
       success: true,

@@ -24,10 +24,11 @@ interface AddressOption {
 
 export const ResidenceAddressPage = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   
   const [residenceType, setResidenceType] = useState<'owned' | 'rented' | ''>('');
   const [loading, setLoading] = useState(true);
+  const [checkingStatus, setCheckingStatus] = useState(true);
   const [addressOptions, setAddressOptions] = useState<AddressOption[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [showManualEntry, setShowManualEntry] = useState(false);
@@ -44,8 +45,44 @@ export const ResidenceAddressPage = () => {
   });
 
   useEffect(() => {
-    fetchAddresses();
-  }, []);
+    checkCompletionAndFetch();
+  }, [user?.id, refreshUser, navigate]);
+
+  const checkCompletionAndFetch = async () => {
+    if (!user?.id) {
+      setCheckingStatus(false);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // Fetch latest user profile to check residence_type
+      const profileResponse = await apiService.getUserProfile();
+      const latestUser = profileResponse.status === 'success' && profileResponse.data?.user 
+        ? profileResponse.data.user 
+        : user;
+
+      console.log('🔍 Checking residence_type:', latestUser?.residence_type);
+      console.log('🔍 Full user object:', JSON.stringify(latestUser, null, 2));
+
+      // Check if residence_type is already set (indicates completion)
+      if (latestUser?.residence_type && (latestUser.residence_type === 'owned' || latestUser.residence_type === 'rented')) {
+        console.log('✅ Residence address already completed, redirecting to additional information');
+        navigate('/additional-information', { replace: true });
+        return;
+      }
+
+      console.log('⚠️ Residence type not set, showing form');
+
+      // If not completed, continue with normal flow
+      setCheckingStatus(false);
+      await fetchAddresses();
+    } catch (error) {
+      console.error('Error checking residence status:', error);
+      setCheckingStatus(false);
+      await fetchAddresses();
+    }
+  };
 
   const fetchAddresses = async () => {
     try {
@@ -238,6 +275,8 @@ export const ResidenceAddressPage = () => {
 
       if (response.success) {
         toast.success('Residence address saved successfully!');
+        // Refresh user context to update residence_type
+        await refreshUser();
         setTimeout(() => {
           navigate('/additional-information');
         }, 1500);
@@ -251,6 +290,20 @@ export const ResidenceAddressPage = () => {
       setSubmitting(false);
     }
   };
+
+  // Show loading while checking completion status
+  if (checkingStatus) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-2xl w-full">
+          <CardContent className="py-12 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Checking status...</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

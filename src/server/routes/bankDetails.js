@@ -8,6 +8,58 @@ const router = express.Router();
 // BANK DETAILS MANAGEMENT
 // =====================================================
 
+/**
+ * GET /api/bank-details/enach-status
+ * Check if user has e-NACH registration
+ * NOTE: This route must be placed BEFORE /user/:userId to avoid route conflicts
+ */
+router.get('/enach-status', requireAuth, async (req, res) => {
+  try {
+    console.log('✅ e-NACH status route called for user:', req.userId);
+    await initializeDatabase();
+    const userId = req.userId;
+
+    try {
+      const existingEnach = await executeQuery(
+        `SELECT id, status, bank_detail_id, created_at 
+         FROM enach_registrations 
+         WHERE user_id = ? 
+         LIMIT 1`,
+        [userId]
+      );
+
+      if (existingEnach && existingEnach.length > 0) {
+        return res.json({
+          success: true,
+          registered: true,
+          data: existingEnach[0]
+        });
+      }
+
+      return res.json({
+        success: true,
+        registered: false
+      });
+    } catch (tableError) {
+      // If table doesn't exist, assume no registration
+      if (tableError.message && tableError.message.includes("doesn't exist")) {
+        return res.json({
+          success: true,
+          registered: false
+        });
+      }
+      throw tableError;
+    }
+  } catch (error) {
+    console.error('Check e-NACH status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check e-NACH status',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 // POST /api/bank-details - Save Bank Details for Loan Application
 router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
   try {

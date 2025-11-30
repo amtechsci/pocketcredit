@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, CheckCircle } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
@@ -6,14 +6,65 @@ import { Button } from '../ui/button';
 import { Label } from '../ui/label';
 import { toast } from 'sonner';
 import { apiService } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
 
 export const AdditionalInformationPage = () => {
   const navigate = useNavigate();
+  const { user, refreshUser } = useAuth();
   
   const [maritalStatus, setMaritalStatus] = useState<string>('');
   const [spokenLanguage, setSpokenLanguage] = useState<string[]>([]);
   const [workExperience, setWorkExperience] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(true);
+
+  useEffect(() => {
+    checkCompletionAndLoad();
+  }, [user?.id, refreshUser, navigate]);
+
+  const checkCompletionAndLoad = async () => {
+    if (!user?.id) {
+      setCheckingStatus(false);
+      return;
+    }
+
+    try {
+      // Fetch latest user profile to check if additional info is already saved
+      const profileResponse = await apiService.getUserProfile();
+      const latestUser = profileResponse.status === 'success' && profileResponse.data?.user 
+        ? profileResponse.data.user 
+        : user;
+
+      console.log('🔍 Checking additional information:', {
+        marital_status: latestUser?.marital_status,
+        spoken_language: latestUser?.spoken_language,
+        work_experience_range: latestUser?.work_experience_range
+      });
+
+      // Check if all required fields are already set
+      if (latestUser?.marital_status && latestUser?.spoken_language && latestUser?.work_experience_range) {
+        console.log('✅ Additional information already completed, redirecting to application under review');
+        navigate('/application-under-review', { replace: true });
+        return;
+      }
+
+      // Load existing data if partially filled
+      if (latestUser?.marital_status) {
+        setMaritalStatus(latestUser.marital_status);
+      }
+      if (latestUser?.spoken_language) {
+        setSpokenLanguage(latestUser.spoken_language.split(',').filter(Boolean));
+      }
+      if (latestUser?.work_experience_range) {
+        setWorkExperience(latestUser.work_experience_range);
+      }
+
+      setCheckingStatus(false);
+    } catch (error) {
+      console.error('Error checking additional information status:', error);
+      setCheckingStatus(false);
+    }
+  };
 
   const handleLanguageToggle = (language: string) => {
     setSpokenLanguage(prev => {
@@ -55,7 +106,11 @@ export const AdditionalInformationPage = () => {
 
       if (response.success) {
         toast.success('Information saved successfully');
-        navigate('/application-under-review');
+        // Refresh user context to update additional info fields
+        await refreshUser();
+        setTimeout(() => {
+          navigate('/application-under-review');
+        }, 1500);
       } else {
         toast.error(response.message || 'Failed to save information');
       }
@@ -66,6 +121,20 @@ export const AdditionalInformationPage = () => {
       setSubmitting(false);
     }
   };
+
+  // Show loading while checking completion status
+  if (checkingStatus) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-2xl w-full">
+          <CardContent className="py-12 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Checking status...</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 pb-20 md:pb-4">

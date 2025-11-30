@@ -46,6 +46,20 @@ export const BankStatementUploadPage = () => {
 
         // Check if completed
         if (status === 'completed') {
+          // Check if e-NACH is already registered
+          try {
+            const enachStatusResponse = await apiService.getEnachStatus();
+            if (enachStatusResponse.success && enachStatusResponse.data?.registered) {
+              // e-NACH already registered, skip to email verification
+              toast.success('Bank statement already uploaded! Redirecting...');
+              setTimeout(() => navigate('/email-verification'), 1500);
+              return;
+            }
+          } catch (enachError) {
+            console.error('Error checking e-NACH status:', enachError);
+            // Continue to e-NACH page if check fails
+          }
+          
           toast.success('Bank statement already uploaded! Redirecting...');
           setTimeout(() => navigate('/link-salary-bank-account'), 1500);
           return;
