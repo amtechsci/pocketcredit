@@ -136,6 +136,24 @@ export function DynamicDashboardPage() {
       setLoading(true);
       setError(null);
       
+      // First check if user has an application under review
+      try {
+        const applicationsResponse = await apiService.getLoanApplications();
+        if (applicationsResponse.success && applicationsResponse.data && applicationsResponse.data.applications) {
+          const underReviewApp = applicationsResponse.data.applications.find(
+            (app: any) => app.status === 'under_review' || app.status === 'submitted'
+          );
+          if (underReviewApp) {
+            // Redirect to under review page
+            navigate('/application-under-review');
+            return;
+          }
+        }
+      } catch (appError) {
+        console.error('Error checking applications:', appError);
+        // Continue to load dashboard
+      }
+      
       const response = await apiService.getDashboardSummary();
       
       if (response.status === 'success' && response.data) {

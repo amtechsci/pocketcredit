@@ -46,8 +46,8 @@ export const BankStatementUploadPage = () => {
 
         // Check if completed
         if (status === 'completed') {
-          toast.success('Bank statement already uploaded! Proceeding to dashboard...');
-          setTimeout(() => navigate('/dashboard'), 1500);
+          toast.success('Bank statement already uploaded! Redirecting...');
+          setTimeout(() => navigate('/link-salary-bank-account'), 1500);
           return;
         }
 

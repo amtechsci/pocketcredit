@@ -14,7 +14,7 @@ const ENDPOINTS = {
   GENERATE_URL: `${DIGITAP_BASE_URL}/bank-data/generateurl`,
   UPLOAD_PDF: `${DIGITAP_BASE_URL}/bank-data/upload`,
   STATUS_CHECK: `${DIGITAP_BASE_URL}/bank-data/statuscheck`,
-  RETRIEVE_REPORT: `${DIGITAP_BASE_URL}/bank-data/report`
+  RETRIEVE_REPORT: `${DIGITAP_BASE_URL}/bank-data/retrievereport`
 };
 
 /**
@@ -425,27 +425,42 @@ async function checkBankStatementStatus(request_id) {
  * Retrieve analyzed bank statement report
  * Only call this after status shows "ReportGenerated"
  * 
- * @param {string} client_ref_num - Reference number
+ * @param {string} client_ref_num - Reference number (optional if txn_id provided)
  * @param {string} format - Report format: 'json' or 'excel' (default: 'json')
+ * @param {string} txn_id - Transaction ID (optional, alternative to client_ref_num)
  * @returns {Promise<{success: boolean, data?: object, error?: string}>}
  */
-async function retrieveBankStatementReport(client_ref_num, format = 'json') {
+async function retrieveBankStatementReport(client_ref_num = null, format = 'json', txn_id = null) {
   try {
-    if (!client_ref_num) {
+    // Either client_ref_num or txn_id must be provided
+    if (!client_ref_num && !txn_id) {
       return {
         success: false,
-        error: 'Client reference number is required'
+        error: 'Either client reference number or transaction ID is required'
       };
     }
 
-    console.log(`📥 Retrieving report for: ${client_ref_num} (format: ${format})`);
+    console.log(`📥 Retrieving report for: ${txn_id ? `txn_id=${txn_id}` : `client_ref_num=${client_ref_num}`} (format: ${format})`);
+
+    // Build request body - use txn_id if provided, otherwise use client_ref_num
+    // API expects: txn_id OR client_ref_num (not both), report_type, report_subtype
+    // When txn_id is provided, ONLY send txn_id (not client_ref_num)
+    const requestBody = {
+      report_type: format || 'json',
+      report_subtype: 'type3'
+    };
+    
+    if (txn_id) {
+      // When txn_id is provided, ONLY use txn_id (API doesn't allow both)
+      requestBody.txn_id = txn_id;
+    } else if (client_ref_num) {
+      // Only use client_ref_num if txn_id is not available
+      requestBody.client_ref_num = client_ref_num;
+    }
 
     const response = await axios.post(
       ENDPOINTS.RETRIEVE_REPORT,
-      {
-        client_ref_num,
-        format
-      },
+      requestBody,
       {
         headers: {
           'Authorization': getAuthHeader(),
@@ -456,24 +471,65 @@ async function retrieveBankStatementReport(client_ref_num, format = 'json') {
     );
 
     console.log('✅ Report Retrieved:', response.data?.result_code);
+    console.log('📊 Report response structure:', {
+      hasResult: !!response.data?.result,
+      hasData: !!response.data?.data,
+      resultCode: response.data?.result_code,
+      httpResponseCode: response.data?.http_response_code,
+      responseKeys: response.data ? Object.keys(response.data) : []
+    });
 
-    if (response.data && response.data.result_code === 101 && response.data.result) {
-      return {
-        success: true,
-        data: {
-          report: response.data.result,
-          client_ref_num,
-          format,
-          message: response.data.message
+    // Handle different response formats
+    // The API might return the report in response.data.result or response.data directly
+    let reportData = null;
+    
+    if (response.data) {
+      // Check if result_code is 101 (success) or http_response_code is 200
+      if (response.data.result_code === 101 || response.data.http_response_code === 200) {
+        // Report might be in result, data, or directly in response.data
+        // For large responses, the entire response.data might be the report
+        reportData = response.data.result || response.data.data || response.data;
+        
+        // If reportData is a string, try to parse it
+        if (typeof reportData === 'string') {
+          try {
+            reportData = JSON.parse(reportData);
+          } catch (e) {
+            console.warn('Report data is a string but not valid JSON, using as-is');
+          }
         }
-      };
-    } else {
-      return {
-        success: false,
-        error: response.data?.message || 'Failed to retrieve report',
-        result_code: response.data?.result_code
-      };
+        
+        // If we have report data (even if it's the entire response), return it
+        if (reportData && (typeof reportData === 'object' || typeof reportData === 'string')) {
+          console.log('✅ Report data extracted successfully, size:', JSON.stringify(reportData).length, 'characters');
+          
+          return {
+            success: true,
+            data: {
+              report: reportData,
+              client_ref_num: client_ref_num || null,
+              txn_id: txn_id || null,
+              format,
+              message: response.data.message || 'Report retrieved successfully'
+            }
+          };
+        }
+      }
     }
+    
+    // If we get here, report retrieval failed
+    console.error('❌ Report retrieval failed:', {
+      result_code: response.data?.result_code,
+      http_response_code: response.data?.http_response_code,
+      message: response.data?.message
+    });
+    
+    return {
+      success: false,
+      error: response.data?.message || 'Failed to retrieve report',
+      result_code: response.data?.result_code,
+      http_response_code: response.data?.http_response_code
+    };
   } catch (error) {
     console.error('❌ Report Retrieval Error:', error.message);
     

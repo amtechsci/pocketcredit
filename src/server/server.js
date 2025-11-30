@@ -199,6 +199,10 @@ app.use('/api/student-documents', studentDocumentsRoutes);
 const emailOtpRoutes = require('./routes/emailOtp');
 app.use('/api/email-otp', emailOtpRoutes);
 
+// User Residence routes (merged with userRoutes, but keeping separate for clarity)
+const userResidenceRoutes = require('./routes/userResidence');
+app.use('/api/user', userResidenceRoutes);
+
 // Digilocker KYC routes
 const digilockerRoutes = require('./routes/digilocker');
 app.use('/api/digilocker', digilockerRoutes);

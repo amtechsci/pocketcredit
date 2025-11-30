@@ -36,7 +36,12 @@ export const BankStatementSuccessPage = () => {
         return;
       }
 
-      const { status, digitapUrl: savedUrl, expiresAt } = response.data as any;
+      const { status, digitapUrl: savedUrl, expiresAt, reportJustFetched, hasReport } = response.data as any;
+      
+      // If report was just fetched, show success message
+      if (reportJustFetched && hasReport) {
+        toast.success('Bank statement report fetched successfully!');
+      }
 
       // Check if transaction is InProgress (user didn't complete)
       if (status === 'InProgress' || status === 'pending') {
@@ -61,18 +66,27 @@ export const BankStatementSuccessPage = () => {
       if (status === 'completed') {
         toast.success('Bank statement submitted successfully!');
         setChecking(false);
-        setRedirecting(true);
+        // Redirect to link salary bank account page
+        setTimeout(() => {
+          navigate('/link-salary-bank-account');
+        }, 1500);
       } else {
         // Still processing or unknown state
         setChecking(false);
         toast.info('Your bank statement is being processed');
-        setRedirecting(true);
+        // Redirect to link salary bank account page after processing
+        setTimeout(() => {
+          navigate('/link-salary-bank-account');
+        }, 2000);
       }
     } catch (error) {
       console.error('Error checking status:', error);
       setChecking(false);
       toast.success('Bank statement submitted! Redirecting...');
-      setRedirecting(true);
+      // Redirect to link salary bank account page
+      setTimeout(() => {
+        navigate('/link-salary-bank-account');
+      }, 1500);
     }
   };
 

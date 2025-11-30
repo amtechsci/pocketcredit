@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../config/database');
+const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
 const nodemailer = require('nodemailer');
 
@@ -49,14 +49,16 @@ router.post('/send', requireAuth, async (req, res) => {
   }
 
   try {
+    await initializeDatabase();
+    
     // Check if email is already verified
-    const [existingVerification] = await db.execute(
+    const existingVerification = await executeQuery(
       `SELECT * FROM email_otp_verification 
        WHERE user_id = ? AND email = ? AND type = ? AND verified = TRUE`,
       [userId, email, type]
     );
 
-    if (existingVerification.length > 0) {
+    if (existingVerification && existingVerification.length > 0) {
       return res.json({
         success: true,
         message: 'Email already verified'
@@ -68,14 +70,14 @@ router.post('/send', requireAuth, async (req, res) => {
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
     // Delete any existing unverified OTPs for this user and email
-    await db.execute(
+    await executeQuery(
       `DELETE FROM email_otp_verification 
        WHERE user_id = ? AND email = ? AND type = ? AND verified = FALSE`,
       [userId, email, type]
     );
 
     // Store OTP in database
-    await db.execute(
+    await executeQuery(
       `INSERT INTO email_otp_verification (user_id, email, otp, type, expires_at) 
        VALUES (?, ?, ?, ?, ?)`,
       [userId, email, otp, type, expiresAt]
@@ -134,15 +136,17 @@ router.post('/verify', requireAuth, async (req, res) => {
   }
 
   try {
+    await initializeDatabase();
+    
     // Find the OTP record
-    const [otpRecords] = await db.execute(
+    const otpRecords = await executeQuery(
       `SELECT * FROM email_otp_verification 
        WHERE user_id = ? AND email = ? AND type = ? AND otp = ? AND verified = FALSE
        ORDER BY created_at DESC LIMIT 1`,
       [userId, email, type, otp]
     );
 
-    if (otpRecords.length === 0) {
+    if (!otpRecords || otpRecords.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'Invalid OTP'
@@ -160,7 +164,7 @@ router.post('/verify', requireAuth, async (req, res) => {
     }
 
     // Mark OTP as verified
-    await db.execute(
+    await executeQuery(
       `UPDATE email_otp_verification 
        SET verified = TRUE 
        WHERE id = ?`,
@@ -171,7 +175,7 @@ router.post('/verify', requireAuth, async (req, res) => {
     const emailField = type === 'personal' ? 'personal_email' : 'official_email';
     const verifiedField = type === 'personal' ? 'personal_email_verified' : 'official_email_verified';
     
-    await db.execute(
+    await executeQuery(
       `UPDATE users 
        SET ${emailField} = ?, ${verifiedField} = TRUE 
        WHERE id = ?`,

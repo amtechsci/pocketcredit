@@ -13,6 +13,167 @@ const {
 } = require('../services/digitapBankStatementService');
 
 /**
+ * Helper function to extract bank details from Digitap report data
+ * Handles various JSON structures from Digitap API response
+ */
+async function extractAndSaveBankDetails(reportData, userId) {
+  try {
+    if (!reportData) {
+      console.log('⚠️  No report data provided for bank details extraction');
+      return { success: false, message: 'No report data' };
+    }
+
+    // Parse report data if it's a string
+    let report = typeof reportData === 'string' ? JSON.parse(reportData) : reportData;
+    
+    // Try multiple possible paths for bank data
+    let bankData = null;
+    
+    // Path 1: report.bankData or report.bank_data
+    bankData = report.bankData || report.bank_data || report.bankInfo || report.bank_info;
+    
+    // Path 2: report.accountDetails or report.account_details
+    if (!bankData) {
+      bankData = report.accountDetails || report.account_details || report.accountInfo || report.account_info;
+    }
+    
+    // Path 3: report.data.bankData or report.data.bank_data
+    if (!bankData && report.data) {
+      bankData = report.data.bankData || report.data.bank_data || report.data.accountDetails || report.data.account_details;
+    }
+    
+    // Path 4: Direct account fields in report
+    if (!bankData && (report.account_number || report.ifsc_code)) {
+      bankData = report;
+    }
+    
+    // Path 5: Check if report is an array and look in first element
+    if (!bankData && Array.isArray(report) && report.length > 0) {
+      bankData = report[0].bankData || report[0].bank_data || report[0].accountDetails || report[0].account_details || report[0];
+    }
+
+    if (!bankData) {
+      console.log('⚠️  Bank data not found in report structure');
+      console.log('📋 Report keys:', Object.keys(report));
+      return { success: false, message: 'Bank data not found in report' };
+    }
+
+    // Extract bank details with fallbacks
+    const accountNumber = bankData.account_number || bankData.accountNumber || bankData.account_no || bankData.accountNo || null;
+    const ifscCode = bankData.ifsc_code || bankData.ifscCode || bankData.ifsc || bankData.IFSC || null;
+    const bankName = bankData.bank_name || bankData.bankName || bankData.bank || null;
+    const accountHolderName = bankData.account_holder_name || bankData.accountHolderName || bankData.holder_name || bankData.holderName || bankData.name || null;
+    const branchName = bankData.branch_name || bankData.branchName || bankData.branch || null;
+    const accountType = bankData.account_type || bankData.accountType || bankData.type || null;
+
+    // Validate required fields
+    if (!accountNumber || !ifscCode) {
+      console.log('⚠️  Missing required bank details (account_number or ifsc_code)');
+      console.log('📋 Available fields:', Object.keys(bankData));
+      return { success: false, message: 'Missing required bank details (account_number or ifsc_code)' };
+    }
+
+    // Validate IFSC code format
+    const ifscRegex = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+    if (!ifscRegex.test(ifscCode.toUpperCase())) {
+      console.log('⚠️  Invalid IFSC code format:', ifscCode);
+      return { success: false, message: 'Invalid IFSC code format' };
+    }
+
+    // Get user details for account holder name if not provided
+    let finalAccountHolderName = accountHolderName;
+    if (!finalAccountHolderName) {
+      const users = await executeQuery(
+        'SELECT first_name, last_name FROM users WHERE id = ?',
+        [userId]
+      );
+      if (users && users.length > 0) {
+        finalAccountHolderName = `${users[0].first_name || ''} ${users[0].last_name || ''}`.trim();
+      }
+    }
+
+    // Determine bank name from IFSC if not provided
+    let finalBankName = bankName;
+    if (!finalBankName) {
+      const bankCode = ifscCode.substring(0, 4);
+      const bankNames = {
+        'SBIN': 'State Bank of India',
+        'HDFC': 'HDFC Bank',
+        'ICIC': 'ICICI Bank',
+        'AXIS': 'Axis Bank',
+        'KOTK': 'Kotak Mahindra Bank',
+        'PNB': 'Punjab National Bank',
+        'BOFA': 'Bank of America',
+        'CITI': 'Citibank',
+        'HSBC': 'HSBC Bank',
+        'UBI': 'Union Bank of India',
+        'BOI': 'Bank of India',
+        'BOB': 'Bank of Baroda',
+        'CANB': 'Canara Bank',
+        'INDB': 'IndusInd Bank',
+        'YESB': 'Yes Bank',
+        'FDRL': 'Federal Bank',
+        'IDFB': 'IDFC First Bank',
+        'RATN': 'RBL Bank',
+        'BAND': 'Bandhan Bank',
+        'DCBL': 'DCB Bank'
+      };
+      finalBankName = bankNames[bankCode] || `${bankCode} Bank`;
+    }
+
+    // Check if bank details already exist for this user with same account number and IFSC
+    const existingBankDetails = await executeQuery(
+      'SELECT id FROM bank_details WHERE user_id = ? AND account_number = ? AND ifsc_code = ?',
+      [userId, accountNumber, ifscCode.toUpperCase()]
+    );
+
+    let bankDetailsId;
+    if (existingBankDetails && existingBankDetails.length > 0) {
+      // Update existing bank details
+      bankDetailsId = existingBankDetails[0].id;
+      await executeQuery(
+        `UPDATE bank_details 
+         SET bank_name = ?, account_holder_name = ?, branch_name = ?, account_type = ?, updated_at = NOW()
+         WHERE id = ?`,
+        [finalBankName, finalAccountHolderName, branchName, accountType, bankDetailsId]
+      );
+      console.log(`✅ Updated existing bank details (ID: ${bankDetailsId}) for user ${userId}`);
+    } else {
+      // Insert new bank details
+      const result = await executeQuery(
+        `INSERT INTO bank_details 
+         (user_id, account_number, ifsc_code, bank_name, account_holder_name, branch_name, account_type, created_at, updated_at) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [userId, accountNumber, ifscCode.toUpperCase(), finalBankName, finalAccountHolderName, branchName, accountType]
+      );
+      bankDetailsId = result.insertId;
+      console.log(`✅ Saved new bank details (ID: ${bankDetailsId}) for user ${userId}`);
+    }
+
+    return {
+      success: true,
+      message: 'Bank details extracted and saved successfully',
+      data: {
+        bank_details_id: bankDetailsId,
+        account_number: accountNumber,
+        ifsc_code: ifscCode.toUpperCase(),
+        bank_name: finalBankName,
+        account_holder_name: finalAccountHolderName
+      }
+    };
+
+  } catch (error) {
+    console.error('❌ Error extracting bank details:', error);
+    console.error('   Error details:', error.message);
+    return {
+      success: false,
+      message: 'Failed to extract bank details',
+      error: error.message
+    };
+  }
+}
+
+/**
  * Helper function to log webhook payloads to database
  */
 async function logWebhookPayload(req, webhookType, endpoint, processed = false, error = null) {
@@ -413,7 +574,7 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     }
 
     const statements = await executeQuery(
-      `SELECT client_ref_num, request_id, status, file_name, report_data, digitap_url, expires_at, transaction_data, created_at, updated_at 
+      `SELECT client_ref_num, request_id, txn_id, status, file_name, report_data, digitap_url, expires_at, transaction_data, created_at, updated_at 
        FROM user_bank_statements 
        WHERE user_id = ? 
        ORDER BY created_at DESC LIMIT 1`,
@@ -452,6 +613,91 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     }
 
     const hasStatement = statement.status === 'completed';
+    let reportJustFetched = false;
+
+    // Extract txn_id from transaction_data if not already in statement.txn_id
+    let txnId = statement.txn_id;
+    if (!txnId && statement.transaction_data) {
+      try {
+        const transactionData = typeof statement.transaction_data === 'string' 
+          ? JSON.parse(statement.transaction_data) 
+          : statement.transaction_data;
+        
+        if (transactionData && transactionData.txn_id) {
+          txnId = transactionData.txn_id;
+          console.log(`📊 Extracted txn_id from transaction_data: ${txnId}`);
+        }
+      } catch (e) {
+        console.warn('Could not parse transaction_data to extract txn_id:', e.message);
+      }
+    }
+
+    // If status is completed but report_data is empty, fetch it
+    if (hasStatement && !statement.report_data && (txnId || statement.client_ref_num)) {
+      console.log('📊 Status is completed but report_data is empty, fetching report...');
+      console.log(`📊 Using ${txnId ? `txn_id=${txnId}` : `client_ref_num=${statement.client_ref_num}`} to fetch report`);
+      
+      try {
+        // Fetch report from Digitap - use txn_id if available, otherwise use client_ref_num
+        // IMPORTANT: When using txn_id, do NOT send client_ref_num (API doesn't allow both)
+        const reportResult = txnId 
+          ? await retrieveBankStatementReport(null, 'json', txnId)
+          : await retrieveBankStatementReport(statement.client_ref_num, 'json');
+        
+        if (reportResult.success && reportResult.data && reportResult.data.report) {
+          // Convert report to JSON string for storage
+          const reportJsonString = typeof reportResult.data.report === 'string' 
+            ? reportResult.data.report 
+            : JSON.stringify(reportResult.data.report);
+          
+          console.log(`📊 Saving report to database, size: ${reportJsonString.length} characters`);
+          
+          // Save report to database
+          await executeQuery(
+            `UPDATE user_bank_statements 
+             SET report_data = ?, status = 'completed', updated_at = NOW() 
+             WHERE request_id = ?`,
+            [reportJsonString, statement.request_id]
+          );
+          
+          // Verify the save by checking the stored data length
+          const verifyResult = await executeQuery(
+            `SELECT LENGTH(report_data) as report_length FROM user_bank_statements WHERE request_id = ?`,
+            [statement.request_id]
+          );
+          
+          if (verifyResult && verifyResult[0]) {
+            console.log(`✅ Report saved successfully, stored length: ${verifyResult[0].report_length} characters`);
+          } else {
+            console.warn('⚠️  Could not verify report save');
+          }
+          
+          // Extract and save bank details from report
+          try {
+            const bankDetailsResult = await extractAndSaveBankDetails(reportResult.data.report, userId);
+            if (bankDetailsResult.success) {
+              console.log('✅ Bank details extracted and saved:', bankDetailsResult.data);
+            } else {
+              console.log('⚠️  Bank details extraction failed:', bankDetailsResult.message);
+            }
+          } catch (bankDetailsError) {
+            console.error('❌ Error extracting bank details:', bankDetailsError);
+            // Don't fail the request if bank details extraction fails
+          }
+          
+          // Update statement object with fetched report
+          statement.report_data = typeof reportResult.data.report === 'string' 
+            ? reportResult.data.report 
+            : JSON.stringify(reportResult.data.report);
+          reportJustFetched = true;
+        } else {
+          console.log('⚠️  Report fetch failed:', reportResult.error || 'Unknown error');
+        }
+      } catch (fetchError) {
+        console.error('❌ Error fetching report:', fetchError);
+        // Continue with response even if fetch fails
+      }
+    }
 
     // Parse transaction_data safely (might be string or object)
     let transactionData = null;
@@ -475,6 +721,7 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
         requestId: statement.request_id,
         fileName: statement.file_name,
         hasReport: !!statement.report_data,
+        reportJustFetched: reportJustFetched, // Flag to indicate report was just fetched
         digitapUrl: statement.digitap_url,
         expiresAt: statement.expires_at,
         transactionData: transactionData,
@@ -515,7 +762,7 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
     const userId = req.userId;
 
     const statements = await executeQuery(
-      `SELECT client_ref_num, status, report_data 
+      `SELECT client_ref_num, txn_id, status, report_data, transaction_data 
        FROM user_bank_statements 
        WHERE user_id = ? 
        ORDER BY created_at DESC LIMIT 1`,
@@ -531,28 +778,37 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
 
     const statement = statements[0];
 
-    // Check status with Digitap
-    const statusResult = await checkBankStatementStatus(statement.client_ref_num);
-
-    if (!statusResult.success) {
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to check status with Digitap'
-      });
+    // Extract txn_id from transaction_data if not already in statement.txn_id
+    let txnId = statement.txn_id;
+    if (!txnId && statement.transaction_data) {
+      try {
+        const transactionData = typeof statement.transaction_data === 'string' 
+          ? JSON.parse(statement.transaction_data) 
+          : statement.transaction_data;
+        
+        if (transactionData && transactionData.txn_id) {
+          txnId = transactionData.txn_id;
+          console.log(`📊 Extracted txn_id from transaction_data: ${txnId}`);
+        }
+      } catch (e) {
+        console.warn('Could not parse transaction_data to extract txn_id:', e.message);
+      }
     }
 
-    const currentStatus = statusResult.data.status;
-
-    // Update status
-    await executeQuery(
-      `UPDATE user_bank_statements 
-       SET status = ?, updated_at = NOW() 
-       WHERE client_ref_num = ?`,
-      [currentStatus, statement.client_ref_num]
-    );
+    // Check status with Digitap (use request_id if available, otherwise client_ref_num)
+    // Note: checkBankStatementStatus uses request_id, but we may not have it here
+    // For now, we'll skip status check if we only have txn_id
+    let statusResult = null;
+    let currentStatus = statement.status;
+    
+    if (statement.client_ref_num) {
+      // We need request_id for status check, but we can try with client_ref_num
+      // Actually, checkBankStatementStatus expects request_id, so we'll skip this for now
+      // and just use the stored status
+    }
 
     // If report is ready, retrieve it
-    if (currentStatus === 'ReportGenerated') {
+    if (currentStatus === 'completed' || currentStatus === 'ReportGenerated') {
       if (statement.report_data) {
         return res.json({
           success: true,
@@ -564,8 +820,12 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
         });
       }
 
-      // Fetch from Digitap
-      const reportResult = await retrieveBankStatementReport(statement.client_ref_num, 'json');
+      // Fetch from Digitap - use txn_id if available, otherwise use client_ref_num
+      // IMPORTANT: When using txn_id, do NOT send client_ref_num (API doesn't allow both)
+      console.log(`📊 Fetching report using ${txnId ? `txn_id=${txnId}` : `client_ref_num=${statement.client_ref_num}`}`);
+      const reportResult = txnId 
+        ? await retrieveBankStatementReport(null, 'json', txnId)
+        : await retrieveBankStatementReport(statement.client_ref_num, 'json');
 
       if (!reportResult.success) {
         return res.status(500).json({
@@ -574,13 +834,43 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
         });
       }
 
+      // Convert report to JSON string for storage
+      const reportJsonString = typeof reportResult.data.report === 'string' 
+        ? reportResult.data.report 
+        : JSON.stringify(reportResult.data.report);
+      
+      console.log(`📊 Saving report to database, size: ${reportJsonString.length} characters`);
+      
       // Save report
       await executeQuery(
         `UPDATE user_bank_statements 
          SET report_data = ?, status = 'completed', updated_at = NOW() 
          WHERE client_ref_num = ?`,
-        [JSON.stringify(reportResult.data.report), statement.client_ref_num]
+        [reportJsonString, statement.client_ref_num]
       );
+      
+      // Verify the save
+      const verifyResult = await executeQuery(
+        `SELECT LENGTH(report_data) as report_length FROM user_bank_statements WHERE client_ref_num = ?`,
+        [statement.client_ref_num]
+      );
+      
+      if (verifyResult && verifyResult[0]) {
+        console.log(`✅ Report saved successfully, stored length: ${verifyResult[0].report_length} characters`);
+      }
+
+      // Extract and save bank details from report
+      try {
+        const bankDetailsResult = await extractAndSaveBankDetails(reportResult.data.report, userId);
+        if (bankDetailsResult.success) {
+          console.log('✅ Bank details extracted and saved:', bankDetailsResult.data);
+        } else {
+          console.log('⚠️  Bank details extraction failed:', bankDetailsResult.message);
+        }
+      } catch (bankDetailsError) {
+        console.error('❌ Error extracting bank details:', bankDetailsError);
+        // Don't fail the request if bank details extraction fails
+      }
 
       return res.json({
         success: true,
@@ -606,6 +896,75 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch report'
+    });
+  }
+});
+
+/**
+ * POST /api/user/extract-bank-details
+ * Manually extract and save bank details from existing report_data
+ * Useful for reprocessing reports or handling cases where extraction failed during webhook
+ */
+router.post('/extract-bank-details', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+
+    // Get the latest bank statement with report_data
+    const statements = await executeQuery(
+      `SELECT id, user_id, report_data, status 
+       FROM user_bank_statements 
+       WHERE user_id = ? AND report_data IS NOT NULL AND status = 'completed'
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId]
+    );
+
+    if (statements.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No completed bank statement with report data found'
+      });
+    }
+
+    const statement = statements[0];
+
+    // Parse report_data
+    let reportData;
+    try {
+      reportData = typeof statement.report_data === 'string' 
+        ? JSON.parse(statement.report_data) 
+        : statement.report_data;
+    } catch (parseError) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid report data format',
+        error: parseError.message
+      });
+    }
+
+    // Extract and save bank details
+    const bankDetailsResult = await extractAndSaveBankDetails(reportData, userId);
+
+    if (bankDetailsResult.success) {
+      res.json({
+        success: true,
+        message: 'Bank details extracted and saved successfully',
+        data: bankDetailsResult.data
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: bankDetailsResult.message || 'Failed to extract bank details',
+        error: bankDetailsResult.error
+      });
+    }
+
+  } catch (error) {
+    console.error('Extract bank details error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to extract bank details',
+      error: error.message
     });
   }
 });
@@ -666,7 +1025,7 @@ async function handleBankDataWebhook(req, res) {
     // Log full webhook payload for debugging
     console.log('📥 Digitap Webhook received - Full payload:', JSON.stringify(req.body, null, 2));
     
-    const { request_id, txn_status, client_ref_num, status, code, client_ref_num: clientRefNum } = req.body;
+    const { request_id, txn_status, client_ref_num, status, code, client_ref_num: clientRefNum, txn_id } = req.body;
 
     // Handle different webhook formats
     const actualRequestId = request_id || req.body.requestId || req.body.request_id;
@@ -674,10 +1033,12 @@ async function handleBankDataWebhook(req, res) {
     const actualClientRefNum = client_ref_num || clientRefNum || req.body.client_ref_num;
     const actualCode = code || req.body.code;
     const actualStatus = status || req.body.status;
+    const actualTxnId = txn_id || req.body.txn_id || req.body.txnId || null;
 
     console.log('📥 Parsed webhook data:', { 
       request_id: actualRequestId, 
       client_ref_num: actualClientRefNum,
+      txn_id: actualTxnId,
       has_txn_status: !!actualTxnStatus 
     });
 
@@ -693,7 +1054,7 @@ async function handleBankDataWebhook(req, res) {
 
     // Find the bank statement by request_id
     const statements = await executeQuery(
-      'SELECT id, user_id, client_ref_num FROM user_bank_statements WHERE request_id = ?',
+      'SELECT id, user_id, client_ref_num, txn_id FROM user_bank_statements WHERE request_id = ?',
       [actualRequestId]
     );
 
@@ -735,14 +1096,23 @@ async function handleBankDataWebhook(req, res) {
 
     const newStatus = allCompleted ? 'completed' : 'InProgress';
 
-    // Update database with transaction data
+    // Update database with transaction data and txn_id
+    const updateFields = ['status = ?', 'transaction_data = ?'];
+    const updateValues = [newStatus, JSON.stringify(actualTxnStatus || req.body)];
+    
+    // Add txn_id if provided
+    if (actualTxnId) {
+      updateFields.push('txn_id = ?');
+      updateValues.push(actualTxnId);
+    }
+    
+    updateFields.push('updated_at = NOW()');
+    
     await executeQuery(
       `UPDATE user_bank_statements 
-       SET status = ?, 
-           transaction_data = ?, 
-           updated_at = NOW() 
+       SET ${updateFields.join(', ')} 
        WHERE request_id = ?`,
-      [newStatus, JSON.stringify(actualTxnStatus || req.body), actualRequestId]
+      [...updateValues, actualRequestId]
     );
 
     console.log(`✅ Bank statement updated: status = ${newStatus}, allCompleted = ${allCompleted}`);
@@ -753,27 +1123,63 @@ async function handleBankDataWebhook(req, res) {
       
       try {
         const clientRefNum = statement.client_ref_num || actualClientRefNum;
+        const txnId = actualTxnId || statement.txn_id;
         
-        if (!clientRefNum) {
-          console.warn('⚠️  No client_ref_num found, cannot fetch report');
+        // Priority: Use txn_id if available, otherwise use client_ref_num
+        if (!txnId && !clientRefNum) {
+          console.warn('⚠️  No txn_id or client_ref_num found, cannot fetch report');
         } else {
           // If we have "ReportGenerated" code, report is definitely ready - fetch directly
           if (actualCode === 'ReportGenerated') {
-            console.log('📥 ReportGenerated code detected - fetching report directly for client_ref_num:', clientRefNum);
-            const reportResult = await retrieveBankStatementReport(clientRefNum, 'json');
+            console.log(`📥 ReportGenerated code detected - fetching report using ${txnId ? `txn_id=${txnId}` : `client_ref_num=${clientRefNum}`}`);
+            
+            // Use txn_id if available, otherwise use client_ref_num
+            const reportResult = txnId 
+              ? await retrieveBankStatementReport(null, 'json', txnId)
+              : await retrieveBankStatementReport(clientRefNum, 'json');
             
             console.log('📥 Report fetch result:', reportResult.success ? 'Success' : reportResult.error);
             
             if (reportResult.success && reportResult.data && reportResult.data.report) {
+              // Convert report to JSON string for storage
+              const reportJsonString = typeof reportResult.data.report === 'string' 
+                ? reportResult.data.report 
+                : JSON.stringify(reportResult.data.report);
+              
+              console.log(`📊 Saving report to database, size: ${reportJsonString.length} characters`);
+              
               // Save report to database
               await executeQuery(
                 `UPDATE user_bank_statements 
                  SET report_data = ?, status = 'completed', updated_at = NOW() 
                  WHERE request_id = ?`,
-                [JSON.stringify(reportResult.data.report), actualRequestId]
+                [reportJsonString, actualRequestId]
               );
               
-              console.log('✅ Report fetched and saved successfully to database');
+              // Verify the save by checking the stored data length
+              const verifyResult = await executeQuery(
+                `SELECT LENGTH(report_data) as report_length FROM user_bank_statements WHERE request_id = ?`,
+                [actualRequestId]
+              );
+              
+              if (verifyResult && verifyResult[0]) {
+                console.log(`✅ Report saved successfully, stored length: ${verifyResult[0].report_length} characters`);
+              } else {
+                console.warn('⚠️  Could not verify report save');
+              }
+              
+              // Extract and save bank details from report
+              try {
+                const bankDetailsResult = await extractAndSaveBankDetails(reportResult.data.report, statement.user_id);
+                if (bankDetailsResult.success) {
+                  console.log('✅ Bank details extracted and saved:', bankDetailsResult.data);
+                } else {
+                  console.log('⚠️  Bank details extraction failed:', bankDetailsResult.message);
+                }
+              } catch (bankDetailsError) {
+                console.error('❌ Error extracting bank details:', bankDetailsError);
+                // Don't fail the webhook if bank details extraction fails
+              }
             } else {
               console.log('⚠️  Report fetch failed:', reportResult.error || 'Unknown error');
             }
@@ -786,22 +1192,55 @@ async function handleBankDataWebhook(req, res) {
             console.log('📊 Status check result:', JSON.stringify(statusResult, null, 2));
             
             if (statusResult.success && (statusResult.data.overall_status === 'completed' || statusResult.data.is_complete)) {
-              // Fetch the report using client_ref_num
-              console.log('📥 Fetching report for client_ref_num:', clientRefNum);
-              const reportResult = await retrieveBankStatementReport(clientRefNum, 'json');
+              // Fetch the report - use txn_id if available, otherwise use client_ref_num
+              console.log(`📥 Fetching report using ${txnId ? `txn_id=${txnId}` : `client_ref_num=${clientRefNum}`}`);
+              
+              const reportResult = txnId 
+                ? await retrieveBankStatementReport(null, 'json', txnId)
+                : await retrieveBankStatementReport(clientRefNum, 'json');
               
               console.log('📥 Report fetch result:', reportResult.success ? 'Success' : reportResult.error);
               
               if (reportResult.success && reportResult.data && reportResult.data.report) {
+                // Convert report to JSON string for storage
+                const reportJsonString = typeof reportResult.data.report === 'string' 
+                  ? reportResult.data.report 
+                  : JSON.stringify(reportResult.data.report);
+                
+                console.log(`📊 Saving report to database, size: ${reportJsonString.length} characters`);
+                
                 // Save report to database
                 await executeQuery(
                   `UPDATE user_bank_statements 
                    SET report_data = ?, status = 'completed', updated_at = NOW() 
                    WHERE request_id = ?`,
-                  [JSON.stringify(reportResult.data.report), actualRequestId]
+                  [reportJsonString, actualRequestId]
                 );
                 
-                console.log('✅ Report fetched and saved successfully to database');
+                // Verify the save
+                const verifyResult = await executeQuery(
+                  `SELECT LENGTH(report_data) as report_length FROM user_bank_statements WHERE request_id = ?`,
+                  [actualRequestId]
+                );
+                
+                if (verifyResult && verifyResult[0]) {
+                  console.log(`✅ Report saved successfully, stored length: ${verifyResult[0].report_length} characters`);
+                } else {
+                  console.warn('⚠️  Could not verify report save');
+                }
+                
+                // Extract and save bank details from report
+                try {
+                  const bankDetailsResult = await extractAndSaveBankDetails(reportResult.data.report, statement.user_id);
+                  if (bankDetailsResult.success) {
+                    console.log('✅ Bank details extracted and saved:', bankDetailsResult.data);
+                  } else {
+                    console.log('⚠️  Bank details extraction failed:', bankDetailsResult.message);
+                  }
+                } catch (bankDetailsError) {
+                  console.error('❌ Error extracting bank details:', bankDetailsError);
+                  // Don't fail the webhook if bank details extraction fails
+                }
               } else {
                 console.log('⚠️  Report not ready yet or fetch failed:', reportResult.error || 'Unknown error');
               }
@@ -937,6 +1376,7 @@ router.post('/init-bank-statement-table', async (req, res) => {
       
       const columnsToAdd = [
         { name: 'request_id', definition: 'INT DEFAULT NULL AFTER client_ref_num' },
+        { name: 'txn_id', definition: 'VARCHAR(255) DEFAULT NULL AFTER request_id' },
         { name: 'expires_at', definition: 'TIMESTAMP DEFAULT NULL AFTER digitap_url' },
         { name: 'transaction_data', definition: 'JSON DEFAULT NULL AFTER status' }
       ];
@@ -964,6 +1404,16 @@ router.post('/init-bank-statement-table', async (req, res) => {
         }
       }
 
+      // Add index for txn_id if doesn't exist
+      try {
+        await executeQuery(`ALTER TABLE user_bank_statements ADD INDEX idx_txn_id (txn_id)`);
+        console.log('✅ Added index: idx_txn_id');
+      } catch (err) {
+        if (err.message && err.message.includes('Duplicate key')) {
+          console.log('   Index idx_txn_id already exists');
+        }
+      }
+
       // Update status enum to include 'InProgress'
       try {
         await executeQuery(`ALTER TABLE user_bank_statements MODIFY status ENUM('pending', 'processing', 'completed', 'failed', 'InProgress') DEFAULT 'pending'`);
@@ -985,6 +1435,7 @@ router.post('/init-bank-statement-table', async (req, res) => {
         user_id INT NOT NULL UNIQUE,
         client_ref_num VARCHAR(255) NOT NULL UNIQUE,
         request_id INT DEFAULT NULL,
+        txn_id VARCHAR(255) DEFAULT NULL,
         mobile_number VARCHAR(15) NOT NULL,
         bank_name VARCHAR(100) DEFAULT NULL,
         upload_method ENUM('online', 'manual', 'aa') DEFAULT 'online',
@@ -1001,6 +1452,7 @@ router.post('/init-bank-statement-table', async (req, res) => {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         INDEX idx_user_id (user_id),
         INDEX idx_request_id (request_id),
+        INDEX idx_txn_id (txn_id),
         INDEX idx_client_ref_num (client_ref_num),
         INDEX idx_status (status),
         INDEX idx_expires_at (expires_at)

@@ -28,6 +28,10 @@ import { EmploymentDetailsPage } from './components/pages/EmploymentDetailsPage'
 import { CreditCheckPage } from './components/pages/CreditCheckPage';
 import { BankStatementUploadPage } from './components/pages/BankStatementUploadPage';
 import { BankStatementSuccessPage } from './components/pages/BankStatementSuccessPage';
+import { LinkSalaryBankAccountPage } from './components/pages/LinkSalaryBankAccountPage';
+import { EmailVerificationPage } from './components/pages/EmailVerificationPage';
+import { ResidenceAddressPage } from './components/pages/ResidenceAddressPage';
+import { ApplicationUnderReviewPage } from './components/pages/ApplicationUnderReviewPage';
 import { AccountAggregatorFlow } from './components/pages/AccountAggregatorFlow';
 import { ApplicationFlow } from './components/ApplicationFlow';
 import { CreditScorePage } from './components/pages/CreditScorePage';
@@ -390,6 +394,38 @@ function AppContent() {
         <Route path="/bank-statement-success" element={
           isAuthenticated ? (
             <BankStatementSuccessPage />
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+        
+        <Route path="/link-salary-bank-account" element={
+          isAuthenticated ? (
+            <LinkSalaryBankAccountPage />
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+        
+        <Route path="/email-verification" element={
+          isAuthenticated ? (
+            <EmailVerificationPage />
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+        
+        <Route path="/residence-address" element={
+          isAuthenticated ? (
+            <ResidenceAddressPage />
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+        
+        <Route path="/application-under-review" element={
+          isAuthenticated ? (
+            <ApplicationUnderReviewPage />
           ) : (
             <Navigate to="/auth" replace />
           )

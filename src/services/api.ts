@@ -733,6 +733,33 @@ class ApiService {
   }
 
   /**
+   * Get available addresses from Experian and Digilocker
+   */
+  async getAvailableAddresses(): Promise<ApiResponse<{
+    digilocker_address?: any;
+    experian_addresses?: any[];
+  }>> {
+    return this.request('GET', '/user/available-addresses');
+  }
+
+  /**
+   * Save residence address and type
+   */
+  async saveResidenceAddress(data: {
+    residence_type: 'owned' | 'rented';
+    source: string;
+    address_line1: string;
+    address_line2?: string;
+    city: string;
+    state: string;
+    pincode: string;
+    country?: string;
+    full_address?: string;
+  }): Promise<ApiResponse<{ message: string }>> {
+    return this.request('POST', '/user/residence-address', data);
+  }
+
+  /**
    * Additional Details Update
    */
   async updateAdditionalDetails(data: {
