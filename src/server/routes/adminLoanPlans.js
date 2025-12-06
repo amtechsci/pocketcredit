@@ -28,6 +28,135 @@ router.get('/', authenticateAdmin, async (req, res) => {
 });
 
 /**
+ * GET /api/admin/loan-plans/:id/fees - Get fees assigned to a loan plan
+ * NOTE: This route must come BEFORE /:id to avoid route conflicts
+ */
+router.get('/:id/fees', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { id } = req.params;
+
+    const planFees = await executeQuery(
+      `SELECT 
+        lpf.id,
+        lpf.loan_plan_id,
+        lpf.fee_type_id,
+        lpf.fee_percent,
+        ft.fee_name,
+        ft.application_method,
+        ft.description
+       FROM loan_plan_fees lpf
+       INNER JOIN fee_types ft ON lpf.fee_type_id = ft.id
+       WHERE lpf.loan_plan_id = ?
+       ORDER BY ft.fee_name ASC`,
+      [id]
+    );
+
+    res.json({
+      success: true,
+      data: planFees
+    });
+  } catch (error) {
+    console.error('Get loan plan fees error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch loan plan fees'
+    });
+  }
+});
+
+/**
+ * POST /api/admin/loan-plans/:id/fees - Assign fee to loan plan
+ * NOTE: This route must come BEFORE /:id to avoid route conflicts
+ */
+router.post('/:id/fees', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { id } = req.params;
+    const { fee_type_id, fee_percent } = req.body;
+
+    if (!fee_type_id || fee_percent === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'fee_type_id and fee_percent are required'
+      });
+    }
+
+    // Check if loan plan exists
+    const plan = await executeQuery(
+      'SELECT id FROM loan_plans WHERE id = ?',
+      [id]
+    );
+
+    if (plan.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan plan not found'
+      });
+    }
+
+    // Check if fee type exists
+    const feeType = await executeQuery(
+      'SELECT id FROM fee_types WHERE id = ? AND is_active = 1',
+      [fee_type_id]
+    );
+
+    if (feeType.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Fee type not found or inactive'
+      });
+    }
+
+    // Insert or update fee assignment
+    await executeQuery(
+      `INSERT INTO loan_plan_fees (loan_plan_id, fee_type_id, fee_percent)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE fee_percent = ?`,
+      [id, fee_type_id, parseFloat(fee_percent), parseFloat(fee_percent)]
+    );
+
+    res.json({
+      success: true,
+      message: 'Fee assigned to loan plan successfully'
+    });
+  } catch (error) {
+    console.error('Assign fee to loan plan error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to assign fee to loan plan'
+    });
+  }
+});
+
+/**
+ * DELETE /api/admin/loan-plans/:id/fees/:feeId - Remove fee from loan plan
+ * NOTE: This route must come BEFORE /:id to avoid route conflicts
+ */
+router.delete('/:id/fees/:feeId', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { id, feeId } = req.params;
+
+    await executeQuery(
+      'DELETE FROM loan_plan_fees WHERE loan_plan_id = ? AND id = ?',
+      [id, feeId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Fee removed from loan plan successfully'
+    });
+  } catch (error) {
+    console.error('Remove fee from loan plan error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to remove fee from loan plan'
+    });
+  }
+});
+
+/**
  * GET /api/admin/loan-plans/:id - Get single loan plan
  */
 router.get('/:id', authenticateAdmin, async (req, res) => {
