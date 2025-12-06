@@ -8,6 +8,8 @@ const router = express.Router();
  */
 const ensureFeeTypesTable = async () => {
   await initializeDatabase();
+  
+  // Create fee_types table
   await executeQuery(`
     CREATE TABLE IF NOT EXISTS fee_types (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -21,34 +23,31 @@ const ensureFeeTypesTable = async () => {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `);
 
-  // Create junction table for member tier fees (deprecated but kept for backward compatibility)
-  // Note: member_tiers table may not exist, so we check first
+  // Try to create member_tier_fees table (deprecated, kept for backward compatibility)
+  // If member_tiers table doesn't exist, this will fail silently
   try {
-    const [tables] = await executeQuery(`
-      SELECT COUNT(*) as count 
-      FROM information_schema.tables 
-      WHERE table_schema = DATABASE() 
-      AND table_name = 'member_tiers'
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS member_tier_fees (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        member_tier_id INT NOT NULL,
+        fee_type_id INT NOT NULL,
+        fee_percent DECIMAL(5,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (member_tier_id) REFERENCES member_tiers(id) ON DELETE CASCADE,
+        FOREIGN KEY (fee_type_id) REFERENCES fee_types(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_tier_fee (member_tier_id, fee_type_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    
-    if (tables[0]?.count > 0) {
-      await executeQuery(`
-        CREATE TABLE IF NOT EXISTS member_tier_fees (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          member_tier_id INT NOT NULL,
-          fee_type_id INT NOT NULL,
-          fee_percent DECIMAL(5,2) NOT NULL,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          FOREIGN KEY (member_tier_id) REFERENCES member_tiers(id) ON DELETE CASCADE,
-          FOREIGN KEY (fee_type_id) REFERENCES fee_types(id) ON DELETE CASCADE,
-          UNIQUE KEY unique_tier_fee (member_tier_id, fee_type_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-      `);
-    }
   } catch (error) {
     // If member_tiers table doesn't exist, skip creating member_tier_fees
-    console.log('Note: member_tiers table not found, skipping member_tier_fees table creation');
+    // This is expected if member tiers have been removed
+    if (error.message && error.message.includes('member_tiers')) {
+      console.log('Note: member_tiers table not found, skipping member_tier_fees table creation');
+    } else {
+      // Re-throw unexpected errors
+      throw error;
+    }
   }
 };
 
@@ -63,13 +62,15 @@ router.get('/', authenticateAdmin, async (req, res) => {
     );
     res.json({ 
       success: true, 
-      data: feeTypes 
+      data: feeTypes || []
     });
   } catch (error) {
     console.error('Get fee types error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({ 
       success: false, 
-      message: 'Failed to fetch fee types' 
+      message: 'Failed to fetch fee types',
+      error: error.message
     });
   }
 });
@@ -225,29 +226,26 @@ router.delete('/:id', authenticateAdmin, async (req, res) => {
 
     // Check if fee type is assigned to any member tier (if table exists)
     try {
-      const [tables] = await executeQuery(`
-        SELECT COUNT(*) as count 
-        FROM information_schema.tables 
-        WHERE table_schema = DATABASE() 
-        AND table_name = 'member_tier_fees'
-      `);
-      
-      if (tables[0]?.count > 0) {
-        const assigned = await executeQuery(
-          'SELECT COUNT(*) as count FROM member_tier_fees WHERE fee_type_id = ?',
-          [id]
-        );
+      const assigned = await executeQuery(
+        'SELECT COUNT(*) as count FROM member_tier_fees WHERE fee_type_id = ?',
+        [id]
+      );
 
-        if (assigned[0]?.count > 0) {
-          return res.status(400).json({
-            success: false,
-            message: 'Cannot delete fee type that is assigned to member tiers. Please remove it from all tiers first.'
-          });
-        }
+      if (assigned && assigned.length > 0 && assigned[0] && assigned[0].count > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot delete fee type that is assigned to member tiers. Please remove it from all tiers first.'
+        });
       }
     } catch (error) {
       // If member_tier_fees table doesn't exist, skip the check
-      console.log('Note: member_tier_fees table not found, skipping assignment check');
+      // This is expected if member tiers have been removed
+      if (error.message && error.message.includes('member_tier_fees')) {
+        console.log('Note: member_tier_fees table not found, skipping assignment check');
+      } else {
+        // Log unexpected errors but don't fail
+        console.log('Note: Error checking member_tier_fees:', error.message);
+      }
     }
 
     await executeQuery('DELETE FROM fee_types WHERE id = ?', [id]);

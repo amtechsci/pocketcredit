@@ -201,7 +201,6 @@ router.post('/calculate', requireAuth, async (req, res) => {
         totalDeductFromDisbursal += feeAmount;
       } else if (defaultFee.application_method === 'add_to_total') {
         totalAddToTotal += feeAmount;
-        }
       }
     } else {
       // Fallback: Use default processing fee if no tier assigned
@@ -360,7 +359,7 @@ router.post('/calculate', requireAuth, async (req, res) => {
       [plan.id]
     );
     
-    const lateFeeStructure = latePenalties.map((lp: any) => ({
+    const lateFeeStructure = latePenalties.map((lp) => ({
       tier_name: `Day ${lp.days_overdue_start}${lp.days_overdue_end ? `-${lp.days_overdue_end}` : '+'}`,
       days_overdue_start: lp.days_overdue_start,
       days_overdue_end: lp.days_overdue_end,
