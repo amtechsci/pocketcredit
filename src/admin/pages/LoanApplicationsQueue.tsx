@@ -35,6 +35,17 @@ interface LoanApplication {
   monthlyIncome: number;
   employment: string;
   company: string;
+  processingFee?: number;
+  processingFeePercent?: number;
+  feesBreakdown?: Array<{
+    name: string;
+    percent: number;
+    application_method: string;
+    amount: number;
+  }>;
+  disbursalAmount?: number;
+  totalInterest?: number;
+  totalRepayable?: number;
   city: string;
   state: string;
   pincode: string;
@@ -722,7 +733,19 @@ export function LoanApplicationsQueue() {
                     <div className="text-sm font-semibold text-gray-900">
                       {formatCurrency(application.loanAmount)}
                     </div>
+                    {application.disbursalAmount && application.disbursalAmount !== application.loanAmount && (
                     <div className="text-xs text-gray-500">
+                        Disbursal: {formatCurrency(application.disbursalAmount)}
+                      </div>
+                    )}
+                    {application.feesBreakdown && application.feesBreakdown.length > 0 && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        {application.feesBreakdown.filter((f: any) => f.application_method === 'deduct_from_disbursal').map((f: any) => (
+                          <div key={f.name}>{f.name}: {formatCurrency(f.amount)}</div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="text-xs text-gray-500 mt-1">
                       Income: {formatCurrency(application.monthlyIncome)}
                     </div>
                   </td>

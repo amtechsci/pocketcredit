@@ -345,5 +345,147 @@ router.patch('/:id/toggle', authenticateAdmin, async (req, res) => {
   }
 });
 
+/**
+ * GET /api/admin/loan-plans/:id/late-penalties - Get late penalties for a loan plan
+ */
+router.get('/:id/late-penalties', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { id } = req.params;
+
+    const penalties = await executeQuery(
+      'SELECT * FROM late_penalty_tiers WHERE loan_plan_id = ? ORDER BY tier_order ASC',
+      [id]
+    );
+
+    res.json({
+      success: true,
+      data: penalties
+    });
+  } catch (error) {
+    console.error('Get late penalties error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch late penalties'
+    });
+  }
+});
+
+/**
+ * POST /api/admin/loan-plans/:id/late-penalties - Create late penalty tier for a loan plan
+ */
+router.post('/:id/late-penalties', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { id } = req.params;
+    const { days_overdue_start, days_overdue_end, penalty_percent, tier_order } = req.body;
+
+    // Validate required fields
+    if (days_overdue_start === undefined || penalty_percent === undefined || tier_order === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: days_overdue_start, penalty_percent, tier_order'
+      });
+    }
+
+    // Check if loan plan exists
+    const plan = await executeQuery(
+      'SELECT id FROM loan_plans WHERE id = ?',
+      [id]
+    );
+
+    if (plan.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan plan not found'
+      });
+    }
+
+    const result = await executeQuery(
+      `INSERT INTO late_penalty_tiers 
+        (loan_plan_id, days_overdue_start, days_overdue_end, penalty_percent, tier_order)
+      VALUES (?, ?, ?, ?, ?)`,
+      [id, days_overdue_start, days_overdue_end || null, penalty_percent, tier_order]
+    );
+
+    res.json({
+      success: true,
+      message: 'Late penalty tier created successfully',
+      data: {
+        id: result.insertId
+      }
+    });
+  } catch (error) {
+    console.error('Create late penalty error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create late penalty tier'
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/loan-plans/:id/late-penalties/:penaltyId - Update late penalty tier
+ */
+router.put('/:id/late-penalties/:penaltyId', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { id, penaltyId } = req.params;
+    const { days_overdue_start, days_overdue_end, penalty_percent, tier_order } = req.body;
+
+    // Validate required fields
+    if (days_overdue_start === undefined || penalty_percent === undefined || tier_order === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: days_overdue_start, penalty_percent, tier_order'
+      });
+    }
+
+    await executeQuery(
+      `UPDATE late_penalty_tiers 
+      SET days_overdue_start = ?, days_overdue_end = ?, penalty_percent = ?, tier_order = ?, updated_at = NOW()
+      WHERE id = ? AND loan_plan_id = ?`,
+      [days_overdue_start, days_overdue_end || null, penalty_percent, tier_order, penaltyId, id]
+    );
+
+    res.json({
+      success: true,
+      message: 'Late penalty tier updated successfully'
+    });
+  } catch (error) {
+    console.error('Update late penalty error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update late penalty tier'
+    });
+  }
+});
+
+/**
+ * DELETE /api/admin/loan-plans/:id/late-penalties/:penaltyId - Delete late penalty tier
+ */
+router.delete('/:id/late-penalties/:penaltyId', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { id, penaltyId } = req.params;
+
+    await executeQuery(
+      'DELETE FROM late_penalty_tiers WHERE id = ? AND loan_plan_id = ?',
+      [penaltyId, id]
+    );
+
+    res.json({
+      success: true,
+      message: 'Late penalty tier deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete late penalty error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete late penalty tier'
+    });
+  }
+});
+
 module.exports = router;
 

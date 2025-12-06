@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import adminApiService from '../../services/adminApi';
 import { 
@@ -423,6 +423,29 @@ export function AdminSettings() {
   const [loanPlansLoading, setLoanPlansLoading] = useState(false);
   const [editingPlan, setEditingPlan] = useState<LoanPlan | null>(null);
   const [showPlanForm, setShowPlanForm] = useState(false);
+  
+  // Late Penalty state
+  const [managingLatePenalties, setManagingLatePenalties] = useState<number | null>(null);
+  const [latePenalties, setLatePenalties] = useState<Array<{
+    id: number;
+    loan_plan_id: number;
+    days_overdue_start: number;
+    days_overdue_end: number | null;
+    penalty_percent: number;
+    tier_order: number;
+  }>>([]);
+  const [latePenaltyForm, setLatePenaltyForm] = useState<{
+    days_overdue_start: string;
+    days_overdue_end: string;
+    penalty_percent: string;
+    tier_order: string;
+  }>({
+    days_overdue_start: '',
+    days_overdue_end: '',
+    penalty_percent: '',
+    tier_order: ''
+  });
+  const [editingLatePenalty, setEditingLatePenalty] = useState<number | null>(null);
   const [planForm, setPlanForm] = useState({
     plan_name: '',
     plan_code: '',
@@ -440,6 +463,56 @@ export function AdminSettings() {
   });
 
   const [showPasswords, setShowPasswords] = useState<{ [key: string]: boolean }>({});
+
+  // Fee Types state
+  const [feeTypes, setFeeTypes] = useState<Array<{
+    id: number;
+    fee_name: string;
+    fee_percent: number;
+    application_method: 'deduct_from_disbursal' | 'add_to_total';
+    description: string | null;
+    is_active: boolean;
+  }>>([]);
+  const [feeTypesLoading, setFeeTypesLoading] = useState(false);
+  const [editingFeeType, setEditingFeeType] = useState<{
+    id: number;
+    fee_name: string;
+    fee_percent: number;
+    application_method: 'deduct_from_disbursal' | 'add_to_total';
+    description: string | null;
+    is_active: boolean;
+  } | null>(null);
+  const [showFeeTypeForm, setShowFeeTypeForm] = useState(false);
+  const [feeTypeForm, setFeeTypeForm] = useState<{
+    fee_name: string;
+    fee_percent: string;
+    application_method: 'deduct_from_disbursal' | 'add_to_total';
+    description: string;
+    is_active: boolean;
+  }>({
+    fee_name: '',
+    fee_percent: '',
+    application_method: 'deduct_from_disbursal',
+    description: '',
+    is_active: true
+  });
+
+  // Member tier fees state (for assigning fees to tiers)
+  const [tierFees, setTierFees] = useState<{ [tierId: number]: Array<{
+    id: number;
+    fee_type_id: number;
+    fee_percent: number;
+    fee_name: string;
+    application_method: string;
+  }> }>({});
+  const [assigningFeeToTier, setAssigningFeeToTier] = useState<number | null>(null);
+  const [feeAssignmentForm, setFeeAssignmentForm] = useState<{
+    fee_type_id: string;
+    fee_percent: string;
+  }>({
+    fee_type_id: '',
+    fee_percent: ''
+  });
 
   // Member tiers state
   const [tiers, setTiers] = useState<Array<{ id: number; tier_name: string; processing_fee_percent: number; interest_percent_per_day: number }>>([]);
@@ -554,7 +627,7 @@ export function AdminSettings() {
   ];
 
   const tabs = [
-    { id: 'members', label: 'Member Tiers', icon: Shield, count: 0 },
+    { id: 'fee-types', label: 'Fee Types', icon: DollarSign, count: 0 },
     { id: 'loan-tiers', label: 'Loan Limits', icon: DollarSign, count: 0 },
     { id: 'loan-plans', label: 'Loan Plans', icon: CreditCard, count: 0 },
     { id: 'user-config', label: 'User Config', icon: Settings, count: 0 },
@@ -725,12 +798,181 @@ export function AdminSettings() {
       }))
     : apiConfigs.filter(config => config.type === activeTab);
 
+  // Fee Types helpers
+  const fetchFeeTypes = async () => {
+    try {
+      setFeeTypesLoading(true);
+      const res = await adminApiService.getFeeTypes();
+      if (res.success) {
+        setFeeTypes(res.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching fee types:', error);
+      alert('Failed to fetch fee types');
+    } finally {
+      setFeeTypesLoading(false);
+    }
+  };
+
+  const createFeeType = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!feeTypeForm.fee_name || !feeTypeForm.fee_percent) return;
+
+    try {
+      const data = {
+        fee_name: feeTypeForm.fee_name,
+        fee_percent: parseFloat(feeTypeForm.fee_percent),
+        application_method: feeTypeForm.application_method,
+        description: feeTypeForm.description || undefined,
+        is_active: feeTypeForm.is_active
+      };
+
+      if (editingFeeType) {
+        await adminApiService.updateFeeType(editingFeeType.id, data);
+        alert('Fee type updated successfully!');
+      } else {
+        await adminApiService.createFeeType(data);
+        alert('Fee type created successfully!');
+      }
+
+      setShowFeeTypeForm(false);
+      setEditingFeeType(null);
+      setFeeTypeForm({
+        fee_name: '',
+        fee_percent: '',
+        application_method: 'deduct_from_disbursal',
+        description: '',
+        is_active: true
+      });
+      await fetchFeeTypes();
+    } catch (error) {
+      console.error('Error saving fee type:', error);
+      alert('Failed to save fee type');
+    }
+  };
+
+  const editFeeType = (feeType: typeof feeTypes[0]) => {
+    setEditingFeeType(feeType);
+    setFeeTypeForm({
+      fee_name: feeType.fee_name,
+      fee_percent: feeType.fee_percent.toString(),
+      application_method: feeType.application_method,
+      description: feeType.description || '',
+      is_active: feeType.is_active
+    });
+    setShowFeeTypeForm(true);
+  };
+
+  const deleteFeeType = async (id: number) => {
+    if (!confirm('Are you sure you want to delete this fee type?')) return;
+    try {
+      await adminApiService.deleteFeeType(id);
+      alert('Fee type deleted successfully!');
+      await fetchFeeTypes();
+    } catch (error) {
+      console.error('Error deleting fee type:', error);
+      alert('Failed to delete fee type');
+    }
+  };
+
+  const cancelEditFeeType = () => {
+    setShowFeeTypeForm(false);
+    setEditingFeeType(null);
+    setFeeTypeForm({
+      fee_name: '',
+      fee_percent: '',
+      application_method: 'deduct_from_disbursal',
+      description: '',
+      is_active: true
+    });
+  };
+
+  // Track which tier fees are being fetched to prevent duplicates
+  const fetchingTierFees = useRef<Set<number>>(new Set());
+  
+  const fetchTierFees = async (tierId: number) => {
+    // Prevent duplicate calls
+    if (fetchingTierFees.current.has(tierId) || tierFees[tierId]) {
+      return;
+    }
+    
+    fetchingTierFees.current.add(tierId);
+    try {
+      const res = await adminApiService.getMemberTierFees(tierId);
+      if (res.success) {
+        setTierFees(prev => ({
+          ...prev,
+          [tierId]: res.data || []
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching tier fees:', error);
+      // Don't cache failed requests, allow retry
+      fetchingTierFees.current.delete(tierId);
+    } finally {
+      fetchingTierFees.current.delete(tierId);
+    }
+  };
+
+  // Assign fee to tier
+  const assignFeeToTier = async (tierId: number) => {
+    if (!feeAssignmentForm.fee_type_id || !feeAssignmentForm.fee_percent) {
+      alert('Please select a fee type and enter a percentage');
+      return;
+    }
+
+    try {
+      await adminApiService.assignFeeToTier(tierId, {
+        fee_type_id: parseInt(feeAssignmentForm.fee_type_id),
+        fee_percent: parseFloat(feeAssignmentForm.fee_percent)
+      });
+      alert('Fee assigned successfully!');
+      setFeeAssignmentForm({ fee_type_id: '', fee_percent: '' });
+      setAssigningFeeToTier(null);
+      await fetchTierFees(tierId);
+    } catch (error) {
+      console.error('Error assigning fee to tier:', error);
+      alert('Failed to assign fee to tier');
+    }
+  };
+
+  // Remove fee from tier
+  const removeFeeFromTier = async (tierId: number, feeId: number) => {
+    if (!confirm('Are you sure you want to remove this fee from the tier?')) return;
+    try {
+      await adminApiService.removeFeeFromTier(tierId, feeId);
+      alert('Fee removed successfully!');
+      await fetchTierFees(tierId);
+    } catch (error) {
+      console.error('Error removing fee from tier:', error);
+      alert('Failed to remove fee from tier');
+    }
+  };
+
   // Member tiers helpers
   const loadTiers = async () => {
     setTiersLoading(true);
-    const res = await adminApiService.getMemberTiers();
-    if (res.status === 'success' && res.data) setTiers(res.data);
-    setTiersLoading(false);
+    try {
+      const res = await adminApiService.getMemberTiers();
+      if (res.status === 'success' && res.data) {
+        setTiers(res.data);
+        // Fetch fees for each tier in parallel batches to avoid timeout
+        // Process in batches of 3 to prevent overwhelming the server
+        const batchSize = 3;
+        for (let i = 0; i < res.data.length; i += batchSize) {
+          const batch = res.data.slice(i, i + batchSize);
+          await Promise.all(batch.map(tier => fetchTierFees(tier.id)));
+          // Small delay between batches
+          if (i + batchSize < res.data.length) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading tiers:', error);
+    } finally {
+      setTiersLoading(false);
+    }
   };
 
   const seedDefaultTiers = async () => {
@@ -1248,9 +1490,102 @@ export function AdminSettings() {
     resetPlanForm();
   };
 
+  // Late Penalty Functions
+  const loadLatePenalties = async (planId: number) => {
+    try {
+      const response = await adminApiService.getLoanPlanLatePenalties(planId);
+      if (response.success) {
+        setLatePenalties(response.data || []);
+      }
+    } catch (error) {
+      console.error('Error loading late penalties:', error);
+    }
+  };
+
+  const openLatePenaltyManager = async (planId: number) => {
+    setManagingLatePenalties(planId);
+    await loadLatePenalties(planId);
+    setLatePenaltyForm({
+      days_overdue_start: '',
+      days_overdue_end: '',
+      penalty_percent: '',
+      tier_order: ''
+    });
+    setEditingLatePenalty(null);
+  };
+
+  const saveLatePenalty = async (planId: number) => {
+    if (!latePenaltyForm.days_overdue_start || !latePenaltyForm.penalty_percent || !latePenaltyForm.tier_order) {
+      alert('Please fill all required fields');
+      return;
+    }
+
+    try {
+      const data = {
+        days_overdue_start: parseInt(latePenaltyForm.days_overdue_start),
+        days_overdue_end: latePenaltyForm.days_overdue_end ? parseInt(latePenaltyForm.days_overdue_end) : null,
+        penalty_percent: parseFloat(latePenaltyForm.penalty_percent),
+        tier_order: parseInt(latePenaltyForm.tier_order)
+      };
+
+      if (editingLatePenalty) {
+        await adminApiService.updateLoanPlanLatePenalty(planId, editingLatePenalty, data);
+        alert('Late penalty updated successfully!');
+      } else {
+        await adminApiService.createLoanPlanLatePenalty(planId, data);
+        alert('Late penalty created successfully!');
+      }
+
+      await loadLatePenalties(planId);
+      setLatePenaltyForm({
+        days_overdue_start: '',
+        days_overdue_end: '',
+        penalty_percent: '',
+        tier_order: ''
+      });
+      setEditingLatePenalty(null);
+    } catch (error: any) {
+      console.error('Error saving late penalty:', error);
+      alert(error.response?.data?.message || 'Failed to save late penalty');
+    }
+  };
+
+  const editLatePenalty = (penalty: any) => {
+    setEditingLatePenalty(penalty.id);
+    setLatePenaltyForm({
+      days_overdue_start: penalty.days_overdue_start.toString(),
+      days_overdue_end: penalty.days_overdue_end ? penalty.days_overdue_end.toString() : '',
+      penalty_percent: penalty.penalty_percent.toString(),
+      tier_order: penalty.tier_order.toString()
+    });
+  };
+
+  const deleteLatePenalty = async (planId: number, penaltyId: number) => {
+    if (!confirm('Are you sure you want to delete this late penalty tier?')) return;
+    
+    try {
+      await adminApiService.deleteLoanPlanLatePenalty(planId, penaltyId);
+      alert('Late penalty deleted successfully!');
+      await loadLatePenalties(planId);
+    } catch (error) {
+      console.error('Error deleting late penalty:', error);
+      alert('Failed to delete late penalty');
+    }
+  };
+
+  const cancelEditLatePenalty = () => {
+    setLatePenaltyForm({
+      days_overdue_start: '',
+      days_overdue_end: '',
+      penalty_percent: '',
+      tier_order: ''
+    });
+    setEditingLatePenalty(null);
+  };
+
   useEffect(() => {
-    if (activeTab === 'members') {
-      loadTiers();
+    if (activeTab === 'fee-types') {
+      fetchFeeTypes();
     } else if (activeTab === 'loan-tiers') {
       loadLoanTiers();
     } else if (activeTab === 'loan-plans') {
@@ -1312,8 +1647,192 @@ export function AdminSettings() {
           </div>
         </div>
 
-        {/* Member Tiers Settings */}
-        {activeTab === 'members' && (
+        {/* Late Penalty Modal */}
+        {managingLatePenalties !== null && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+              <div className="p-6 border-b border-gray-200">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold">Manage Late Penalties</h3>
+                  <button
+                    onClick={() => {
+                      setManagingLatePenalties(null);
+                      setLatePenalties([]);
+                      cancelEditLatePenalty();
+                    }}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <XCircle className="w-5 h-5" />
+                  </button>
+                </div>
+                <p className="text-sm text-gray-600 mt-1">
+                  Configure late penalty tiers for: {loanPlans.find(p => p.id === managingLatePenalties)?.plan_name}
+                </p>
+              </div>
+              
+              <div className="p-6">
+                {/* Late Penalty Form */}
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <h4 className="text-md font-semibold mb-4">
+                    {editingLatePenalty ? 'Edit Late Penalty Tier' : 'Add New Late Penalty Tier'}
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Days Overdue Start *
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={latePenaltyForm.days_overdue_start}
+                        onChange={e => setLatePenaltyForm({ ...latePenaltyForm, days_overdue_start: e.target.value })}
+                        placeholder="e.g., 1"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Days Overdue End
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={latePenaltyForm.days_overdue_end}
+                        onChange={e => setLatePenaltyForm({ ...latePenaltyForm, days_overdue_end: e.target.value })}
+                        placeholder="Leave empty for unlimited"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Leave empty for unlimited</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Penalty % per Day *
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={latePenaltyForm.penalty_percent}
+                        onChange={e => setLatePenaltyForm({ ...latePenaltyForm, penalty_percent: e.target.value })}
+                        placeholder="e.g., 0.10"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Order *
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={latePenaltyForm.tier_order}
+                        onChange={e => setLatePenaltyForm({ ...latePenaltyForm, tier_order: e.target.value })}
+                        placeholder="e.g., 1"
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-4">
+                    <button
+                      onClick={() => saveLatePenalty(managingLatePenalties)}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    >
+                      <Save className="w-4 h-4 inline mr-1" />
+                      {editingLatePenalty ? 'Update' : 'Add'} Penalty
+                    </button>
+                    {editingLatePenalty && (
+                      <button
+                        onClick={cancelEditLatePenalty}
+                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Late Penalties Table */}
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="text-left border-b">
+                        <th className="py-2 pr-4">Order</th>
+                        <th className="py-2 pr-4">Days Overdue</th>
+                        <th className="py-2 pr-4">Penalty %/Day</th>
+                        <th className="py-2 pr-4">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {latePenalties.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="py-4 text-center text-gray-500">
+                            No late penalties configured. Add one above.
+                          </td>
+                        </tr>
+                      ) : (
+                        latePenalties
+                          .sort((a, b) => a.tier_order - b.tier_order)
+                          .map(penalty => (
+                            <tr key={penalty.id} className="border-b hover:bg-gray-50">
+                              <td className="py-3 pr-4">{penalty.tier_order}</td>
+                              <td className="py-3 pr-4">
+                                Day {penalty.days_overdue_start}
+                                {penalty.days_overdue_end 
+                                  ? ` - ${penalty.days_overdue_end}`
+                                  : ' and above'
+                                }
+                              </td>
+                              <td className="py-3 pr-4">{penalty.penalty_percent}%</td>
+                              <td className="py-3 pr-4">
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => editLatePenalty(penalty)}
+                                    className="text-blue-600 hover:text-blue-900"
+                                    title="Edit"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => deleteLatePenalty(managingLatePenalties, penalty.id)}
+                                    className="text-red-600 hover:text-red-900"
+                                    title="Delete"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Info Box */}
+                <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm text-blue-800">
+                      <p className="font-semibold mb-2">Late Penalty Configuration:</p>
+                      <ul className="list-disc list-inside space-y-1">
+                        <li>Penalties are applied based on days overdue from the due date</li>
+                        <li>Lower order numbers are checked first</li>
+                        <li>Leave "Days Overdue End" empty for unlimited (applies to all days after start)</li>
+                        <li>Example: Day 1: 2%, Day 2-10: 0.10%, Day 11-30: 0.09%, Day 31+: 0%</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Member Tiers Settings - REMOVED */}
+        {false && activeTab === 'members' && (
           <div className="space-y-6">
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <div className="flex items-center justify-between mb-4">
@@ -1405,28 +1924,322 @@ export function AdminSettings() {
                   <thead>
                     <tr className="text-left border-b">
                       <th className="py-2 pr-4">Name</th>
-                      <th className="py-2 pr-4">Processing Fee %</th>
+                      <th className="py-2 pr-4">Fees (Deduct from Disbursal)</th>
                       <th className="py-2 pr-4">Interest %/day</th>
                       <th className="py-2 pr-4">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {tiers.map(t => (
-                      <tr key={t.id} className="border-b hover:bg-gray-50">
-                        <td className="py-3 pr-4 capitalize font-medium">{t.tier_name}</td>
-                        <td className="py-3 pr-4">{t.processing_fee_percent}%</td>
-                        <td className="py-3 pr-4">{t.interest_percent_per_day}%</td>
+                    {tiers.map(t => {
+                      // Don't fetch during render - fees are loaded when tiers are loaded
+                      return (
+                        <tr key={t.id} className="border-b hover:bg-gray-50">
+                          <td className="py-3 pr-4 capitalize font-medium">{t.tier_name}</td>
+                          <td className="py-3 pr-4">
+                            <div className="space-y-1">
+                              {tierFees[t.id]?.filter(f => f.application_method === 'deduct_from_disbursal').map(f => (
+                                <div key={f.id} className="text-xs text-gray-600">
+                                  {f.fee_name}: {f.fee_percent}%
+                                </div>
+                              ))}
+                              {(!tierFees[t.id] || tierFees[t.id].filter(f => f.application_method === 'deduct_from_disbursal').length === 0) && (
+                                <span className="text-gray-400 text-xs">No fees</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 pr-4">{t.interest_percent_per_day}%</td>
+                          <td className="py-3 pr-4">
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => {
+                                  setAssigningFeeToTier(t.id);
+                                  setFeeAssignmentForm({ fee_type_id: '', fee_percent: '' });
+                                }}
+                                className="text-green-600 hover:text-green-900"
+                                title="Assign Fee"
+                              >
+                                <Plus className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => editMemberTier(t)}
+                                className="text-blue-600 hover:text-blue-900"
+                                title="Edit"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => deleteMemberTier(t.id)}
+                                className="text-red-600 hover:text-red-900"
+                                title="Delete"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {tiers.length === 0 && !tiersLoading && (
+                      <tr>
+                        <td className="py-3" colSpan={4}>No tiers found. Click "Add New Tier" to create one.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Fee Assignment Modal */}
+              {assigningFeeToTier && (
+                <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <h3 className="text-md font-semibold text-gray-900 mb-4">
+                    Assign Fee to {tiers.find(t => t.id === assigningFeeToTier)?.tier_name} Tier
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Fee Type *
+                      </label>
+                      <select
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={feeAssignmentForm.fee_type_id}
+                        onChange={e => setFeeAssignmentForm({ ...feeAssignmentForm, fee_type_id: e.target.value })}
+                        required
+                      >
+                        <option value="">Select Fee Type</option>
+                        {feeTypes.filter(ft => ft.is_active).map(ft => (
+                          <option key={ft.id} value={ft.id}>
+                            {ft.fee_name} ({ft.application_method === 'deduct_from_disbursal' ? 'Deduct from Disbursal' : 'Add to Total'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Fee Percentage (%) *
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="100"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="e.g., 5"
+                        value={feeAssignmentForm.fee_percent}
+                        onChange={e => setFeeAssignmentForm({ ...feeAssignmentForm, fee_percent: e.target.value })}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      onClick={() => assignFeeToTier(assigningFeeToTier)}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    >
+                      Assign Fee
+                    </button>
+                    <button
+                      onClick={() => {
+                        setAssigningFeeToTier(null);
+                        setFeeAssignmentForm({ fee_type_id: '', fee_percent: '' });
+                      }}
+                      className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  
+                  {/* Show assigned fees */}
+                  {tierFees[assigningFeeToTier] && tierFees[assigningFeeToTier].length > 0 && (
+                    <div className="mt-4">
+                      <h4 className="text-sm font-semibold mb-2">Assigned Fees:</h4>
+                      <div className="space-y-2">
+                        {tierFees[assigningFeeToTier].map(fee => (
+                          <div key={fee.id} className="flex items-center justify-between p-2 bg-white rounded border">
+                            <span className="text-sm">
+                              {fee.fee_name}: {fee.fee_percent}% ({fee.application_method === 'deduct_from_disbursal' ? 'Deduct from Disbursal' : 'Add to Total'})
+                            </span>
+                            <button
+                              onClick={() => removeFeeFromTier(assigningFeeToTier, fee.id)}
+                              className="text-red-600 hover:text-red-900"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Fee Types Settings */}
+        {activeTab === 'fee-types' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-lg font-semibold">Fee Types</h2>
+                  <p className="text-sm text-gray-600 mt-1">Create and manage fee types that can be assigned to member tiers</p>
+                </div>
+                <button
+                  onClick={() => setShowFeeTypeForm(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Fee Type
+                </button>
+              </div>
+
+              {/* Fee Type Form */}
+              {showFeeTypeForm && (
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <h3 className="text-md font-semibold text-gray-900 mb-4">
+                    {editingFeeType ? 'Edit Fee Type' : 'Add New Fee Type'}
+                  </h3>
+                  <form onSubmit={createFeeType} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Fee Name *
+                        </label>
+                        <input
+                          type="text"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="e.g., Processing Fee"
+                          value={feeTypeForm.fee_name}
+                          onChange={e => setFeeTypeForm({ ...feeTypeForm, fee_name: e.target.value })}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Default Fee Percentage (%) *
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="e.g., 5"
+                          value={feeTypeForm.fee_percent}
+                          onChange={e => setFeeTypeForm({ ...feeTypeForm, fee_percent: e.target.value })}
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Application Method *
+                      </label>
+                      <select
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={feeTypeForm.application_method}
+                        onChange={e => setFeeTypeForm({ ...feeTypeForm, application_method: e.target.value as 'deduct_from_disbursal' | 'add_to_total' })}
+                        required
+                      >
+                        <option value="deduct_from_disbursal">Deduct from Disbursal Amount</option>
+                        <option value="add_to_total">Add to Total Repayable Amount</option>
+                      </select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {feeTypeForm.application_method === 'deduct_from_disbursal' 
+                          ? 'Fee will be deducted from the loan amount before disbursal (e.g., Processing Fee)'
+                          : 'Fee will be added to the total repayable amount (e.g., Service Fee)'}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Description
+                      </label>
+                      <textarea
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        rows={3}
+                        placeholder="Optional description..."
+                        value={feeTypeForm.description}
+                        onChange={e => setFeeTypeForm({ ...feeTypeForm, description: e.target.value })}
+                      />
+                    </div>
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id="fee_active"
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        checked={feeTypeForm.is_active}
+                        onChange={e => setFeeTypeForm({ ...feeTypeForm, is_active: e.target.checked })}
+                      />
+                      <label htmlFor="fee_active" className="ml-2 text-sm text-gray-700">
+                        Active
+                      </label>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                        disabled={feeTypesLoading}
+                      >
+                        <Save className="w-4 h-4 inline mr-1" />
+                        {editingFeeType ? 'Update Fee Type' : 'Create Fee Type'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelEditFeeType}
+                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left border-b">
+                      <th className="py-2 pr-4">Name</th>
+                      <th className="py-2 pr-4">Default %</th>
+                      <th className="py-2 pr-4">Application Method</th>
+                      <th className="py-2 pr-4">Status</th>
+                      <th className="py-2 pr-4">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {feeTypes.map(ft => (
+                      <tr key={ft.id} className="border-b hover:bg-gray-50">
+                        <td className="py-3 pr-4 font-medium">{ft.fee_name}</td>
+                        <td className="py-3 pr-4">{ft.fee_percent}%</td>
+                        <td className="py-3 pr-4">
+                          <span className={`px-2 py-1 rounded text-xs ${
+                            ft.application_method === 'deduct_from_disbursal' 
+                              ? 'bg-blue-100 text-blue-800' 
+                              : 'bg-green-100 text-green-800'
+                          }`}>
+                            {ft.application_method === 'deduct_from_disbursal' 
+                              ? 'Deduct from Disbursal' 
+                              : 'Add to Total'}
+                          </span>
+                        </td>
+                        <td className="py-3 pr-4">
+                          <span className={`px-2 py-1 rounded text-xs ${
+                            ft.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {ft.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
                         <td className="py-3 pr-4">
                           <div className="flex gap-2">
                             <button
-                              onClick={() => editMemberTier(t)}
+                              onClick={() => editFeeType(ft)}
                               className="text-blue-600 hover:text-blue-900"
                               title="Edit"
                             >
                               <Edit className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => deleteMemberTier(t.id)}
+                              onClick={() => deleteFeeType(ft.id)}
                               className="text-red-600 hover:text-red-900"
                               title="Delete"
                             >
@@ -1436,9 +2249,9 @@ export function AdminSettings() {
                         </td>
                       </tr>
                     ))}
-                    {tiers.length === 0 && !tiersLoading && (
+                    {feeTypes.length === 0 && !feeTypesLoading && (
                       <tr>
-                        <td className="py-3" colSpan={4}>No tiers found. Click "Add New Tier" to create one.</td>
+                        <td className="py-3" colSpan={5}>No fee types found. Click "Add Fee Type" to create one.</td>
                       </tr>
                     )}
                   </tbody>
@@ -2181,6 +2994,13 @@ export function AdminSettings() {
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                 <div className="flex gap-2">
                                   <button
+                                    onClick={() => openLatePenaltyManager(plan.id)}
+                                    className="text-purple-600 hover:text-purple-900"
+                                    title="Manage Late Penalties"
+                                  >
+                                    <DollarSign className="w-4 h-4" />
+                                  </button>
+                                  <button
                                     onClick={() => editLoanPlan(plan)}
                                     className="text-blue-600 hover:text-blue-900"
                                     title="Edit"
@@ -2212,7 +3032,7 @@ export function AdminSettings() {
                         <ul className="list-disc list-inside space-y-1">
                           <li><strong>Single Payment:</strong> User repays full amount in one go after specified days (e.g., 15-day, 30-day)</li>
                           <li><strong>Multi-EMI:</strong> User pays in equal installments (e.g., 3 monthly EMIs, 6 monthly EMIs)</li>
-                          <li>Interest and processing fees are defined in Member Tiers settings</li>
+                          <li>Interest and fees are configured per loan plan</li>
                           <li>Users select their preferred plan when applying for a loan</li>
                           <li>Lower order numbers appear first in the plan selection screen</li>
                         </ul>

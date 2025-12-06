@@ -17,10 +17,14 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     
     console.log('📄 Generating KFS for loan ID:', loanId);
     
-    // Fetch loan application details
+    // Fetch loan application details including dynamic fees
     const [loans] = await db.execute(`
       SELECT 
         la.*,
+        la.fees_breakdown,
+        la.disbursal_amount,
+        la.total_deduct_from_disbursal,
+        la.total_add_to_total,
         u.first_name, u.last_name, u.email, u.phone, u.date_of_birth,
         u.gender, u.marital_status
       FROM loan_applications la
@@ -69,9 +73,33 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       return rangeMap[range] || 0;
     };
     
-    // Calculate loan values
+    // Parse fees breakdown if available
+    let feesBreakdown = [];
+    let totalDeductFromDisbursal = 0;
+    let totalAddToTotal = 0;
+    let disbursalAmount = null;
+    
+    if (loan.fees_breakdown) {
+      try {
+        feesBreakdown = typeof loan.fees_breakdown === 'string' 
+          ? JSON.parse(loan.fees_breakdown) 
+          : loan.fees_breakdown;
+        
+        // Calculate totals from breakdown
+        feesBreakdown.forEach(fee => {
+          if (fee.application_method === 'deduct_from_disbursal') {
+            totalDeductFromDisbursal += parseFloat(fee.amount || 0);
+          } else if (fee.application_method === 'add_to_total') {
+            totalAddToTotal += parseFloat(fee.amount || 0);
+          }
+        });
+      } catch (e) {
+        console.error('Error parsing fees_breakdown:', e);
+      }
+    }
+    
+    // Use disbursal_amount if available, otherwise calculate
     const principal = parseFloat(loan.loan_amount || 0);
-    const pfPercent = parseFloat(loan.processing_fee_percent || 14);
     const intPercentPerDay = parseFloat(loan.interest_percent_per_day || 0.3);
     
     // Get days from plan_snapshot or default to 30
@@ -92,17 +120,53 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       days = calculateTotalDays(loan.disbursed_at);
     }
     
-    const loanData = {
-      loan_amount: principal,
-      processing_fee_percent: pfPercent,
-      interest_percent_per_day: intPercentPerDay
-    };
+    // Use dynamic fees if available, otherwise fallback to legacy calculation
+    let calculations;
+    let processingFee = 0;
+    let gst = 0;
+    let disbAmount = principal;
     
-    const calculations = calculateLoanValues(loanData, days);
+    if (feesBreakdown.length > 0 && loan.disbursal_amount !== null) {
+      // Use dynamic fees
+      disbursalAmount = parseFloat(loan.disbursal_amount || 0);
+      disbAmount = disbursalAmount;
+      
+      // Calculate GST on fees deducted from disbursal (18% GST)
+      gst = totalDeductFromDisbursal * 0.18;
+      
+      // Calculate interest on disbursed amount
+      const interest = (disbAmount * intPercentPerDay / 100) * days;
+      
+      // Total repayable = disbursed amount + interest + fees added to total
+      const totalRepayable = disbAmount + interest + totalAddToTotal;
+      
+      calculations = {
+        principal: principal,
+        processingFee: totalDeductFromDisbursal,
+        gst: gst,
+        disbAmount: disbAmount,
+        interest: interest,
+        totalAmount: totalRepayable
+      };
+      
+      processingFee = totalDeductFromDisbursal;
+    } else {
+      // Fallback to legacy calculation
+      const pfPercent = parseFloat(loan.processing_fee_percent || 14);
+      const loanData = {
+        loan_amount: principal,
+        processing_fee_percent: pfPercent,
+        interest_percent_per_day: intPercentPerDay
+      };
+      calculations = calculateLoanValues(loanData, days);
+      processingFee = calculations.processingFee;
+      gst = calculations.gst;
+      disbAmount = calculations.disbAmount;
+    }
     
     // Calculate APR (Annual Percentage Rate)
-    // APR = ((Processing Fee + GST + Interest) / Loan Amount) / Days * 36500
-    const totalCharges = calculations.processingFee + calculations.gst + calculations.interest;
+    // APR = ((All Fees + GST + Interest) / Loan Amount) / Days * 36500
+    const totalCharges = processingFee + gst + totalAddToTotal + calculations.interest;
     const apr = ((totalCharges / principal) / days) * 36500;
     
     // Generate due date (today + days)
@@ -177,21 +241,24 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         calculation_days: days
       },
       
-      // Fees & Charges
+      // Fees & Charges (dynamic fees support)
       fees: {
-        processing_fee: calculations.processingFee,
-        processing_fee_percent: pfPercent,
-        gst: calculations.gst,
+        processing_fee: processingFee,
+        processing_fee_percent: feesBreakdown.length > 0 ? null : parseFloat(loan.processing_fee_percent || 14),
+        gst: gst,
         gst_percent: 18,
-        total_upfront_charges: calculations.processingFee + calculations.gst
+        total_upfront_charges: processingFee + gst,
+        fees_breakdown: feesBreakdown,
+        total_deduct_from_disbursal: totalDeductFromDisbursal,
+        total_add_to_total: totalAddToTotal
       },
       
       // Calculations
       calculations: {
-        principal: calculations.principal,
-        processing_fee: calculations.processingFee,
-        gst: calculations.gst,
-        disbursed_amount: calculations.disbAmount,
+        principal: principal,
+        processing_fee: processingFee,
+        gst: gst,
+        disbursed_amount: disbAmount,
         interest: calculations.interest,
         total_repayable: calculations.totalAmount,
         apr: parseFloat(apr.toFixed(2))

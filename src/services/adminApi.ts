@@ -355,6 +355,50 @@ class AdminApiService {
     return this.request('DELETE', `/settings/member-tiers/${id}`);
   }
 
+  // Admin Settings - Fee Types
+  async getFeeTypes(): Promise<ApiResponse<any>> {
+    return this.request('GET', '/fee-types');
+  }
+
+  async createFeeType(data: {
+    fee_name: string;
+    fee_percent: number;
+    application_method: 'deduct_from_disbursal' | 'add_to_total';
+    description?: string;
+    is_active?: boolean;
+  }): Promise<ApiResponse<any>> {
+    return this.request('POST', '/fee-types', data);
+  }
+
+  async updateFeeType(id: number, data: Partial<{
+    fee_name: string;
+    fee_percent: number;
+    application_method: 'deduct_from_disbursal' | 'add_to_total';
+    description?: string;
+    is_active?: boolean;
+  }>): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/fee-types/${id}`, data);
+  }
+
+  async deleteFeeType(id: number): Promise<ApiResponse<any>> {
+    return this.request('DELETE', `/fee-types/${id}`);
+  }
+
+  async getMemberTierFees(tierId: number): Promise<ApiResponse<any>> {
+    return this.request('GET', `/fee-types/member-tier/${tierId}`);
+  }
+
+  async assignFeeToTier(tierId: number, data: {
+    fee_type_id: number;
+    fee_percent: number;
+  }): Promise<ApiResponse<any>> {
+    return this.request('POST', `/fee-types/member-tier/${tierId}`, data);
+  }
+
+  async removeFeeFromTier(tierId: number, feeId: number): Promise<ApiResponse<any>> {
+    return this.request('DELETE', `/fee-types/member-tier/${tierId}/${feeId}`);
+  }
+
   // Admin Settings - Integrations (sms, email, cloud)
   async getIntegrations(type: 'sms' | 'email' | 'cloud'): Promise<ApiResponse<any>> {
     return this.request('GET', `/settings/integrations/${type}`);
@@ -728,6 +772,44 @@ class AdminApiService {
    */
   async toggleLoanPlan(id: string | number): Promise<any> {
     return this.request('PATCH', `/loan-plans/${id}/toggle`);
+  }
+
+  /**
+   * Get late penalties for a loan plan
+   */
+  async getLoanPlanLatePenalties(planId: string | number): Promise<any> {
+    return this.request('GET', `/loan-plans/${planId}/late-penalties`);
+  }
+
+  /**
+   * Create late penalty tier for a loan plan
+   */
+  async createLoanPlanLatePenalty(planId: string | number, data: {
+    days_overdue_start: number;
+    days_overdue_end: number | null;
+    penalty_percent: number;
+    tier_order: number;
+  }): Promise<any> {
+    return this.request('POST', `/loan-plans/${planId}/late-penalties`, data);
+  }
+
+  /**
+   * Update late penalty tier for a loan plan
+   */
+  async updateLoanPlanLatePenalty(planId: string | number, penaltyId: string | number, data: {
+    days_overdue_start: number;
+    days_overdue_end: number | null;
+    penalty_percent: number;
+    tier_order: number;
+  }): Promise<any> {
+    return this.request('PUT', `/loan-plans/${planId}/late-penalties/${penaltyId}`, data);
+  }
+
+  /**
+   * Delete late penalty tier for a loan plan
+   */
+  async deleteLoanPlanLatePenalty(planId: string | number, penaltyId: string | number): Promise<any> {
+    return this.request('DELETE', `/loan-plans/${planId}/late-penalties/${penaltyId}`);
   }
 
   // ==================== Late Fee Tiers APIs ====================

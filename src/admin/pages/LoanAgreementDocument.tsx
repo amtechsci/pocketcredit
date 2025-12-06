@@ -283,7 +283,7 @@ export function LoanAgreementDocument() {
           </h2>
           <ol type="i" style={{ fontSize: '8pt', lineHeight: '1.5', textAlign: 'justify', paddingLeft: '40px' }}>
             <li className="mb-2">The Lender agrees to extend, and the Borrower agrees to accept, a loan facility for an amount not exceeding {formatCurrency(agreementData.loan.sanctioned_amount)}/-, for the purpose specified in this Agreement, and subject to the terms and conditions set forth herein. The said amount shall hereinafter be referred to as the "<strong>Loan</strong>."</li>
-            <li className="mb-2">The disbursement of the Loan by the Lender shall take place after execution of this Agreement. The Lender shall disburse the Loan from its designated bank account to the Borrower's bank account, as provided in the digital lending application of the Lender. In the event that the Borrower requests to change the designated bank account, the Borrower shall submit a formal written application via registered mail to the Lender. Upon receipt of such application, the Lender shall issue a response regarding its decision to the Borrower.</li>
+            <li className="mb-2">The disbursement of the Loan by the Lender shall take place after execution of this Agreement. The Lender shall disburse an amount of {formatCurrency(agreementData.calculations.disbursed_amount)}/- (after deduction of applicable fees and charges as detailed in the Key Facts Statement) from its designated bank account to the Borrower's bank account, as provided in the digital lending application of the Lender. In the event that the Borrower requests to change the designated bank account, the Borrower shall submit a formal written application via registered mail to the Lender. Upon receipt of such application, the Lender shall issue a response regarding its decision to the Borrower.</li>
             <li className="mb-2">Post acceptance of the Loan application by the Lender, the Borrower shall have the right to request the cancellation of the loan within 12 hours of such acceptance, before the Loan is disbursed to the Borrower.</li>
             <li className="mb-2">Borrower shall pay Interest at the rate specified which may be changed prospectively by the Lender by providing prior notice to the Borrower. The Interest shall be calculated as on the principal amount as mentioned in the Key Facts Statement ("KFS"). The Interest shall begin to accrue from the date of disbursement of the Loan to the Borrower till the repayment due dates mentioned in the Loan agreement and KFS. The Lender may, at its sole discretion, and, subject to applicable laws, alter such due dates.</li>
             <li className="mb-2">Each payment made by the Borrower under the terms of this Agreement shall be made on or before the respective due date, as mentioned in the Loan Agreement and KFS.</li>
@@ -614,7 +614,113 @@ export function LoanAgreementDocument() {
           </table>
 
           <h2 className="font-bold mt-8 mb-4" style={{ fontSize: '9pt', borderBottom: '1px solid #000', paddingBottom: '3px' }}>
-            ANNEXURE II – Loan Facility (or) KFS (or) KEY FACT STATEMENT
+            ANNEXURE II – Loan Facility Summary
+          </h2>
+          
+          {/* Loan Summary Table */}
+          <table className="w-full border-collapse mb-4" style={{ fontSize: '8pt', border: '1px solid #000' }}>
+            <thead>
+              <tr>
+                <th className="border border-black p-2 bg-gray-100 font-bold" style={{ width: '5%' }}>Sr.</th>
+                <th className="border border-black p-2 bg-gray-100 font-bold" style={{ width: '55%' }}>Particulars</th>
+                <th className="border border-black p-2 bg-gray-100 font-bold" style={{ width: '40%' }}>Amount (₹)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="border border-black p-2">1</td>
+                <td className="border border-black p-2">Sanctioned Loan Amount</td>
+                <td className="border border-black p-2">{formatCurrency(agreementData.loan.sanctioned_amount)}</td>
+              </tr>
+              {/* Dynamic Fees - Deducted from Disbursal */}
+              {agreementData.fees?.fees_breakdown && agreementData.fees.fees_breakdown
+                .filter((fee: any) => fee.application_method === 'deduct_from_disbursal')
+                .map((fee: any, index: number) => (
+                  <tr key={`deduct-${index}`}>
+                    <td className="border border-black p-2">{index + 2}</td>
+                    <td className="border border-black p-2">{fee.fee_name || 'Processing Fee'}</td>
+                    <td className="border border-black p-2">-{formatCurrency(parseFloat(fee.amount || 0))}</td>
+                  </tr>
+                ))}
+              {/* GST on deducted fees */}
+              {agreementData.fees?.gst > 0 && (
+                <tr>
+                  <td className="border border-black p-2">
+                    {agreementData.fees?.fees_breakdown?.filter((f: any) => f.application_method === 'deduct_from_disbursal').length + 2 || 2}
+                  </td>
+                  <td className="border border-black p-2">GST on Fees (18%)</td>
+                  <td className="border border-black p-2">-{formatCurrency(agreementData.fees.gst)}</td>
+                </tr>
+              )}
+              {/* Fallback to legacy processing fee if no dynamic fees */}
+              {(!agreementData.fees?.fees_breakdown || agreementData.fees.fees_breakdown.length === 0) && (
+                <>
+                  <tr>
+                    <td className="border border-black p-2">2</td>
+                    <td className="border border-black p-2">Processing Fee</td>
+                    <td className="border border-black p-2">-{formatCurrency(agreementData.fees.processing_fee)}</td>
+                  </tr>
+                  {agreementData.fees?.gst > 0 && (
+                    <tr>
+                      <td className="border border-black p-2">3</td>
+                      <td className="border border-black p-2">GST on Processing Fee (18%)</td>
+                      <td className="border border-black p-2">-{formatCurrency(agreementData.fees.gst)}</td>
+                    </tr>
+                  )}
+                </>
+              )}
+              <tr className="font-bold">
+                <td className="border border-black p-2">
+                  {(() => {
+                    const deductFees = agreementData.fees?.fees_breakdown?.filter((f: any) => f.application_method === 'deduct_from_disbursal').length || 0;
+                    return deductFees + (agreementData.fees?.gst > 0 ? 2 : 1) + 1;
+                  })()}
+                </td>
+                <td className="border border-black p-2">Net Disbursal Amount</td>
+                <td className="border border-black p-2">{formatCurrency(agreementData.calculations.disbursed_amount)}</td>
+              </tr>
+              {/* Dynamic Fees - Added to Total */}
+              {agreementData.fees?.fees_breakdown && agreementData.fees.fees_breakdown
+                .filter((fee: any) => fee.application_method === 'add_to_total')
+                .map((fee: any, index: number) => (
+                  <tr key={`add-${index}`}>
+                    <td className="border border-black p-2">
+                      {(() => {
+                        const deductFees = agreementData.fees.fees_breakdown.filter((f: any) => f.application_method === 'deduct_from_disbursal').length || 0;
+                        return deductFees + (agreementData.fees?.gst > 0 ? 2 : 1) + index + 2;
+                      })()}
+                    </td>
+                    <td className="border border-black p-2">{fee.fee_name || 'Service Fee'} (payable at repayment)</td>
+                    <td className="border border-black p-2">+{formatCurrency(parseFloat(fee.amount || 0))}</td>
+                  </tr>
+                ))}
+              <tr>
+                <td className="border border-black p-2">
+                  {(() => {
+                    const deductFees = agreementData.fees?.fees_breakdown?.filter((f: any) => f.application_method === 'deduct_from_disbursal').length || 0;
+                    const addFees = agreementData.fees?.fees_breakdown?.filter((f: any) => f.application_method === 'add_to_total').length || 0;
+                    return deductFees + addFees + (agreementData.fees?.gst > 0 ? 2 : 1) + 2;
+                  })()}
+                </td>
+                <td className="border border-black p-2">Interest ({agreementData.interest.rate_per_day}% per day for {agreementData.loan.loan_term_days} days)</td>
+                <td className="border border-black p-2">+{formatCurrency(agreementData.calculations.interest)}</td>
+              </tr>
+              <tr className="font-bold bg-gray-50">
+                <td className="border border-black p-2">
+                  {(() => {
+                    const deductFees = agreementData.fees?.fees_breakdown?.filter((f: any) => f.application_method === 'deduct_from_disbursal').length || 0;
+                    const addFees = agreementData.fees?.fees_breakdown?.filter((f: any) => f.application_method === 'add_to_total').length || 0;
+                    return deductFees + addFees + (agreementData.fees?.gst > 0 ? 2 : 1) + 3;
+                  })()}
+                </td>
+                <td className="border border-black p-2">Total Amount Repayable</td>
+                <td className="border border-black p-2">{formatCurrency(agreementData.calculations.total_repayable)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h2 className="font-bold mt-6 mb-4" style={{ fontSize: '9pt', borderBottom: '1px solid #000', paddingBottom: '3px' }}>
+            ANNEXURE III – Key Facts Statement (KFS)
           </h2>
           <p style={{ fontSize: '8pt', lineHeight: '1.5', textAlign: 'justify' }}>
             Please refer to the attached Key Facts Statement (KFS) document for complete details of the loan facility including interest rates, fees, charges, repayment schedule, and other terms and conditions.

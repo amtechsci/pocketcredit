@@ -28,12 +28,8 @@ router.get('/available', requireAuth, async (req, res) => {
     const userCreditScore = user.credit_score || 0;
     const userEmploymentType = user.employment_type || 'salaried';
 
-    // Get user's member tier (if assigned)
-    const userTiers = await executeQuery(
-      'SELECT tier_name FROM member_tiers WHERE id = (SELECT member_tier_id FROM users WHERE id = ?)',
-      [userId]
-    );
-    const userTierName = userTiers.length > 0 ? userTiers[0].tier_name : null;
+    // Member tier check removed - plans are now open to all users
+    const userTierName = null;
 
     // Fetch active loan plans
     const plans = await executeQuery(
@@ -87,26 +83,7 @@ router.get('/available', requireAuth, async (req, res) => {
         console.log(`  ℹ No employment type restrictions (eligible_employment_types is null/empty)`);
       }
 
-      // Check member tier - only if plan has tier restrictions AND user has a tier
-      if (plan.eligible_member_tiers) {
-        try {
-          const eligibleTiers = JSON.parse(plan.eligible_member_tiers);
-          // Only filter if there are actual tier restrictions
-          if (Array.isArray(eligibleTiers) && eligibleTiers.length > 0) {
-            // If user has no tier, they can't access tier-restricted plans
-            if (!userTierName) {
-              console.log(`  ⚠ Plan has tier restrictions but user has no tier assigned`);
-              // For now, allow access if plan doesn't have strict tier requirements
-            } else if (!eligibleTiers.includes(userTierName)) {
-              console.log(`  ✗ Failed tier check: ${userTierName} not in`, eligibleTiers);
-              return false;
-            }
-          }
-        } catch (e) {
-          console.log(`  ⚠ Could not parse eligible_member_tiers`);
-          // If JSON parse fails, skip this check
-        }
-      }
+      // Member tier check removed - plans are now open to all users
 
       console.log(`  ✓ Plan eligible`);
       return true;
@@ -169,11 +146,10 @@ router.post('/calculate', requireAuth, async (req, res) => {
 
     const plan = plans[0];
 
-    // Get user's member tier for interest and processing fee rates, and salary date
+    // Get user's salary date and basic info
     const users = await executeQuery(
-      `SELECT u.*, mt.processing_fee_percent, mt.interest_percent_per_day, mt.tier_name
+      `SELECT u.*
        FROM users u
-       LEFT JOIN member_tiers mt ON u.member_tier_id = mt.id
        WHERE u.id = ?`,
       [userId]
     );
@@ -187,14 +163,59 @@ router.post('/calculate', requireAuth, async (req, res) => {
 
     const user = users[0];
     
-    // Use default rates if user doesn't have a tier assigned
-    const processingFeePercent = user.processing_fee_percent || 10; // Default 10% (Bronze tier)
-    const interestPercentPerDay = user.interest_percent_per_day || 0.001; // Default 0.001 (0.1% per day)
+    // Use default interest rate (can be configured per plan later)
+    const interestPercentPerDay = 0.001; // Default 0.001 (0.1% per day)
 
     const loanAmount = parseFloat(loan_amount);
     
-    // Calculate processing fee (deducted from principal upfront)
-    const processingFee = Math.round((loanAmount * processingFeePercent) / 100);
+    // Fetch dynamic fees for the loan plan (fees are now configured per plan, not per tier)
+    // For now, use default fees - this can be extended to link fees to plans
+    let fees = [];
+    let totalDeductFromDisbursal = 0;
+    let totalAddToTotal = 0;
+    
+    // TODO: Fetch fees linked to loan plan when that feature is implemented
+    // For now, keep existing logic but remove member tier dependency
+    const defaultFees = await executeQuery(
+      `SELECT 
+        ft.fee_name,
+        ft.application_method,
+        ft.fee_percent as default_percent
+       FROM fee_types ft
+       WHERE ft.is_active = 1
+       LIMIT 1`
+    );
+    
+    if (defaultFees.length > 0) {
+      // Use first active fee type as default
+      const defaultFee = defaultFees[0];
+      const feeAmount = Math.round((loanAmount * parseFloat(defaultFee.default_percent || '2')) / 100);
+      
+      fees = [{
+        fee_name: defaultFee.fee_name || 'Processing Fee',
+        fee_percent: defaultFee.default_percent || '2',
+        application_method: defaultFee.application_method || 'deduct_from_disbursal'
+      }];
+      
+      if (defaultFee.application_method === 'deduct_from_disbursal') {
+        totalDeductFromDisbursal += feeAmount;
+      } else if (defaultFee.application_method === 'add_to_total') {
+        totalAddToTotal += feeAmount;
+        }
+      }
+    } else {
+      // Fallback: Use default processing fee if no tier assigned
+      totalDeductFromDisbursal = Math.round((loanAmount * 10) / 100); // Default 10%
+      fees = [{
+        fee_name: 'Processing Fee',
+        fee_percent: 10,
+        application_method: 'deduct_from_disbursal',
+        fee_amount: totalDeductFromDisbursal
+      }];
+    }
+    
+    // Calculate total fees for display
+    const processingFee = totalDeductFromDisbursal; // For backward compatibility
 
     // Calculate repayment days based on plan settings
     let totalDays = plan.total_duration_days || plan.repayment_days || 15;
@@ -279,9 +300,13 @@ router.post('/calculate', requireAuth, async (req, res) => {
     // Note: interestPercentPerDay is already in decimal format (e.g., 0.001 = 0.1% per day)
     const totalInterest = Math.round(loanAmount * interestPercentPerDay * totalDays);
 
-    // Calculate total repayable (Principal + Interest)
-    // Processing fee is deducted upfront, not added to repayment
-    const totalRepayable = loanAmount + totalInterest;
+    // Calculate total repayable (Principal + Interest + Fees that add to total)
+    // Fees with 'deduct_from_disbursal' are deducted upfront, not added to repayment
+    // Fees with 'add_to_total' are added to the total repayable amount
+    const totalRepayable = loanAmount + totalInterest + totalAddToTotal;
+    
+    // Calculate disbursal amount (loan amount minus fees that deduct from disbursal)
+    const disbursalAmount = loanAmount - totalDeductFromDisbursal;
 
     // Calculate EMI details if multi-EMI plan
     let emiDetails = null;
@@ -329,14 +354,19 @@ router.post('/calculate', requireAuth, async (req, res) => {
       };
     }
 
-    // Get late fee structure for user's tier
-    let lateFeeStructure = [];
-    if (user.member_tier_id) {
-      lateFeeStructure = await executeQuery(
-        'SELECT tier_name, days_overdue_start, days_overdue_end, fee_type, fee_value FROM late_fee_tiers WHERE member_tier_id = ? ORDER BY tier_order ASC',
-        [user.member_tier_id]
-      );
-    }
+    // Get late penalty structure for the loan plan
+    const latePenalties = await executeQuery(
+      'SELECT days_overdue_start, days_overdue_end, penalty_percent, tier_order FROM late_penalty_tiers WHERE loan_plan_id = ? ORDER BY tier_order ASC',
+      [plan.id]
+    );
+    
+    const lateFeeStructure = latePenalties.map((lp: any) => ({
+      tier_name: `Day ${lp.days_overdue_start}${lp.days_overdue_end ? `-${lp.days_overdue_end}` : '+'}`,
+      days_overdue_start: lp.days_overdue_start,
+      days_overdue_end: lp.days_overdue_end,
+      fee_type: 'percentage',
+      fee_value: lp.penalty_percent
+    }));
 
     res.json({
       success: true,
@@ -356,8 +386,18 @@ router.post('/calculate', requireAuth, async (req, res) => {
         late_fee_structure: lateFeeStructure,
         breakdown: {
           principal: loanAmount,
-          processing_fee: processingFee,
-          processing_fee_percent: processingFeePercent,
+        processing_fee: processingFee,
+        fees: fees.map(f => ({
+          name: f.fee_name,
+          percent: parseFloat(f.fee_percent),
+          application_method: f.application_method,
+          amount: f.application_method === 'deduct_from_disbursal' 
+            ? Math.round((loanAmount * parseFloat(f.fee_percent)) / 100)
+            : Math.round((loanAmount * parseFloat(f.fee_percent)) / 100)
+        })),
+        total_deduct_from_disbursal: totalDeductFromDisbursal,
+        total_add_to_total: totalAddToTotal,
+        disbursal_amount: disbursalAmount,
           interest: totalInterest,
           interest_rate: `${interestPercentPerDay}% per day for ${totalDays} days`,
           interest_percent_per_day: interestPercentPerDay, // Add raw numeric value

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, Shield, ExternalLink } from 'lucide-react';
+import { ArrowLeft, FileText, ExternalLink } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Label } from '../ui/label';
@@ -266,11 +266,39 @@ export function SimplifiedLoanApplicationPage() {
     // Submit loan application directly
     setLoading(true);
     try {
+      // Prepare fees breakdown from calculation if available
+      const calcData = calculation as any; // Type assertion for dynamic fees
+      const feesBreakdown = calcData?.breakdown?.fees || [];
+      const totalDeductFromDisbursal = calcData?.breakdown?.total_deduct_from_disbursal || 0;
+      const totalAddToTotal = calcData?.breakdown?.total_add_to_total || 0;
+      const disbursalAmount = calcData?.breakdown?.disbursal_amount || formData.desiredAmount;
+
       const response = await apiService.applyForLoan({
         loan_amount: formData.desiredAmount,
-        tenure_months: Math.ceil((calculation?.plan.duration_days || 15) / 30),
+        tenure_months: Math.ceil((calcData?.plan?.duration_days || 15) / 30),
         loan_purpose: formData.purpose,
-        plan_id: formData.selectedPlanId
+        plan_id: formData.selectedPlanId,
+        plan_code: calcData?.plan?.code || null,
+        plan_snapshot: calcData?.plan ? {
+          plan_name: calcData.plan.name,
+          plan_type: calcData.plan.type,
+          duration_days: calcData.plan.duration_days
+        } : null,
+        // Legacy processing fee fields (for backward compatibility)
+        processing_fee: calcData?.processing_fee || 0,
+        processing_fee_percent: calcData?.breakdown?.processing_fee_percent || 0,
+        // Dynamic fees
+        fees_breakdown: feesBreakdown.length > 0 ? feesBreakdown : null,
+        total_deduct_from_disbursal: totalDeductFromDisbursal,
+        total_add_to_total: totalAddToTotal,
+        disbursal_amount: disbursalAmount,
+        // Interest and repayable
+        total_interest: calcData?.interest || 0,
+        interest_percent_per_day: calcData?.breakdown?.interest_percent_per_day || 0.001,
+        total_repayable: calcData?.total_repayable || formData.desiredAmount,
+        // EMI schedule if available
+        emi_schedule: calcData?.emi_details?.schedule || null,
+        late_fee_structure: calcData?.late_fee_structure || null
       } as any);
 
       if (response && (response as any).success && (response as any).data) {
@@ -391,26 +419,26 @@ export function SimplifiedLoanApplicationPage() {
 
             {/* Repayment Plan Selection - Only show if multiple plans available */}
             {availablePlans.length > 1 && (
-              <div className="space-y-2">
-                <Label htmlFor="plan" className="text-base font-medium">
-                  Choose Repayment Plan *
-                </Label>
-                <Select 
-                  value={formData.selectedPlanId?.toString() || ''} 
-                  onValueChange={(value) => handleInputChange('selectedPlanId', parseInt(value))}
-                >
-                  <SelectTrigger className="h-12 text-base">
-                    <SelectValue placeholder="Select repayment plan" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availablePlans.map(plan => (
-                      <SelectItem key={plan.id} value={plan.id.toString()}>
-                        {plan.plan_name} - {plan.total_duration_days} days
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="plan" className="text-base font-medium">
+                Choose Repayment Plan *
+              </Label>
+              <Select 
+                value={formData.selectedPlanId?.toString() || ''} 
+                onValueChange={(value) => handleInputChange('selectedPlanId', parseInt(value))}
+              >
+                <SelectTrigger className="h-12 text-base">
+                  <SelectValue placeholder="Select repayment plan" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availablePlans.map(plan => (
+                    <SelectItem key={plan.id} value={plan.id.toString()}>
+                      {plan.plan_name} - {plan.total_duration_days} days
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             )}
 
             {/* Disclaimer Section */}

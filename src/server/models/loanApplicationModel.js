@@ -33,6 +33,11 @@ const createApplication = async (userId, applicationData) => {
       plan_snapshot,
       processing_fee,
       processing_fee_percent,
+      fees, // Dynamic fees array
+      fees_breakdown, // Full fees breakdown JSON
+      total_deduct_from_disbursal, // Total fees deducted from disbursal
+      total_add_to_total, // Total fees added to repayable
+      disbursal_amount, // Amount actually disbursed
       total_interest,
       interest_percent_per_day,
       total_repayable,
@@ -55,12 +60,28 @@ const createApplication = async (userId, applicationData) => {
         user_id, application_number, loan_amount, loan_purpose,
         loan_plan_id, plan_code, plan_snapshot,
         processing_fee, processing_fee_percent,
+        fees_breakdown, disbursal_amount,
         total_interest, interest_percent_per_day,
         total_repayable, late_fee_structure, emi_schedule,
         tenure_months, interest_rate, emi_amount,
         status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', NOW(), NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', NOW(), NOW())
     `;
+    
+    // Prepare fees_breakdown JSON (use provided fees_breakdown or construct from fees array)
+    let feesBreakdownJson = null;
+    if (fees_breakdown) {
+      feesBreakdownJson = typeof fees_breakdown === 'string' ? fees_breakdown : JSON.stringify(fees_breakdown);
+    } else if (fees && Array.isArray(fees)) {
+      feesBreakdownJson = JSON.stringify(fees);
+    }
+    
+    // Calculate disbursal_amount if not provided
+    const calculatedDisbursalAmount = disbursal_amount !== undefined 
+      ? disbursal_amount 
+      : (total_deduct_from_disbursal !== undefined 
+          ? loan_amount - total_deduct_from_disbursal 
+          : (processing_fee ? loan_amount - processing_fee : null));
     
     const values = [
       userId,
@@ -72,6 +93,8 @@ const createApplication = async (userId, applicationData) => {
       plan_snapshot ? JSON.stringify(plan_snapshot) : null,
       processing_fee || null,
       processing_fee_percent || null,
+      feesBreakdownJson,
+      calculatedDisbursalAmount,
       total_interest || null,
       interest_percent_per_day || null,
       total_repayable || null,

@@ -155,11 +155,24 @@ export function KFSDocument() {
 
   const calculateAPR = () => {
     if (!kfsData) return 0;
-    const totalCharges = kfsData.fees.processing_fee + kfsData.fees.gst + kfsData.calculations.interest;
+    // Include all fees: processing fee, GST, fees added to total, and interest
+    const totalCharges = kfsData.fees.processing_fee + kfsData.fees.gst + 
+                        (kfsData.fees.total_add_to_total || 0) + kfsData.calculations.interest;
     const principal = kfsData.loan.sanctioned_amount;
     const days = kfsData.loan.loan_term_days;
     return ((totalCharges / principal) / days * 36500).toFixed(2);
   };
+
+  // Get fees grouped by application method
+  const getFeesByMethod = (method: string) => {
+    if (!kfsData?.fees?.fees_breakdown || !Array.isArray(kfsData.fees.fees_breakdown)) {
+      return [];
+    }
+    return kfsData.fees.fees_breakdown.filter((fee: any) => fee.application_method === method);
+  };
+
+  const deductFromDisbursalFees = getFeesByMethod('deduct_from_disbursal');
+  const addToTotalFees = getFeesByMethod('add_to_total');
 
   if (loading) {
     return (
@@ -360,35 +373,78 @@ export function KFSDocument() {
                 <td className="border border-black p-2">One time/ Recurring</td>
                 <td className="border border-black p-2">Amount (in ₹) or Percentage (%) as applicable</td>
               </tr>
+              {/* Dynamic fees - Deduct from disbursal */}
+              {deductFromDisbursalFees.length > 0 ? (
+                deductFromDisbursalFees.map((fee: any, index: number) => (
+                  <tr key={`deduct-${index}`}>
+                    <td className="border border-black p-2"></td>
+                    <td className="border border-black p-2">
+                      {index === 0 ? '(i) ' : ''}{fee.fee_name || 'Processing fees'}
+                    </td>
+                    <td className="border border-black p-2">Onetime</td>
+                    <td className="border border-black p-2">{formatCurrency(parseFloat(fee.amount || 0))}</td>
+                    <td className="border border-black p-2">N/A</td>
+                    <td className="border border-black p-2">N/A</td>
+                  </tr>
+                ))
+              ) : (
+                // Fallback to legacy processing fee
+                <tr>
+                  <td className="border border-black p-2"></td>
+                  <td className="border border-black p-2">(i) Processing fees</td>
+                  <td className="border border-black p-2">Onetime</td>
+                  <td className="border border-black p-2">{formatCurrency(kfsData.fees.processing_fee)}</td>
+                  <td className="border border-black p-2">N/A</td>
+                  <td className="border border-black p-2">N/A</td>
+                </tr>
+              )}
+              {/* GST on fees deducted from disbursal */}
+              {kfsData.fees.gst > 0 && (
+                <tr>
+                  <td className="border border-black p-2"></td>
+                  <td className="border border-black p-2">
+                    ({deductFromDisbursalFees.length > 0 ? deductFromDisbursalFees.length + 1 : 'ii'}) GST
+                  </td>
+                  <td className="border border-black p-2">Onetime</td>
+                  <td className="border border-black p-2">{formatCurrency(kfsData.fees.gst)}</td>
+                  <td className="border border-black p-2">N/A</td>
+                  <td className="border border-black p-2">N/A</td>
+                </tr>
+              )}
+              {/* Fees added to total (shown in third party column as they're added to repayment) */}
+              {addToTotalFees.length > 0 && (
+                addToTotalFees.map((fee: any, index: number) => (
+                  <tr key={`add-${index}`}>
+                    <td className="border border-black p-2"></td>
+                    <td className="border border-black p-2">
+                      ({deductFromDisbursalFees.length + (kfsData.fees.gst > 0 ? 1 : 0) + index + 1}) {fee.fee_name || 'Service fees'}
+                    </td>
+                    <td className="border border-black p-2">N/A</td>
+                    <td className="border border-black p-2">N/A</td>
+                    <td className="border border-black p-2">Onetime</td>
+                    <td className="border border-black p-2">{formatCurrency(parseFloat(fee.amount || 0))}</td>
+                  </tr>
+                ))
+              )}
+              {/* Insurance charges */}
               <tr>
                 <td className="border border-black p-2"></td>
-                <td className="border border-black p-2">(i) Processing fees</td>
-                <td className="border border-black p-2">Onetime</td>
-                <td className="border border-black p-2">{formatCurrency(kfsData.fees.processing_fee)}</td>
+                <td className="border border-black p-2">
+                  ({deductFromDisbursalFees.length + addToTotalFees.length + (kfsData.fees.gst > 0 ? 1 : 0) + 1}) Insurance charges
+                </td>
+                <td className="border border-black p-2">N/A</td>
+                <td className="border border-black p-2">N/A</td>
                 <td className="border border-black p-2">N/A</td>
                 <td className="border border-black p-2">N/A</td>
               </tr>
+              {/* Valuation fees */}
               <tr>
                 <td className="border border-black p-2"></td>
-                <td className="border border-black p-2">(ii) Insurance charges</td>
+                <td className="border border-black p-2">
+                  ({deductFromDisbursalFees.length + addToTotalFees.length + (kfsData.fees.gst > 0 ? 1 : 0) + 2}) Valuation fees
+                </td>
                 <td className="border border-black p-2">N/A</td>
                 <td className="border border-black p-2">N/A</td>
-                <td className="border border-black p-2">N/A</td>
-                <td className="border border-black p-2">N/A</td>
-              </tr>
-              <tr>
-                <td className="border border-black p-2"></td>
-                <td className="border border-black p-2">(iii) Valuation fees</td>
-                <td className="border border-black p-2">N/A</td>
-                <td className="border border-black p-2">N/A</td>
-                <td className="border border-black p-2">N/A</td>
-                <td className="border border-black p-2">N/A</td>
-              </tr>
-              <tr>
-                <td className="border border-black p-2"></td>
-                <td className="border border-black p-2">(iv) Gst</td>
-                <td className="border border-black p-2">Onetime</td>
-                <td className="border border-black p-2">{formatCurrency(kfsData.fees.gst)}</td>
                 <td className="border border-black p-2">N/A</td>
                 <td className="border border-black p-2">N/A</td>
               </tr>
@@ -602,17 +658,29 @@ export function KFSDocument() {
               <tr>
                 <td className="border border-black p-2">6</td>
                 <td className="border border-black p-2">Fee/ Charges payable (in Rupees)</td>
-                <td className="border border-black p-2">{formatCurrency(kfsData.fees.processing_fee + kfsData.fees.gst)}</td>
+                <td className="border border-black p-2">
+                  {formatCurrency(
+                    kfsData.fees.processing_fee + 
+                    kfsData.fees.gst + 
+                    (kfsData.fees.total_add_to_total || 0)
+                  )}
+                </td>
               </tr>
               <tr>
                 <td className="border border-black p-2"></td>
                 <td className="border border-black p-2">A Payable to the RE</td>
-                <td className="border border-black p-2">{formatCurrency(kfsData.fees.processing_fee + kfsData.fees.gst)}</td>
+                <td className="border border-black p-2">
+                  {formatCurrency(kfsData.fees.processing_fee + kfsData.fees.gst)}
+                </td>
               </tr>
               <tr>
                 <td className="border border-black p-2"></td>
                 <td className="border border-black p-2">B Payable to third-party routed through RE</td>
-                <td className="border border-black p-2">N/A</td>
+                <td className="border border-black p-2">
+                  {kfsData.fees.total_add_to_total > 0 
+                    ? formatCurrency(kfsData.fees.total_add_to_total) 
+                    : 'N/A'}
+                </td>
               </tr>
               <tr>
                 <td className="border border-black p-2">7</td>

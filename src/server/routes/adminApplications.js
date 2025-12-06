@@ -53,6 +53,13 @@ router.get('/', authenticateAdmin, async (req, res) => {
         la.disbursed_at as disbursedDate,
         la.created_at as applicationDate,
         la.updated_at as updatedAt,
+        la.processing_fee,
+        la.processing_fee_percent,
+        la.fees_breakdown,
+        la.disbursal_amount,
+        la.total_interest,
+        la.interest_percent_per_day,
+        la.total_repayable,
         u.first_name,
         u.last_name,
         u.phone as mobile,
@@ -160,45 +167,66 @@ router.get('/', authenticateAdmin, async (req, res) => {
     }
 
     // Transform the data to match the expected format
-    const applicationsWithUserData = applications.map(app => ({
-      id: app.applicationNumber || app.id,
-      userId: app.userId,
-      loanAmount: parseFloat(app.loanAmount) || 0,
-      loanType: app.loanType?.toLowerCase() || 'personal',
-      status: app.status,
-      applicationDate: app.applicationDate,
-      tenure: app.tenure || 0,
-      interestRate: app.interestRate || 0,
-      emiAmount: app.emiAmount || 0,
-      rejectionReason: app.rejectionReason,
-      approvedBy: app.approvedBy,
-      approvedDate: app.approvedDate,
-      disbursedDate: app.disbursedDate,
-      updatedAt: app.updatedAt,
-      applicantName: `${app.first_name || ''} ${app.last_name || ''}`.trim() || 'Unknown User',
-      mobile: app.mobile || '',
-      email: app.email || '',
-      cibilScore: app.credit_score || 750, // Use actual credit score or default
-      monthlyIncome: getMonthlyIncomeFromRange(app.income_range), // Convert income range to value
-      employment: app.employment_type || 'Salaried', // Use actual employment type
-      company: app.company_name || 'N/A', // Use actual company name
-      city: app.city || 'N/A', // Use actual city
-      state: app.state || 'N/A', // Use actual state
-      pincode: app.pincode || '000000', // Use actual pincode
-      assignedManager: 'Unassigned', // This would need to be added to the database
-      recoveryOfficer: 'Unassigned', // This would need to be added to the database
-      // Additional real data fields
-      dateOfBirth: app.date_of_birth,
-      gender: app.gender,
-      maritalStatus: app.marital_status,
-      designation: app.designation,
-      workExperience: app.work_experience_years,
-      monthlyExpenses: app.monthly_expenses,
-      existingLoans: app.existing_loans,
-      address: app.address_line1 ? `${app.address_line1}${app.address_line2 ? ', ' + app.address_line2 : ''}` : 'N/A',
-      kycCompleted: app.kyc_completed || false,
-      userStatus: app.userStatus || 'active'
-    }));
+    const applicationsWithUserData = applications.map(app => {
+      // Parse fees_breakdown JSON if available
+      let feesBreakdown = null;
+      if (app.fees_breakdown) {
+        try {
+          feesBreakdown = typeof app.fees_breakdown === 'string' 
+            ? JSON.parse(app.fees_breakdown) 
+            : app.fees_breakdown;
+        } catch (e) {
+          console.error('Error parsing fees_breakdown:', e);
+        }
+      }
+      
+      return {
+        id: app.applicationNumber || app.id,
+        userId: app.userId,
+        loanAmount: parseFloat(app.loanAmount) || 0,
+        loanType: app.loanType?.toLowerCase() || 'personal',
+        status: app.status,
+        applicationDate: app.applicationDate,
+        tenure: app.tenure || 0,
+        interestRate: app.interestRate || 0,
+        emiAmount: app.emiAmount || 0,
+        rejectionReason: app.rejectionReason,
+        approvedBy: app.approvedBy,
+        approvedDate: app.approvedDate,
+        disbursedDate: app.disbursedDate,
+        updatedAt: app.updatedAt,
+        applicantName: `${app.first_name || ''} ${app.last_name || ''}`.trim() || 'Unknown User',
+        mobile: app.mobile || '',
+        email: app.email || '',
+        cibilScore: app.credit_score || 750, // Use actual credit score or default
+        monthlyIncome: getMonthlyIncomeFromRange(app.income_range), // Convert income range to value
+        employment: app.employment_type || 'Salaried', // Use actual employment type
+        company: app.company_name || 'N/A', // Use actual company name
+        city: app.city || 'N/A', // Use actual city
+        state: app.state || 'N/A', // Use actual state
+        pincode: app.pincode || '000000', // Use actual pincode
+        assignedManager: 'Unassigned', // This would need to be added to the database
+        recoveryOfficer: 'Unassigned', // This would need to be added to the database
+        // Additional real data fields
+        dateOfBirth: app.date_of_birth,
+        gender: app.gender,
+        maritalStatus: app.marital_status,
+        designation: app.designation,
+        workExperience: app.work_experience_years,
+        monthlyExpenses: app.monthly_expenses,
+        existingLoans: app.existing_loans,
+        address: app.address_line1 ? `${app.address_line1}${app.address_line2 ? ', ' + app.address_line2 : ''}` : 'N/A',
+        kycCompleted: app.kyc_completed || false,
+        userStatus: app.userStatus || 'active',
+        // Dynamic fees fields
+        processingFee: app.processing_fee ? parseFloat(app.processing_fee) : undefined,
+        processingFeePercent: app.processing_fee_percent ? parseFloat(app.processing_fee_percent) : undefined,
+        feesBreakdown: feesBreakdown,
+        disbursalAmount: app.disbursal_amount ? parseFloat(app.disbursal_amount) : undefined,
+        totalInterest: app.total_interest ? parseFloat(app.total_interest) : undefined,
+        totalRepayable: app.total_repayable ? parseFloat(app.total_repayable) : undefined
+      };
+    });
 
     // Calculate pagination info
     const totalPages = Math.ceil(totalApplications / limit);
