@@ -163,51 +163,54 @@ router.post('/calculate', requireAuth, async (req, res) => {
 
     const user = users[0];
     
-    // Use default interest rate (can be configured per plan later)
-    const interestPercentPerDay = 0.001; // Default 0.001 (0.1% per day)
+    // Use interest rate from plan, or default if not set
+    const interestPercentPerDay = plan.interest_percent_per_day ? parseFloat(plan.interest_percent_per_day) : 0.001;
 
     const loanAmount = parseFloat(loan_amount);
     
-    // Fetch dynamic fees for the loan plan (fees are now configured per plan, not per tier)
-    // For now, use default fees - this can be extended to link fees to plans
+    // Fetch fees assigned to this loan plan
     let fees = [];
     let totalDeductFromDisbursal = 0;
     let totalAddToTotal = 0;
     
-    // TODO: Fetch fees linked to loan plan when that feature is implemented
-    // For now, keep existing logic but remove member tier dependency
-    const defaultFees = await executeQuery(
+    const planFees = await executeQuery(
       `SELECT 
+        lpf.fee_percent,
         ft.fee_name,
         ft.application_method,
-        ft.fee_percent as default_percent
-       FROM fee_types ft
-       WHERE ft.is_active = 1
-       LIMIT 1`
+        ft.description
+       FROM loan_plan_fees lpf
+       INNER JOIN fee_types ft ON lpf.fee_type_id = ft.id
+       WHERE lpf.loan_plan_id = ? AND ft.is_active = 1
+       ORDER BY ft.fee_name ASC`,
+      [plan_id]
     );
     
-    if (defaultFees.length > 0) {
-      // Use first active fee type as default
-      const defaultFee = defaultFees[0];
-      const feeAmount = Math.round((loanAmount * parseFloat(defaultFee.default_percent || '2')) / 100);
-      
-      fees = [{
-        fee_name: defaultFee.fee_name || 'Processing Fee',
-        fee_percent: defaultFee.default_percent || '2',
-        application_method: defaultFee.application_method || 'deduct_from_disbursal'
-      }];
-      
-      if (defaultFee.application_method === 'deduct_from_disbursal') {
-        totalDeductFromDisbursal += feeAmount;
-      } else if (defaultFee.application_method === 'add_to_total') {
-        totalAddToTotal += feeAmount;
+    if (planFees.length > 0) {
+      // Use fees assigned to the plan
+      for (const planFee of planFees) {
+        const feePercent = parseFloat(planFee.fee_percent);
+        const feeAmount = Math.round((loanAmount * feePercent) / 100);
+        
+        fees.push({
+          fee_name: planFee.fee_name,
+          fee_percent: feePercent.toString(),
+          application_method: planFee.application_method,
+          fee_amount: feeAmount
+        });
+        
+        if (planFee.application_method === 'deduct_from_disbursal') {
+          totalDeductFromDisbursal += feeAmount;
+        } else if (planFee.application_method === 'add_to_total') {
+          totalAddToTotal += feeAmount;
+        }
       }
     } else {
-      // Fallback: Use default processing fee if no tier assigned
+      // Fallback: Use default processing fee if no fees assigned
       totalDeductFromDisbursal = Math.round((loanAmount * 10) / 100); // Default 10%
       fees = [{
         fee_name: 'Processing Fee',
-        fee_percent: 10,
+        fee_percent: '10',
         application_method: 'deduct_from_disbursal',
         fee_amount: totalDeductFromDisbursal
       }];

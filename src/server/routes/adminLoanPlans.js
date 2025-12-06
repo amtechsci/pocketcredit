@@ -136,9 +136,9 @@ router.post('/', authenticateAdmin, async (req, res) => {
     const result = await executeQuery(
       `INSERT INTO loan_plans 
         (plan_name, plan_code, plan_type, repayment_days, calculate_by_salary_date, emi_frequency, emi_count, 
-         total_duration_days, min_credit_score, eligible_member_tiers, eligible_employment_types,
+         total_duration_days, min_credit_score, interest_percent_per_day, eligible_member_tiers, eligible_employment_types,
          is_active, plan_order, description, terms_conditions)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         plan_name, 
         plan_code, 
@@ -149,6 +149,7 @@ router.post('/', authenticateAdmin, async (req, res) => {
         emi_count || null,
         totalDurationDays,
         min_credit_score || 0,
+        interest_percent_per_day ? parseFloat(interest_percent_per_day) : null,
         eligible_member_tiers ? JSON.stringify(eligible_member_tiers) : null,
         eligible_employment_types ? JSON.stringify(eligible_employment_types) : null,
         is_active !== false ? 1 : 0,
@@ -229,7 +230,7 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       `UPDATE loan_plans 
       SET plan_name = ?, plan_code = ?, plan_type = ?, repayment_days = ?, calculate_by_salary_date = ?,
           emi_frequency = ?, emi_count = ?, total_duration_days = ?, 
-          min_credit_score = ?, eligible_member_tiers = ?, eligible_employment_types = ?,
+          min_credit_score = ?, interest_percent_per_day = ?, eligible_member_tiers = ?, eligible_employment_types = ?,
           is_active = ?, plan_order = ?, description = ?, terms_conditions = ?,
           updated_at = NOW()
       WHERE id = ?`,
@@ -243,6 +244,7 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
         emi_count || null,
         totalDurationDays,
         min_credit_score || 0,
+        interest_percent_per_day ? parseFloat(interest_percent_per_day) : null,
         eligible_member_tiers ? JSON.stringify(eligible_member_tiers) : null,
         eligible_employment_types ? JSON.stringify(eligible_employment_types) : null,
         is_active !== false ? 1 : 0,

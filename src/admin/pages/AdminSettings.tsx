@@ -93,6 +93,7 @@ interface LoanPlan {
   emi_count: number | null;
   total_duration_days: number | null;
   min_credit_score: number;
+  interest_percent_per_day: number | null;
   eligible_member_tiers: string | null;
   eligible_employment_types: string | null;
   is_active: boolean;
@@ -1434,6 +1435,7 @@ export function AdminSettings() {
       emi_frequency: plan.emi_frequency || 'monthly',
       emi_count: plan.emi_count?.toString() || '',
       min_credit_score: plan.min_credit_score.toString(),
+      interest_percent_per_day: plan.interest_percent_per_day?.toString() || '0.001',
       eligible_member_tiers: plan.eligible_member_tiers ? JSON.parse(plan.eligible_member_tiers) : [],
       eligible_employment_types: plan.eligible_employment_types ? JSON.parse(plan.eligible_employment_types) : [],
       plan_order: plan.plan_order.toString(),
@@ -1476,12 +1478,87 @@ export function AdminSettings() {
       emi_frequency: 'monthly',
       emi_count: '',
       min_credit_score: '0',
+      interest_percent_per_day: '0.001',
       eligible_member_tiers: [],
       eligible_employment_types: [],
       plan_order: '',
       description: '',
       is_active: true
     });
+  };
+
+  // Loan Plan Fees Functions
+  const loadPlanFees = async (planId: number) => {
+    try {
+      const response = await adminApiService.getLoanPlanFees(planId);
+      if (response.success) {
+        setPlanFees(response.data || []);
+      }
+    } catch (error) {
+      console.error('Error loading plan fees:', error);
+    }
+  };
+
+  const openPlanFeeManager = async (planId: number) => {
+    setManagingPlanFees(planId);
+    await loadPlanFees(planId);
+    setPlanFeeForm({
+      fee_type_id: '',
+      fee_percent: ''
+    });
+    setEditingPlanFee(null);
+  };
+
+  const savePlanFee = async (planId: number) => {
+    if (!planFeeForm.fee_type_id || !planFeeForm.fee_percent) {
+      alert('Please select a fee type and enter a percentage');
+      return;
+    }
+
+    try {
+      await adminApiService.assignFeeToLoanPlan(planId, {
+        fee_type_id: parseInt(planFeeForm.fee_type_id),
+        fee_percent: parseFloat(planFeeForm.fee_percent)
+      });
+      alert('Fee assigned successfully!');
+      await loadPlanFees(planId);
+      setPlanFeeForm({
+        fee_type_id: '',
+        fee_percent: ''
+      });
+      setEditingPlanFee(null);
+    } catch (error: any) {
+      console.error('Error saving plan fee:', error);
+      alert(error.response?.data?.message || 'Failed to assign fee');
+    }
+  };
+
+  const editPlanFee = (fee: any) => {
+    setEditingPlanFee(fee.id);
+    setPlanFeeForm({
+      fee_type_id: fee.fee_type_id.toString(),
+      fee_percent: fee.fee_percent.toString()
+    });
+  };
+
+  const deletePlanFee = async (planId: number, feeId: number) => {
+    if (!confirm('Are you sure you want to remove this fee from the plan?')) return;
+    try {
+      await adminApiService.removeFeeFromLoanPlan(planId, feeId);
+      alert('Fee removed successfully!');
+      await loadPlanFees(planId);
+    } catch (error) {
+      console.error('Error removing plan fee:', error);
+      alert('Failed to remove fee');
+    }
+  };
+
+  const cancelEditPlanFee = () => {
+    setPlanFeeForm({
+      fee_type_id: '',
+      fee_percent: ''
+    });
+    setEditingPlanFee(null);
   };
 
   const cancelEditPlan = () => {
@@ -2841,6 +2918,22 @@ export function AdminSettings() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Interest Rate (% per day) *
+                            </label>
+                            <input
+                              type="number"
+                              step="0.0001"
+                              value={planForm.interest_percent_per_day}
+                              onChange={(e) => setPlanForm({ ...planForm, interest_percent_per_day: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="0.001"
+                              required
+                              min="0"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">e.g., 0.001 = 0.1% per day</p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
                               Min Credit Score
                             </label>
                             <input
@@ -2994,6 +3087,13 @@ export function AdminSettings() {
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                 <div className="flex gap-2">
                                   <button
+                                    onClick={() => openPlanFeeManager(plan.id)}
+                                    className="text-green-600 hover:text-green-900"
+                                    title="Manage Fees"
+                                  >
+                                    <CreditCard className="w-4 h-4" />
+                                  </button>
+                                  <button
                                     onClick={() => openLatePenaltyManager(plan.id)}
                                     className="text-purple-600 hover:text-purple-900"
                                     title="Manage Late Penalties"
@@ -3041,6 +3141,157 @@ export function AdminSettings() {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Fee Assignment Modal */}
+        {managingPlanFees !== null && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+              <div className="p-6 border-b border-gray-200">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold">Manage Fee Types</h3>
+                  <button
+                    onClick={() => {
+                      setManagingPlanFees(null);
+                      setPlanFees([]);
+                      cancelEditPlanFee();
+                    }}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <XCircle className="w-5 h-5" />
+                  </button>
+                </div>
+                <p className="text-sm text-gray-600 mt-1">
+                  Assign fee types to: {loanPlans.find(p => p.id === managingPlanFees)?.plan_name}
+                </p>
+              </div>
+              
+              <div className="p-6">
+                {/* Fee Assignment Form */}
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <h4 className="text-md font-semibold mb-4">
+                    {editingPlanFee ? 'Edit Fee Assignment' : 'Assign Fee Type'}
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Fee Type *
+                      </label>
+                      <select
+                        value={planFeeForm.fee_type_id}
+                        onChange={e => setPlanFeeForm({ ...planFeeForm, fee_type_id: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      >
+                        <option value="">Select Fee Type</option>
+                        {feeTypes.filter(ft => ft.is_active).map(feeType => (
+                          <option key={feeType.id} value={feeType.id}>
+                            {feeType.fee_name} ({feeType.application_method === 'deduct_from_disbursal' ? 'Deduct from Disbursal' : 'Add to Total'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Fee Percentage (%) *
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="100"
+                        value={planFeeForm.fee_percent}
+                        onChange={e => setPlanFeeForm({ ...planFeeForm, fee_percent: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="e.g., 2.5"
+                        required
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <div className="flex gap-2 w-full">
+                        <button
+                          onClick={() => savePlanFee(managingPlanFees)}
+                          className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                        >
+                          <Save className="w-4 h-4 inline mr-1" />
+                          {editingPlanFee ? 'Update' : 'Assign'}
+                        </button>
+                        {editingPlanFee && (
+                          <button
+                            onClick={cancelEditPlanFee}
+                            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Assigned Fees Table */}
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fee Name</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Application Method</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Percentage</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {planFees.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
+                            No fees assigned. Assign a fee type above.
+                          </td>
+                        </tr>
+                      ) : (
+                        planFees.map(fee => (
+                          <tr key={fee.id} className="hover:bg-gray-50">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                              {fee.fee_name}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                fee.application_method === 'deduct_from_disbursal'
+                                  ? 'bg-red-100 text-red-800'
+                                  : 'bg-green-100 text-green-800'
+                              }`}>
+                                {fee.application_method === 'deduct_from_disbursal' ? 'Deduct from Disbursal' : 'Add to Total'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                              {fee.fee_percent}%
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => editPlanFee(fee)}
+                                  className="text-blue-600 hover:text-blue-900"
+                                  title="Edit"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => deletePlanFee(managingPlanFees, fee.id)}
+                                  className="text-red-600 hover:text-red-900"
+                                  title="Remove"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
         )}

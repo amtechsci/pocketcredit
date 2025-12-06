@@ -812,6 +812,30 @@ class AdminApiService {
     return this.request('DELETE', `/loan-plans/${planId}/late-penalties/${penaltyId}`);
   }
 
+  /**
+   * Get fees assigned to a loan plan
+   */
+  async getLoanPlanFees(planId: string | number): Promise<any> {
+    return this.request('GET', `/loan-plans/${planId}/fees`);
+  }
+
+  /**
+   * Assign fee to loan plan
+   */
+  async assignFeeToLoanPlan(planId: string | number, data: {
+    fee_type_id: number;
+    fee_percent: number;
+  }): Promise<any> {
+    return this.request('POST', `/loan-plans/${planId}/fees`, data);
+  }
+
+  /**
+   * Remove fee from loan plan
+   */
+  async removeFeeFromLoanPlan(planId: string | number, feeId: string | number): Promise<any> {
+    return this.request('DELETE', `/loan-plans/${planId}/fees/${feeId}`);
+  }
+
   // ==================== Late Fee Tiers APIs ====================
 
   /**
