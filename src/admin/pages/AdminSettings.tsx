@@ -344,7 +344,7 @@ const EmailTestForm: React.FC<{
 
 export function AdminSettings() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('members');
+  const [activeTab, setActiveTab] = useState('fee-types');
   const [showTestModal, setShowTestModal] = useState(false);
   const [testingConfig, setTestingConfig] = useState<ApiConfig | null>(null);
   const [userConfig, setUserConfig] = useState<UserConfigData | null>(null);
