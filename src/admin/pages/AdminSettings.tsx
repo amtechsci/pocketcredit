@@ -447,6 +447,26 @@ export function AdminSettings() {
     tier_order: ''
   });
   const [editingLatePenalty, setEditingLatePenalty] = useState<number | null>(null);
+  
+  // Loan Plan Fees state
+  const [managingPlanFees, setManagingPlanFees] = useState<number | null>(null);
+  const [planFees, setPlanFees] = useState<Array<{
+    id: number;
+    loan_plan_id: number;
+    fee_type_id: number;
+    fee_percent: number;
+    fee_name: string;
+    application_method: string;
+  }>>([]);
+  const [planFeeForm, setPlanFeeForm] = useState<{
+    fee_type_id: string;
+    fee_percent: string;
+  }>({
+    fee_type_id: '',
+    fee_percent: ''
+  });
+  const [editingPlanFee, setEditingPlanFee] = useState<number | null>(null);
+  
   const [planForm, setPlanForm] = useState({
     plan_name: '',
     plan_code: '',
