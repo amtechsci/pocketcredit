@@ -11,7 +11,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
     await initializeDatabase();
     
     const plans = await executeQuery(
-      'SELECT * FROM loan_plans ORDER BY plan_order ASC'
+      'SELECT * FROM loan_plans ORDER BY id ASC'
     );
 
     res.json({
@@ -203,20 +203,19 @@ router.post('/', authenticateAdmin, async (req, res) => {
       calculate_by_salary_date,
       emi_frequency, 
       emi_count,
-      min_credit_score,
+      interest_percent_per_day,
       eligible_member_tiers,
       eligible_employment_types,
       is_active,
-      plan_order,
       description,
       terms_conditions
     } = req.body;
 
     // Validate required fields
-    if (!plan_name || !plan_code || !plan_type || !plan_order) {
+    if (!plan_name || !plan_code || !plan_type) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: plan_name, plan_code, plan_type, plan_order'
+        message: 'Missing required fields: plan_name, plan_code, plan_type'
       });
     }
 
@@ -265,9 +264,9 @@ router.post('/', authenticateAdmin, async (req, res) => {
     const result = await executeQuery(
       `INSERT INTO loan_plans 
         (plan_name, plan_code, plan_type, repayment_days, calculate_by_salary_date, emi_frequency, emi_count, 
-         total_duration_days, min_credit_score, interest_percent_per_day, eligible_member_tiers, eligible_employment_types,
-         is_active, plan_order, description, terms_conditions)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         total_duration_days, interest_percent_per_day, eligible_member_tiers, eligible_employment_types,
+         is_active, description, terms_conditions)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         plan_name, 
         plan_code, 
@@ -277,12 +276,10 @@ router.post('/', authenticateAdmin, async (req, res) => {
         emi_frequency || null,
         emi_count || null,
         totalDurationDays,
-        min_credit_score || 0,
         interest_percent_per_day ? parseFloat(interest_percent_per_day) : null,
         eligible_member_tiers ? JSON.stringify(eligible_member_tiers) : null,
         eligible_employment_types ? JSON.stringify(eligible_employment_types) : null,
         is_active !== false ? 1 : 0,
-        plan_order,
         description || null,
         terms_conditions || null
       ]
@@ -319,11 +316,10 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       calculate_by_salary_date,
       emi_frequency, 
       emi_count,
-      min_credit_score,
+      interest_percent_per_day,
       eligible_member_tiers,
       eligible_employment_types,
       is_active,
-      plan_order,
       description,
       terms_conditions
     } = req.body;
@@ -359,8 +355,8 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       `UPDATE loan_plans 
       SET plan_name = ?, plan_code = ?, plan_type = ?, repayment_days = ?, calculate_by_salary_date = ?,
           emi_frequency = ?, emi_count = ?, total_duration_days = ?, 
-          min_credit_score = ?, interest_percent_per_day = ?, eligible_member_tiers = ?, eligible_employment_types = ?,
-          is_active = ?, plan_order = ?, description = ?, terms_conditions = ?,
+          interest_percent_per_day = ?, eligible_member_tiers = ?, eligible_employment_types = ?,
+          is_active = ?, description = ?, terms_conditions = ?,
           updated_at = NOW()
       WHERE id = ?`,
       [
@@ -372,12 +368,10 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
         emi_frequency || null,
         emi_count || null,
         totalDurationDays,
-        min_credit_score || 0,
         interest_percent_per_day ? parseFloat(interest_percent_per_day) : null,
         eligible_member_tiers ? JSON.stringify(eligible_member_tiers) : null,
         eligible_employment_types ? JSON.stringify(eligible_employment_types) : null,
         is_active !== false ? 1 : 0,
-        plan_order,
         description || null,
         terms_conditions || null,
         id
