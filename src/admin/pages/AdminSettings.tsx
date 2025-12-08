@@ -92,12 +92,10 @@ interface LoanPlan {
   emi_frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly' | null;
   emi_count: number | null;
   total_duration_days: number | null;
-  min_credit_score: number;
   interest_percent_per_day: number | null;
   eligible_member_tiers: string | null;
   eligible_employment_types: string | null;
   is_active: boolean;
-  plan_order: number;
   description: string | null;
   terms_conditions: string | null;
   created_at: string;
@@ -475,10 +473,9 @@ export function AdminSettings() {
     calculate_by_salary_date: false,
     emi_frequency: 'monthly' as 'daily' | 'weekly' | 'biweekly' | 'monthly',
     emi_count: '',
-    min_credit_score: '0',
+    interest_percent_per_day: '0.001',
     eligible_member_tiers: [] as string[],
     eligible_employment_types: [] as string[],
-    plan_order: '',
     description: '',
     is_active: true
   });
@@ -1415,13 +1412,12 @@ export function AdminSettings() {
         plan_code: planForm.plan_code,
         plan_type: planForm.plan_type,
         repayment_days: planForm.plan_type === 'single' ? parseInt(planForm.repayment_days) : undefined,
-        calculate_by_salary_date: planForm.plan_type === 'single' ? planForm.calculate_by_salary_date : false,
+        calculate_by_salary_date: planForm.calculate_by_salary_date,
         emi_frequency: planForm.plan_type === 'multi_emi' ? planForm.emi_frequency : undefined,
         emi_count: planForm.plan_type === 'multi_emi' ? parseInt(planForm.emi_count) : undefined,
-        min_credit_score: parseInt(planForm.min_credit_score),
+        interest_percent_per_day: planForm.interest_percent_per_day ? parseFloat(planForm.interest_percent_per_day) : undefined,
         eligible_member_tiers: planForm.eligible_member_tiers,
         eligible_employment_types: planForm.eligible_employment_types,
-        plan_order: parseInt(planForm.plan_order),
         description: planForm.description,
         is_active: planForm.is_active
       };
@@ -1454,11 +1450,9 @@ export function AdminSettings() {
       calculate_by_salary_date: plan.calculate_by_salary_date || false,
       emi_frequency: plan.emi_frequency || 'monthly',
       emi_count: plan.emi_count?.toString() || '',
-      min_credit_score: plan.min_credit_score.toString(),
       interest_percent_per_day: plan.interest_percent_per_day?.toString() || '0.001',
       eligible_member_tiers: plan.eligible_member_tiers ? JSON.parse(plan.eligible_member_tiers) : [],
       eligible_employment_types: plan.eligible_employment_types ? JSON.parse(plan.eligible_employment_types) : [],
-      plan_order: plan.plan_order.toString(),
       description: plan.description || '',
       is_active: plan.is_active
     });
@@ -1497,11 +1491,9 @@ export function AdminSettings() {
       calculate_by_salary_date: false,
       emi_frequency: 'monthly',
       emi_count: '',
-      min_credit_score: '0',
       interest_percent_per_day: '0.001',
       eligible_member_tiers: [],
       eligible_employment_types: [],
-      plan_order: '',
       description: '',
       is_active: true
     });
@@ -2952,33 +2944,6 @@ export function AdminSettings() {
                             />
                             <p className="text-xs text-gray-500 mt-1">e.g., 0.001 = 0.1% per day</p>
                           </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Min Credit Score
-                            </label>
-                            <input
-                              type="number"
-                              value={planForm.min_credit_score}
-                              onChange={(e) => setPlanForm({ ...planForm, min_credit_score: e.target.value })}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              placeholder="0"
-                              min="0"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Plan Order *
-                            </label>
-                            <input
-                              type="number"
-                              value={planForm.plan_order}
-                              onChange={(e) => setPlanForm({ ...planForm, plan_order: e.target.value })}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              placeholder="1"
-                              required
-                              min="1"
-                            />
-                          </div>
                         </div>
 
                         {/* Description */}
@@ -3035,9 +3000,6 @@ export function AdminSettings() {
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Order
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Plan Name
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -3045,9 +3007,6 @@ export function AdminSettings() {
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Duration
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Min Score
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Status
@@ -3060,16 +3019,13 @@ export function AdminSettings() {
                       <tbody className="bg-white divide-y divide-gray-200">
                         {loanPlans.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                            <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
                               No loan plans configured. Click "Add New Plan" to create one.
                             </td>
                           </tr>
                         ) : (
                           loanPlans.map((plan) => (
                             <tr key={plan.id} className="hover:bg-gray-50">
-                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                {plan.plan_order}
-                              </td>
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <div className="text-sm font-medium text-gray-900">{plan.plan_name}</div>
                                 <div className="text-xs text-gray-500">{plan.plan_code}</div>
@@ -3088,9 +3044,6 @@ export function AdminSettings() {
                                   ? `${plan.repayment_days} days`
                                   : `${plan.emi_count} × ${plan.emi_frequency}`
                                 }
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                {plan.min_credit_score || 0}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <button
