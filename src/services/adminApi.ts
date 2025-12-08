@@ -740,13 +740,13 @@ class AdminApiService {
     plan_code: string;
     plan_type: 'single' | 'multi_emi';
     repayment_days?: number;
+    calculate_by_salary_date?: boolean;
     emi_frequency?: 'daily' | 'weekly' | 'biweekly' | 'monthly';
     emi_count?: number;
-    min_credit_score?: number;
+    interest_percent_per_day?: number;
     eligible_member_tiers?: string[];
     eligible_employment_types?: string[];
     is_active?: boolean;
-    plan_order: number;
     description?: string;
     terms_conditions?: string;
   }): Promise<any> {

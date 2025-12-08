@@ -2892,37 +2892,61 @@ export function AdminSettings() {
                             )}
                           </div>
                         ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">
-                                EMI Frequency *
-                              </label>
-                              <select
-                                value={planForm.emi_frequency}
-                                onChange={(e) => setPlanForm({ ...planForm, emi_frequency: e.target.value as any })}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                required
-                              >
-                                <option value="daily">Daily</option>
-                                <option value="weekly">Weekly</option>
-                                <option value="biweekly">Bi-weekly</option>
-                                <option value="monthly">Monthly</option>
-                              </select>
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  EMI Frequency *
+                                </label>
+                                <select
+                                  value={planForm.emi_frequency}
+                                  onChange={(e) => setPlanForm({ ...planForm, emi_frequency: e.target.value as any })}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  required
+                                >
+                                  <option value="daily">Daily</option>
+                                  <option value="weekly">Weekly</option>
+                                  <option value="biweekly">Bi-weekly</option>
+                                  <option value="monthly">Monthly</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Number of EMIs *
+                                </label>
+                                <input
+                                  type="number"
+                                  value={planForm.emi_count}
+                                  onChange={(e) => setPlanForm({ ...planForm, emi_count: e.target.value })}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  placeholder="e.g., 3"
+                                  required
+                                  min="1"
+                                />
+                              </div>
                             </div>
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Number of EMIs *
-                              </label>
+                            <div className="flex items-center space-x-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
                               <input
-                                type="number"
-                                value={planForm.emi_count}
-                                onChange={(e) => setPlanForm({ ...planForm, emi_count: e.target.value })}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="e.g., 3"
-                                required
-                                min="1"
+                                type="checkbox"
+                                id="calculate_by_salary_date_emi"
+                                checked={planForm.calculate_by_salary_date}
+                                onChange={(e) => setPlanForm({ ...planForm, calculate_by_salary_date: e.target.checked })}
+                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                               />
+                              <label htmlFor="calculate_by_salary_date_emi" className="text-sm font-medium text-gray-700 cursor-pointer">
+                                Calculate by salary date
+                              </label>
                             </div>
+                            {planForm.calculate_by_salary_date && (
+                              <div className="ml-6 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded">
+                                <p className="text-xs text-yellow-800">
+                                  <strong>How it works:</strong> EMI dates will be calculated based on the user's salary date. 
+                                  For monthly EMIs, each EMI will be scheduled on the user's salary date of each month. 
+                                  For other frequencies (daily, weekly, bi-weekly), the first EMI will start from the next salary date, then follow the frequency. 
+                                  If the user has no salary date, EMIs will start from today.
+                                </p>
+                              </div>
+                            )}
                           </div>
                         )}
 
