@@ -31,7 +31,17 @@ const RELATION_OPTIONS = [
   'Neighbor'
 ];
 
-export function EnhancedUserReferencesPage() {
+interface EnhancedUserReferencesPageProps {
+  onComplete?: () => void;
+  showBackButton?: boolean;
+  embedded?: boolean; // If true, don't render header and page wrapper
+}
+
+export function EnhancedUserReferencesPage({ 
+  onComplete, 
+  showBackButton = true,
+  embedded = false
+}: EnhancedUserReferencesPageProps = {}) {
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -262,7 +272,11 @@ export function EnhancedUserReferencesPage() {
       
       if (response.data) {
         toast.success('References and alternate data saved successfully!');
-        navigate(-1); // Go back to previous page
+        if (onComplete) {
+          onComplete();
+        } else {
+          navigate(-1); // Go back to previous page
+        }
       } else {
         toast.error('Failed to save references');
       }
@@ -285,21 +299,21 @@ export function EnhancedUserReferencesPage() {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
-      <DashboardHeader userName={user?.first_name && user?.last_name ? `${user.first_name} ${user.last_name}` : user?.email || 'User'} />
-      
-      <div className="container mx-auto px-4 py-8 max-w-5xl">
-        {/* Header */}
+  const formContent = (
+    <>
+      {/* Header - only show if not embedded */}
+      {!embedded && (
         <div className="mb-8">
-          <Button
-            variant="ghost"
-            onClick={() => navigate(-1)}
-            className="mb-6 p-2 h-auto text-gray-600 hover:text-gray-900 hover:bg-white/50 rounded-lg transition-all duration-200"
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Application
-          </Button>
+          {showBackButton && (
+            <Button
+              variant="ghost"
+              onClick={() => navigate(-1)}
+              className="mb-6 p-2 h-auto text-gray-600 hover:text-gray-900 hover:bg-white/50 rounded-lg transition-all duration-200"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Application
+            </Button>
+          )}
           
           <div className="text-center">
             <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full mb-4">
@@ -313,6 +327,7 @@ export function EnhancedUserReferencesPage() {
             </p>
           </div>
         </div>
+      )}
 
         <form onSubmit={handleSubmit} className="space-y-8">
           {/* Reference Numbers Section */}
@@ -564,6 +579,20 @@ export function EnhancedUserReferencesPage() {
             </div>
           </div>
         </form>
+      </>
+  );
+
+  // If embedded, return just the form content without page wrapper
+  if (embedded) {
+    return formContent;
+  }
+
+  // Otherwise, return full page with header
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
+      <DashboardHeader userName={user?.first_name && user?.last_name ? `${user.first_name} ${user.last_name}` : user?.email || 'User'} />
+      <div className="container mx-auto px-4 py-8 max-w-5xl">
+        {formContent}
       </div>
     </div>
   );

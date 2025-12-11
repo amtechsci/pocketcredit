@@ -62,6 +62,9 @@ export function UserProfileDetail() {
   // Real data state
   const [userData, setUserData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loanDocuments, setLoanDocuments] = useState<{ [loanId: number]: any[] }>({});
+  const [documentsLoading, setDocumentsLoading] = useState<{ [loanId: number]: boolean }>({});
+  const [expandedLoanDocuments, setExpandedLoanDocuments] = useState<{ [loanId: number]: boolean }>({});
   const [error, setError] = useState<string | null>(null);
 
   // Form state for modals
@@ -114,9 +117,26 @@ export function UserProfileDetail() {
     templateId: ''
   });
 
+  // State for loan plan management
+  const [loanPlans, setLoanPlans] = useState<any[]>([]);
+  const [userLoanPlan, setUserLoanPlan] = useState<any>(null);
+  const [showLoanPlanModal, setShowLoanPlanModal] = useState(false);
+  const [selectedLoanPlanId, setSelectedLoanPlanId] = useState<number | null>(null);
+
   // State for editable loan fields
   const [editingLoan, setEditingLoan] = useState<any>(null);
   const [editValues, setEditValues] = useState<any>({});
+  
+  // State for loan calculations (backend-only)
+  const [loanCalculations, setLoanCalculations] = useState<{ [loanId: number]: any }>({});
+  const [calculationsLoading, setCalculationsLoading] = useState<{ [loanId: number]: boolean }>({});
+  
+  // State for plan details modal
+  const [showPlanDetailsModal, setShowPlanDetailsModal] = useState(false);
+  const [selectedPlanDetails, setSelectedPlanDetails] = useState<any>(null);
+  
+  // State for assigning plan to a specific loan (not user's default plan)
+  const [editingLoanPlanId, setEditingLoanPlanId] = useState<number | null>(null);
 
   // Validation tab state
   const [selectedAction, setSelectedAction] = useState('');
@@ -310,9 +330,17 @@ export function UserProfileDetail() {
           break;
       }
 
+      // Get the latest loan application ID from applied loans
+      const loans = getArray('loans');
+      const appliedLoans = loans ? loans.filter((loan: any) => 
+        ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(loan.status)
+      ) : [];
+      const latestLoan = appliedLoans && appliedLoans.length > 0 ? appliedLoans[0] : null;
+      const loanApplicationId = latestLoan?.id || userData.current_loan_id || null;
+
       const requestData = {
         userId: userData.id,
-        loanApplicationId: userData.current_loan_id || null,
+        loanApplicationId: loanApplicationId,
         actionType: selectedAction,
         actionDetails,
         adminId
@@ -323,6 +351,17 @@ export function UserProfileDetail() {
       const response = await adminApiService.submitValidationAction(requestData);
 
       if (response.status === 'success') {
+        // If action is "Need Document", update loan status to "follow_up"
+        if (selectedAction === 'need_document' && loanApplicationId) {
+          try {
+            await adminApiService.updateApplicationStatus(loanApplicationId.toString(), 'follow_up');
+            console.log('Loan status updated to follow_up');
+          } catch (statusError) {
+            console.error('Error updating loan status:', statusError);
+            // Don't fail the whole operation if status update fails
+          }
+        }
+        
         // Reset form
         setSelectedAction('');
         setSelectedDocuments([]);
@@ -333,11 +372,15 @@ export function UserProfileDetail() {
         setHoldDuration('');
         setHoldDays('');
         
-        // Refresh history
+        // Refresh history and user data
         await fetchValidationHistory();
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success' && profileResponse.data) {
+          setUserData(profileResponse.data);
+        }
         
         // Show success message
-        alert('Validation action submitted successfully!');
+        alert('Validation action submitted successfully! Loan status updated to Follow Up.');
       }
     } catch (error) {
       console.error('Error submitting validation action:', error);
@@ -352,8 +395,33 @@ export function UserProfileDetail() {
         setLoading(true);
         const response = await adminApiService.getUserProfile(params.userId!);
         
-        if (response.status === 'success') {
+        if (response.status === 'success' && response.data) {
           setUserData(response.data);
+          
+          // Load user's selected loan plan from response data
+          if (response.data.selectedLoanPlan) {
+            // Loan plan is already included in the response
+            setUserLoanPlan(response.data.selectedLoanPlan);
+            setSelectedLoanPlanId(response.data.selectedLoanPlan.id);
+          } else if (response.data.selectedLoanPlanId) {
+            // Fallback: fetch plan if not included in response
+            try {
+              const planResponse = await adminApiService.getLoanPlan(response.data.selectedLoanPlanId);
+              if (planResponse.success && planResponse.data) {
+                setUserLoanPlan(planResponse.data);
+                setSelectedLoanPlanId(planResponse.data.id);
+              } else if (planResponse.status === 'success' && planResponse.data) {
+                setUserLoanPlan(planResponse.data);
+                setSelectedLoanPlanId(planResponse.data.id);
+              }
+            } catch (err) {
+              console.error('Error fetching user loan plan:', err);
+            }
+          } else {
+            // No loan plan assigned
+            setUserLoanPlan(null);
+            setSelectedLoanPlanId(null);
+          }
         } else {
           setError(response.message || 'Failed to fetch user profile');
         }
@@ -370,6 +438,157 @@ export function UserProfileDetail() {
     }
   }, [params.userId]);
 
+  // Fetch all loan plans for selection
+  useEffect(() => {
+    const fetchLoanPlans = async () => {
+      try {
+        const response = await adminApiService.getLoanPlans();
+        console.log('Loan plans response:', response);
+        if (response.success && response.data) {
+          setLoanPlans(response.data.filter((plan: any) => plan.is_active === 1 || plan.is_active === true));
+        } else if (response.status === 'success' && response.data) {
+          // Fallback for different response format
+          setLoanPlans(response.data.filter((plan: any) => plan.is_active === 1 || plan.is_active === true));
+        }
+      } catch (err) {
+        console.error('Error fetching loan plans:', err);
+      }
+    };
+
+    fetchLoanPlans();
+  }, []);
+
+  // Handle loan status change
+  const handleLoanStatusChange = async (loanId: number, newStatus: string) => {
+    if (!confirm(`Are you sure you want to change the status to "${newStatus}"?`)) {
+      return;
+    }
+
+    try {
+      const response = await adminApiService.updateApplicationStatus(loanId.toString(), newStatus);
+      
+      if (response.status === 'success' || response.success) {
+        alert('Loan status updated successfully!');
+        // Refresh user data
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success' && profileResponse.data) {
+          setUserData(profileResponse.data);
+        }
+      } else {
+        alert(response.message || 'Failed to update loan status');
+        // Reload page to revert dropdown
+        window.location.reload();
+      }
+    } catch (error) {
+      console.error('Error updating loan status:', error);
+      alert('Failed to update loan status. Please try again.');
+      // Reload page to revert dropdown
+      window.location.reload();
+    }
+  };
+
+  // Quick Process - Move loan from follow_up to disbursal
+  const handleQuickProcess = async (loanId: number) => {
+    if (!confirm('Are you sure you want to process this application? This will move it to Disbursal status.')) {
+      return;
+    }
+
+    try {
+      const adminId = currentUser?.id || 'unknown';
+      
+      // Submit validation action with "process" type
+      const response = await adminApiService.submitValidationAction({
+        userId: userData?.id,
+        loanApplicationId: loanId,
+        actionType: 'process',
+        actionDetails: { message: 'Application processed and moved to disbursal status' },
+        adminId
+      });
+
+      if (response.status === 'success') {
+        alert('Application processed successfully! Status updated to Disbursal.');
+        
+        // Refresh user data to show updated status
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success' && profileResponse.data) {
+          setUserData(profileResponse.data);
+        }
+        
+        // Refresh validation history
+        await fetchValidationHistory();
+      } else {
+        alert(response.message || 'Failed to process application');
+      }
+    } catch (error: any) {
+      console.error('Error processing application:', error);
+      alert(error.response?.data?.message || error.message || 'Failed to process application. Please try again.');
+    }
+  };
+
+  // Update user's loan plan or assign plan to a loan
+  const handleUpdateLoanPlan = async () => {
+    if (!selectedLoanPlanId) return;
+
+    try {
+      // If editingLoanPlanId is set, assign plan to that loan
+      if (editingLoanPlanId) {
+        const response = await adminApiService.assignLoanPlanToApplication(editingLoanPlanId, selectedLoanPlanId);
+        
+        if (response.status === 'success' || response.success) {
+          setShowLoanPlanModal(false);
+          const loanIdToRefresh = editingLoanPlanId;
+          setEditingLoanPlanId(null);
+          setSelectedLoanPlanId(null);
+          alert('Loan plan assigned successfully!');
+          // Refresh user data to show updated loan
+          const profileResponse = await adminApiService.getUserProfile(params.userId!);
+          if (profileResponse.status === 'success' && profileResponse.data) {
+            setUserData(profileResponse.data);
+            // Clear loan calculations cache for this loan and re-fetch
+            setLoanCalculations(prev => {
+              const updated = { ...prev };
+              delete updated[loanIdToRefresh];
+              return updated;
+            });
+            // Re-fetch calculation with new plan
+            fetchLoanCalculation(loanIdToRefresh);
+          }
+        } else {
+          alert(response.message || 'Failed to assign loan plan');
+        }
+        return;
+      }
+
+      // Otherwise, update user's default loan plan
+      if (!params.userId) return;
+
+      const response = await adminApiService.updateUserLoanPlan(params.userId, selectedLoanPlanId);
+      
+      if (response.status === 'success' || response.success) {
+        // Update local state
+        const planResponse = await adminApiService.getLoanPlan(selectedLoanPlanId);
+        if (planResponse.success && planResponse.data) {
+          setUserLoanPlan(planResponse.data);
+        } else if (planResponse.status === 'success' && planResponse.data) {
+          setUserLoanPlan(planResponse.data);
+        }
+        setShowLoanPlanModal(false);
+        setSelectedLoanPlanId(null);
+        alert('Loan plan updated successfully!');
+        // Refresh user data
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success') {
+          setUserData(profileResponse.data);
+        }
+      } else {
+        alert(response.message || 'Failed to update loan plan');
+      }
+    } catch (err) {
+      console.error('Error updating loan plan:', err);
+      alert('Failed to update loan plan');
+    }
+  };
+
   // Fetch validation data when user data is loaded
   useEffect(() => {
     if (userData?.id) {
@@ -377,6 +596,31 @@ export function UserProfileDetail() {
       fetchValidationHistory();
     }
   }, [userData?.id]);
+  
+  // Fetch loan calculations when loans are available (backend-only)
+  useEffect(() => {
+    if (userData && (activeTab === 'applied-loans' || activeTab === 'loans')) {
+      let loansToFetch: any[] = [];
+      
+      if (activeTab === 'applied-loans') {
+        loansToFetch = getArray('loans').filter((loan: any) => 
+          ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(loan.status)
+        );
+      } else if (activeTab === 'loans') {
+        loansToFetch = getArray('loans').filter((loan: any) => 
+          ['account_manager', 'cleared'].includes(loan.status)
+        );
+      }
+      
+      loansToFetch.forEach((loan: any) => {
+        const loanId = loan.id || loan.loanId;
+        if (loanId && !loanCalculations[loanId] && !calculationsLoading[loanId]) {
+          fetchLoanCalculation(loanId);
+        }
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userData, activeTab]);
 
   // Fetch validation history when validation tab is active
   useEffect(() => {
@@ -1380,6 +1624,66 @@ export function UserProfileDetail() {
             </div>
           </div>
         </div>
+
+        {/* Loan Plan Information */}
+        <div className="bg-white border border-gray-200 rounded-lg p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-semibold text-gray-900">Loan Plan</h3>
+            {canEditUsers && (
+              <button
+                onClick={() => {
+                  setSelectedLoanPlanId(userLoanPlan?.id || null);
+                  setShowLoanPlanModal(true);
+                }}
+                className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+              >
+                <Edit className="w-4 h-4" />
+                {userLoanPlan ? 'Change Plan' : 'Assign Plan'}
+              </button>
+            )}
+          </div>
+          <div className="space-y-4">
+            {userLoanPlan ? (
+              <>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Plan Name</label>
+                  <p className="text-gray-900 font-semibold">{userLoanPlan.plan_name}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Plan Code</label>
+                  <p className="text-gray-900">{userLoanPlan.plan_code}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Plan Type</label>
+                    <p className="text-gray-900">{userLoanPlan.plan_type === 'single' ? 'Single Payment' : 'Multi-EMI'}</p>
+                  </div>
+                  {userLoanPlan.plan_type === 'single' ? (
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Duration</label>
+                      <p className="text-gray-900">{userLoanPlan.repayment_days} days</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">EMI Count</label>
+                      <p className="text-gray-900">{userLoanPlan.emi_count}</p>
+                    </div>
+                  )}
+                </div>
+                {userLoanPlan.is_default && (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded p-2">
+                    <p className="text-xs text-yellow-800">This is the default system plan</p>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-center py-4">
+                <p className="text-gray-500 text-sm">No loan plan assigned</p>
+                <p className="text-gray-400 text-xs mt-1">User will use system default plan</p>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Family Information */}
@@ -1930,16 +2234,80 @@ export function UserProfileDetail() {
     </div>
   );
 
-  // Loan calculation helper function (used by both Applied Loans and Loans tabs)
-  const calculateValues = (principal: number, pfPercent: number, intPercent: number, days: number) => {
-    const processingFee = (principal * pfPercent) / 100;
-    const gst = processingFee * 0.18;
-    const disbAmount = principal - processingFee - gst;
-    // Interest = (Disb Amount + Processing Fee) × Days × Interest% per day
-    const interest = (disbAmount + processingFee) * days * (intPercent / 100);
-    const totalAmount = disbAmount + processingFee + interest + gst;
+  // Fetch loan calculation from backend (backend-only approach)
+  const fetchLoanDocuments = async (loanId: number) => {
+    setDocumentsLoading(prev => ({ ...prev, [loanId]: true }));
+    try {
+      console.log(`🔍 Fetching documents for loan ${loanId}...`);
+      const response = await adminApiService.getLoanDocuments(loanId);
+      console.log(`📄 Admin documents response for loan ${loanId}:`, response);
+      if ((response.success || response.status === 'success') && response.data?.documents) {
+        console.log(`✅ Found ${response.data.documents.length} documents for loan ${loanId}`);
+        response.data.documents.forEach((doc: any) => {
+          console.log(`  - ${doc.document_name} (${doc.document_type})`);
+        });
+        setLoanDocuments(prev => ({ ...prev, [loanId]: response.data!.documents }));
+      } else {
+        console.log(`⚠️ No documents found for loan ${loanId} or invalid response`);
+        setLoanDocuments(prev => ({ ...prev, [loanId]: [] }));
+      }
+    } catch (error: any) {
+      console.error(`❌ Error fetching loan documents for loan ${loanId}:`, error);
+      console.error('Error details:', error.response?.data || error.message);
+      setLoanDocuments(prev => ({ ...prev, [loanId]: [] }));
+    } finally {
+      setDocumentsLoading(prev => ({ ...prev, [loanId]: false }));
+    }
+  };
+
+  const fetchLoanCalculation = async (loanId: number) => {
+    if (loanCalculations[loanId] || calculationsLoading[loanId]) {
+      return; // Already fetched or loading
+    }
     
-    return { disbAmount, processingFee, gst, interest, totalAmount };
+    setCalculationsLoading(prev => ({ ...prev, [loanId]: true }));
+    
+    try {
+      const response = await adminApiService.getLoanCalculation(loanId);
+      if (response.success && response.data) {
+        setLoanCalculations(prev => ({ ...prev, [loanId]: response.data }));
+      }
+    } catch (error) {
+      console.error(`Error fetching calculation for loan ${loanId}:`, error);
+    } finally {
+      setCalculationsLoading(prev => ({ ...prev, [loanId]: false }));
+    }
+  };
+  
+  // Fetch plan details for modal
+  const fetchPlanDetails = async (planId: number) => {
+    try {
+      const [planResponse, feesResponse] = await Promise.all([
+        adminApiService.getLoanPlan(planId),
+        adminApiService.getLoanPlanFees(planId)
+      ]);
+      
+      if (planResponse.success && planResponse.data) {
+        const planData = planResponse.data;
+        
+        // Add fees to plan data
+        if (feesResponse.success && feesResponse.data) {
+          planData.fees = feesResponse.data.map((fee: any) => ({
+            fee_name: fee.fee_name,
+            fee_percent: fee.fee_percent,
+            application_method: fee.application_method
+          }));
+        } else {
+          planData.fees = [];
+        }
+        
+        setSelectedPlanDetails(planData);
+        setShowPlanDetailsModal(true);
+      }
+    } catch (error) {
+      console.error('Error fetching plan details:', error);
+      alert('Failed to load plan details');
+    }
   };
 
   // Applied Loans Tab (Submitted -> Under Review -> Follow Up -> Disbursal)
@@ -2002,16 +2370,14 @@ export function UserProfileDetail() {
                     <tr>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan ID</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Principal Amount</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">PF%</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Int%</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan Plan</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disb Amount</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time Period</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">P.Fee</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">GST</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disbursal Fee</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disbursal Fee GST</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Repayable Fee</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Repayable Fee GST</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Interest</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Amount</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Apply Date</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status Date</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
@@ -2019,172 +2385,289 @@ export function UserProfileDetail() {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {appliedLoans.map((loan: any, index: number) => {
-                      const isEditing = editingLoan === loan.id;
-                      const principal = isEditing ? parseFloat(editValues.principalAmount) : parseFloat(loan.principalAmount || loan.amount || 0);
-                      const pfPercent = isEditing ? parseFloat(editValues.pfPercent) : parseFloat(loan.processingFeePercent || 14);
-                      const intPercent = isEditing ? parseFloat(editValues.intPercent) : parseFloat(loan.interestRate || 0.10);
+                      const loanId = loan.id || loan.loanId;
+                      const calculation = loanCalculations[loanId];
+                      const isLoading = calculationsLoading[loanId];
                       
-                      // Get days from plan_snapshot or default to 15 days for applied loans
-                      let days = 15; // Default for applied loans
+                      // Parse plan snapshot to get plan code
+                      let planCode = 'N/A';
+                      let planId = null;
                       if (loan.plan_snapshot) {
                         try {
                           const planData = typeof loan.plan_snapshot === 'string' ? JSON.parse(loan.plan_snapshot) : loan.plan_snapshot;
-                          days = planData.repayment_days || 15;
+                          planCode = planData.plan_code || 'N/A';
+                          planId = planData.plan_id || planData.id || null;
                         } catch (e) {
-                          days = 15;
+                          // Ignore parse errors
                         }
                       }
                       
-                      const calculated = calculateValues(principal, pfPercent, intPercent, days);
-                      const processingFee = calculated.processingFee;
-                      const interest = calculated.interest;
-                      const gst = processingFee * 0.18;
-                      const totalAmount = calculated.disbAmount + processingFee + interest + gst;
-                      
                       // Generate shorter loan ID (last 8 characters)
-                      const shortLoanId = loan.loanId ? `CLL${loan.loanId.slice(-8)}` : `CLL${loan.id}`;
+                      const shortLoanId = loan.loanId ? `CLL${loan.loanId.slice(-8)}` : `CLL${loan.id || 'N/A'}`;
+                      
+                      // Fetch calculation if not loaded yet
+                      if (loanId && !calculation && !isLoading) {
+                        fetchLoanCalculation(loanId);
+                      }
                       
                       return (
-                        <tr key={index} className="hover:bg-gray-50">
-                          {/* Loan ID - Shorter format */}
+                        <>
+                          <tr key={index} className="hover:bg-gray-50">
+                          {/* Loan ID */}
                           <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                             {shortLoanId}
                           </td>
                           
-                          {/* Principal Amount - Editable */}
+                          {/* Principal Amount */}
                           <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {isEditing ? (
-                              <input
-                                type="number"
-                                value={editValues.principalAmount}
-                                onChange={(e) => setEditValues({...editValues, principalAmount: e.target.value})}
-                                className="w-24 px-2 py-1 border border-gray-300 rounded"
-                              />
+                            {calculation ? calculation.principal.toFixed(2) : isLoading ? '...' : 'N/A'}
+                          </td>
+                          
+                          {/* Loan Plan - Clickable/Editable */}
+                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {planId ? (
+                              <button
+                                onClick={() => fetchPlanDetails(planId)}
+                                className="text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                                title="Click to view plan details"
+                              >
+                                {planCode}
+                              </button>
                             ) : (
-                              principal
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-400">{planCode}</span>
+                                <button
+                                  onClick={() => {
+                                    setEditingLoanPlanId(loanId);
+                                    setSelectedLoanPlanId(null);
+                                    setShowLoanPlanModal(true);
+                                  }}
+                                  className="text-xs text-blue-600 hover:text-blue-800 underline"
+                                  title="Assign loan plan"
+                                >
+                                  Assign Plan
+                                </button>
+                              </div>
+                            )}
+                            {planId && (
+                              <button
+                                onClick={() => {
+                                  setEditingLoanPlanId(loanId);
+                                  setSelectedLoanPlanId(planId);
+                                  setShowLoanPlanModal(true);
+                                }}
+                                className="ml-2 text-xs text-gray-500 hover:text-gray-700"
+                                title="Change plan"
+                              >
+                                Change
+                              </button>
                             )}
                           </td>
                           
-                          {/* PF% - Editable */}
+                          {/* Disbursal Amount */}
                           <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {isEditing ? (
-                              <input
-                                type="number"
-                                step="0.1"
-                                value={editValues.pfPercent}
-                                onChange={(e) => setEditValues({...editValues, pfPercent: e.target.value})}
-                                className="w-16 px-2 py-1 border border-gray-300 rounded"
-                              />
-                            ) : (
-                              pfPercent
-                            )}
+                            {calculation ? calculation.disbursal.amount.toFixed(2) : isLoading ? '...' : 'N/A'}
                           </td>
                           
-                          {/* Int% - Editable */}
+                          {/* Disbursal Fee */}
                           <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {isEditing ? (
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={editValues.intPercent}
-                                onChange={(e) => setEditValues({...editValues, intPercent: e.target.value})}
-                                className="w-16 px-2 py-1 border border-gray-300 rounded"
-                              />
-                            ) : (
-                              intPercent
-                            )}
+                            {calculation ? calculation.totals.disbursalFee.toFixed(2) : isLoading ? '...' : 'N/A'}
                           </td>
                           
-                          {/* Disb Amount - Calculated */}
+                          {/* Disbursal Fee GST */}
                           <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {calculated.disbAmount.toFixed(3)}
+                            {calculation ? calculation.totals.disbursalFeeGST.toFixed(2) : isLoading ? '...' : 'N/A'}
                           </td>
                           
-                          {/* Time Period */}
+                          {/* Repayable Fee */}
                           <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {loan.timePeriod || loan.tenure || '30'}
+                            {calculation ? calculation.totals.repayableFee.toFixed(2) : isLoading ? '...' : 'N/A'}
                           </td>
                           
-                          {/* P.Fee - Calculated (not editable) */}
+                          {/* Repayable Fee GST */}
                           <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {processingFee.toFixed(3)}
+                            {calculation ? calculation.totals.repayableFeeGST.toFixed(2) : isLoading ? '...' : 'N/A'}
                           </td>
                           
-                          {/* GST - Calculated */}
+                          {/* Interest */}
                           <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {gst.toFixed(1)}
+                            {calculation ? calculation.interest.amount.toFixed(2) : isLoading ? '...' : 'N/A'}
                           </td>
                           
-                          {/* Interest - Calculated (not editable) */}
-                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {interest.toFixed(0)}
-                          </td>
-                          
-                          {/* Total Amount - Calculated */}
+                          {/* Total Amount */}
                           <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {totalAmount.toFixed(0)}
-                          </td>
-                          
-                          {/* Apply Date */}
-                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {formatDate(loan.appliedDate || loan.createdAt)}
-                          </td>
-                          
-                          {/* Reason */}
-                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {loan.reason || loan.type || 'Personal'}
+                            {calculation ? calculation.total.repayable.toFixed(2) : isLoading ? '...' : 'N/A'}
                           </td>
                           
                           {/* Status */}
                           <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {loan.status}
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              loan.status === 'submitted' ? 'bg-yellow-100 text-yellow-800' :
+                              loan.status === 'under_review' ? 'bg-blue-100 text-blue-800' :
+                              loan.status === 'follow_up' ? 'bg-purple-100 text-purple-800' :
+                              loan.status === 'disbursal' ? 'bg-green-100 text-green-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {loan.status || 'N/A'}
+                            </span>
                           </td>
                           
                           {/* Status Date */}
                           <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {formatDate(loan.statusDate || loan.updatedAt)}
+                            {formatDate(loan.statusDate || loan.updatedAt || loan.createdAt)}
                           </td>
                           
                           {/* Action Buttons */}
                           <td className="px-3 py-4 whitespace-nowrap text-sm font-medium">
                             <div className="flex flex-col gap-1">
-                              {isEditing ? (
-                                <button 
-                                  onClick={() => handleSave(loan.id)}
-                                  className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
-                                >
-                                  Save
-                                </button>
-                              ) : (
-                                <button 
-                                  onClick={() => handleEdit(loan)}
-                                  className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
-                                >
-                                  Edit
-                                </button>
-                              )}
                               <button 
                                 className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
-                                onClick={() => window.open(`/admin/loan-agreement/${loan.id}`, '_blank')}
+                                onClick={() => window.open(`/admin/loan-agreement/${loanId}`, '_blank')}
                                 title="View Loan Agreement"
                               >
                                 Agreement
                               </button>
                               <button 
                                 className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
-                                onClick={() => window.open(`/admin/kfs/${loan.id}`, '_blank')}
+                                onClick={() => window.open(`/admin/kfs/${loanId}`, '_blank')}
                                 title="View Key Facts Statement"
                               >
                                 View KFS
                               </button>
+                              <button 
+                                className="px-3 py-1 bg-purple-600 text-white rounded text-xs hover:bg-purple-700"
+                                onClick={() => {
+                                  const isExpanded = expandedLoanDocuments[loanId];
+                                  setExpandedLoanDocuments(prev => ({
+                                    ...prev,
+                                    [loanId]: !isExpanded
+                                  }));
+                                  if (!isExpanded && !loanDocuments[loanId]) {
+                                    fetchLoanDocuments(loanId);
+                                  }
+                                }}
+                                title="View Uploaded Documents"
+                              >
+                                {expandedLoanDocuments[loanId] ? 'Hide Docs' : 'View Docs'}
+                              </button>
                             </div>
                           </td>
-                        </tr>
+                          </tr>
+                          {expandedLoanDocuments[loanId] && (
+                            <tr key={`${index}-docs`}>
+                              <td colSpan={13} className="px-3 py-4 bg-gray-50">
+                              {documentsLoading[loanId] ? (
+                                <div className="text-center py-4">
+                                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
+                                  <p className="text-sm text-gray-600 mt-2">Loading documents...</p>
+                                </div>
+                              ) : loanDocuments[loanId] && loanDocuments[loanId].length > 0 ? (
+                                <div className="space-y-3">
+                                  <h4 className="font-semibold text-gray-900 mb-3">Uploaded Documents</h4>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {loanDocuments[loanId].map((doc: any, idx: number) => (
+                                      <div key={idx} className="border border-gray-200 rounded-lg p-3 bg-white">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <div className="flex items-center gap-2">
+                                            <FileText className="w-4 h-4 text-gray-600" />
+                                            <span className="text-sm font-medium text-gray-900">{doc.document_name}</span>
+                                          </div>
+                                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                            doc.upload_status === 'verified' ? 'bg-green-100 text-green-800' :
+                                            doc.upload_status === 'rejected' ? 'bg-red-100 text-red-800' :
+                                            'bg-yellow-100 text-yellow-800'
+                                          }`}>
+                                            {doc.upload_status}
+                                          </span>
+                                        </div>
+                                        <div className="text-xs text-gray-600 mb-2">
+                                          <p>File: {doc.file_name}</p>
+                                          <p>Size: {(doc.file_size / 1024 / 1024).toFixed(2)} MB</p>
+                                          <p>Uploaded: {new Date(doc.uploaded_at).toLocaleDateString()}</p>
+                                        </div>
+                                        <button
+                                          onClick={async () => {
+                                            try {
+                                              const urlResponse = await adminApiService.getLoanDocumentUrl(doc.id);
+                                              if ((urlResponse.success || urlResponse.status === 'success') && urlResponse.data?.url) {
+                                                window.open(urlResponse.data.url, '_blank');
+                                              }
+                                            } catch (error) {
+                                              alert('Failed to get document URL');
+                                            }
+                                          }}
+                                          className="text-xs text-blue-600 hover:text-blue-800 underline"
+                                        >
+                                          View Document
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="text-center py-4">
+                                  <FileText className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                                  <p className="text-sm text-gray-600">No documents uploaded yet</p>
+                                </div>
+                              )}
+                              </td>
+                            </tr>
+                          )}
+                        </>
                       );
                     })}
                   </tbody>
                 </table>
               </div>
+              
+              {/* Quick Follow-up Section */}
+              {appliedLoans.some((loan: any) => loan.status === 'follow_up') && (
+                <div className="mt-6 bg-white rounded-lg border border-gray-200 p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Follow-up</h3>
+                  <div className="space-y-3">
+                    {appliedLoans
+                      .filter((loan: any) => loan.status === 'follow_up')
+                      .map((loan: any) => {
+                        const loanId = loan.id || loan.loanId;
+                        const shortLoanId = loan.loanId ? `CLL${loan.loanId.slice(-8)}` : `CLL${loan.id || 'N/A'}`;
+                        
+                        return (
+                          <div key={loanId} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                            <div>
+                              <p className="font-medium text-gray-900">Loan ID: {shortLoanId}</p>
+                              <p className="text-sm text-gray-600">Status: Follow Up - Ready for processing</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <select
+                                defaultValue=""
+                                onChange={(e) => {
+                                  if (e.target.value === 'process') {
+                                    handleQuickProcess(loanId);
+                                    e.target.value = ''; // Reset dropdown
+                                  }
+                                }}
+                                className="px-4 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              >
+                                <option value="">Select Action</option>
+                                <option value="process">Process</option>
+                              </select>
+                              <button
+                                onClick={() => handleQuickProcess(loanId)}
+                                className="px-4 py-2 bg-orange-600 text-white rounded-md text-sm hover:bg-orange-700 font-medium"
+                                title="This will process the application to Disbursal status"
+                              >
+                                Process
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-3">
+                    <strong>Process:</strong> This will process the application to Disbursal status
+                  </p>
+                </div>
+              )}
             </>
           ) : (
             <div className="text-center py-12">
@@ -2223,12 +2706,11 @@ export function UserProfileDetail() {
                     <tr>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan ID</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Principal Amount</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">PF%</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Int%</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Interest Rate</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disb Amount</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time Period</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">P.Fee</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">GST</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disbursal Fees</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Repayable Fees</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Interest</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Amount</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Apply Date</th>
@@ -2240,57 +2722,43 @@ export function UserProfileDetail() {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {runningLoans.map((loan: any, index: number) => {
-                      // Calculate actual days from disbursement date
-                      const calculateDays = (disbursedDate: string | Date) => {
-                        if (!disbursedDate) return 0;
-                        const startDate = new Date(disbursedDate);
-                        startDate.setHours(0, 0, 0, 0);
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        const diffInMs = today.getTime() - startDate.getTime();
-                        const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
-                        return diffInDays + 1; // Include both start and end date
-                      };
+                      const loanId = loan.id || loan.loanId;
+                      const calculation = loanCalculations[loanId];
+                      const isLoading = calculationsLoading[loanId];
                       
-                      const principal = parseFloat(loan.principalAmount || loan.amount || 0);
-                      const pfPercent = parseFloat(loan.processingFeePercent || 14);
-                      const intPercent = parseFloat(loan.interestRate || 0.10);
-                      const days = loan.disbursed_at ? calculateDays(loan.disbursed_at) : 0;
-                      
-                      // Calculate using the same formula as applied loans
-                      const calculated = calculateValues(principal, pfPercent, intPercent, days);
+                      // Fetch calculation if not loaded yet
+                      if (loanId && !calculation && !isLoading) {
+                        fetchLoanCalculation(loanId);
+                      }
                       
                       return (
                       <tr key={index} className="hover:bg-gray-50 border-l-4 border-l-green-500">
                         <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {loan.loanId}
+                          {loan.loanId || loan.id}
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatCurrency(principal)}
+                          {calculation ? formatCurrency(calculation.principal) : isLoading ? '...' : 'N/A'}
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {pfPercent}%
+                          {calculation ? `${(calculation.interest.rate_per_day * 100).toFixed(4)}%` : isLoading ? '...' : 'N/A'}
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {intPercent}%
+                          {calculation ? calculation.interest.days : isLoading ? '...' : 'N/A'} days
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatCurrency(calculated.disbAmount)}
+                          {calculation ? formatCurrency(calculation.disbursal.amount) : isLoading ? '...' : 'N/A'}
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {days} days
+                          {calculation ? formatCurrency(calculation.totals.disbursalFee + calculation.totals.disbursalFeeGST) : isLoading ? '...' : 'N/A'}
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatCurrency(calculated.processingFee)}
+                          {calculation ? formatCurrency(calculation.totals.repayableFee + calculation.totals.repayableFeeGST) : isLoading ? '...' : 'N/A'}
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatCurrency(calculated.gst)}
-                        </td>
-                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatCurrency(calculated.interest)}
+                          {calculation ? formatCurrency(calculation.interest.amount) : isLoading ? '...' : 'N/A'}
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {formatCurrency(calculated.totalAmount)}
+                          {calculation ? formatCurrency(calculation.total.repayable) : isLoading ? '...' : 'N/A'}
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
                           {formatDate(loan.appliedDate || loan.createdAt)}
@@ -5164,12 +5632,62 @@ export function UserProfileDetail() {
               </button>
             </div>
             
-            <form className="space-y-4">
+            <form className="space-y-4" onSubmit={async (e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target as HTMLFormElement);
+              const transactionType = formData.get('transactionType') as string;
+              const loanApplicationId = formData.get('loanApplicationId') as string;
+              
+              // If transaction type is loan_disbursement and loan application is selected, update loan status
+              if (transactionType === 'loan_disbursement' && loanApplicationId) {
+                try {
+                  await adminApiService.updateApplicationStatus(loanApplicationId, 'account_manager');
+                  alert('Transaction added successfully! Loan status updated to Account Manager.');
+                } catch (error) {
+                  console.error('Error updating loan status:', error);
+                  alert('Transaction added, but failed to update loan status. Please update manually.');
+                }
+              } else {
+                alert('Transaction added successfully!');
+              }
+              setShowAddTransactionModal(false);
+              // Refresh user data
+              if (params.userId) {
+                const profileResponse = await adminApiService.getUserProfile(params.userId);
+                if (profileResponse.status === 'success' && profileResponse.data) {
+                  setUserData(profileResponse.data);
+                }
+              }
+            }}>
+              {/* Loan Application Selector (for loan disbursement) */}
+              {(() => {
+                const readyForDisbursementLoans = getArray('loans').filter((loan: any) => 
+                  loan.status === 'ready_for_disbursement'
+                );
+                return readyForDisbursementLoans.length > 0 ? (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Loan Application (for Loan Disbursement)</label>
+                    <select 
+                      name="loanApplicationId"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Select Loan Application</option>
+                      {readyForDisbursementLoans.map((loan: any) => (
+                        <option key={loan.id} value={loan.id}>
+                          Loan ID: {loan.id || loan.loanId} - {formatCurrency(loan.principalAmount || loan.loan_amount || 0)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null;
+              })()}
+              
               {/* Transaction Type and Amount */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Transaction Type *</label>
                   <select 
+                    name="transactionType"
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   >
@@ -5285,6 +5803,16 @@ export function UserProfileDetail() {
                     required
                   >
                     <option value="">Select Status</option>
+                    <option value="submitted">Submitted</option>
+                    <option value="under_review">Under Review</option>
+                    <option value="follow_up">Follow Up</option>
+                    <option value="disbursal">Disbursal</option>
+                    <option value="ready_for_disbursement">Ready for Disbursement</option>
+                    <option value="disbursed">Disbursed</option>
+                    <option value="account_manager">Account Manager</option>
+                    <option value="cleared">Cleared</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="cancelled">Cancelled</option>
                     <option value="pending">Pending</option>
                     <option value="completed">Completed</option>
                     <option value="failed">Failed</option>
@@ -5341,11 +5869,6 @@ export function UserProfileDetail() {
               <div className="flex gap-3 pt-4">
                 <button
                   type="submit"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    alert('Transaction added successfully!');
-                    setShowAddTransactionModal(false);
-                  }}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
                 >
                   Add Transaction
@@ -6029,6 +6552,205 @@ export function UserProfileDetail() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Plan Details Modal */}
+      {showPlanDetailsModal && selectedPlanDetails && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-3xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-lg font-semibold text-gray-900">Loan Plan Details</h4>
+              <button
+                onClick={() => {
+                  setShowPlanDetailsModal(false);
+                  setSelectedPlanDetails(null);
+                }}
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Plan Name</label>
+                  <p className="text-gray-900 font-semibold">{selectedPlanDetails.plan_name}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Plan Code</label>
+                  <p className="text-gray-900">{selectedPlanDetails.plan_code}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Plan Type</label>
+                  <p className="text-gray-900">{selectedPlanDetails.plan_type === 'single' ? 'Single Payment' : 'Multi-EMI'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Interest Rate</label>
+                  <p className="text-gray-900">{selectedPlanDetails.interest_percent_per_day ? (parseFloat(selectedPlanDetails.interest_percent_per_day) * 100).toFixed(4) : 'N/A'}% per day</p>
+                </div>
+                {selectedPlanDetails.plan_type === 'single' ? (
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Duration</label>
+                    <p className="text-gray-900">{selectedPlanDetails.repayment_days || 'N/A'} days</p>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">EMI Frequency</label>
+                      <p className="text-gray-900 capitalize">{selectedPlanDetails.emi_frequency || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">EMI Count</label>
+                      <p className="text-gray-900">{selectedPlanDetails.emi_count || 'N/A'}</p>
+                    </div>
+                  </>
+                )}
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Calculate by Salary Date</label>
+                  <p className="text-gray-900">{selectedPlanDetails.calculate_by_salary_date ? 'Yes' : 'No'}</p>
+                </div>
+                {selectedPlanDetails.allow_extension && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Loan Extension</label>
+                    <p className="text-gray-900">
+                      {selectedPlanDetails.extension_show_from_days && selectedPlanDetails.extension_show_till_days
+                        ? `D${selectedPlanDetails.extension_show_from_days} to D+${selectedPlanDetails.extension_show_till_days}`
+                        : 'Enabled'}
+                    </p>
+                  </div>
+                )}
+              </div>
+              
+              {/* Fees Section */}
+              <div className="mt-6">
+                <h5 className="text-md font-semibold text-gray-900 mb-3">Fees</h5>
+                {selectedPlanDetails.fees && selectedPlanDetails.fees.length > 0 ? (
+                  <div className="space-y-2">
+                    {selectedPlanDetails.fees.map((fee: any, idx: number) => (
+                      <div key={idx} className="p-3 bg-gray-50 rounded-lg">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <p className="font-medium text-gray-900">{fee.fee_name}</p>
+                            <p className="text-sm text-gray-600">{fee.fee_percent}%</p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {fee.application_method === 'deduct_from_disbursal' 
+                                ? 'Deduct from Disbursal' 
+                                : 'Add to Total Repayable'}
+                            </p>
+                          </div>
+                          <span className="text-xs text-gray-500">18% GST applies</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-gray-500 text-sm">No fees assigned to this plan</p>
+                )}
+              </div>
+              
+              {selectedPlanDetails.description && (
+                <div className="mt-4">
+                  <label className="text-sm font-medium text-gray-500">Description</label>
+                  <p className="text-gray-900 text-sm">{selectedPlanDetails.description}</p>
+                </div>
+              )}
+            </div>
+            
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => {
+                  setShowPlanDetailsModal(false);
+                  setSelectedPlanDetails(null);
+                }}
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Loan Plan Selection Modal */}
+      {showLoanPlanModal && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-lg font-semibold text-gray-900">
+                {editingLoanPlanId ? 'Assign Loan Plan to Loan' : 'Select Loan Plan'}
+              </h4>
+              <button 
+                onClick={() => {
+                  setShowLoanPlanModal(false);
+                  setEditingLoanPlanId(null);
+                  setSelectedLoanPlanId(null);
+                }}
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              {loanPlans.length > 0 ? (
+                <div className="space-y-2">
+                  {loanPlans.map((plan: any) => (
+                    <div
+                      key={plan.id}
+                      onClick={() => setSelectedLoanPlanId(plan.id)}
+                      className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                        selectedLoanPlanId === plan.id
+                          ? 'border-blue-600 bg-blue-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h5 className="font-semibold text-gray-900">{plan.plan_name}</h5>
+                          <p className="text-sm text-gray-600 mt-1">Code: {plan.plan_code}</p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Type: {plan.plan_type === 'single' ? 'Single Payment' : `Multi-EMI (${plan.emi_count || 'N/A'} EMIs)`}
+                          </p>
+                          {plan.is_default && (
+                            <span className="inline-block mt-2 px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
+                              Default Plan
+                            </span>
+                          )}
+                        </div>
+                        {selectedLoanPlanId === plan.id && (
+                          <CheckCircle className="w-5 h-5 text-blue-600" />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-center py-4">No active loan plans available</p>
+              )}
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={handleUpdateLoanPlan}
+                  disabled={!selectedLoanPlanId}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {editingLoanPlanId ? 'Assign Plan' : 'Update Plan'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowLoanPlanModal(false);
+                    setEditingLoanPlanId(null);
+                    setSelectedLoanPlanId(null);
+                  }}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

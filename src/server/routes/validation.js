@@ -1,6 +1,7 @@
 const express = require('express');
 const { authenticateAdmin } = require('../middleware/auth');
-const { executeQuery } = require('../config/database');
+const { requireAuth } = require('../middleware/jwtAuth');
+const { executeQuery, initializeDatabase } = require('../config/database');
 const router = express.Router();
 
 // Get validation options by type
@@ -162,6 +163,9 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       let newStatus = null;
       
       switch (actionType) {
+        case 'need_document':
+          newStatus = 'follow_up';
+          break;
         case 'process':
           newStatus = 'disbursal';
           break;
@@ -171,7 +175,6 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
         case 'cancel':
           newStatus = 'cancelled';
           break;
-        // 'need_document' doesn't change status
       }
 
       if (newStatus) {
@@ -223,7 +226,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Get user validation history
+// Get user validation history (admin only)
 router.get('/history/:userId', authenticateAdmin, async (req, res) => {
   try {
     console.log('Fetching validation history for user:', req.params.userId);
@@ -300,6 +303,74 @@ router.get('/history/:userId', authenticateAdmin, async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching validation history:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch validation history'
+    });
+  }
+});
+
+// Get user's own validation history (user-facing endpoint)
+router.get('/user/history', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+    const { loanApplicationId } = req.query;
+
+    let query = `
+      SELECT 
+        uvh.id,
+        uvh.action_type,
+        uvh.action_details,
+        uvh.status,
+        uvh.created_at,
+        uvh.loan_application_id
+      FROM user_validation_history uvh
+      WHERE uvh.user_id = ?
+    `;
+    
+    const params = [userId];
+    
+    if (loanApplicationId) {
+      query += ' AND uvh.loan_application_id = ?';
+      params.push(loanApplicationId);
+    }
+    
+    query += ' ORDER BY uvh.created_at DESC';
+
+    const history = await executeQuery(query, params);
+
+    // Parse action_details JSON and format response
+    const formattedHistory = history.map(item => {
+      let details = {};
+      try {
+        if (typeof item.action_details === 'string') {
+          details = JSON.parse(item.action_details);
+        } else {
+          details = item.action_details || {};
+        }
+      } catch (error) {
+        console.error('Error parsing action_details:', error);
+        details = {};
+      }
+
+      return {
+        id: item.id,
+        action_type: item.action_type,
+        action_details: details,
+        status: item.status,
+        created_at: item.created_at,
+        loan_application_id: item.loan_application_id
+      };
+    });
+
+    res.json({
+      status: 'success',
+      data: formattedHistory
+    });
+
+  } catch (error) {
+    console.error('Error fetching user validation history:', error);
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch validation history'

@@ -70,12 +70,25 @@ const createUser = async (userData) => {
       console.warn('Could not fetch default credit score, using fallback:', configError.message);
     }
 
+    // Get default loan plan (is_default = 1)
+    let defaultLoanPlanId = null;
+    try {
+      const defaultPlans = await executeQuery(
+        'SELECT id FROM loan_plans WHERE is_default = 1 AND is_active = 1 LIMIT 1'
+      );
+      if (defaultPlans && defaultPlans.length > 0) {
+        defaultLoanPlanId = defaultPlans[0].id;
+      }
+    } catch (planError) {
+      console.warn('Could not fetch default loan plan, user will have no plan assigned:', planError.message);
+    }
+
     const query = `
       INSERT INTO users (
         phone, email, first_name, last_name, 
         date_of_birth, gender, marital_status, 
-        phone_verified, status, profile_completion_step, credit_score, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        phone_verified, status, profile_completion_step, credit_score, selected_loan_plan_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
     `;
     
     const values = [
@@ -89,7 +102,8 @@ const createUser = async (userData) => {
       true, // phone_verified = true after OTP verification
       'active', // status = active
       1, // profile_completion_step = 1 (Start with Step 1: Employment Quick Check)
-      defaultCreditScore // credit_score = default from config
+      defaultCreditScore, // credit_score = default from config
+      defaultLoanPlanId // selected_loan_plan_id = default loan plan
     ];
 
     const result = await executeQuery(query, values);

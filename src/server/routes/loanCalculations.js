@@ -5,34 +5,140 @@ const { initializeDatabase } = require('../config/database');
 const {
   calculateTotalDays,
   calculateLoanValues,
+  calculateCompleteLoanValues,
   getLoanCalculation,
   updateLoanCalculation
 } = require('../utils/loanCalculations');
+const { executeQuery } = require('../config/database');
 
 /**
  * GET /api/loan-calculations/:loanId
- * Get calculated values for a loan
+ * Get complete calculated values for a loan using centralized function
  * Query params:
- *   - days: Optional custom days for calculation
+ *   - customDays: Optional custom days for calculation
+ *   - calculationDate: Optional date to calculate from (ISO format)
  */
 router.get('/:loanId', authenticateAdmin, async (req, res) => {
   try {
-    const db = await initializeDatabase();
+    await initializeDatabase();
     const loanId = parseInt(req.params.loanId);
-    const customDays = req.query.days ? parseInt(req.query.days) : null;
+    const customDays = req.query.customDays ? parseInt(req.query.customDays) : null;
+    const calculationDate = req.query.calculationDate ? new Date(req.query.calculationDate) : null;
+    
+    console.log(`📊 Fetching loan calculation for loan ID: ${loanId}`);
     
     if (isNaN(loanId)) {
+      console.error(`❌ Invalid loan ID: ${req.params.loanId}`);
       return res.status(400).json({
         success: false,
         message: 'Invalid loan ID'
       });
     }
     
-    const calculation = await getLoanCalculation(db, loanId, customDays);
+    // Fetch loan data
+    const loans = await executeQuery(
+      `SELECT 
+        id, loan_amount, status, disbursed_at, plan_snapshot,
+        interest_percent_per_day, fees_breakdown, user_id
+      FROM loan_applications 
+      WHERE id = ?`,
+      [loanId]
+    );
+    
+    if (!loans || loans.length === 0) {
+      console.error(`❌ Loan not found: ${loanId}`);
+      return res.status(404).json({
+        success: false,
+        message: `Loan with ID ${loanId} not found`
+      });
+    }
+    
+    console.log(`✅ Loan found: ${loanId}, status: ${loans[0].status}`);
+    
+    const loan = loans[0];
+    
+    // Parse plan snapshot
+    let planSnapshot = null;
+    if (loan.plan_snapshot) {
+      try {
+        planSnapshot = typeof loan.plan_snapshot === 'string' 
+          ? JSON.parse(loan.plan_snapshot) 
+          : loan.plan_snapshot;
+      } catch (e) {
+        console.error('Error parsing plan_snapshot:', e);
+      }
+    }
+    
+    // If no plan snapshot, try to get plan from fees_breakdown or use defaults
+    if (!planSnapshot) {
+      // Try to get plan from fees_breakdown
+      let feesBreakdown = [];
+      if (loan.fees_breakdown) {
+        try {
+          feesBreakdown = typeof loan.fees_breakdown === 'string' 
+            ? JSON.parse(loan.fees_breakdown) 
+            : loan.fees_breakdown;
+        } catch (e) {
+          console.error('Error parsing fees_breakdown:', e);
+        }
+      }
+      
+      planSnapshot = {
+        plan_type: 'single',
+        repayment_days: 15,
+        interest_percent_per_day: parseFloat(loan.interest_percent_per_day || 0.001),
+        calculate_by_salary_date: false,
+        fees: feesBreakdown.map(fee => ({
+          fee_name: fee.fee_name || 'Fee',
+          fee_percent: fee.fee_percent || 0,
+          application_method: fee.application_method || 'deduct_from_disbursal'
+        }))
+      };
+    }
+    
+    // Fetch user data
+    const users = await executeQuery(
+      `SELECT id, salary_date FROM users WHERE id = (SELECT user_id FROM loan_applications WHERE id = ?)`,
+      [loanId]
+    );
+    
+    const userData = users && users.length > 0 ? {
+      user_id: users[0].id,
+      salary_date: users[0].salary_date
+    } : { user_id: null, salary_date: null };
+    
+    // Prepare data for calculation
+    const loanData = {
+      loan_amount: parseFloat(loan.loan_amount || 0),
+      loan_id: loan.id,
+      status: loan.status,
+      disbursed_at: loan.disbursed_at
+    };
+    
+    const planData = {
+      plan_id: planSnapshot.plan_id || null,
+      plan_type: planSnapshot.plan_type || 'single',
+      repayment_days: planSnapshot.repayment_days || null,
+      total_duration_days: planSnapshot.total_duration_days || planSnapshot.repayment_days || null,
+      interest_percent_per_day: parseFloat(planSnapshot.interest_percent_per_day || loan.interest_percent_per_day || 0.001),
+      calculate_by_salary_date: planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true,
+      fees: planSnapshot.fees || []
+    };
+    
+    const options = {
+      customDays: customDays,
+      calculationDate: calculationDate
+    };
+    
+    // Calculate using centralized function
+    const calculation = calculateCompleteLoanValues(loanData, planData, userData, options);
     
     res.json({
       success: true,
-      data: calculation
+      data: {
+        loan_id: loanId,
+        ...calculation
+      }
     });
     
   } catch (error) {

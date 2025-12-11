@@ -1,6 +1,7 @@
 const express = require('express');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
+const { authenticateAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 

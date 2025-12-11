@@ -3,6 +3,8 @@
  * Centralized calculation logic for loan amounts, interest, and fees
  */
 
+const GST_RATE = 0.18; // 18% GST
+
 /**
  * Calculate total days from disbursement date to today (inclusive)
  * @param {string|Date} disbursedDate - The date when loan was disbursed
@@ -26,6 +28,97 @@ function calculateTotalDays(disbursedDate) {
   
   // Add 1 to include both start and end date (inclusive counting)
   return diffInDays + 1;
+}
+
+/**
+ * Get next valid salary date based on target day
+ * @param {Date} startDate - Starting date
+ * @param {number} targetDay - Day of month (1-31)
+ * @returns {Date} Next valid salary date
+ */
+function getNextSalaryDate(startDate, targetDay) {
+  let year = startDate.getFullYear();
+  let month = startDate.getMonth();
+  let day = targetDay;
+  
+  // Create date for this month's salary date
+  let salaryDate = new Date(year, month, day);
+  
+  // If salary date has passed or is today, move to next month
+  if (salaryDate <= startDate) {
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+    salaryDate = new Date(year, month, day);
+  }
+  
+  // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
+  if (salaryDate.getDate() !== day) {
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    salaryDate = new Date(year, month, Math.min(day, lastDay));
+  }
+  
+  return salaryDate;
+}
+
+/**
+ * Calculate days for interest based on plan type and salary date
+ * @param {Object} planData - Plan data
+ * @param {Object} userData - User data
+ * @param {Date} calculationDate - Date to calculate from (default: today)
+ * @returns {Object} Days calculation result
+ */
+function calculateInterestDays(planData, userData, calculationDate = new Date()) {
+  const today = new Date(calculationDate);
+  today.setHours(0, 0, 0, 0);
+  
+  let days = planData.repayment_days || planData.total_duration_days || 15;
+  let calculationMethod = 'fixed';
+  let repaymentDate = null;
+  
+  // If plan uses salary date calculation
+  if (planData.calculate_by_salary_date && planData.plan_type === 'single' && userData.salary_date) {
+    const salaryDate = parseInt(userData.salary_date);
+    
+    if (salaryDate >= 1 && salaryDate <= 31) {
+      // Get next salary date
+      let nextSalaryDate = getNextSalaryDate(today, salaryDate);
+      
+      // Calculate days from today to next salary date
+      let daysToNextSalary = Math.ceil((nextSalaryDate - today) / (1000 * 60 * 60 * 24));
+      
+      // If days to next salary date is less than required duration, extend to following month
+      if (daysToNextSalary < days) {
+        // Keep adding months until we reach or exceed the required duration
+        let targetSalaryDate = new Date(nextSalaryDate);
+        let daysToTarget = daysToNextSalary;
+        
+        while (daysToTarget < days) {
+          targetSalaryDate = getNextSalaryDate(
+            new Date(targetSalaryDate.getFullYear(), targetSalaryDate.getMonth() + 1, 1),
+            salaryDate
+          );
+          daysToTarget = Math.ceil((targetSalaryDate - today) / (1000 * 60 * 60 * 24));
+        }
+        
+        days = daysToTarget;
+        repaymentDate = targetSalaryDate;
+      } else {
+        days = daysToNextSalary;
+        repaymentDate = nextSalaryDate;
+      }
+      
+      calculationMethod = 'salary_date';
+    }
+  }
+  
+  return {
+    days,
+    calculationMethod,
+    repaymentDate
+  };
 }
 
 /**
@@ -238,11 +331,164 @@ async function updateLoanCalculation(db, loanId, updates) {
   }
 }
 
+/**
+ * Complete loan calculation function - Single source of truth
+ * Calculates all loan values including fees with GST, interest, disbursal, and total repayable
+ * 
+ * @param {Object} loanData - Loan data
+ * @param {number} loanData.loan_amount - Principal loan amount
+ * @param {number} loanData.loan_id - Loan application ID (optional)
+ * @param {string} loanData.status - Loan status (optional)
+ * @param {Date|string} loanData.disbursed_at - Disbursement date (optional)
+ * 
+ * @param {Object} planData - Plan data
+ * @param {number} planData.plan_id - Plan ID
+ * @param {string} planData.plan_type - 'single' or 'multi_emi'
+ * @param {number} planData.repayment_days - Days for single payment plans
+ * @param {number} planData.total_duration_days - Total duration days
+ * @param {number} planData.interest_percent_per_day - Interest rate per day (decimal, e.g., 0.001)
+ * @param {boolean} planData.calculate_by_salary_date - Whether to calculate by salary date
+ * @param {Array} planData.fees - Array of fee objects
+ * @param {string} planData.fees[].fee_name - Fee name
+ * @param {number} planData.fees[].fee_percent - Fee percentage
+ * @param {string} planData.fees[].application_method - 'deduct_from_disbursal' or 'add_to_total'
+ * 
+ * @param {Object} userData - User data
+ * @param {number} userData.user_id - User ID
+ * @param {number} userData.salary_date - Day of month (1-31) or null
+ * 
+ * @param {Object} options - Optional parameters
+ * @param {number} options.customDays - Override days calculation
+ * @param {Date} options.calculationDate - Date to calculate from (default: today)
+ * 
+ * @returns {Object} Complete calculation breakdown
+ */
+function calculateCompleteLoanValues(loanData, planData, userData = {}, options = {}) {
+  // Validate inputs
+  const principal = parseFloat(loanData.loan_amount || 0);
+  if (principal <= 0) {
+    throw new Error('Invalid principal amount');
+  }
+  
+  const interestPercentPerDay = parseFloat(planData.interest_percent_per_day || 0);
+  if (interestPercentPerDay < 0) {
+    throw new Error('Invalid interest rate');
+  }
+  
+  // Parse fees
+  const fees = planData.fees || [];
+  const deductFromDisbursal = [];
+  const addToTotal = [];
+  
+  let totalDisbursalFee = 0; // Sum of fee amounts (without GST)
+  let totalDisbursalFeeGST = 0; // Sum of GST on deduct fees
+  let totalRepayableFee = 0; // Sum of fee amounts (without GST)
+  let totalRepayableFeeGST = 0; // Sum of GST on add fees
+  
+  // Calculate each fee with GST
+  fees.forEach(fee => {
+    const feePercent = parseFloat(fee.fee_percent || 0);
+    const feeAmount = Math.round((principal * feePercent) / 100 * 100) / 100; // Round to 2 decimals
+    const gstAmount = Math.round(feeAmount * GST_RATE * 100) / 100; // Round to 2 decimals
+    const totalWithGST = Math.round((feeAmount + gstAmount) * 100) / 100;
+    
+    const feeDetail = {
+      fee_name: fee.fee_name || 'Unknown Fee',
+      fee_percent: feePercent,
+      fee_amount: feeAmount,
+      gst_amount: gstAmount,
+      total_with_gst: totalWithGST
+    };
+    
+    if (fee.application_method === 'deduct_from_disbursal') {
+      deductFromDisbursal.push(feeDetail);
+      totalDisbursalFee += feeAmount;
+      totalDisbursalFeeGST += gstAmount;
+    } else if (fee.application_method === 'add_to_total') {
+      addToTotal.push(feeDetail);
+      totalRepayableFee += feeAmount;
+      totalRepayableFeeGST += gstAmount;
+    }
+  });
+  
+  // Round totals
+  totalDisbursalFee = Math.round(totalDisbursalFee * 100) / 100;
+  totalDisbursalFeeGST = Math.round(totalDisbursalFeeGST * 100) / 100;
+  totalRepayableFee = Math.round(totalRepayableFee * 100) / 100;
+  totalRepayableFeeGST = Math.round(totalRepayableFeeGST * 100) / 100;
+  
+  const totalDisbursalDeduction = Math.round((totalDisbursalFee + totalDisbursalFeeGST) * 100) / 100;
+  const totalRepayableAddition = Math.round((totalRepayableFee + totalRepayableFeeGST) * 100) / 100;
+  
+  // Calculate disbursal amount
+  const disbursalAmount = Math.round((principal - totalDisbursalDeduction) * 100) / 100;
+  
+  // Calculate interest days
+  let daysResult;
+  if (options.customDays !== undefined && options.customDays !== null) {
+    daysResult = {
+      days: options.customDays,
+      calculationMethod: 'custom',
+      repaymentDate: null
+    };
+  } else {
+    daysResult = calculateInterestDays(planData, userData, options.calculationDate || new Date());
+  }
+  
+  const { days, calculationMethod, repaymentDate } = daysResult;
+  
+  // Calculate interest
+  const interest = Math.round(principal * interestPercentPerDay * days * 100) / 100;
+  
+  // Calculate total repayable
+  const totalRepayable = Math.round((principal + interest + totalRepayableAddition) * 100) / 100;
+  
+  // Build calculation explanation strings
+  const disbursalCalculation = `Principal (${principal.toFixed(2)}) - Deduct Fees (${totalDisbursalDeduction.toFixed(2)}) = ${disbursalAmount.toFixed(2)}`;
+  
+  const totalBreakdown = `Principal (${principal.toFixed(2)}) + Interest (${interest.toFixed(2)}) + Repayable Fees (${totalRepayableAddition.toFixed(2)}) = ${totalRepayable.toFixed(2)}`;
+  
+  return {
+    principal: principal,
+    fees: {
+      deductFromDisbursal: deductFromDisbursal,
+      addToTotal: addToTotal
+    },
+    totals: {
+      disbursalFee: totalDisbursalFee,
+      disbursalFeeGST: totalDisbursalFeeGST,
+      repayableFee: totalRepayableFee,
+      repayableFeeGST: totalRepayableFeeGST,
+      totalDisbursalDeduction: totalDisbursalDeduction,
+      totalRepayableAddition: totalRepayableAddition
+    },
+    disbursal: {
+      amount: disbursalAmount,
+      calculation: disbursalCalculation
+    },
+    interest: {
+      amount: interest,
+      days: days,
+      rate_per_day: interestPercentPerDay,
+      calculation_method: calculationMethod,
+      calculation_date: options.calculationDate || new Date(),
+      repayment_date: repaymentDate
+    },
+    total: {
+      repayable: totalRepayable,
+      breakdown: totalBreakdown
+    }
+  };
+}
+
 module.exports = {
   calculateLoanValues,
   calculateTotalDays,
-  calculateLoanValues,
+  getNextSalaryDate,
+  calculateCompleteLoanValues,
   getLoanCalculation,
-  updateLoanCalculation
+  updateLoanCalculation,
+  getNextSalaryDate,
+  calculateInterestDays
 };
 

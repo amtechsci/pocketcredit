@@ -198,13 +198,71 @@ export function DynamicDashboardPage() {
         
         console.log('✅ Unique applications:', uniqueApplications);
         
+        // Check for account_manager status - redirect to repayment schedule
+        const accountManagerApp = uniqueApplications.find((app: any) => 
+          app.status === 'account_manager'
+        );
+        
+        if (accountManagerApp) {
+          navigate(`/repayment-schedule?applicationId=${accountManagerApp.id}`);
+          return;
+        }
+        
+        // Check for ready_for_disbursement status - show waiting message (admin needs to add transaction)
+        const readyForDisbursementApp = uniqueApplications.find((app: any) => 
+          app.status === 'ready_for_disbursement'
+        );
+        
+        if (readyForDisbursementApp) {
+          // Don't redirect - just show the dashboard with a message
+          // The loan will appear in "Running Loans" section
+          // Once admin adds transaction, status will change to account_manager and user will see repayment schedule
+        }
+        
+        // Check for disbursal status - redirect to post-disbursal flow
+        // But check if user has already completed all steps first
+        const disbursalApp = uniqueApplications.find((app: any) => 
+          app.status === 'disbursal'
+        );
+        
+        if (disbursalApp) {
+          // Check if user has completed step 6 (agreement signed)
+          // If yes, redirect to post-disbursal to show "You will get funds shortly" message
+          try {
+            const progressResponse = await apiService.getPostDisbursalProgress(disbursalApp.id);
+            if (progressResponse.success && progressResponse.data) {
+              const progress = progressResponse.data;
+              // If step 6 completed and agreement signed, redirect to show confirmation
+              if ((progress.current_step >= 6 && progress.agreement_signed) || progress.current_step >= 7) {
+                console.log('✅ Post-disbursal completed, redirecting to confirmation page...');
+                // Redirect to post-disbursal to show "You will get funds shortly" message
+                navigate(`/post-disbursal?applicationId=${disbursalApp.id}`);
+                return;
+              } else {
+                // User hasn't completed all steps - redirect to post-disbursal
+                navigate(`/post-disbursal?applicationId=${disbursalApp.id}`);
+                return;
+              }
+            } else {
+              // Can't determine progress - redirect to post-disbursal
+              navigate(`/post-disbursal?applicationId=${disbursalApp.id}`);
+              return;
+            }
+          } catch (error) {
+            console.error('Error checking progress:', error);
+            // On error, redirect to post-disbursal
+            navigate(`/post-disbursal?applicationId=${disbursalApp.id}`);
+            return;
+          }
+        }
+        
         // Split applications into applied loans and running loans
         const applied = uniqueApplications.filter((app: any) => 
-          ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(app.status)
+          ['submitted', 'under_review', 'follow_up'].includes(app.status)
         );
         
         const running = uniqueApplications.filter((app: any) => 
-          ['account_manager', 'cleared'].includes(app.status)
+          ['account_manager', 'cleared', 'ready_for_disbursement'].includes(app.status)
         );
         
         console.log('📝 Applied loans:', applied);
@@ -1028,15 +1086,22 @@ export function DynamicDashboardPage() {
                         <Button 
                           onClick={() => {
                             console.log('View Details clicked for:', application.id);
-                            navigate('/loan-application/kyc-verification', {
-                              state: { applicationId: application.id }
-                            });
+                            if (application.status === 'follow_up') {
+                              // Redirect to document upload page for follow_up status
+                              navigate('/loan-application/upload-documents', {
+                                state: { applicationId: application.id }
+                              });
+                            } else {
+                              navigate('/loan-application/kyc-verification', {
+                                state: { applicationId: application.id }
+                              });
+                            }
                           }}
                           variant="outline"
                           size="sm"
                           className="text-xs lg:text-sm whitespace-nowrap"
                         >
-                          View
+                          {application.status === 'follow_up' ? 'Upload Documents' : 'View'}
                         </Button>
                       </div>
                     </Card>

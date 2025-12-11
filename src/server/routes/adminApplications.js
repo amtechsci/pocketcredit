@@ -489,6 +489,112 @@ router.put('/:applicationId/assign', authenticateAdmin, validate(schemas.assignA
   }
 });
 
+// Assign/Update loan plan for an existing loan application
+router.put('/:applicationId/loan-plan', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { applicationId } = req.params;
+    const { plan_id } = req.body;
+
+    if (!plan_id) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Plan ID is required'
+      });
+    }
+
+    // Verify loan application exists
+    const applications = await executeQuery(
+      'SELECT id, user_id FROM loan_applications WHERE id = ?',
+      [applicationId]
+    );
+
+    if (applications.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Loan application not found'
+      });
+    }
+
+    // Verify plan exists and is active
+    const plans = await executeQuery(
+      'SELECT * FROM loan_plans WHERE id = ? AND is_active = 1',
+      [plan_id]
+    );
+
+    if (plans.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Loan plan not found or inactive'
+      });
+    }
+
+    const plan = plans[0];
+
+    // Fetch plan fees
+    const planFees = await executeQuery(
+      `SELECT 
+        lpf.fee_percent,
+        ft.fee_name,
+        ft.application_method,
+        ft.description
+       FROM loan_plan_fees lpf
+       INNER JOIN fee_types ft ON lpf.fee_type_id = ft.id
+       WHERE lpf.loan_plan_id = ? AND ft.is_active = 1
+       ORDER BY ft.fee_name ASC`,
+      [plan_id]
+    );
+
+    // Create plan snapshot
+    const planSnapshot = {
+      plan_id: plan.id,
+      plan_name: plan.plan_name,
+      plan_code: plan.plan_code,
+      plan_type: plan.plan_type,
+      repayment_days: plan.repayment_days,
+      total_duration_days: plan.total_duration_days,
+      interest_percent_per_day: parseFloat(plan.interest_percent_per_day || 0.001),
+      calculate_by_salary_date: plan.calculate_by_salary_date === 1 || plan.calculate_by_salary_date === true,
+      emi_count: plan.emi_count,
+      emi_frequency: plan.emi_frequency,
+      allow_extension: plan.allow_extension === 1 || plan.allow_extension === true,
+      extension_show_from_days: plan.extension_show_from_days,
+      extension_show_till_days: plan.extension_show_till_days,
+      fees: planFees.map(pf => ({
+        fee_name: pf.fee_name,
+        fee_percent: parseFloat(pf.fee_percent),
+        application_method: pf.application_method
+      }))
+    };
+
+    // Update loan application with plan snapshot
+    await executeQuery(
+      `UPDATE loan_applications 
+       SET plan_snapshot = ?, updated_at = NOW() 
+       WHERE id = ?`,
+      [JSON.stringify(planSnapshot), applicationId]
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Loan plan assigned successfully',
+      data: {
+        application_id: applicationId,
+        plan_id: plan.id,
+        plan_code: plan.plan_code,
+        plan_name: plan.plan_name
+      }
+    });
+
+  } catch (error) {
+    console.error('Assign loan plan error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to assign loan plan'
+    });
+  }
+});
+
 // Get application statistics
 router.get('/stats/overview', authenticateAdmin, async (req, res) => {
   try {

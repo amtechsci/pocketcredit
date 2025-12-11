@@ -52,6 +52,7 @@ const loanPlansRoutes = require('./routes/loanPlans');
 const validationRoutes = require('./routes/validation');
 const loanCalculationsRoutes = require('./routes/loanCalculations');
 const kfsRoutes = require('./routes/kfs');
+const postDisbursalRoutes = require('./routes/postDisbursal');
 const { activityLoggerMiddleware } = require('./middleware/activityLogger');
 const activityProcessor = require('./workers/activityProcessor');
 
@@ -187,8 +188,9 @@ app.use('/api/eligibility', eligibilityRoutes);
 app.use('/api/employment-quick-check', employmentQuickCheckRoutes);
 app.use('/api/loan-plans', loanPlansRoutes);
 app.use('/api/validation', validationRoutes);
-app.use('/api/loan-calculations', loanCalculationsRoutes);
+app.use('/api/admin/loan-calculations', loanCalculationsRoutes);
 app.use('/api/kfs', kfsRoutes);
+app.use('/api/post-disbursal', postDisbursalRoutes);
 
 // Digitap API routes
 const digitapRoutes = require('./routes/digitap');
@@ -196,6 +198,66 @@ app.use('/api/digitap', digitapRoutes);
 
 const studentDocumentsRoutes = require('./routes/studentDocuments');
 app.use('/api/student-documents', studentDocumentsRoutes);
+
+const loanApplicationDocumentsRoutes = require('./routes/loanApplicationDocuments');
+app.use('/api/loan-documents', loanApplicationDocumentsRoutes);
+
+// Admin route for loan documents
+const { authenticateAdmin } = require('./middleware/auth');
+const adminLoanDocumentsRouter = express.Router();
+adminLoanDocumentsRouter.get('/:applicationId', authenticateAdmin, async (req, res) => {
+  try {
+    const { executeQuery, initializeDatabase } = require('./config/database');
+    await initializeDatabase();
+    const { applicationId } = req.params;
+
+    // Verify loan application exists
+    const applications = await executeQuery(
+      'SELECT id, user_id FROM loan_applications WHERE id = ?',
+      [applicationId]
+    );
+
+    if (!applications || applications.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Loan application not found'
+      });
+    }
+
+    // Get all documents for this application
+    const documents = await executeQuery(
+      `SELECT id, document_name, document_type, file_name, file_size, mime_type, 
+              upload_status, uploaded_at, verified_at, verification_notes
+       FROM loan_application_documents 
+       WHERE loan_application_id = ? 
+       ORDER BY uploaded_at DESC`,
+      [applicationId]
+    );
+
+    console.log(`📄 Admin documents response: ${documents?.length || 0} documents found for loan ${applicationId}`);
+    if (documents && documents.length > 0) {
+      documents.forEach((doc) => {
+        console.log(`  - ${doc.document_name} (${doc.document_type}) - ${doc.upload_status}`);
+      });
+    }
+
+    res.json({
+      status: 'success',
+      success: true,
+      data: {
+        documents: documents || []
+      }
+    });
+
+  } catch (error) {
+    console.error('Get documents error (admin):', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message || 'Failed to fetch documents'
+    });
+  }
+});
+app.use('/api/admin/loan-documents', adminLoanDocumentsRouter);
 
 // Email OTP routes
 const emailOtpRoutes = require('./routes/emailOtp');

@@ -1,6 +1,7 @@
 const express = require('express');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
+const { calculateCompleteLoanValues, getNextSalaryDate } = require('../utils/loanCalculations');
 const router = express.Router();
 
 /**
@@ -163,10 +164,6 @@ router.post('/calculate', requireAuth, async (req, res) => {
     const loanAmount = parseFloat(loan_amount);
     
     // Fetch fees assigned to this loan plan
-    let fees = [];
-    let totalDeductFromDisbursal = 0;
-    let totalAddToTotal = 0;
-    
     const planFees = await executeQuery(
       `SELECT 
         lpf.fee_percent,
@@ -180,135 +177,67 @@ router.post('/calculate', requireAuth, async (req, res) => {
       [plan_id]
     );
     
-    if (planFees.length > 0) {
-      // Use fees assigned to the plan
-      for (const planFee of planFees) {
-        const feePercent = parseFloat(planFee.fee_percent);
-        const feeAmount = Math.round((loanAmount * feePercent) / 100);
-        
-        fees.push({
-          fee_name: planFee.fee_name,
-          fee_percent: feePercent.toString(),
-          application_method: planFee.application_method,
-          fee_amount: feeAmount
-        });
-        
-        if (planFee.application_method === 'deduct_from_disbursal') {
-          totalDeductFromDisbursal += feeAmount;
-        } else if (planFee.application_method === 'add_to_total') {
-          totalAddToTotal += feeAmount;
-        }
-      }
-    } else {
-      // Fallback: Use default processing fee if no fees assigned
-      totalDeductFromDisbursal = Math.round((loanAmount * 10) / 100); // Default 10%
-      fees = [{
-        fee_name: 'Processing Fee',
-        fee_percent: '10',
-        application_method: 'deduct_from_disbursal',
-        fee_amount: totalDeductFromDisbursal
-      }];
-    }
+    // Prepare fees array for centralized calculation
+    const fees = planFees.length > 0 
+      ? planFees.map(pf => ({
+          fee_name: pf.fee_name,
+          fee_percent: parseFloat(pf.fee_percent),
+          application_method: pf.application_method
+        }))
+      : [{
+          fee_name: 'Processing Fee',
+          fee_percent: 10,
+          application_method: 'deduct_from_disbursal'
+        }];
     
-    // Calculate total fees for display
-    const processingFee = totalDeductFromDisbursal; // For backward compatibility
-
-    // Calculate repayment days based on plan settings
-    let totalDays = plan.total_duration_days || plan.repayment_days || 15;
-    let actualRepaymentDays = plan.repayment_days || 15;
+    // Prepare data for centralized calculation
+    const loanData = {
+      loan_amount: loanAmount,
+      loan_id: null, // Preview calculation, no loan ID yet
+      status: 'preview',
+      disbursed_at: null
+    };
     
-    // If plan is configured to calculate by salary date, adjust repayment days
-    // For single payment plans, this adjusts the repayment date
-    // For multi-EMI plans, this will be used to set the first EMI date
-    if (plan.calculate_by_salary_date === 1 && user.salary_date) {
-      // Only adjust repayment days for single payment plans
-      if (plan.plan_type === 'single') {
-        const salaryDate = parseInt(user.salary_date);
-        if (salaryDate >= 1 && salaryDate <= 31) {
-          const today = new Date();
-          today.setHours(0, 0, 0, 0); // Normalize to start of day
-          
-          // Helper function to get next valid salary date
-          const getNextSalaryDate = (startDate, targetDay) => {
-            let year = startDate.getFullYear();
-            let month = startDate.getMonth();
-            let day = targetDay;
-            
-            // Create date for this month's salary date
-            let salaryDate = new Date(year, month, day);
-            
-            // If salary date has passed or is today, move to next month
-            if (salaryDate <= startDate) {
-              month += 1;
-              if (month > 11) {
-                month = 0;
-                year += 1;
-              }
-              salaryDate = new Date(year, month, day);
-            }
-            
-            // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
-            if (salaryDate.getDate() !== day) {
-              // Get last day of the month
-              const lastDay = new Date(year, month + 1, 0).getDate();
-              salaryDate = new Date(year, month, Math.min(day, lastDay));
-            }
-            
-            return salaryDate;
-          };
-          
-          // Calculate next salary date
-          let nextSalaryDate = getNextSalaryDate(today, salaryDate);
-          
-          // Calculate days from today to next salary date
-          let daysToNextSalary = Math.ceil((nextSalaryDate - today) / (1000 * 60 * 60 * 24));
-          
-          // If days to next salary date is less than required duration, extend to following month
-          if (daysToNextSalary < actualRepaymentDays) {
-            // Keep adding months until we reach or exceed the required duration
-            let targetSalaryDate = new Date(nextSalaryDate);
-            let daysToTarget = daysToNextSalary;
-            
-            while (daysToTarget < actualRepaymentDays) {
-              targetSalaryDate = getNextSalaryDate(
-                new Date(targetSalaryDate.getFullYear(), targetSalaryDate.getMonth() + 1, 1),
-                salaryDate
-              );
-              daysToTarget = Math.ceil((targetSalaryDate - today) / (1000 * 60 * 60 * 24));
-            }
-            
-            totalDays = daysToTarget;
-            actualRepaymentDays = daysToTarget;
-          } else {
-            totalDays = daysToNextSalary;
-            actualRepaymentDays = daysToNextSalary;
-          }
-        } else {
-          // Invalid salary date, use default
-          console.warn(`Invalid salary date for user ${userId}: ${user.salary_date}`);
-          totalDays = 30;
-          actualRepaymentDays = 30;
-        }
-      }
-      // For multi-EMI plans, salary date logic is handled in the EMI schedule generation below
-    } else if (plan.plan_type === 'single' && plan.calculate_by_salary_date === 1 && !user.salary_date) {
-      // If calculate by salary date is enabled but user has no salary date, use default 30 days
-      totalDays = 30;
-      actualRepaymentDays = 30;
-    }
-
-    // Calculate interest based on plan duration
-    // Interest = Principal × Interest Rate (decimal) × Days
-    // Note: interestPercentPerDay is already in decimal format (e.g., 0.001 = 0.1% per day)
-    const totalInterest = Math.round(loanAmount * interestPercentPerDay * totalDays);
-
-    // Calculate total repayable (Principal + Interest + Fees that add to total)
-    // Fees with 'deduct_from_disbursal' are deducted upfront, not added to repayment
-    // Fees with 'add_to_total' are added to the total repayable amount
-    const totalRepayable = loanAmount + totalInterest + totalAddToTotal;
+    const planData = {
+      plan_id: plan.id,
+      plan_type: plan.plan_type,
+      repayment_days: plan.repayment_days || null,
+      total_duration_days: plan.total_duration_days || plan.repayment_days || null,
+      interest_percent_per_day: parseFloat(plan.interest_percent_per_day || 0.001),
+      calculate_by_salary_date: plan.calculate_by_salary_date === 1 || plan.calculate_by_salary_date === true,
+      emi_count: plan.emi_count || null,
+      emi_frequency: plan.emi_frequency || null,
+      fees: fees
+    };
     
-    // Calculate disbursal amount (loan amount minus fees that deduct from disbursal)
-    const disbursalAmount = loanAmount - totalDeductFromDisbursal;
+    const userData = {
+      user_id: user.id,
+      salary_date: user.salary_date
+    };
+    
+    // Use centralized calculation function
+    const calculations = calculateCompleteLoanValues(loanData, planData, userData, {
+      calculationDate: new Date() // Use today for preview
+    });
+    
+    // Extract values for response
+    const disbursalAmount = calculations.disbursal.amount;
+    const totalRepayable = calculations.total.repayable;
+    const totalInterest = calculations.interest.amount;
+    const totalDays = calculations.interest.days;
+    
+    // Format fees for backward compatibility
+    const formattedFees = calculations.fees.deductFromDisbursal.concat(calculations.fees.addToTotal).map(fee => ({
+      fee_name: fee.fee_name,
+      fee_percent: fee.fee_percent.toString(),
+      application_method: fee.application_method,
+      fee_amount: fee.fee_amount,
+      gst_amount: fee.gst_amount,
+      total_with_gst: fee.total_with_gst
+    }));
+    
+    // For backward compatibility
+    const processingFee = calculations.totals.disbursalFee;
 
     // Calculate EMI details if multi-EMI plan
     let emiDetails = null;
@@ -334,35 +263,7 @@ router.post('/calculate', requireAuth, async (req, res) => {
       if (plan.calculate_by_salary_date === 1 && user.salary_date) {
         const salaryDate = parseInt(user.salary_date);
         if (salaryDate >= 1 && salaryDate <= 31) {
-          // Helper function to get next valid salary date
-          const getNextSalaryDate = (startDate, targetDay) => {
-            let year = startDate.getFullYear();
-            let month = startDate.getMonth();
-            let day = targetDay;
-            
-            // Create date for this month's salary date
-            let salaryDate = new Date(year, month, day);
-            
-            // If salary date has passed or is today, move to next month
-            if (salaryDate <= startDate) {
-              month += 1;
-              if (month > 11) {
-                month = 0;
-                year += 1;
-              }
-              salaryDate = new Date(year, month, day);
-            }
-            
-            // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
-            if (salaryDate.getDate() !== day) {
-              const lastDay = new Date(year, month + 1, 0).getDate();
-              salaryDate = new Date(year, month, Math.min(day, lastDay));
-            }
-            
-            return salaryDate;
-          };
-          
-          // Get next salary date as the start date for first EMI
+          // Use imported helper function
           startDate = getNextSalaryDate(startDate, salaryDate);
         }
       }
@@ -407,13 +308,14 @@ router.post('/calculate', requireAuth, async (req, res) => {
         schedule: emiSchedule
       };
     } else {
-      // Single payment plan
-      const dueDate = new Date();
-      dueDate.setDate(dueDate.getDate() + actualRepaymentDays);
+      // Single payment plan - use repayment date from calculation
+      const repaymentDate = calculations.interest.repayment_date 
+        ? new Date(calculations.interest.repayment_date)
+        : new Date();
       
       emiDetails = {
-        repayment_date: dueDate.toISOString().split('T')[0],
-        repayment_days: actualRepaymentDays
+        repayment_date: repaymentDate.toISOString().split('T')[0],
+        repayment_days: totalDays
       };
     }
 
@@ -423,13 +325,21 @@ router.post('/calculate', requireAuth, async (req, res) => {
       [plan.id]
     );
     
-    const lateFeeStructure = latePenalties.map((lp) => ({
-      tier_name: `Day ${lp.days_overdue_start}${lp.days_overdue_end ? `-${lp.days_overdue_end}` : '+'}`,
-      days_overdue_start: lp.days_overdue_start,
-      days_overdue_end: lp.days_overdue_end,
-      fee_type: 'percentage',
-      fee_value: lp.penalty_percent
-    }));
+    const lateFeeStructure = latePenalties.map((lp) => {
+      const penaltyPercent = parseFloat(lp.penalty_percent);
+      const gstPercent = 18; // 18% GST on penalty
+      const totalPercent = penaltyPercent + (penaltyPercent * gstPercent / 100);
+      
+      return {
+        tier_name: `Day ${lp.days_overdue_start}${lp.days_overdue_end ? `-${lp.days_overdue_end}` : '+'}`,
+        days_overdue_start: lp.days_overdue_start,
+        days_overdue_end: lp.days_overdue_end,
+        fee_type: 'percentage',
+        fee_value: lp.penalty_percent,
+        gst_percent: gstPercent,
+        total_percent_with_gst: totalPercent
+      };
+    });
 
     res.json({
       success: true,
@@ -449,21 +359,21 @@ router.post('/calculate', requireAuth, async (req, res) => {
         late_fee_structure: lateFeeStructure,
         breakdown: {
           principal: loanAmount,
-        processing_fee: processingFee,
-        fees: fees.map(f => ({
-          name: f.fee_name,
-          percent: parseFloat(f.fee_percent),
-          application_method: f.application_method,
-          amount: f.application_method === 'deduct_from_disbursal' 
-            ? Math.round((loanAmount * parseFloat(f.fee_percent)) / 100)
-            : Math.round((loanAmount * parseFloat(f.fee_percent)) / 100)
-        })),
-        total_deduct_from_disbursal: totalDeductFromDisbursal,
-        total_add_to_total: totalAddToTotal,
-        disbursal_amount: disbursalAmount,
+          processing_fee: processingFee,
+          fees: formattedFees.map(f => ({
+            name: f.fee_name,
+            percent: parseFloat(f.fee_percent),
+            application_method: f.application_method,
+            amount: f.fee_amount,
+            gst_amount: f.gst_amount,
+            total_with_gst: f.total_with_gst
+          })),
+          total_deduct_from_disbursal: calculations.totals.disbursalFee + calculations.totals.disbursalFeeGST,
+          total_add_to_total: calculations.totals.repayableFee + calculations.totals.repayableFeeGST,
+          disbursal_amount: disbursalAmount,
           interest: totalInterest,
-          interest_rate: `${interestPercentPerDay}% per day for ${totalDays} days`,
-          interest_percent_per_day: interestPercentPerDay, // Add raw numeric value
+          interest_rate: `${(calculations.interest.rate_per_day * 100).toFixed(4)}% per day for ${totalDays} days`,
+          interest_percent_per_day: calculations.interest.rate_per_day,
           total: totalRepayable
         }
       }

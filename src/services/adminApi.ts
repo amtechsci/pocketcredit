@@ -121,7 +121,7 @@ class AdminApiService {
 
   // Generic API request method
   private async request<T>(
-    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
     endpoint: string,
     data?: any,
     params?: any
@@ -443,6 +443,10 @@ class AdminApiService {
     country: string;
   }): Promise<ApiResponse<any>> {
     return this.request('PUT', `/user-profile/${userId}/address-info`, data);
+  }
+
+  async updateUserLoanPlan(userId: string, planId: number): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/user-profile/${userId}/loan-plan`, { plan_id: planId });
   }
 
   async updateUserEmploymentInfo(userId: string, data: {
@@ -775,6 +779,39 @@ class AdminApiService {
   }
 
   /**
+   * Set loan plan as default
+   */
+  async setDefaultLoanPlan(id: string | number): Promise<any> {
+    return this.request('PATCH', `/loan-plans/${id}/set-default`);
+  }
+
+  // ==================== Loan Calculations APIs ====================
+
+  /**
+   * Get complete loan calculation for a loan
+   */
+  async getLoanCalculation(loanId: string | number, options?: {
+    customDays?: number;
+    calculationDate?: string;
+  }): Promise<any> {
+    const params: any = {};
+    if (options?.customDays !== undefined) {
+      params.customDays = options.customDays;
+    }
+    if (options?.calculationDate) {
+      params.calculationDate = options.calculationDate;
+    }
+    return this.request('GET', `/loan-calculations/${loanId}`, undefined, params);
+  }
+
+  /**
+   * Assign/Update loan plan for an existing loan application
+   */
+  async assignLoanPlanToApplication(applicationId: string | number, planId: number): Promise<any> {
+    return this.request('PUT', `/applications/${applicationId}/loan-plan`, { plan_id: planId });
+  }
+
+  /**
    * Get late penalties for a loan plan
    */
   async getLoanPlanLatePenalties(planId: string | number): Promise<any> {
@@ -939,15 +976,6 @@ class AdminApiService {
   }
 
   // Loan Calculations API
-  async getLoanCalculation(loanId: number, days?: number): Promise<ApiResponse<any>> {
-    const params = days ? `?days=${days}` : '';
-    const response = await axios.get(`/api/loan-calculations/${loanId}${params}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
-  }
 
   async updateLoanCalculation(loanId: number, data: { processing_fee_percent?: number; interest_percent_per_day?: number }): Promise<ApiResponse<any>> {
     const response = await axios.put(`/api/loan-calculations/${loanId}`, data, {
@@ -1020,6 +1048,41 @@ class AdminApiService {
 
   async performCreditCheck(userId: number): Promise<ApiResponse<any>> {
     const response = await axios.post(`/api/admin/users/${userId}/perform-credit-check`, {}, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
+
+  // Loan Application Documents API
+  async getLoanDocuments(loanApplicationId: number): Promise<ApiResponse<{
+    documents: Array<{
+      id: number;
+      document_name: string;
+      document_type: string;
+      file_name: string;
+      file_size: number;
+      mime_type: string;
+      upload_status: string;
+      uploaded_at: string;
+      verified_at?: string;
+      verification_notes?: string;
+    }>;
+  }>> {
+    const response = await axios.get(`/api/admin/loan-documents/${loanApplicationId}`, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      }
+    });
+    return response.data;
+  }
+
+  async getLoanDocumentUrl(documentId: number): Promise<ApiResponse<{
+    url: string;
+    expires_in: number;
+  }>> {
+    const response = await axios.get(`/api/loan-documents/${documentId}/url`, {
       headers: {
         'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
       }

@@ -35,9 +35,12 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
     if (user) {
       setCurrentUser(JSON.parse(user));
     } else {
-      navigate('/admin/login');
+      // Only redirect if not already on login page
+      if (location.pathname !== '/admin/login') {
+        navigate('/admin/login');
+      }
     }
-  }, [navigate]);
+  }, [navigate, location.pathname]);
 
   const handleLogout = () => {
     localStorage.removeItem('adminUser');
@@ -179,15 +182,19 @@ function AdminLoginPage() {
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<AdminUser | null>(null);
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     const user = localStorage.getItem('adminUser');
     if (user) {
       setCurrentUser(JSON.parse(user));
     } else {
-      navigate('/admin/login');
+      // Only redirect if not already on login page
+      if (location.pathname !== '/admin/login') {
+        navigate('/admin/login');
+      }
     }
-  }, [navigate]);
+  }, [navigate, location.pathname]);
 
   if (!currentUser) {
     return null; // Will redirect to login
@@ -199,7 +206,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 export default function AdminApp() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="login" replace />} />
+      <Route path="/" element={<Navigate to="/admin/login" replace />} />
       <Route path="login" element={<AdminLoginPage />} />
       <Route path="dashboard" element={
         <ProtectedRoute>
@@ -256,7 +263,7 @@ export default function AdminApp() {
           <LoanAgreementDocument />
         </ProtectedRoute>
       } />
-      <Route path="*" element={<Navigate to="login" replace />} />
+      <Route path="*" element={<Navigate to="/admin/login" replace />} />
     </Routes>
   );
 }

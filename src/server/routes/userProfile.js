@@ -18,7 +18,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         date_of_birth, gender, marital_status, kyc_completed, 
         email_verified, phone_verified, status, profile_completion_step, 
         profile_completed, eligibility_status, eligibility_reason, 
-        eligibility_retry_date, created_at, updated_at, last_login_at
+        eligibility_retry_date, selected_loan_plan_id, created_at, updated_at, last_login_at
       FROM users 
       WHERE id = ?
     `, [userId]);
@@ -33,6 +33,18 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
 
     const user = users[0];
     console.log('👤 User data:', user);
+    
+    // Get user's selected loan plan if exists
+    let selectedLoanPlan = null;
+    if (user.selected_loan_plan_id) {
+      const plans = await executeQuery(
+        'SELECT * FROM loan_plans WHERE id = ?',
+        [user.selected_loan_plan_id]
+      );
+      if (plans && plans.length > 0) {
+        selectedLoanPlan = plans[0];
+      }
+    }
     
     // Get loan applications for this user
     const applications = await executeQuery(`
@@ -121,6 +133,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       eligibilityStatus: user.eligibility_status || 'pending',
       eligibilityReason: user.eligibility_reason || 'N/A',
       eligibilityRetryDate: user.eligibility_retry_date || 'N/A',
+      selectedLoanPlanId: user.selected_loan_plan_id || null,
+      selectedLoanPlan: selectedLoanPlan,
       personalInfo: {
         age: calculateAge(user.date_of_birth),
         gender: user.gender || 'N/A',
@@ -252,6 +266,53 @@ router.put('/:userId/basic-info', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to update basic information'
+    });
+  }
+});
+
+// Update user's loan plan (admin only)
+router.put('/:userId/loan-plan', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+    const { plan_id } = req.body;
+
+    if (!plan_id) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Plan ID is required'
+      });
+    }
+
+    // Verify plan exists and is active
+    const plans = await executeQuery(
+      'SELECT id FROM loan_plans WHERE id = ? AND is_active = 1',
+      [plan_id]
+    );
+
+    if (plans.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Loan plan not found or inactive'
+      });
+    }
+
+    // Update user's selected loan plan
+    await executeQuery(
+      'UPDATE users SET selected_loan_plan_id = ?, updated_at = NOW() WHERE id = ?',
+      [plan_id, userId]
+    );
+
+    res.json({
+      status: 'success',
+      message: 'User loan plan updated successfully',
+      data: { plan_id }
+    });
+  } catch (error) {
+    console.error('Update user loan plan error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update user loan plan'
     });
   }
 });

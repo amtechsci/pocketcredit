@@ -118,29 +118,28 @@ export function SimplifiedLoanApplicationPage() {
     }
   }, [isAuthenticated, navigate]);
 
-  // Load available loan plans
+  // Load user's assigned loan plan (auto-assigned on registration)
   useEffect(() => {
-    const loadPlans = async () => {
+    const loadUserPlan = async () => {
       try {
-        const response = await apiService.getAvailableLoanPlans();
-        if (response && (response as any).success && (response as any).data) {
-          const plans = (response as any).data;
-          setAvailablePlans(plans);
-          
-          // Auto-select if only one plan is available
-          if (plans.length === 1) {
-            console.log('Only one plan available, auto-selecting:', plans[0].plan_name);
-            handleInputChange('selectedPlanId', plans[0].id);
+        const response = await apiService.getSelectedLoanPlan();
+        if (response && (response as any).status === 'success' && (response as any).data) {
+          const planData = (response as any).data;
+          if (planData.plan && planData.plan.id) {
+            console.log('Auto-using user\'s assigned plan:', planData.plan.plan_name);
+            handleInputChange('selectedPlanId', planData.plan.id);
+            // Also set available plans for display purposes
+            setAvailablePlans([planData.plan]);
           }
         }
       } catch (error) {
-        console.error('Error loading plans:', error);
-        toast.error('Failed to load loan plans');
+        console.error('Error loading user plan:', error);
+        toast.error('Failed to load loan plan. Please try again.');
       }
     };
 
     if (isAuthenticated && !checkingEligibility) {
-      loadPlans();
+      loadUserPlan();
     }
   }, [isAuthenticated, checkingEligibility]);
 
@@ -254,7 +253,7 @@ export function SimplifiedLoanApplicationPage() {
     }
 
     if (!formData.selectedPlanId) {
-      toast.error('Please select a repayment plan');
+      toast.error('No loan plan assigned. Please contact support.');
       return;
     }
 
@@ -417,28 +416,21 @@ export function SimplifiedLoanApplicationPage() {
               </Select>
             </div>
 
-            {/* Repayment Plan Selection - Only show if multiple plans available */}
-            {availablePlans.length > 1 && (
-            <div className="space-y-2">
-              <Label htmlFor="plan" className="text-base font-medium">
-                Choose Repayment Plan *
-              </Label>
-              <Select 
-                value={formData.selectedPlanId?.toString() || ''} 
-                onValueChange={(value) => handleInputChange('selectedPlanId', parseInt(value))}
-              >
-                <SelectTrigger className="h-12 text-base">
-                  <SelectValue placeholder="Select repayment plan" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availablePlans.map(plan => (
-                    <SelectItem key={plan.id} value={plan.id.toString()}>
-                      {plan.plan_name} - {plan.total_duration_days} days
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Display assigned loan plan (read-only) */}
+            {formData.selectedPlanId && availablePlans.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-base font-medium">
+                  Repayment Plan
+                </Label>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <p className="text-sm font-semibold text-gray-900">
+                    {availablePlans.find(p => p.id === formData.selectedPlanId)?.plan_name || 'Default Plan'}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    This plan has been automatically assigned to you. Contact admin to change it.
+                  </p>
+                </div>
+              </div>
             )}
 
             {/* Disclaimer Section */}

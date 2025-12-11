@@ -18,6 +18,7 @@ import { DynamicLoanDetailsPage as LoanDetailsPage } from './components/pages/Dy
 import { DynamicPaymentHistoryPage as PaymentHistoryPage } from './components/pages/DynamicPaymentHistoryPage';
 import { SimplifiedLoanApplicationPage } from './components/pages/SimplifiedLoanApplicationPage';
 import LoanApplicationConfirmation from './components/pages/LoanApplicationConfirmation';
+import { LoanDocumentUploadPage } from './components/pages/LoanDocumentUploadPage';
 import { BankDetailsPage } from './components/pages/BankDetailsPage';
 import { ReferenceDetailsPage } from './components/pages/ReferenceDetailsPage';
 import { EnhancedUserReferencesPage } from './components/pages/EnhancedUserReferencesPage';
@@ -33,6 +34,8 @@ import { EmailVerificationPage } from './components/pages/EmailVerificationPage'
 import { ResidenceAddressPage } from './components/pages/ResidenceAddressPage';
 import { AdditionalInformationPage } from './components/pages/AdditionalInformationPage';
 import { ApplicationUnderReviewPage } from './components/pages/ApplicationUnderReviewPage';
+import { PostDisbursalFlowPage } from './components/pages/PostDisbursalFlowPage';
+import { RepaymentSchedulePage } from './components/pages/RepaymentSchedulePage';
 import { AccountAggregatorFlow } from './components/pages/AccountAggregatorFlow';
 import { ApplicationFlow } from './components/ApplicationFlow';
 import { CreditScorePage } from './components/pages/CreditScorePage';
@@ -366,6 +369,36 @@ function AppContent() {
           isAuthenticated ? (
             <DashboardLayout>
               <KYCCheckPage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+        
+        <Route path="/loan-application/upload-documents" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <LoanDocumentUploadPage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+        
+        <Route path="/post-disbursal" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <PostDisbursalFlowPage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+        
+        <Route path="/repayment-schedule" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <RepaymentSchedulePage />
             </DashboardLayout>
           ) : (
             <Navigate to="/auth" replace />

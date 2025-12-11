@@ -208,7 +208,10 @@ router.post('/', authenticateAdmin, async (req, res) => {
       eligible_employment_types,
       is_active,
       description,
-      terms_conditions
+      terms_conditions,
+      allow_extension,
+      extension_show_from_days,
+      extension_show_till_days
     } = req.body;
 
     // Validate required fields
@@ -261,12 +264,17 @@ router.post('/', authenticateAdmin, async (req, res) => {
       });
     }
 
+    // If setting as default, unset other defaults
+    if (is_default) {
+      await executeQuery('UPDATE loan_plans SET is_default = 0 WHERE is_default = 1');
+    }
+
     const result = await executeQuery(
       `INSERT INTO loan_plans 
         (plan_name, plan_code, plan_type, repayment_days, calculate_by_salary_date, emi_frequency, emi_count, 
          total_duration_days, interest_percent_per_day, eligible_member_tiers, eligible_employment_types,
-         is_active, description, terms_conditions)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         is_active, is_default, description, terms_conditions, allow_extension, extension_show_from_days, extension_show_till_days)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         plan_name, 
         plan_code, 
@@ -280,8 +288,12 @@ router.post('/', authenticateAdmin, async (req, res) => {
         eligible_member_tiers ? JSON.stringify(eligible_member_tiers) : null,
         eligible_employment_types ? JSON.stringify(eligible_employment_types) : null,
         is_active !== false ? 1 : 0,
+        is_default ? 1 : 0,
         description || null,
-        terms_conditions || null
+        terms_conditions || null,
+        allow_extension ? 1 : 0,
+        extension_show_from_days !== undefined && extension_show_from_days !== null ? parseInt(extension_show_from_days) : null,
+        extension_show_till_days !== undefined && extension_show_till_days !== null ? parseInt(extension_show_till_days) : null
       ]
     );
 
@@ -320,8 +332,12 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       eligible_member_tiers,
       eligible_employment_types,
       is_active,
+      is_default,
       description,
-      terms_conditions
+      terms_conditions,
+      allow_extension,
+      extension_show_from_days,
+      extension_show_till_days
     } = req.body;
 
     // Check if plan exists
@@ -335,6 +351,11 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
         success: false,
         message: 'Loan plan not found'
       });
+    }
+
+    // If setting as default, unset other defaults
+    if (is_default) {
+      await executeQuery('UPDATE loan_plans SET is_default = 0 WHERE is_default = 1 AND id != ?', [id]);
     }
 
     // Calculate total duration for multi-EMI plans
@@ -356,7 +377,8 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       SET plan_name = ?, plan_code = ?, plan_type = ?, repayment_days = ?, calculate_by_salary_date = ?,
           emi_frequency = ?, emi_count = ?, total_duration_days = ?, 
           interest_percent_per_day = ?, eligible_member_tiers = ?, eligible_employment_types = ?,
-          is_active = ?, description = ?, terms_conditions = ?,
+          is_active = ?, is_default = ?, description = ?, terms_conditions = ?,
+          allow_extension = ?, extension_show_from_days = ?, extension_show_till_days = ?,
           updated_at = NOW()
       WHERE id = ?`,
       [
@@ -372,8 +394,12 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
         eligible_member_tiers ? JSON.stringify(eligible_member_tiers) : null,
         eligible_employment_types ? JSON.stringify(eligible_employment_types) : null,
         is_active !== false ? 1 : 0,
+        is_default ? 1 : 0,
         description || null,
         terms_conditions || null,
+        allow_extension ? 1 : 0,
+        extension_show_from_days !== undefined && extension_show_from_days !== null ? parseInt(extension_show_from_days) : null,
+        extension_show_till_days !== undefined && extension_show_till_days !== null ? parseInt(extension_show_till_days) : null,
         id
       ]
     );
@@ -423,6 +449,56 @@ router.delete('/:id', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to delete loan plan'
+    });
+  }
+});
+
+/**
+ * PATCH /api/admin/loan-plans/:id/set-default - Set plan as default
+ */
+router.patch('/:id/set-default', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { id } = req.params;
+
+    // Check if plan exists
+    const existing = await executeQuery(
+      'SELECT id, is_active FROM loan_plans WHERE id = ?',
+      [id]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan plan not found'
+      });
+    }
+
+    if (!existing[0].is_active) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot set inactive plan as default'
+      });
+    }
+
+    // Unset all other defaults
+    await executeQuery('UPDATE loan_plans SET is_default = 0 WHERE is_default = 1');
+    
+    // Set this plan as default
+    await executeQuery(
+      'UPDATE loan_plans SET is_default = 1, updated_at = NOW() WHERE id = ?',
+      [id]
+    );
+
+    res.json({
+      success: true,
+      message: 'Loan plan set as default successfully'
+    });
+  } catch (error) {
+    console.error('Set default loan plan error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to set default loan plan'
     });
   }
 });

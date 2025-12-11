@@ -112,6 +112,10 @@ class ApiService {
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
         }
+        // If data is FormData, remove Content-Type header so axios can set it with boundary
+        if (config.data instanceof FormData) {
+          delete config.headers['Content-Type'];
+        }
         return config;
       },
       (error: any) => {
@@ -583,6 +587,78 @@ class ApiService {
     return this.request('DELETE', `/student-documents/${documentId}`);
   }
 
+  // Loan Application Document Upload APIs
+  async uploadLoanDocument(
+    formData: FormData,
+    loanApplicationId: number,
+    documentName: string,
+    documentType: string
+  ): Promise<ApiResponse<{
+    message: string;
+    document: {
+      id: number;
+      document_name: string;
+      document_type: string;
+      s3_key: string;
+      file_name: string;
+      file_size: number;
+      mime_type: string;
+      status: string;
+    };
+  }>> {
+    const token = localStorage.getItem('pocket_user_token');
+    
+    // Append required fields to FormData
+    formData.append('loan_application_id', loanApplicationId.toString());
+    formData.append('document_name', documentName);
+    formData.append('document_type', documentType);
+    
+    const response = await fetch(`${this.baseURL}/loan-documents/upload`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || 'Upload failed');
+    }
+
+    return response.json();
+  }
+
+  async getLoanDocuments(loanApplicationId: number): Promise<ApiResponse<{
+    documents: Array<{
+      id: number;
+      document_name: string;
+      document_type: string;
+      file_name: string;
+      file_size: number;
+      mime_type: string;
+      upload_status: string;
+      uploaded_at: string;
+      verified_at?: string;
+      verification_notes?: string;
+    }>;
+  }>> {
+    return this.request('GET', `/loan-documents/${loanApplicationId}`);
+  }
+
+  async getLoanDocumentUrl(documentId: number): Promise<ApiResponse<{
+    url: string;
+    expires_in: number;
+  }>> {
+    return this.request('GET', `/loan-documents/${documentId}/url`);
+  }
+
+  async deleteLoanDocument(documentId: number): Promise<ApiResponse<{
+    message: string;
+  }>> {
+    return this.request('DELETE', `/loan-documents/${documentId}`);
+  }
+
   async getStudentDocumentUrl(documentId: number): Promise<ApiResponse<{
     url: string;
     expires_in: number;
@@ -701,6 +777,17 @@ class ApiService {
    */
   async getAvailableLoanPlans(): Promise<ApiResponse<any[]>> {
     return this.request('GET', '/loan-plans/available');
+  }
+
+  /**
+   * Get user's selected loan plan (or default plan)
+   */
+  async getSelectedLoanPlan(): Promise<ApiResponse<{
+    plan: any;
+    is_user_selected: boolean;
+    is_system_default: boolean;
+  }>> {
+    return this.request('GET', '/user/selected-loan-plan');
   }
 
   /**
@@ -1030,6 +1117,82 @@ class ApiService {
     message: string;
   }>> {
     return this.request('POST', '/bank-statement/delete-pending-bank-statement');
+  }
+
+  /**
+   * Post-Disbursal Flow - Get Progress
+   */
+  async getPostDisbursalProgress(applicationId: number): Promise<ApiResponse<{
+    enach_done: boolean;
+    selfie_captured: boolean;
+    selfie_verified: boolean;
+    references_completed: boolean;
+    kfs_viewed: boolean;
+    agreement_signed: boolean;
+    current_step: number;
+  }>> {
+    return this.request('GET', `/post-disbursal/progress/${applicationId}`);
+  }
+
+  /**
+   * Post-Disbursal Flow - Update Progress
+   */
+  async updatePostDisbursalProgress(
+    applicationId: number,
+    progress: {
+      enach_done?: boolean;
+      selfie_captured?: boolean;
+      selfie_verified?: boolean;
+      references_completed?: boolean;
+      kfs_viewed?: boolean;
+      agreement_signed?: boolean;
+      current_step?: number;
+    }
+  ): Promise<ApiResponse<{ message: string }>> {
+    return this.request('PUT', `/post-disbursal/progress/${applicationId}`, progress);
+  }
+
+  /**
+   * Post-Disbursal Flow - Upload Selfie
+   */
+  async uploadSelfieForVerification(
+    applicationId: number,
+    file: File
+  ): Promise<ApiResponse<{
+    selfie_url: string;
+    message: string;
+  }>> {
+    const formData = new FormData();
+    formData.append('selfie', file);
+    formData.append('applicationId', applicationId.toString());
+    
+    // Use axios directly - the interceptor will remove Content-Type for FormData
+    try {
+      const response = await this.api.post('/post-disbursal/upload-selfie', formData);
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.data) {
+        return error.response.data;
+      }
+      throw new Error(error.message || 'Failed to upload selfie');
+    }
+  }
+
+  /**
+   * Post-Disbursal Flow - Complete All Steps
+   */
+  async completePostDisbursalFlow(applicationId: number): Promise<ApiResponse<{
+    message: string;
+    status: string;
+  }>> {
+    return this.request('POST', `/post-disbursal/complete/${applicationId}`);
+  }
+
+  /**
+   * Get KFS (Key Facts Statement) for user's loan
+   */
+  async getKFS(loanId: number): Promise<ApiResponse<any>> {
+    return this.request('GET', `/kfs/user/${loanId}`);
   }
 }
 

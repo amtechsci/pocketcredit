@@ -1,30 +1,262 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateAdmin } = require('../middleware/auth');
+const { requireAuth } = require('../middleware/jwtAuth');
 const { initializeDatabase, executeQuery } = require('../config/database');
-const { calculateLoanValues, calculateTotalDays } = require('../utils/loanCalculations');
+const { calculateLoanValues, calculateTotalDays, calculateCompleteLoanValues } = require('../utils/loanCalculations');
 const pdfService = require('../services/pdfService');
 const emailService = require('../services/emailService');
 
 /**
+ * GET /api/kfs/user/:loanId
+ * User-facing endpoint to get KFS data for their own loan
+ */
+router.get('/user/:loanId', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { loanId } = req.params;
+    const userId = req.userId;
+    
+    console.log('📄 User fetching KFS for loan ID:', loanId);
+    
+    // Verify loan belongs to user
+    const loans = await executeQuery(`
+      SELECT id, user_id, status FROM loan_applications 
+      WHERE id = ? AND user_id = ?
+    `, [loanId, userId]);
+    
+    if (!loans || loans.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan application not found or access denied'
+      });
+    }
+    
+    // Use the same KFS generation logic as admin endpoint
+    // Fetch full loan application details
+    const fullLoans = await executeQuery(`
+      SELECT 
+        la.*,
+        la.fees_breakdown,
+        la.disbursal_amount,
+        la.user_id,
+        u.first_name, u.last_name, u.email, u.phone, u.date_of_birth,
+        u.gender, u.marital_status
+      FROM loan_applications la
+      INNER JOIN users u ON la.user_id = u.id
+      WHERE la.id = ?
+    `, [loanId]);
+    
+    if (!fullLoans || fullLoans.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan application not found'
+      });
+    }
+    
+    const loan = fullLoans[0];
+    
+    // Get address details
+    const addresses = await executeQuery(`
+      SELECT * FROM addresses 
+      WHERE user_id = ? AND is_primary = 1 
+      LIMIT 1
+    `, [loan.user_id]);
+    
+    const address = addresses[0] || {};
+    
+    // Get employment details and income range from users
+    const employment = await executeQuery(`
+      SELECT ed.*, u.income_range 
+      FROM employment_details ed
+      LEFT JOIN users u ON ed.user_id = u.id
+      WHERE ed.user_id = ? 
+      LIMIT 1
+    `, [loan.user_id]);
+    
+    const employmentDetails = employment[0] || {};
+    
+    // Get bank details for the loan application
+    const bankDetailsQuery = await executeQuery(`
+      SELECT bd.* FROM bank_details bd
+      INNER JOIN loan_applications la ON la.user_bank_id = bd.id
+      WHERE la.id = ?
+      LIMIT 1
+    `, [loanId]);
+    
+    const bankDetails = bankDetailsQuery[0] || null;
+    
+    // Convert income_range to approximate monthly income for display
+    const getMonthlyIncomeFromRange = (range) => {
+      const ranges = {
+        '0-15000': 7500,
+        '15000-30000': 22500,
+        '30000-50000': 40000,
+        '50000-75000': 62500,
+        '75000-100000': 87500,
+        '100000+': 125000
+      };
+      return ranges[range] || 0;
+    };
+    
+    const monthlyIncome = getMonthlyIncomeFromRange(employmentDetails.income_range);
+    
+    // Get loan plan details
+    const loanPlans = await executeQuery(`
+      SELECT * FROM loan_plans WHERE id = ?
+    `, [loan.loan_plan_id]);
+    
+    const loanPlan = loanPlans[0] || {};
+    
+    // Calculate loan values
+    const loanValues = calculateCompleteLoanValues(loan, loanPlan);
+    
+    // Parse fees breakdown if it's a JSON string
+    let feesBreakdown = [];
+    if (loan.fees_breakdown) {
+      try {
+        feesBreakdown = typeof loan.fees_breakdown === 'string' 
+          ? JSON.parse(loan.fees_breakdown) 
+          : loan.fees_breakdown;
+      } catch (e) {
+        console.error('Error parsing fees_breakdown:', e);
+        feesBreakdown = [];
+      }
+    }
+    
+    // Build KFS data structure (same as admin endpoint)
+    const kfsData = {
+      company: {
+        name: 'Pocket Credit',
+        address: '123 Business Street, Mumbai, Maharashtra 400001',
+        phone: '+91 9876543210',
+        email: 'support@pocketcredit.in',
+        website: 'https://pocketcredit.in',
+        cin: 'U74999MH2023PTC123456',
+        gstin: '27AABCU1234D1Z5',
+        rbi_registration: 'B-14.03456',
+        registered_office: 'Plot No. 123, Sector 18, Gurugram, Haryana 122015',
+        jurisdiction: 'Gurugram, Haryana'
+      },
+      loan: {
+        loan_id: loan.loan_id || `LOAN${loan.id}`,
+        application_date: loan.created_at ? new Date(loan.created_at).toLocaleDateString('en-IN') : 'N/A',
+        sanctioned_amount: loan.sanctioned_amount || loan.principal_amount || 0,
+        disbursal_amount: loan.disbursal_amount || loanValues.netDisbursalAmount || 0,
+        loan_term_days: loan.loan_term_days || loanPlan.tenure_days || 0,
+        loan_term_months: Math.ceil((loan.loan_term_days || loanPlan.tenure_days || 0) / 30),
+        interest_rate: loan.interest_rate || loanPlan.base_interest_rate || 0,
+        repayment_frequency: loanPlan.repayment_frequency || 'Monthly'
+      },
+      borrower: {
+        name: `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'N/A',
+        email: loan.email || 'N/A',
+        phone: loan.phone || 'N/A',
+        date_of_birth: loan.date_of_birth ? new Date(loan.date_of_birth).toLocaleDateString('en-IN') : 'N/A',
+        gender: loan.gender || 'N/A',
+        marital_status: loan.marital_status || 'N/A',
+        address: {
+          line1: address.address_line1 || 'N/A',
+          line2: address.address_line2 || '',
+          city: address.city || 'N/A',
+          state: address.state || 'N/A',
+          pincode: address.pincode || 'N/A'
+        },
+        employment: {
+          company_name: employmentDetails.company_name || 'N/A',
+          designation: employmentDetails.designation || 'N/A',
+          monthly_income: monthlyIncome
+        }
+      },
+      interest: {
+        rate: loan.interest_rate || loanPlan.base_interest_rate || 0,
+        type: 'Reducing Balance',
+        calculation_method: 'Daily',
+        annual_rate: (loan.interest_rate || loanPlan.base_interest_rate || 0) * 365 / 100
+      },
+      fees: {
+        processing_fee: loanValues.processingFee || 0,
+        gst: loanValues.processingFeeGST || 0,
+        total_add_to_total: loanValues.totalAddToTotal || 0,
+        fees_breakdown: feesBreakdown
+      },
+      calculations: {
+        principal: loan.sanctioned_amount || loan.principal_amount || 0,
+        interest: loanValues.totalInterest || 0,
+        total_amount: loanValues.totalRepayableAmount || 0,
+        emi: loanValues.emiAmount || 0
+      },
+      repayment: {
+        emi_amount: loanValues.emiAmount || 0,
+        total_emis: Math.ceil((loan.loan_term_days || loanPlan.tenure_days || 0) / 30),
+        first_emi_date: loan.first_emi_date || 'N/A',
+        last_emi_date: loan.last_emi_date || 'N/A'
+      },
+      penal_charges: {
+        late_fee_per_day: loanPlan.late_fee_per_day || 0,
+        late_fee_cap: loanPlan.late_fee_cap || 0,
+        bounce_charges: loanPlan.bounce_charges || 0
+      },
+      grievance: {
+        name: 'Customer Service',
+        phone: '+91 9876543211',
+        email: 'compliance@pocketcredit.in'
+      },
+      digital_loan: {
+        cooling_off_period: '3 days',
+        lsp_list_url: 'https://pocketcredit.in/lsp',
+        payment_method: 'Digital payment through app or payment link'
+      },
+      additional: {
+        loan_transferable: 'Yes',
+        co_lending: 'No',
+        recovery_clause: '1(X)',
+        grievance_clause: '12'
+      },
+      bank_details: bankDetails ? {
+        bank_name: bankDetails.bank_name || 'N/A',
+        account_number: bankDetails.account_number || 'N/A',
+        ifsc_code: bankDetails.ifsc_code || 'N/A',
+        account_holder_name: bankDetails.account_holder_name || 'N/A'
+      } : null,
+      generated_at: new Date().toISOString()
+    };
+    
+    console.log('✅ KFS data generated successfully for user');
+    
+    res.json({
+      success: true,
+      data: kfsData
+    });
+    
+  } catch (error) {
+    console.error('❌ Error generating KFS for user:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate KFS',
+      error: error.message
+    });
+  }
+});
+
+/**
  * GET /api/kfs/:loanId
- * Generate KFS (Key Facts Statement) data for a loan
+ * Generate KFS (Key Facts Statement) data for a loan (Admin only)
  */
 router.get('/:loanId', authenticateAdmin, async (req, res) => {
   try {
-    const db = await initializeDatabase();
+    await initializeDatabase();
     const { loanId } = req.params;
     
     console.log('📄 Generating KFS for loan ID:', loanId);
     
     // Fetch loan application details including dynamic fees
-    const [loans] = await db.execute(`
+    const loans = await executeQuery(`
       SELECT 
         la.*,
         la.fees_breakdown,
         la.disbursal_amount,
-        la.total_deduct_from_disbursal,
-        la.total_add_to_total,
+        la.user_id,
         u.first_name, u.last_name, u.email, u.phone, u.date_of_birth,
         u.gender, u.marital_status
       FROM loan_applications la
@@ -42,7 +274,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     const loan = loans[0];
     
     // Get address details
-    const [addresses] = await db.execute(`
+    const addresses = await executeQuery(`
       SELECT * FROM addresses 
       WHERE user_id = ? AND is_primary = 1 
       LIMIT 1
@@ -51,7 +283,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     const address = addresses[0] || {};
     
     // Get employment details and income range from users
-    const [employment] = await db.execute(`
+    const employment = await executeQuery(`
       SELECT ed.*, u.income_range 
       FROM employment_details ed
       LEFT JOIN users u ON ed.user_id = u.id
@@ -73,106 +305,132 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       return rangeMap[range] || 0;
     };
     
+    // Parse plan snapshot
+    let planSnapshot = null;
+    if (loan.plan_snapshot) {
+      try {
+        planSnapshot = typeof loan.plan_snapshot === 'string' 
+          ? JSON.parse(loan.plan_snapshot) 
+          : loan.plan_snapshot;
+      } catch (e) {
+        console.error('Error parsing plan_snapshot:', e);
+      }
+    }
+    
     // Parse fees breakdown if available
     let feesBreakdown = [];
-    let totalDeductFromDisbursal = 0;
-    let totalAddToTotal = 0;
-    let disbursalAmount = null;
-    
     if (loan.fees_breakdown) {
       try {
         feesBreakdown = typeof loan.fees_breakdown === 'string' 
           ? JSON.parse(loan.fees_breakdown) 
           : loan.fees_breakdown;
-        
-        // Calculate totals from breakdown
-        feesBreakdown.forEach(fee => {
-          if (fee.application_method === 'deduct_from_disbursal') {
-            totalDeductFromDisbursal += parseFloat(fee.amount || 0);
-          } else if (fee.application_method === 'add_to_total') {
-            totalAddToTotal += parseFloat(fee.amount || 0);
-          }
-        });
       } catch (e) {
         console.error('Error parsing fees_breakdown:', e);
       }
     }
     
-    // Use disbursal_amount if available, otherwise calculate
+    // Fetch user data for salary date calculation
+    const users = await executeQuery(
+      `SELECT id, salary_date FROM users WHERE id = ?`,
+      [loan.user_id]
+    );
+    
+    const userData = users && users.length > 0 ? {
+      user_id: users[0].id,
+      salary_date: users[0].salary_date
+    } : { user_id: null, salary_date: null };
+    
+    // Prepare data for centralized calculation
     const principal = parseFloat(loan.loan_amount || 0);
-    const intPercentPerDay = parseFloat(loan.interest_percent_per_day || 0.3);
     
-    // Get days from plan_snapshot or default to 30
-    let days = 30;
-    if (loan.plan_snapshot) {
-      try {
-        const planData = typeof loan.plan_snapshot === 'string' 
-          ? JSON.parse(loan.plan_snapshot) 
-          : loan.plan_snapshot;
-        days = planData.repayment_days || 30;
-      } catch (e) {
-        days = 30;
-      }
+    // If no plan snapshot, create one from fees_breakdown or use defaults
+    if (!planSnapshot) {
+      planSnapshot = {
+        plan_type: 'single',
+        repayment_days: 15,
+        interest_percent_per_day: parseFloat(loan.interest_percent_per_day || 0.001),
+        calculate_by_salary_date: false,
+        fees: feesBreakdown.map(fee => ({
+          fee_name: fee.fee_name || 'Fee',
+          fee_percent: fee.fee_percent || 0,
+          application_method: fee.application_method || 'deduct_from_disbursal'
+        }))
+      };
     }
     
-    // If loan is disbursed, calculate actual days
-    if (loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)) {
-      days = calculateTotalDays(loan.disbursed_at);
+    // Ensure fees array exists in plan snapshot
+    if (!planSnapshot.fees && feesBreakdown.length > 0) {
+      planSnapshot.fees = feesBreakdown.map(fee => ({
+        fee_name: fee.fee_name || 'Fee',
+        fee_percent: fee.fee_percent || 0,
+        application_method: fee.application_method || 'deduct_from_disbursal'
+      }));
     }
     
-    // Use dynamic fees if available, otherwise fallback to legacy calculation
+    const loanData = {
+      loan_amount: principal,
+      loan_id: loan.id,
+      status: loan.status,
+      disbursed_at: loan.disbursed_at
+    };
+    
+    // Ensure planData has all required fields for calculateInterestDays
+    // Default repayment_days to 15 if not set (for single payment plans)
+    const defaultRepaymentDays = planSnapshot.repayment_days || planSnapshot.total_duration_days || 15;
+    
+    const planData = {
+      plan_id: planSnapshot.plan_id || null,
+      plan_type: planSnapshot.plan_type || 'single',
+      repayment_days: defaultRepaymentDays,
+      total_duration_days: planSnapshot.total_duration_days || defaultRepaymentDays,
+      emi_count: planSnapshot.emi_count || null,
+      emi_frequency: planSnapshot.emi_frequency || null,
+      interest_percent_per_day: parseFloat(planSnapshot.interest_percent_per_day || loan.interest_percent_per_day || 0.001),
+      calculate_by_salary_date: planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true || false,
+      fees: planSnapshot.fees || []
+    };
+    
+    // Determine calculation date - use disbursed_at if loan is disbursed, otherwise use today
+    const calculationDate = loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)
+      ? new Date(loan.disbursed_at)
+      : new Date();
+    
+    // Use centralized calculation function
     let calculations;
-    let processingFee = 0;
-    let gst = 0;
-    let disbAmount = principal;
-    
-    if (feesBreakdown.length > 0 && loan.disbursal_amount !== null) {
-      // Use dynamic fees
-      disbursalAmount = parseFloat(loan.disbursal_amount || 0);
-      disbAmount = disbursalAmount;
-      
-      // Calculate GST on fees deducted from disbursal (18% GST)
-      gst = totalDeductFromDisbursal * 0.18;
-      
-      // Calculate interest on disbursed amount
-      const interest = (disbAmount * intPercentPerDay / 100) * days;
-      
-      // Total repayable = disbursed amount + interest + fees added to total
-      const totalRepayable = disbAmount + interest + totalAddToTotal;
-      
-      calculations = {
-        principal: principal,
-        processingFee: totalDeductFromDisbursal,
-        gst: gst,
-        disbAmount: disbAmount,
-        interest: interest,
-        totalAmount: totalRepayable
-      };
-      
-      processingFee = totalDeductFromDisbursal;
-    } else {
-      // Fallback to legacy calculation
-      const pfPercent = parseFloat(loan.processing_fee_percent || 14);
-      const loanData = {
-        loan_amount: principal,
-        processing_fee_percent: pfPercent,
-        interest_percent_per_day: intPercentPerDay
-      };
-      calculations = calculateLoanValues(loanData, days);
-      processingFee = calculations.processingFee;
-      gst = calculations.gst;
-      disbAmount = calculations.disbAmount;
+    try {
+      calculations = calculateCompleteLoanValues(loanData, planData, userData, {
+        calculationDate: calculationDate
+      });
+    } catch (error) {
+      console.error('Error in calculateCompleteLoanValues:', error);
+      console.error('Loan Data:', JSON.stringify(loanData, null, 2));
+      console.error('Plan Data:', JSON.stringify(planData, null, 2));
+      console.error('User Data:', JSON.stringify(userData, null, 2));
+      throw error;
     }
+    
+    // Extract values for KFS
+    const processingFee = calculations.totals.disbursalFee;
+    const gst = calculations.totals.disbursalFeeGST + calculations.totals.repayableFeeGST;
+    const disbAmount = calculations.disbursal.amount;
+    const interest = calculations.interest.amount;
+    const days = calculations.interest.days;
+    const totalRepayable = calculations.total.repayable;
     
     // Calculate APR (Annual Percentage Rate)
     // APR = ((All Fees + GST + Interest) / Loan Amount) / Days * 36500
-    const totalCharges = processingFee + gst + totalAddToTotal + calculations.interest;
-    const apr = ((totalCharges / principal) / days) * 36500;
+    const totalCharges = processingFee + gst + calculations.totals.repayableFee + interest;
+    const apr = days > 0 ? ((totalCharges / principal) / days) * 36500 : 0;
     
-    // Generate due date (today + days)
-    const today = new Date();
-    const dueDate = new Date(today);
-    dueDate.setDate(today.getDate() + days);
+    // Generate due date from repayment date or calculate
+    let dueDate;
+    if (calculations.interest.repayment_date) {
+      dueDate = new Date(calculations.interest.repayment_date);
+    } else {
+      const today = new Date();
+      dueDate = new Date(today);
+      dueDate.setDate(today.getDate() + days);
+    }
     
     // Prepare KFS data
     const kfsData = {
@@ -195,7 +453,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         application_number: loan.application_number,
         type: loan.loan_purpose || 'Personal Loan',
         sanctioned_amount: principal,
-        disbursed_amount: calculations.disbAmount,
+        disbursed_amount: disbAmount,
         loan_term_days: days,
         status: loan.status,
         created_at: loan.created_at,
@@ -235,22 +493,41 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       
       // Interest & Charges
       interest: {
-        rate_per_day: intPercentPerDay,
-        rate_type: 'Fixed',
-        total_interest: calculations.interest,
+        rate_per_day: calculations.interest.rate_per_day,
+        rate_type: calculations.interest.calculation_method === 'salary_date' ? 'Salary Date Based' : 'Fixed',
+        total_interest: interest,
         calculation_days: days
       },
       
-      // Fees & Charges (dynamic fees support)
+      // Fees & Charges (dynamic fees support with GST)
       fees: {
         processing_fee: processingFee,
-        processing_fee_percent: feesBreakdown.length > 0 ? null : parseFloat(loan.processing_fee_percent || 14),
+        processing_fee_percent: null, // Using dynamic fees
         gst: gst,
         gst_percent: 18,
-        total_upfront_charges: processingFee + gst,
-        fees_breakdown: feesBreakdown,
-        total_deduct_from_disbursal: totalDeductFromDisbursal,
-        total_add_to_total: totalAddToTotal
+        total_upfront_charges: processingFee + calculations.totals.disbursalFeeGST,
+        fees_breakdown: [
+          ...calculations.fees.deductFromDisbursal.map(fee => ({
+            fee_name: fee.fee_name,
+            fee_percent: fee.fee_percent,
+            fee_amount: fee.fee_amount,
+            gst_amount: fee.gst_amount,
+            total_with_gst: fee.total_with_gst,
+            application_method: 'deduct_from_disbursal'
+          })),
+          ...calculations.fees.addToTotal.map(fee => ({
+            fee_name: fee.fee_name,
+            fee_percent: fee.fee_percent,
+            fee_amount: fee.fee_amount,
+            gst_amount: fee.gst_amount,
+            total_with_gst: fee.total_with_gst,
+            application_method: 'add_to_total'
+          }))
+        ],
+        total_deduct_from_disbursal: calculations.totals.disbursalFee,
+        total_add_to_total: calculations.totals.repayableFee,
+        gst_on_deduct_from_disbursal: calculations.totals.disbursalFeeGST,
+        gst_on_add_to_total: calculations.totals.repayableFeeGST
       },
       
       // Calculations
@@ -259,8 +536,8 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         processing_fee: processingFee,
         gst: gst,
         disbursed_amount: disbAmount,
-        interest: calculations.interest,
-        total_repayable: calculations.totalAmount,
+        interest: interest,
+        total_repayable: totalRepayable,
         apr: parseFloat(apr.toFixed(2))
       },
       
@@ -268,26 +545,28 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       repayment: {
         type: 'Bullet Payment',
         number_of_instalments: 1,
-        instalment_amount: calculations.totalAmount,
+        instalment_amount: totalRepayable,
         first_due_date: dueDate.toISOString(),
         schedule: [
           {
             instalment_no: 1,
             outstanding_principal: principal,
             principal: principal,
-            interest: calculations.interest,
-            instalment_amount: calculations.totalAmount,
+            interest: interest,
+            instalment_amount: totalRepayable,
             due_date: dueDate.toISOString()
           }
         ]
       },
       
-      // Penal Charges
+      // Penal Charges (with 18% GST)
       penal_charges: {
-        late_payment_fee: '4% of overdue principal (one-time on first day)',
-        daily_penalty: '0.2% of overdue principal per day (from second day onwards)',
-        post_due_interest: `${intPercentPerDay}% per day on principal overdue`,
-        foreclosure_charges: 'Zero foreclosure charges'
+        late_payment_fee: '4% of overdue principal + 18% GST (one-time on first day)',
+        daily_penalty: '0.2% of overdue principal + 18% GST per day (from second day onwards)',
+        post_due_interest: `${calculations.interest.rate_per_day}% per day on principal overdue`,
+        foreclosure_charges: 'Zero foreclosure charges',
+        gst_on_penalties: 18,
+        note: 'All penalty charges are subject to 18% GST'
       },
       
       // Grievance Redressal

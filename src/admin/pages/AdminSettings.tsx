@@ -28,6 +28,7 @@ import {
   Edit,
   Trash2,
   Plus,
+  Star,
   DollarSign
 } from 'lucide-react';
 
@@ -96,8 +97,12 @@ interface LoanPlan {
   eligible_member_tiers: string | null;
   eligible_employment_types: string | null;
   is_active: boolean;
+  is_default: boolean;
   description: string | null;
   terms_conditions: string | null;
+  allow_extension: boolean;
+  extension_show_from_days: number | null;
+  extension_show_till_days: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -477,7 +482,10 @@ export function AdminSettings() {
     eligible_member_tiers: [] as string[],
     eligible_employment_types: [] as string[],
     description: '',
-    is_active: true
+    is_active: true,
+    allow_extension: false,
+    extension_show_from_days: '',
+    extension_show_till_days: ''
   });
 
   const [showPasswords, setShowPasswords] = useState<{ [key: string]: boolean }>({});
@@ -1419,7 +1427,10 @@ export function AdminSettings() {
         eligible_member_tiers: planForm.eligible_member_tiers,
         eligible_employment_types: planForm.eligible_employment_types,
         description: planForm.description,
-        is_active: planForm.is_active
+        is_active: planForm.is_active,
+        allow_extension: planForm.allow_extension,
+        extension_show_from_days: planForm.allow_extension && planForm.extension_show_from_days ? parseInt(planForm.extension_show_from_days) : null,
+        extension_show_till_days: planForm.allow_extension && planForm.extension_show_till_days ? parseInt(planForm.extension_show_till_days) : null
       };
 
       if (editingPlan) {
@@ -1454,7 +1465,10 @@ export function AdminSettings() {
       eligible_member_tiers: plan.eligible_member_tiers ? JSON.parse(plan.eligible_member_tiers) : [],
       eligible_employment_types: plan.eligible_employment_types ? JSON.parse(plan.eligible_employment_types) : [],
       description: plan.description || '',
-      is_active: plan.is_active
+      is_active: plan.is_active,
+      allow_extension: plan.allow_extension || false,
+      extension_show_from_days: plan.extension_show_from_days?.toString() || '',
+      extension_show_till_days: plan.extension_show_till_days?.toString() || ''
     });
     setShowPlanForm(true);
   };
@@ -1482,6 +1496,18 @@ export function AdminSettings() {
     }
   };
 
+  const setDefaultLoanPlan = async (id: number) => {
+    if (!confirm('Set this plan as the default plan? This will unset the current default plan.')) return;
+    try {
+      await adminApiService.setDefaultLoanPlan(id);
+      alert('Default loan plan updated successfully!');
+      loadLoanPlans();
+    } catch (error) {
+      console.error('Error setting default loan plan:', error);
+      alert('Failed to set default loan plan');
+    }
+  };
+
   const resetPlanForm = () => {
     setPlanForm({
       plan_name: '',
@@ -1495,7 +1521,10 @@ export function AdminSettings() {
       eligible_member_tiers: [],
       eligible_employment_types: [],
       description: '',
-      is_active: true
+      is_active: true,
+      allow_extension: false,
+      extension_show_from_days: '',
+      extension_show_till_days: ''
     });
   };
 
@@ -2984,6 +3013,67 @@ export function AdminSettings() {
                           />
                         </div>
 
+                        {/* Loan Extension Option */}
+                        <div className="space-y-4 p-4 bg-purple-50 border border-purple-200 rounded-md">
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id="allow_extension"
+                              checked={planForm.allow_extension}
+                              onChange={(e) => setPlanForm({ ...planForm, allow_extension: e.target.checked })}
+                              className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                            />
+                            <label htmlFor="allow_extension" className="text-sm font-medium text-gray-700 cursor-pointer">
+                              Allow Loan Extension
+                            </label>
+                          </div>
+                          
+                          {planForm.allow_extension && (
+                            <div className="ml-6 space-y-4">
+                              <p className="text-xs text-gray-600 mb-2">
+                                Set the date range when users can extend their loan. Use negative numbers for days before due date (D-5) and positive numbers for days after due date (D+15).
+                              </p>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Show From (Days) *
+                                  </label>
+                                  <input
+                                    type="number"
+                                    value={planForm.extension_show_from_days}
+                                    onChange={(e) => setPlanForm({ ...planForm, extension_show_from_days: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    placeholder="e.g., -5 (D-5)"
+                                    required={planForm.allow_extension}
+                                    max="0"
+                                  />
+                                  <p className="text-xs text-gray-500 mt-1">Negative number: days before due date (e.g., -5 = D-5)</p>
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Show Till (Days) *
+                                  </label>
+                                  <input
+                                    type="number"
+                                    value={planForm.extension_show_till_days}
+                                    onChange={(e) => setPlanForm({ ...planForm, extension_show_till_days: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    placeholder="e.g., 15 (D+15)"
+                                    required={planForm.allow_extension}
+                                    min="0"
+                                  />
+                                  <p className="text-xs text-gray-500 mt-1">Positive number: days after due date (e.g., 15 = D+15)</p>
+                                </div>
+                              </div>
+                              <div className="p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded">
+                                <p className="text-xs text-yellow-800">
+                                  <strong>Example:</strong> If set to D-5 to D+15, users can extend their loan starting from 5 days before the due date until 15 days after the due date.
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
                         {/* Status */}
                         <div className="flex items-center space-x-2 p-3 bg-gray-50 border border-gray-200 rounded-md">
                           <input
@@ -3036,6 +3126,9 @@ export function AdminSettings() {
                             Status
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Default
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Actions
                           </th>
                         </tr>
@@ -3043,7 +3136,7 @@ export function AdminSettings() {
                       <tbody className="bg-white divide-y divide-gray-200">
                         {loanPlans.length === 0 ? (
                           <tr>
-                            <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                            <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
                               No loan plans configured. Click "Add New Plan" to create one.
                             </td>
                           </tr>
@@ -3080,6 +3173,23 @@ export function AdminSettings() {
                                 >
                                   {plan.is_active ? 'Active' : 'Inactive'}
                                 </button>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                {plan.is_default ? (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                    <Star className="w-3 h-3 mr-1 fill-current" />
+                                    Default
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => setDefaultLoanPlan(plan.id)}
+                                    className="text-indigo-600 hover:text-indigo-900 text-xs flex items-center gap-1"
+                                    title="Set as Default"
+                                  >
+                                    <Star className="w-3 h-3" />
+                                    Set Default
+                                  </button>
+                                )}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                 <div className="flex gap-2">
