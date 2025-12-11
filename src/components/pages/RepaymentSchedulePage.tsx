@@ -1,12 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { 
-  CreditCard, 
-  Calendar,
-  Download,
+import {
   ArrowLeft,
   CheckCircle,
-  Clock,
   AlertCircle,
   Loader2
 } from 'lucide-react';
@@ -22,7 +18,6 @@ export const RepaymentSchedulePage = () => {
   const [searchParams] = useSearchParams();
   const { user, isAuthenticated } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [applicationId, setApplicationId] = useState<number | null>(null);
   const [loanData, setLoanData] = useState<any>(null);
   const [kfsData, setKfsData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +30,6 @@ export const RepaymentSchedulePage = () => {
 
     const appId = searchParams.get('applicationId');
     if (appId) {
-      setApplicationId(parseInt(appId));
       fetchLoanData(parseInt(appId));
     } else {
       // Try to find loan with account_manager status
@@ -51,7 +45,6 @@ export const RepaymentSchedulePage = () => {
           (app: any) => app.status === 'account_manager'
         );
         if (accountManagerLoan) {
-          setApplicationId(accountManagerLoan.id);
           fetchLoanData(accountManagerLoan.id);
         } else {
           // Check if there's a ready_for_disbursement loan
@@ -59,7 +52,7 @@ export const RepaymentSchedulePage = () => {
             (app: any) => app.status === 'ready_for_disbursement'
           );
           if (readyLoan) {
-            setError('Your loan is ready for disbursement. Please wait for the transaction to be processed. You will be able to view your repayment schedule once the funds are disbursed.');
+            setError('Your loan is ready for disbursement. Please wait for the transaction to be processed.');
           } else {
             setError('No active loan found with account manager status');
           }
@@ -121,7 +114,7 @@ export const RepaymentSchedulePage = () => {
   if (!isAuthenticated || loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
-        <DashboardHeader userName={user?.first_name && user?.last_name ? `${user.first_name} ${user.last_name}` : user?.email || 'User'} />
+        <DashboardHeader userName={user?.first_name || 'User'} />
         <div className="container mx-auto px-4 py-8 max-w-5xl">
           <div className="flex items-center justify-center min-h-[400px]">
             <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
@@ -134,7 +127,7 @@ export const RepaymentSchedulePage = () => {
   if (error) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
-        <DashboardHeader userName={user?.first_name && user?.last_name ? `${user.first_name} ${user.last_name}` : user?.email || 'User'} />
+        <DashboardHeader userName={user?.first_name || 'User'} />
         <div className="container mx-auto px-4 py-8 max-w-5xl">
           <Card>
             <CardContent className="p-6 text-center">
@@ -146,7 +139,7 @@ export const RepaymentSchedulePage = () => {
                   What's happening?
                 </p>
                 <p className="text-sm text-gray-600">
-                  Your loan application has been processed and is ready for disbursement. 
+                  Your loan application has been processed and is ready for disbursement.
                   Once the admin processes the transaction, you will be able to view your repayment schedule here.
                 </p>
               </div>
@@ -164,7 +157,7 @@ export const RepaymentSchedulePage = () => {
   if (!loanData || !kfsData) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
-        <DashboardHeader userName={user?.first_name && user?.last_name ? `${user.first_name} ${user.last_name}` : user?.email || 'User'} />
+        <DashboardHeader userName={user?.first_name || 'User'} />
         <div className="container mx-auto px-4 py-8 max-w-5xl">
           <Card>
             <CardContent className="p-6 text-center">
@@ -179,11 +172,40 @@ export const RepaymentSchedulePage = () => {
   const repayment = kfsData.repayment || {};
   const calculations = kfsData.calculations || {};
   const interest = kfsData.interest || {};
+  const fees = kfsData.fees || {};
+  const borrower = kfsData.borrower || {};
+
+  // Calculate derived values
+  const disbursedDate = loanData.disbursed_at ? new Date(loanData.disbursed_at) : new Date();
+  const currentDate = new Date(); // Use current date
+
+  // Exhausted Days Calculation
+  const diffTime = Math.abs(currentDate.getTime() - disbursedDate.getTime());
+  const exhaustedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  // Determine Due Date
+  // Logic: Disbursement Date + Loan Term
+  const termDays = loanData.loan_term_days || 30; // Default or fetch from backend
+  const dueDate = new Date(disbursedDate);
+  dueDate.setDate(dueDate.getDate() + termDays);
+
+  // Check default status
+  const isDefaulted = currentDate > dueDate;
+  const daysDelayed = isDefaulted ? Math.ceil((currentDate.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+
+  // Tenure extension logic: D-5 to D+15
+  const dMinus5 = new Date(dueDate);
+  dMinus5.setDate(dMinus5.getDate() - 5);
+  const dPlus15 = new Date(dueDate);
+  dPlus15.setDate(dPlus15.getDate() + 15);
+
+  const canExtend = currentDate >= dMinus5 && currentDate <= dPlus15;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 pb-12">
       <DashboardHeader userName={user?.first_name && user?.last_name ? `${user.first_name} ${user.last_name}` : user?.email || 'User'} />
-      <div className="container mx-auto px-4 py-8 max-w-5xl">
+
+      <div className="container mx-auto px-4 py-8 max-w-4xl">
         {/* Header */}
         <div className="mb-6">
           <Button
@@ -195,193 +217,143 @@ export const RepaymentSchedulePage = () => {
             Back to Dashboard
           </Button>
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full mb-4">
-              <CreditCard className="w-8 h-8 text-white" />
-            </div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent mb-3">
               Repayment Schedule
             </h1>
-            <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+            <p className="text-lg text-gray-600">
               Your loan repayment details and schedule
             </p>
           </div>
         </div>
 
-        {/* Loan Summary Card */}
-        <Card className="mb-6">
-          <CardContent className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Main Repayment Card */}
+        <Card className="bg-white shadow-xl rounded-xl overflow-hidden mb-6 border-2 border-blue-100">
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600 mb-1">Loan Amount</p>
-                <p className="text-2xl font-bold text-gray-900">
+                <h2 className="text-2xl font-bold mb-1">Repayment Screen</h2>
+                <p className="text-blue-100 text-sm">Loan ID: {loanData.loan_id || loanData.application_number || 'N/A'}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-blue-100 text-sm mb-1">Exhausted days</p>
+                <p className="text-2xl font-bold">{exhaustedDays} days</p>
+              </div>
+            </div>
+          </div>
+          
+          <CardContent className="p-6 space-y-6">
+            {/* Total Outstanding - Prominent Display */}
+            <div className="text-center py-4 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border-2 border-blue-200">
+              <p className="text-sm text-gray-600 mb-2 font-medium">Total Outstanding till today</p>
+              <h1 className="text-4xl font-extrabold text-gray-900 mb-2">
+                {formatCurrency(calculations.total_repayable || 0)}
+              </h1>
+              <p className="text-xs text-gray-500">
+                Due date: {formatDate(dueDate.toISOString())}
+              </p>
+            </div>
+
+            {/* Default Status */}
+            {isDefaulted && (
+              <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg animate-pulse">
+                <p className="text-red-600 font-bold text-lg uppercase tracking-wide">
+                  ⚠ DEFAULTED ({daysDelayed} days delayed)
+                </p>
+                <p className="text-sm text-red-500 mt-1">Immediate action required</p>
+              </div>
+            )}
+
+            {/* Loan Details Grid */}
+            <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-200">
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Loan Amount</p>
+                <p className="text-lg font-semibold text-gray-900">
                   {formatCurrency(calculations.principal || loanData.sanctioned_amount || 0)}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-gray-600 mb-1">Total Repayable</p>
-                <p className="text-2xl font-bold text-blue-600">
-                  {formatCurrency(calculations.total_repayable || 0)}
+                <p className="text-xs text-gray-500 mb-1">Disbursed Amount</p>
+                <p className="text-lg font-semibold text-blue-600">
+                  {formatCurrency(calculations.disbursed_amount || calculations.netDisbursalAmount || 0)}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-gray-600 mb-1">Interest Rate</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {interest.annual_rate ? `${interest.annual_rate}% p.a.` : `${(interest.rate_per_day * 365).toFixed(2)}% p.a.`}
+                <p className="text-xs text-gray-500 mb-1">Interest</p>
+                <p className="text-lg font-semibold text-gray-900">
+                  {formatCurrency(calculations.interest || 0)}
                 </p>
               </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Interest Rate</p>
+                <p className="text-lg font-semibold text-gray-900">
+                  {interest.annual_rate ? `${interest.annual_rate}% p.a.` : `${((interest.rate_per_day || 0) * 365).toFixed(2)}% p.a.`}
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-3 pt-4 border-t border-gray-200">
+              <Button
+                className="w-full h-14 text-lg font-bold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all transform hover:scale-[1.02]"
+                onClick={() => {
+                  toast.success('Redirecting to Payment Gateway...');
+                  // navigate('/payment-gateway') 
+                }}
+              >
+                Repay Now
+              </Button>
+
+              <Button
+                variant="outline"
+                className={`w-full h-12 border-2 ${canExtend ? 'border-blue-600 text-blue-600 hover:bg-blue-50' : 'border-gray-200 text-gray-400 cursor-not-allowed'}`}
+                disabled={!canExtend}
+                onClick={() => {
+                  if (canExtend) {
+                    toast.info('Tenure extension feature coming soon');
+                  }
+                }}
+              >
+                Extend your loan tenure
+              </Button>
+              {!canExtend && (
+                <p className="text-xs text-gray-400 text-center">
+                  (Available from 5 days before due date to 15 days after)
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
 
-        {/* Repayment Details */}
-        <Card className="mb-6">
+        {/* Loan Breakdown Card */}
+        <Card className="bg-white shadow-lg rounded-xl mb-6">
           <CardContent className="p-6">
-            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-blue-600" />
-              Repayment Details
-            </h2>
-            
-            {repayment.emi_amount && repayment.total_emis ? (
-              // Multi-EMI Plan
-              <div className="space-y-4">
-                <div className="bg-blue-50 rounded-lg p-4 mb-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-600 mb-1">EMI Amount</p>
-                      <p className="text-xl font-semibold text-gray-900">
-                        {formatCurrency(repayment.emi_amount)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-600 mb-1">Total EMIs</p>
-                      <p className="text-xl font-semibold text-gray-900">
-                        {repayment.total_emis}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* EMI Schedule Table */}
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          EMI #
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Due Date
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Amount
-                        </th>
-                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Status
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {Array.from({ length: repayment.total_emis || 0 }).map((_, index) => {
-                        const emiNumber = index + 1;
-                        const isLastEmi = emiNumber === repayment.total_emis;
-                        const emiAmount = isLastEmi && repayment.last_emi_amount 
-                          ? repayment.last_emi_amount 
-                          : repayment.emi_amount;
-                        
-                        // Calculate due date (simplified - would need actual schedule from backend)
-                        const firstDueDate = repayment.first_due_date 
-                          ? new Date(repayment.first_due_date) 
-                          : new Date();
-                        const dueDate = new Date(firstDueDate);
-                        // Assuming monthly EMIs
-                        dueDate.setMonth(dueDate.getMonth() + index);
-                        
-                        return (
-                          <tr key={emiNumber} className="hover:bg-gray-50">
-                            <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                              {emiNumber}
-                            </td>
-                            <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
-                              {formatDate(dueDate.toISOString())}
-                            </td>
-                            <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 text-right">
-                              {formatCurrency(emiAmount)}
-                            </td>
-                            <td className="px-4 py-4 whitespace-nowrap text-center">
-                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                <Clock className="w-3 h-3 inline mr-1" />
-                                Pending
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : (
-              // Single Payment Plan
-              <div className="space-y-4">
-                <div className="bg-blue-50 rounded-lg p-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-600 mb-1">Repayment Date</p>
-                      <p className="text-xl font-semibold text-gray-900">
-                        {formatDate(repayment.first_due_date || kfsData.repayment?.last_due_date || 'N/A')}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-600 mb-1">Total Amount Due</p>
-                      <p className="text-xl font-semibold text-blue-600">
-                        {formatCurrency(calculations.total_repayable || 0)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <p className="text-sm text-gray-600 mb-2">Loan Term</p>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {loanData.loan_term_days || kfsData.loan?.loan_term_days || 0} days
-                    {loanData.loan_term_months && ` (${loanData.loan_term_months} months)`}
-                  </p>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Loan Breakdown */}
-        <Card className="mb-6">
-          <CardContent className="p-6">
-            <h2 className="text-xl font-semibold mb-4">Loan Breakdown</h2>
+            <h3 className="text-xl font-semibold mb-4 text-gray-900">Loan Breakdown</h3>
             <div className="space-y-3">
-              <div className="flex justify-between items-center py-2 border-b border-gray-200">
+              <div className="flex justify-between items-center py-2 border-b border-gray-100">
                 <span className="text-gray-600">Principal Amount</span>
                 <span className="font-semibold text-gray-900">
                   {formatCurrency(calculations.principal || 0)}
                 </span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-gray-200">
+              <div className="flex justify-between items-center py-2 border-b border-gray-100">
                 <span className="text-gray-600">Interest</span>
                 <span className="font-semibold text-gray-900">
                   {formatCurrency(calculations.interest || 0)}
                 </span>
               </div>
-              {kfsData.fees && kfsData.fees.processing_fee > 0 && (
-                <div className="flex justify-between items-center py-2 border-b border-gray-200">
+              {fees.processing_fee > 0 && (
+                <div className="flex justify-between items-center py-2 border-b border-gray-100">
                   <span className="text-gray-600">Processing Fee</span>
                   <span className="font-semibold text-gray-900">
-                    {formatCurrency(kfsData.fees.processing_fee || 0)}
+                    {formatCurrency(fees.processing_fee || 0)}
                   </span>
                 </div>
               )}
-              {kfsData.fees && kfsData.fees.gst > 0 && (
-                <div className="flex justify-between items-center py-2 border-b border-gray-200">
+              {fees.gst > 0 && (
+                <div className="flex justify-between items-center py-2 border-b border-gray-100">
                   <span className="text-gray-600">GST</span>
                   <span className="font-semibold text-gray-900">
-                    {formatCurrency(kfsData.fees.gst || 0)}
+                    {formatCurrency(fees.gst || 0)}
                   </span>
                 </div>
               )}
@@ -395,26 +367,65 @@ export const RepaymentSchedulePage = () => {
           </CardContent>
         </Card>
 
-        {/* Action Buttons */}
-        <div className="flex justify-end gap-4">
-          <Button
-            variant="outline"
-            onClick={() => navigate('/dashboard')}
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Dashboard
-          </Button>
-          <Button
-            onClick={() => {
-              toast.info('Download feature coming soon');
-            }}
-          >
-            <Download className="w-4 h-4 mr-2" />
-            Download Schedule
-          </Button>
-        </div>
+        {/* Loan Information Card */}
+        <Card className="bg-white shadow-lg rounded-xl mb-6">
+          <CardContent className="p-6">
+            <h3 className="text-xl font-semibold mb-4 text-gray-900">Loan Information</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <p className="text-sm text-gray-500 mb-1">Loan Term</p>
+                <p className="font-semibold text-gray-900">
+                  {loanData.loan_term_days || 0} days
+                  {loanData.loan_term_months && ` (${loanData.loan_term_months} months)`}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 mb-1">Disbursed Date</p>
+                <p className="font-semibold text-gray-900">
+                  {formatDate(loanData.disbursed_at || loanData.created_at)}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 mb-1">Due Date</p>
+                <p className="font-semibold text-gray-900">
+                  {formatDate(dueDate.toISOString())}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 mb-1">Days Remaining</p>
+                <p className="font-semibold text-gray-900">
+                  {Math.max(0, Math.ceil((dueDate.getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24)))} days
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Important Bullet Points */}
+        <Card className="bg-blue-50 border-blue-100 shadow-sm rounded-xl">
+          <CardContent className="p-5">
+            <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
+              <CheckCircle className="w-5 h-5" />
+              Important Information
+            </h3>
+            <ul className="space-y-3">
+              {[
+                "Timely repayment helps improve CIBIL / Experian / CRIF / Equifax scores",
+                "Get higher loan limits & faster approvals on your next loan",
+                "Build your Pocket Credit Score & Trust Quotient",
+                "Avoid penalty, late fee & recovery actions",
+                "Prevent E-NACH bounce charges & bank penalties",
+                "Stay stress-free — no calls, no follow-ups"
+              ].map((point, index) => (
+                <li key={index} className="flex gap-3 text-sm text-blue-800 items-start">
+                  <span className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-1.5 flex-shrink-0" />
+                  <span className="leading-relaxed">{point}</span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
 };
-

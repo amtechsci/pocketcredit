@@ -10,7 +10,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     console.log('🔍 Getting user profile for ID:', req.params.userId);
     await initializeDatabase();
     const { userId } = req.params;
-    
+
     // Get user basic info from MySQL
     const users = await executeQuery(`
       SELECT 
@@ -22,7 +22,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       FROM users 
       WHERE id = ?
     `, [userId]);
-    
+
     if (!users || users.length === 0) {
       console.log('❌ User not found in database');
       return res.status(404).json({
@@ -33,7 +33,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
 
     const user = users[0];
     console.log('👤 User data:', user);
-    
+
     // Get user's selected loan plan if exists
     let selectedLoanPlan = null;
     if (user.selected_loan_plan_id) {
@@ -45,7 +45,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         selectedLoanPlan = plans[0];
       }
     }
-    
+
     // Get loan applications for this user
     const applications = await executeQuery(`
       SELECT 
@@ -58,14 +58,14 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       WHERE user_id = ?
       ORDER BY created_at DESC
     `, [userId]);
-    
+
     console.log('📋 Found applications:', applications ? applications.length : 0);
 
     // Get additional user data from related tables
     const addresses = await executeQuery(`
       SELECT * FROM addresses WHERE user_id = ? AND is_primary = 1 LIMIT 1
     `, [userId]);
-    
+
     const employment = await executeQuery(`
       SELECT ed.*, u.income_range 
       FROM employment_details ed
@@ -171,8 +171,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         const calculateEMI = (principal, rate, tenure) => {
           if (!principal || !rate || !tenure) return 0;
           const monthlyRate = rate / 100 / 12;
-          const emi = (principal * monthlyRate * Math.pow(1 + monthlyRate, tenure)) / 
-                     (Math.pow(1 + monthlyRate, tenure) - 1);
+          const emi = (principal * monthlyRate * Math.pow(1 + monthlyRate, tenure)) /
+            (Math.pow(1 + monthlyRate, tenure) - 1);
           return Math.round(emi);
         };
 
@@ -248,16 +248,16 @@ router.put('/:userId/basic-info', authenticateAdmin, async (req, res) => {
 
     console.log('✅ Basic info updated successfully');
     console.log('📝 Updated fields:', { firstName, lastName, dateOfBirth, panNumber });
-    
+
     res.json({
       status: 'success',
       message: 'Basic information updated successfully',
-      data: { 
-        userId, 
-        firstName, 
-        lastName, 
-        dateOfBirth, 
-        panNumber: 'N/A (column not in DB yet)' 
+      data: {
+        userId,
+        firstName,
+        lastName,
+        dateOfBirth,
+        panNumber: 'N/A (column not in DB yet)'
       }
     });
 
@@ -483,21 +483,173 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
     console.log('💰 Adding transaction for user:', req.params.userId);
     await initializeDatabase();
     const { userId } = req.params;
-    const { amount, type, description, date, status } = req.body;
+    const adminId = req.admin.id; // Get admin ID from authenticated token
 
-    // For now, we'll store transaction info in memory since table doesn't exist yet
-    console.log('✅ Transaction added successfully (stored in memory)');
+    // Extract all fields
+    const {
+      amount,
+      transaction_type, // Frontend sends "transaction_type" or "type"
+      type,             // Fallback
+      loan_application_id,
+      description,
+      category,
+      payment_method,
+      reference_number,
+      transaction_date,
+      transaction_time,
+      status,
+      priority,
+      bank_name,
+      account_number,
+      additional_notes
+    } = req.body;
+
+    const txType = transaction_type || type;
+    const txDate = transaction_date || new Date().toISOString().split('T')[0];
+    const txStatus = status || 'completed';
+
+    // Validate required fields
+    if (!amount || !txType) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Amount and transaction type are required'
+      });
+    }
+
+    // Insert transaction into database
+    const query = `
+      INSERT INTO transactions (
+        user_id, loan_application_id, transaction_type, amount, description, 
+        category, payment_method, reference_number, transaction_date, 
+        transaction_time, status, priority, bank_name, account_number, 
+        additional_notes, created_by, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+    `;
+
+    const values = [
+      userId,
+      loan_application_id || null,
+      txType,
+      amount,
+      description || null,
+      category || null,
+      payment_method || null,
+      reference_number || null,
+      txDate,
+      transaction_time || null,
+      txStatus,
+      priority || 'normal',
+      bank_name || null,
+      account_number || null,
+      additional_notes || null,
+      adminId
+    ];
+
+    const result = await executeQuery(query, values);
+    const transactionId = result.insertId;
+
+    let loanStatusUpdated = false;
+    let newStatus = null;
+
+    // If this is a loan disbursement, update the loan application status
+    console.log(`🔍 Checking loan status update conditions. Type: ${txType}, LoanID: ${loan_application_id}`);
+
+    if (txType === 'loan_disbursement' && loan_application_id) {
+      const loanIdInt = parseInt(loan_application_id);
+      const userIdInt = parseInt(userId);
+
+      // 1. Verify loan exists (query by ID only first)
+      console.log(`🔍 Verifying loan #${loanIdInt}`);
+      const loans = await executeQuery(
+        'SELECT id, user_id, status FROM loan_applications WHERE id = ?',
+        [loanIdInt]
+      );
+
+      console.log(`🔍 Found loans: ${JSON.stringify(loans)}`);
+
+      if (loans.length > 0) {
+        const loan = loans[0];
+        // Check ownership in JS to be safe
+        if (loan.user_id == userIdInt || loan.user_id == userId) {
+          console.log(`✅ Loan ownership confirmed. Current status: ${loan.status}`);
+
+          // 2. Update loan status
+          console.log(`Attempting to update loan status to account_manager...`);
+          const updateResult = await executeQuery(`
+               UPDATE loan_applications 
+               SET 
+                 status = 'account_manager',
+                 disbursed_at = NOW(),
+                 updated_at = NOW()
+               WHERE id = ?
+             `, [loanIdInt]);
+
+          console.log('Update result:', updateResult);
+
+          loanStatusUpdated = true;
+          newStatus = 'account_manager';
+          console.log(`✅ Updated loan #${loanIdInt} status to account_manager`);
+        } else {
+          console.warn(`❌ Loan #${loanIdInt} belongs to user ${loan.user_id}, not requested user ${userId}`);
+        }
+      } else {
+        console.warn(`⚠️ Loan #${loanIdInt} not found`);
+      }
+    } else {
+      console.log('Skipping loan status update (conditions not met)');
+    }
+
+    console.log('✅ Transaction added successfully to database');
+
     res.json({
       status: 'success',
-      message: 'Transaction added successfully',
-      data: { userId, amount, type, description, date, status }
+      message: loanStatusUpdated
+        ? 'Transaction added and loan status updated to Account Manager'
+        : 'Transaction added successfully',
+      data: {
+        transaction_id: transactionId,
+        user_id: userId,
+        amount,
+        transaction_type: txType,
+        loan_status_updated: loanStatusUpdated,
+        new_status: newStatus
+      }
     });
 
   } catch (error) {
     console.error('Add transaction error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to add transaction'
+      message: 'Failed to add transaction',
+      error: error.message
+    });
+  }
+});
+
+// Get user transactions
+router.get('/:userId/transactions', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+
+    const transactions = await executeQuery(`
+      SELECT t.*, a.name as created_by_name, la.application_number
+      FROM transactions t
+      LEFT JOIN admins a ON t.created_by = a.id
+      LEFT JOIN loan_applications la ON t.loan_application_id = la.id
+      WHERE t.user_id = ?
+      ORDER BY t.transaction_date DESC, t.created_at DESC
+    `, [userId]);
+
+    res.json({
+      status: 'success',
+      data: transactions
+    });
+  } catch (error) {
+    console.error('Get transactions error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch transactions'
     });
   }
 });

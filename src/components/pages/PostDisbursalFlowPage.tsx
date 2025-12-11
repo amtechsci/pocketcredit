@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { 
-  CheckCircle, 
-  Camera, 
-  Users, 
-  FileText, 
-  PenTool, 
+import {
+  CheckCircle,
+  Camera,
+  Users,
+  FileText,
+  PenTool,
   CreditCard,
   ArrowRight,
   ArrowLeft,
@@ -71,20 +71,96 @@ export const PostDisbursalFlowPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applicationId]);
 
+  // Check status and redirect if needed
+  const checkStatusAndRedirect = async (appId: number) => {
+    try {
+      console.log(`🔍 Checking status for App ID: ${appId} (Type: ${typeof appId})`);
+      const response = await apiService.getLoanApplications();
+
+      console.log('🔍 /loan-applications Response:', JSON.stringify(response));
+
+      // Check success/status
+      const isSuccess = response.success === true || response.status === 'success';
+
+      if (isSuccess && response.data?.applications) {
+        console.log(`📋 Found ${response.data.applications.length} applications`);
+
+        // Use loose equality to handle string/number mismatch
+        const app = response.data.applications.find((a: any) => a.id == appId);
+
+        if (app) {
+          console.log(`✅ Found App #${app.id}: Status='${app.status}'`);
+
+          if ((app as any).status === 'account_manager') {
+            console.log('🚀 Loan disbursed! Redirecting to repayment schedule...');
+            setRedirecting(true);
+            navigate(`/repayment-schedule?applicationId=${appId}`);
+            return true;
+          } else {
+            console.log(`⏳ Status mismatch: Expected 'account_manager', got '${app.status}'`);
+          }
+        } else {
+          console.warn(`❌ App #${appId} NOT found in applications list`, response.data.applications.map((a: any) => ({ id: a.id, status: a.status })));
+        }
+      } else {
+        console.warn('❌ API returned unsuccesful or missing data:', response);
+      }
+      return false;
+    } catch (error) {
+      console.error('Error checking status:', error);
+      return false;
+    }
+  };
+
+  // Poll for status changes if on confirmation step
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+
+    if (currentStep === 6 && applicationId) {
+      // Check immediately
+      checkStatusAndRedirect(applicationId);
+
+      // Then poll every 5 seconds
+      intervalId = setInterval(() => {
+        checkStatusAndRedirect(applicationId);
+      }, 5000);
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [currentStep, applicationId, navigate]);
+
   const fetchApplicationAndProgress = async () => {
     try {
       setLoading(true);
       // Get application ID from URL or fetch latest disbursal application
       const appIdParam = searchParams.get('applicationId');
       let appId: number | null = null;
-      
+
       if (appIdParam) {
         appId = parseInt(appIdParam);
         setApplicationId(appId);
+
+        // check status immediately for this ID
+        const redirected = await checkStatusAndRedirect(appId);
+        if (redirected) return; // Stop if redirecting
+
       } else {
-        // Fetch latest application with disbursal status
+        // Fetch latest application with disbursal status OR account_manager status
         const response = await apiService.getLoanApplications();
         if (response.success && response.data?.applications) {
+          // Check for account_manager first (prioritize redirected flow)
+          const activeLoan = response.data.applications.find(
+            (app: any) => app.status === 'account_manager'
+          );
+
+          if (activeLoan) {
+            setRedirecting(true);
+            navigate(`/repayment-schedule?applicationId=${activeLoan.id}`);
+            return;
+          }
+
           const disbursalApp = response.data.applications.find(
             (app: any) => app.status === 'disbursal'
           );
@@ -104,7 +180,10 @@ export const PostDisbursalFlowPage = () => {
       console.error('Error fetching application:', error);
       toast.error('Failed to load application');
     } finally {
-      setLoading(false);
+      // Only turn off loading if NOT redirecting
+      if (!redirecting) {
+        setLoading(false);
+      }
     }
   };
 
@@ -112,44 +191,33 @@ export const PostDisbursalFlowPage = () => {
     try {
       const response = await apiService.getPostDisbursalProgress(appId);
       console.log('📊 Post-disbursal progress response:', response);
-      
-      // The API service returns response.data directly from axios, which is the API response
-      // So response should be: {success: true, data: {...}} or {status: 'success', data: {...}}
+
       const isSuccess = response.success === true || response.status === 'success';
       const progressData = response.data;
-      
-      console.log('🔍 Parsed - isSuccess:', isSuccess, 'hasData:', !!progressData, 'progressData:', progressData);
-      
+
       if (isSuccess && progressData) {
         setProgress(progressData);
-        const savedStep = progressData.current_step || progressData.post_disbursal_step || 1;
-        console.log('✅ Loaded step:', savedStep, 'agreement_signed:', progressData.agreement_signed);
-        
+        const savedStep = progressData.current_step || (progressData as any).post_disbursal_step || 1;
+
         // If step 6 is completed (agreement_signed) OR step is 7 or higher (all steps done)
-        // Show step 6 (Confirmation) instead of redirecting - user should see "You will get funds shortly"
         if ((savedStep >= 6 && progressData.agreement_signed) || savedStep >= 7) {
-          console.log('✅ All steps completed (step', savedStep, '), showing confirmation step...');
-          // Show step 6 (Confirmation) - "You will get funds shortly"
           setCurrentStep(6);
           setLoading(false);
           return;
         }
-        
-        // Cap the step to max 6 (since we removed step 7)
+
+        // Cap the step to max 6
         const validStep = Math.min(savedStep, 6);
-        console.log('📍 Setting current step to:', validStep);
         setCurrentStep(validStep);
-        setLoading(false); // Set loading to false after setting current step
+        setLoading(false);
       } else {
-        console.warn('⚠️ Invalid response format, defaulting to step 1. Response:', response);
         setCurrentStep(1);
-        setLoading(false); // Set loading to false even if no data
+        setLoading(false);
       }
     } catch (error) {
       console.error('❌ Error fetching progress:', error);
-      // On error, default to step 1
       setCurrentStep(1);
-      setLoading(false); // Set loading to false on error
+      setLoading(false);
     }
   };
 
@@ -160,7 +228,7 @@ export const PostDisbursalFlowPage = () => {
       setSaving(true);
       const updatedProgress = { ...progress, ...stepData };
       const response = await apiService.updatePostDisbursalProgress(applicationId, updatedProgress);
-      
+
       if (response.success) {
         setProgress(updatedProgress);
         return true;
@@ -182,42 +250,23 @@ export const PostDisbursalFlowPage = () => {
     });
 
     if (saved) {
-      // Step 6 is the final step (Confirmation) - don't proceed further
-      // Repayment schedule will show after admin adds transaction and status changes to account_manager
       if (stepNumber < 6) {
         setCurrentStep(stepNumber + 1);
       } else if (stepNumber === 6) {
-        // Step 6 is the final step - just stay here, no further action needed
-        // User sees "You will get funds shortly" message
-        // Status will change to account_manager when admin adds transaction
         setCurrentStep(6);
       }
     }
   };
-
-  const completeAllSteps = async () => {
-    if (!applicationId) return;
-
-    try {
-      const response = await apiService.completePostDisbursalFlow(applicationId);
-      if (response.success) {
-        toast.success('All steps completed! Your loan is ready for disbursement.');
-        navigate('/dashboard');
-      }
-    } catch (error) {
-      console.error('Error completing flow:', error);
-      toast.error('Failed to complete process');
-    }
-  };
-
 
   if (loading || redirecting) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
-          {redirecting && (
-            <p className="text-gray-600">Redirecting to dashboard...</p>
+          {redirecting ? (
+            <p className="text-gray-600">Redirecting to repayment schedule...</p>
+          ) : (
+            <p className="text-gray-600">Loading...</p>
           )}
         </div>
       </div>
@@ -245,8 +294,8 @@ export const PostDisbursalFlowPage = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
-      <DashboardHeader />
-      
+      <DashboardHeader userName={user?.first_name || 'User'} />
+
       <div className="max-w-4xl mx-auto px-4 py-6">
         {/* Step Content */}
         <Card>
@@ -262,10 +311,10 @@ export const PostDisbursalFlowPage = () => {
             {currentStep === 2 && (
               <SelfieCaptureStep
                 applicationId={applicationId}
-                onComplete={(verified) => 
-                  handleStepComplete(2, { 
-                    selfie_captured: true, 
-                    selfie_verified: verified 
+                onComplete={(verified: boolean) =>
+                  handleStepComplete(2, {
+                    selfie_captured: true,
+                    selfie_verified: verified
                   })
                 }
                 saving={saving}
@@ -300,7 +349,7 @@ export const PostDisbursalFlowPage = () => {
             {currentStep === 6 && (
               <ConfirmationStep
                 applicationId={applicationId}
-                onComplete={undefined}
+                onComplete={() => { }}
                 saving={saving}
               />
             )}
@@ -326,7 +375,14 @@ export const PostDisbursalFlowPage = () => {
 };
 
 // Step 1: E-NACH Registration
-const ENachStep = ({ applicationId, onComplete, saving }: any) => {
+interface StepProps {
+  applicationId: number;
+  onComplete: (data?: any) => void;
+  saving: boolean;
+  progress?: any;
+}
+
+const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
   const handleComplete = async () => {
     // Mock API call - will be replaced with actual Cashfree E-NACH API
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -363,9 +419,9 @@ const ENachStep = ({ applicationId, onComplete, saving }: any) => {
   );
 };
 
-// Step 2: Selfie Capture (will be created separately)
+// Step 2: Selfie Capture (imported)
 // Step 3: References (reusing existing component)
-const ReferencesStep = ({ applicationId, onComplete, saving }: any) => {
+const ReferencesStep = ({ applicationId, onComplete, saving }: StepProps) => {
   const [completed, setCompleted] = useState(false);
 
   const handleReferencesSaved = () => {
@@ -374,7 +430,7 @@ const ReferencesStep = ({ applicationId, onComplete, saving }: any) => {
   };
 
   return (
-    <EnhancedUserReferencesPage 
+    <EnhancedUserReferencesPage
       onComplete={handleReferencesSaved}
       showBackButton={false}
       embedded={true}
@@ -383,7 +439,7 @@ const ReferencesStep = ({ applicationId, onComplete, saving }: any) => {
 };
 
 // Step 4: KFS View
-const KFSViewStep = ({ applicationId, onComplete, saving }: any) => {
+const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
   return (
     <div className="space-y-6">
       <div className="text-center">
@@ -412,7 +468,7 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: any) => {
 };
 
 // Step 5: Agreement Sign
-const AgreementSignStep = ({ applicationId, onComplete, saving }: any) => {
+const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => {
   const handleSign = async () => {
     // Mock e-signature - will be replaced with Cashfree Wrap API
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -455,7 +511,7 @@ const AgreementSignStep = ({ applicationId, onComplete, saving }: any) => {
 };
 
 // Step 6: Confirmation
-const ConfirmationStep = ({ applicationId, onComplete, saving }: any) => {
+const ConfirmationStep = ({ applicationId, onComplete, saving }: StepProps) => {
   return (
     <div className="space-y-6 text-center">
       <CheckCircle className="w-20 h-20 text-green-500 mx-auto" />
@@ -467,7 +523,3 @@ const ConfirmationStep = ({ applicationId, onComplete, saving }: any) => {
     </div>
   );
 };
-
-// Step 7 removed - Step 6 (Confirmation) is now the final step
-// Repayment schedule is shown separately after admin adds transaction and status changes to account_manager
-
