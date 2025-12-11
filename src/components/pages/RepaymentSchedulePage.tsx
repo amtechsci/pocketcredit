@@ -206,25 +206,6 @@ export const RepaymentSchedulePage = () => {
       <DashboardHeader userName={user?.first_name && user?.last_name ? `${user.first_name} ${user.last_name}` : user?.email || 'User'} />
 
       <div className="container mx-auto px-4 py-8 max-w-4xl">
-        {/* Header */}
-        <div className="mb-6">
-          <Button
-            variant="ghost"
-            onClick={() => navigate('/dashboard')}
-            className="mb-4 p-2 h-auto text-gray-600 hover:text-gray-900 hover:bg-white/50 rounded-lg transition-all duration-200"
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Dashboard
-          </Button>
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent mb-3">
-              Repayment Schedule
-            </h1>
-            <p className="text-lg text-gray-600">
-              Your loan repayment details and schedule
-            </p>
-          </div>
-        </div>
 
         {/* Main Repayment Card */}
         <Card className="bg-white shadow-xl rounded-xl overflow-hidden mb-6 border-2 border-blue-100">
@@ -283,12 +264,6 @@ export const RepaymentSchedulePage = () => {
                   {formatCurrency(calculations.interest || 0)}
                 </p>
               </div>
-              <div>
-                <p className="text-xs text-gray-500 mb-1">Interest Rate</p>
-                <p className="text-lg font-semibold text-gray-900">
-                  {interest.annual_rate ? `${interest.annual_rate}% p.a.` : `${((interest.rate_per_day || 0) * 365).toFixed(2)}% p.a.`}
-                </p>
-              </div>
             </div>
 
             {/* Action Buttons */}
@@ -320,6 +295,40 @@ export const RepaymentSchedulePage = () => {
                   (Available from 5 days before due date to 15 days after)
                 </p>
               )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Loan Information Card */}
+        <Card className="bg-white shadow-lg rounded-xl mb-6">
+          <CardContent className="p-6">
+            <h3 className="text-xl font-semibold mb-4 text-gray-900">Loan Information</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <p className="text-sm text-gray-500 mb-1">Loan Term</p>
+                <p className="font-semibold text-gray-900">
+                  {loanData.loan_term_days || 0} days
+                  {loanData.loan_term_months && ` (${loanData.loan_term_months} months)`}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 mb-1">Disbursed Date</p>
+                <p className="font-semibold text-gray-900">
+                  {formatDate(loanData.disbursed_at || loanData.created_at)}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 mb-1">Due Date</p>
+                <p className="font-semibold text-gray-900">
+                  {formatDate(dueDate.toISOString())}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 mb-1">Days Remaining</p>
+                <p className="font-semibold text-gray-900">
+                  {Math.max(0, Math.ceil((dueDate.getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24)))} days
+                </p>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -362,40 +371,6 @@ export const RepaymentSchedulePage = () => {
                 <span className="text-xl font-bold text-blue-600">
                   {formatCurrency(calculations.total_repayable || 0)}
                 </span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Loan Information Card */}
-        <Card className="bg-white shadow-lg rounded-xl mb-6">
-          <CardContent className="p-6">
-            <h3 className="text-xl font-semibold mb-4 text-gray-900">Loan Information</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm text-gray-500 mb-1">Loan Term</p>
-                <p className="font-semibold text-gray-900">
-                  {loanData.loan_term_days || 0} days
-                  {loanData.loan_term_months && ` (${loanData.loan_term_months} months)`}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 mb-1">Disbursed Date</p>
-                <p className="font-semibold text-gray-900">
-                  {formatDate(loanData.disbursed_at || loanData.created_at)}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 mb-1">Due Date</p>
-                <p className="font-semibold text-gray-900">
-                  {formatDate(dueDate.toISOString())}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 mb-1">Days Remaining</p>
-                <p className="font-semibold text-gray-900">
-                  {Math.max(0, Math.ceil((dueDate.getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24)))} days
-                </p>
               </div>
             </div>
           </CardContent>

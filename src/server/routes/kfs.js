@@ -108,8 +108,51 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     
     const loanPlan = loanPlans[0] || {};
     
-    // Calculate loan values
-    const loanValues = calculateCompleteLoanValues(loan, loanPlan);
+    // Prepare loan data for calculation
+    const loanData = {
+      loan_amount: loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0,
+      loan_id: loan.id,
+      status: loan.status,
+      disbursed_at: loan.disbursed_at
+    };
+    
+    // Prepare plan data for calculation
+    const planSnapshot = loan.plan_snapshot ? (typeof loan.plan_snapshot === 'string' ? JSON.parse(loan.plan_snapshot) : loan.plan_snapshot) : loanPlan;
+    const defaultRepaymentDays = planSnapshot.repayment_days || planSnapshot.total_duration_days || loanPlan.repayment_days || loanPlan.total_duration_days || 15;
+    
+    const planData = {
+      plan_id: planSnapshot.plan_id || loanPlan.id || null,
+      plan_type: planSnapshot.plan_type || loanPlan.plan_type || 'single',
+      repayment_days: defaultRepaymentDays,
+      total_duration_days: planSnapshot.total_duration_days || loanPlan.total_duration_days || defaultRepaymentDays,
+      emi_count: planSnapshot.emi_count || loanPlan.emi_count || null,
+      emi_frequency: planSnapshot.emi_frequency || loanPlan.emi_frequency || null,
+      interest_percent_per_day: parseFloat(planSnapshot.interest_percent_per_day || loanPlan.interest_percent_per_day || loan.interest_percent_per_day || 0.001),
+      calculate_by_salary_date: planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true || loanPlan.calculate_by_salary_date === 1 || false,
+      fees: planSnapshot.fees || loanPlan.fees || []
+    };
+    
+    // Get user data for salary date calculation
+    const userData = {
+      user_id: loan.user_id,
+      salary_date: loan.salary_date || null
+    };
+    
+    // For repayment schedule: calculate interest based on actual days elapsed from disbursed date
+    // If loan has been disbursed, use actual days from disbursed_at to today
+    let calculationOptions = {};
+    if (loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)) {
+      // Calculate actual days from disbursed date to today (inclusive)
+      const actualDays = calculateTotalDays(loan.disbursed_at);
+      calculationOptions = {
+        customDays: actualDays,
+        calculationDate: new Date() // Use today as calculation date
+      };
+      console.log(`📅 Loan disbursed on ${loan.disbursed_at}, calculating interest for ${actualDays} days (from disbursed date to today)`);
+    }
+    
+    // Calculate loan values with actual days if disbursed, otherwise use plan days
+    const loanValues = calculateCompleteLoanValues(loanData, planData, userData, calculationOptions);
     
     // Parse fees breakdown if it's a JSON string
     let feesBreakdown = [];
@@ -139,12 +182,15 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         jurisdiction: 'Gurugram, Haryana'
       },
       loan: {
-        loan_id: loan.loan_id || `LOAN${loan.id}`,
+        loan_id: loan.loan_id || loan.application_number || `LOAN${loan.id}`,
+        application_number: loan.application_number || loan.loan_id || `LOAN${loan.id}`,
         application_date: loan.created_at ? new Date(loan.created_at).toLocaleDateString('en-IN') : 'N/A',
-        sanctioned_amount: loan.sanctioned_amount || loan.principal_amount || 0,
-        disbursal_amount: loan.disbursal_amount || loanValues.netDisbursalAmount || 0,
-        loan_term_days: loan.loan_term_days || loanPlan.tenure_days || 0,
-        loan_term_months: Math.ceil((loan.loan_term_days || loanPlan.tenure_days || 0) / 30),
+        sanctioned_amount: loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0,
+        principal_amount: loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0,
+        disbursal_amount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
+        disbursed_at: loan.disbursed_at || null,
+        loan_term_days: loan.loan_term_days || loanPlan.tenure_days || loanPlan.repayment_days || loanPlan.total_duration_days || 0,
+        loan_term_months: Math.ceil((loan.loan_term_days || loanPlan.tenure_days || loanPlan.repayment_days || loanPlan.total_duration_days || 0) / 30),
         interest_rate: loan.interest_rate || loanPlan.base_interest_rate || 0,
         repayment_frequency: loanPlan.repayment_frequency || 'Monthly'
       },
@@ -170,20 +216,26 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       },
       interest: {
         rate: loan.interest_rate || loanPlan.base_interest_rate || 0,
+        rate_per_day: planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001,
         type: 'Reducing Balance',
         calculation_method: 'Daily',
-        annual_rate: (loan.interest_rate || loanPlan.base_interest_rate || 0) * 365 / 100
+        annual_rate: ((planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001) * 365 * 100).toFixed(2),
+        days: loanValues.interest?.days || 0,
+        amount: loanValues.interest?.amount || 0
       },
       fees: {
-        processing_fee: loanValues.processingFee || 0,
-        gst: loanValues.processingFeeGST || 0,
-        total_add_to_total: loanValues.totalAddToTotal || 0,
+        processing_fee: loanValues.totals?.disbursalFee || loanValues.processingFee || 0,
+        gst: (loanValues.totals?.disbursalFeeGST || 0) + (loanValues.totals?.repayableFeeGST || 0) || loanValues.processingFeeGST || 0,
+        total_add_to_total: loanValues.totals?.repayableFee || loanValues.totalAddToTotal || 0,
         fees_breakdown: feesBreakdown
       },
       calculations: {
-        principal: loan.sanctioned_amount || loan.principal_amount || 0,
-        interest: loanValues.totalInterest || 0,
-        total_amount: loanValues.totalRepayableAmount || 0,
+        principal: loanValues.principal || loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0,
+        interest: loanValues.interest?.amount || loanValues.totalInterest || 0,
+        total_repayable: loanValues.total?.repayable || loanValues.totalRepayableAmount || 0,
+        total_amount: loanValues.total?.repayable || loanValues.totalRepayableAmount || 0,
+        disbursed_amount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
+        netDisbursalAmount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
         emi: loanValues.emiAmount || 0
       },
       repayment: {
