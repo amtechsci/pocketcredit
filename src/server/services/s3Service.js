@@ -2,10 +2,17 @@ const path = require('path');
 const fs = require('fs');
 
 // Ensure .env is loaded
-const envPath = path.resolve(__dirname, '../../server/.env');
-require('dotenv').config({ path: fs.existsSync(envPath) ? envPath : undefined });
-// Fallback
-require('dotenv').config();
+const envPath = path.join(__dirname, '../.env');
+console.log('Trying to load .env from:', envPath);
+const result = require('dotenv').config({ path: envPath });
+
+if (result.error) {
+  console.warn('⚠️  Failed to load specific .env file:', result.error.message);
+  // Fallback to default
+  require('dotenv').config();
+} else {
+  console.log('✅ Loaded .env file successfully');
+}
 
 const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');

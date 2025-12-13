@@ -5,7 +5,8 @@ const cookieParser = require('cookie-parser');
 const path = require('path');
 const fs = require('fs');
 const rateLimit = require('express-rate-limit');
-require('dotenv').config();
+// Explicitly load .env from the server directory
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 // Validate required environment variables
 const requiredEnvVars = ['JWT_SECRET', 'DB_HOST', 'DB_USER', 'DB_NAME'];
@@ -66,7 +67,7 @@ app.use(helmet({
 
 // Rate limiting (configurable via environment variables)
 const rateLimitWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS) || (15 * 60 * 1000); // Default: 15 minutes
-const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 
+const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) ||
   (process.env.NODE_ENV === 'production' ? 200 : 5000); // Increased limits: 200 in prod, 5000 in dev
 
 const limiter = rateLimit({
@@ -102,20 +103,20 @@ app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, Postman, curl)
     if (!origin) return callback(null, true);
-    
+
     // Allow localhost in any port
     if (origin.match(/^http:\/\/localhost(:\d+)?$/)) return callback(null, true);
     if (origin.match(/^https:\/\/localhost(:\d+)?$/)) return callback(null, true);
     if (origin.match(/^http:\/\/127\.0\.0\.1(:\d+)?$/)) return callback(null, true);
-    
+
     // Allow local network IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
     if (origin.match(/^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/)) return callback(null, true);
     if (origin.match(/^http:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/)) return callback(null, true);
     if (origin.match(/^http:\/\/172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+(:\d+)?$/)) return callback(null, true);
-    
+
     // Allow production domain
     if (origin === 'https://pocketcredit.in') return callback(null, true);
-    
+
     // Reject all others
     callback(new Error('Not allowed by CORS'));
   },
@@ -287,10 +288,10 @@ app.use('/api/bank-statement', userBankStatementRoutes);
 if (process.env.NODE_ENV !== 'production') {
   const testDigitapRoutes = require('./routes/testDigitap');
   app.use('/api/test-digitap', testDigitapRoutes);
-  
+
   const checkTableRoutes = require('./routes/checkTable');
   app.use('/api/check-table', checkTableRoutes);
-  
+
   console.log('🧪 Development routes enabled');
 }
 
@@ -315,18 +316,18 @@ app.get('/api/health', (req, res) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Error:', err);
-  
+
   if (err.code === 'LIMIT_FILE_SIZE') {
     return res.status(400).json({
       status: 'error',
       message: 'File size too large. Maximum size is 10MB.'
     });
   }
-  
+
   res.status(500).json({
     status: 'error',
-    message: process.env.NODE_ENV === 'production' 
-      ? 'Internal server error' 
+    message: process.env.NODE_ENV === 'production'
+      ? 'Internal server error'
       : err.message
   });
 });
@@ -344,13 +345,13 @@ const startServer = async () => {
   try {
     // Initialize database connection
     await initializeDatabase();
-    
+
     // Initialize Redis connection
     await initializeRedis();
-    
+
     // Start activity processor
     await activityProcessor.start();
-    
+
     // Start the server
     app.listen(PORT, () => {
       console.log(`🚀 Pocket Credit API server running on port ${PORT}`);
