@@ -372,6 +372,13 @@ class ApiService {
     return this.request('POST', '/bank-details/user', data);
   }
 
+  async updateBankDetails(id: number, data: {
+    account_number?: string;
+    is_primary?: boolean;
+  }): Promise<ApiResponse<{ message: string }>> {
+    return this.request('PUT', `/bank-details/${id}`, data);
+  }
+
   async chooseBankDetails(data: {
     application_id: number;
     bank_details_id: number;

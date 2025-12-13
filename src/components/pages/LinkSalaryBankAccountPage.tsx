@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, Plus, CheckCircle, Info, ArrowLeft } from 'lucide-react';
+import { Building2, Plus, CheckCircle, ArrowLeft } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { toast } from 'sonner';
@@ -29,6 +29,7 @@ export const LinkSalaryBankAccountPage = () => {
   const [checkingEnach, setCheckingEnach] = useState(true);
   const [bankDetails, setBankDetails] = useState<BankDetail[]>([]);
   const [selectedBankId, setSelectedBankId] = useState<number | null>(null);
+  const [fullAccountNumber, setFullAccountNumber] = useState('');
   const [showAddNew, setShowAddNew] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -50,51 +51,16 @@ export const LinkSalaryBankAccountPage = () => {
       }
 
       try {
-        // Method 1: Check if email is already verified (this step comes after e-NACH)
+        // Method 1: Check if email is already verified
         if (user.personal_email_verified) {
-          console.log('Email already verified, skipping e-NACH page');
           navigate('/email-verification', { replace: true });
           return;
         }
 
-        // Method 2: Check if user has a primary bank account (set during e-NACH registration)
-        try {
-          const bankDetailsResponse = await apiService.getUserBankDetails(user.id);
-          if (bankDetailsResponse.success && bankDetailsResponse.data) {
-            const hasPrimaryBank = bankDetailsResponse.data.some((bank: BankDetail) => {
-              const isPrimary = bank.is_primary;
-              // Check if is_primary is truthy (handles boolean true, number 1, string '1')
-              return Boolean(isPrimary);
-            });
-            if (hasPrimaryBank) {
-              console.log('Primary bank account found, e-NACH likely completed, redirecting');
-              navigate('/email-verification', { replace: true });
-              return;
-            }
-          }
-        } catch (bankError) {
-          console.log('Error checking bank details:', bankError);
-        }
-
-        // Method 3: Try the e-NACH status API as fallback (if it works)
-        try {
-          const enachStatusResponse = await apiService.getEnachStatus();
-          if (enachStatusResponse.success && enachStatusResponse.data?.registered) {
-            console.log('e-NACH already registered, redirecting to email verification');
-            navigate('/email-verification', { replace: true });
-            return;
-          }
-        } catch (enachError) {
-          // API might not be available, that's okay - we'll use other methods
-          console.log('e-NACH status API not available, using other checks');
-        }
-        
-        // If none of the checks indicate completion, continue with normal flow
         setCheckingEnach(false);
         checkAndFetchReport();
       } catch (error) {
         console.error('Error checking completion status:', error);
-        // Continue to show the page if check fails
         setCheckingEnach(false);
         checkAndFetchReport();
       }
@@ -114,10 +80,10 @@ export const LinkSalaryBankAccountPage = () => {
 
       // First, check bank statement status - this will automatically fetch report if needed
       const statusResponse = await apiService.getUserBankStatementStatus();
-      
+
       if (statusResponse.success && statusResponse.data) {
         const { status, reportJustFetched } = statusResponse.data as any;
-        
+
         // If status is completed but report was just fetched, wait a moment for bank details extraction
         if (status === 'completed' && reportJustFetched) {
           toast.success('Bank statement report fetched! Extracting bank details...');
@@ -142,7 +108,7 @@ export const LinkSalaryBankAccountPage = () => {
       }
 
       const response = await apiService.getUserBankDetails(user.id);
-      
+
       if (response.success && response.data && response.data.length > 0) {
         setBankDetails(response.data as BankDetail[]);
         // Auto-select if only one bank detail exists
@@ -182,7 +148,10 @@ export const LinkSalaryBankAccountPage = () => {
   };
 
   const handleSelectBank = (bankId: number) => {
-    setSelectedBankId(bankId);
+    if (selectedBankId !== bankId) {
+      setSelectedBankId(bankId);
+      setFullAccountNumber(''); // Reset input when changing selection
+    }
   };
 
   const handleAddNewBank = async () => {
@@ -201,14 +170,14 @@ export const LinkSalaryBankAccountPage = () => {
 
     try {
       setSubmitting(true);
-      
+
       // Call API to save bank details for user
       const response = await apiService.saveUserBankDetails({
         account_number: newBankForm.account_number,
         ifsc_code: newBankForm.ifsc_code.toUpperCase(),
         bank_name: newBankForm.bank_name || undefined
       });
-      
+
       if (response.success) {
         toast.success('Bank account added successfully!');
         setShowAddNew(false);
@@ -232,53 +201,46 @@ export const LinkSalaryBankAccountPage = () => {
       return;
     }
 
-    setSubmitting(true);
+    if (!fullAccountNumber) {
+      toast.error('Please enter your full account number to confirm');
+      return;
+    }
 
-    try {
-      // First check if e-NACH is already registered
-      const enachStatusResponse = await apiService.getEnachStatus();
-      if (enachStatusResponse.success && enachStatusResponse.data?.registered) {
-        // e-NACH already registered, just redirect to next page
-        toast.info('e-NACH already registered. Continuing...');
-        setTimeout(() => {
-          navigate('/email-verification');
-        }, 1000);
-        return;
-      }
-
-      // Register the selected bank account for e-NACH
-      const response = await apiService.registerEnach(selectedBankId);
-
-      if (response.success) {
-        toast.success('Salary bank account registered for e-NACH successfully!');
-        
-        // Navigate to email verification page
-        setTimeout(() => {
-          navigate('/email-verification');
-        }, 1500);
-      } else {
-        // If error is about already existing, just redirect
-        if (response.message && response.message.includes('already exists')) {
-          toast.info('e-NACH already registered. Continuing...');
-          setTimeout(() => {
-            navigate('/email-verification');
-          }, 1000);
-        } else {
-          toast.error(response.message || 'Failed to register bank account');
+    // Optional: Validate that the entered number matches the masked one (partial check)
+    const selectedBank = bankDetails.find(b => b.id === selectedBankId);
+    if (selectedBank) {
+      const masked = selectedBank.account_number;
+      // If masked has at least 4 chars and isn't fully masked
+      if (masked.length >= 4 && !masked.includes('****')) {
+        // If we actually had the full number, we could check equality. 
+        // But here we assume we are collecting the full number to UPDATE it.
+      } else if (masked.length >= 4) {
+        const last4 = masked.slice(-4);
+        if (!fullAccountNumber.endsWith(last4)) {
+          toast.error(`Account number must end with ${last4}`);
+          return;
         }
       }
-    } catch (error: any) {
-      console.error('Error registering e-NACH:', error);
-      
-      // If error is about already existing, just redirect
-      if (error.message && error.message.includes('already exists')) {
-        toast.info('e-NACH already registered. Continuing...');
-        setTimeout(() => {
-          navigate('/email-verification');
-        }, 1000);
+    }
+
+    setSubmitting(true);
+    try {
+      // Update the bank details with the full account number and mark as primary
+      const response = await apiService.updateBankDetails(selectedBankId, {
+        account_number: fullAccountNumber,
+        is_primary: true
+      });
+
+      if (response.success) {
+        toast.success('Bank details verified successfully');
+        // Navigate to email verification page
+        navigate('/email-verification');
       } else {
-        toast.error(error.message || 'Failed to register bank account. Please try again.');
+        toast.error(response.message || 'Failed to verify bank details');
       }
+    } catch (error: any) {
+      console.error('Error updating bank details:', error);
+      toast.error(error.message || 'Failed to update bank details');
     } finally {
       setSubmitting(false);
     }
@@ -321,8 +283,8 @@ export const LinkSalaryBankAccountPage = () => {
       {/* Header with Back Button */}
       <div className="bg-white border-b sticky top-0 z-10 mb-4 md:mb-6">
         <div className="max-w-4xl mx-auto px-4 py-3 md:py-4 flex items-center gap-3">
-          <button 
-            onClick={() => navigate('/dashboard')} 
+          <button
+            onClick={() => navigate('/dashboard')}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
             aria-label="Back to dashboard"
           >
@@ -338,59 +300,7 @@ export const LinkSalaryBankAccountPage = () => {
       <div className="max-w-4xl mx-auto px-4">
 
         {/* e-NACH Information Section - Always Visible */}
-        <Card className="mb-4 md:mb-6">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base md:text-xl flex items-center gap-2">
-              <Info className="w-4 h-4 md:w-5 md:h-5 text-blue-600" />
-              What is e-NACH / e-Mandate?
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 md:space-y-4 text-xs md:text-sm text-gray-700 pt-0">
-              <div>
-                <p className="mb-2">
-                  <strong>Electronic National Automated Clearing House (e-NACH)</strong> is a financial system that helps automate recurring payments for loans.
-                </p>
-                <p className="mb-2">
-                  e-NACH is a service that allows you to pay your loan EMIs from your bank account. It's a service provided by the National Payments Corporation of India (NPCI).
-                </p>
-                <p className="mb-2">
-                  <strong>e-mandate</strong> is an electronic version of a mandate, which is a standing instruction given to the bank where a customer holds their account to debit a fixed amount to another bank account automatically.
-                </p>
-                <p className="mb-4">
-                  ENACH, allows the platform to set up payments with predefined frequency or Ad Hoc. By setting the frequency to Adhoc, the platform can present a mandate per the business requirements.
-                </p>
-              </div>
 
-              <div className="bg-blue-50 border-l-4 border-blue-400 p-3 md:p-4 rounded">
-                <p className="font-semibold text-blue-900 mb-1 md:mb-2 text-xs md:text-sm">Period or Tenure of E-NACH:</p>
-                <p className="text-blue-800 text-xs md:text-sm leading-relaxed">
-                  The "Period or Tenure of E-NACH" refers to the validity of your E-mandate or e-NACH registration. It does not imply that your account will be debited throughout this period. Instead, it signifies that the E-mandate remains valid for transactions during this time. If you wish to apply for a loan, you can do so directly without having to go through the E-NACH registration process again, as the existing mandate remains valid.
-                </p>
-              </div>
-
-              <div className="bg-blue-50 border-l-4 border-blue-400 p-3 md:p-4 rounded">
-                <p className="font-semibold text-blue-900 mb-1 md:mb-2 text-xs md:text-sm">Maximum amount:</p>
-                <p className="text-blue-800 text-xs md:text-sm leading-relaxed">
-                  The maximum amount refers to the highest total sum that can be debited throughout the duration of the mandate. This includes the principal loan amount, as well as any accrued interest and charges specified in the loan agreement. We set up an e-mandate for an amount higher than your current loan balance to accommodate potential future increases in your loan limit. This way, you won't need to register again if your limit changes, as the one-time registration will cover the higher amount.
-                </p>
-              </div>
-
-              <div className="bg-green-50 border-l-4 border-green-400 p-3 md:p-4 rounded">
-                <p className="font-semibold text-green-900 mb-1 md:mb-2 text-xs md:text-sm">Benefits:</p>
-                <ul className="list-disc list-inside space-y-1 text-green-800 text-xs md:text-sm">
-                  <li>One-time authorization: No need to submit fresh mandates for each transaction.</li>
-                  <li>Easy digital authentication: Using Netbanking or Debit Card credentials</li>
-                </ul>
-              </div>
-
-              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 md:p-4 rounded">
-                <p className="font-semibold text-yellow-900 mb-1 md:mb-2 text-xs md:text-sm">Note:</p>
-                <p className="text-yellow-800 text-xs md:text-sm leading-relaxed">
-                  Make sure you are ready with your debit card or net banking details linked to the bank shown below to proceed with e-NACH registration.
-                </p>
-              </div>
-            </CardContent>
-        </Card>
 
         {/* Bank Accounts List */}
         <Card className="mb-4 md:mb-6">
@@ -416,11 +326,10 @@ export const LinkSalaryBankAccountPage = () => {
                   <div
                     key={bank.id}
                     onClick={() => handleSelectBank(bank.id)}
-                    className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                      selectedBankId === bank.id
-                        ? 'border-blue-600 bg-blue-50'
-                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                    }`}
+                    className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${selectedBankId === bank.id
+                      ? 'border-blue-600 bg-blue-50'
+                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
@@ -449,6 +358,26 @@ export const LinkSalaryBankAccountPage = () => {
                             </div>
                           )}
                         </div>
+
+                        {/* Show Input if selected */}
+                        {selectedBankId === bank.id && (
+                          <div className="mt-4 ml-8" onClick={(e) => e.stopPropagation()}>
+                            <Label htmlFor={`full-account-${bank.id}`} className="text-blue-900">
+                              Confirm Full Account Number
+                            </Label>
+                            <Input
+                              id={`full-account-${bank.id}`}
+                              value={fullAccountNumber}
+                              onChange={(e) => setFullAccountNumber(e.target.value)}
+                              placeholder="Enter full account number"
+                              className="mt-1 bg-white"
+                              autoFocus
+                            />
+                            <p className="text-xs text-blue-600 mt-1">
+                              Please enter the complete account number to verify.
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

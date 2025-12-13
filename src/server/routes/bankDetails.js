@@ -59,6 +59,77 @@ router.get('/enach-status', requireAuth, async (req, res) => {
     });
   }
 });
+// PUT /api/bank-details/:id - Update Bank Details
+router.put('/:id', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+    const { id } = req.params;
+    const { account_number, is_primary } = req.body;
+
+    if (!account_number && is_primary === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'No fields to update provided'
+      });
+    }
+
+    // Verify bank detail belongs to user
+    const existing = await executeQuery(
+      'SELECT id FROM bank_details WHERE id = ? AND user_id = ?',
+      [id, userId]
+    );
+
+    if (!existing || existing.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Bank detail not found'
+      });
+    }
+
+    const updates = [];
+    const values = [];
+
+    if (account_number) {
+      updates.push('account_number = ?');
+      values.push(account_number);
+    }
+
+    if (is_primary !== undefined) {
+      updates.push('is_primary = ?');
+      values.push(is_primary);
+
+      // If setting as primary, unset others (optional but good practice)
+      if (is_primary) {
+        await executeQuery(
+          'UPDATE bank_details SET is_primary = FALSE WHERE user_id = ? AND id != ?',
+          [userId, id]
+        );
+      }
+    }
+
+    values.push(new Date()); // updated_at
+    values.push(id);
+
+    await executeQuery(
+      `UPDATE bank_details SET ${updates.join(', ')}, updated_at = ? WHERE id = ?`,
+      values
+    );
+
+    res.json({
+      success: true,
+      message: 'Bank details updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Error updating bank details:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
 
 // POST /api/bank-details - Save Bank Details for Loan Application
 router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
@@ -66,9 +137,9 @@ router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
     await initializeDatabase();
     const userId = req.userId;
 
-    const { 
+    const {
       application_id,
-      account_number, 
+      account_number,
       ifsc_code
     } = req.body;
 
@@ -120,7 +191,7 @@ router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
 
     // Extract bank name from IFSC code (first 4 characters)
     const bankCode = ifsc_code.substring(0, 4);
-    
+
     // Map common bank codes to bank names
     const bankNames = {
       'SBIN': 'State Bank of India',
@@ -282,8 +353,8 @@ router.post('/user', requireAuth, async (req, res) => {
     await initializeDatabase();
     const userId = req.userId;
 
-    const { 
-      account_number, 
+    const {
+      account_number,
       ifsc_code,
       bank_name
     } = req.body;
