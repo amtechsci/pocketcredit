@@ -107,10 +107,15 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
       mobile: mobile_number,
       // APP_URL: production includes /api, development doesn't
       redirectionUrl: (() => {
-        const isDevelopment = process.env.NODE_ENV === 'development' || (!process.env.NODE_ENV && !process.env.APP_URL);
-        const appUrl = process.env.APP_URL || (isDevelopment ? 'http://localhost:3002' : 'https://pocketcredit.in/api');
-        // Routes are mounted at /api/digiwebhook, so add /api for dev, or just /digiwebhook for prod
-        return isDevelopment ? `${appUrl}/api/digiwebhook` : `${appUrl}/digiwebhook`;
+        const isDevelopment = process.env.NODE_ENV === 'development';
+        // Ensure we target the API URL, not the frontend URL
+        const baseUrl = process.env.API_URL || (isDevelopment ? 'http://localhost:3002' : 'https://pocketcredit.in/api');
+
+        // Remove trailing slash if present
+        const cleanBaseUrl = baseUrl.replace(/\/$/, '');
+
+        // Return full path to webhook endpoint
+        return `${cleanBaseUrl}/digiwebhook`;
       })(),
       serviceId: process.env.DIGILOCKER_SERVICE_ID || "4"
     };

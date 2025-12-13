@@ -1,18 +1,44 @@
 const path = require('path');
 const fs = require('fs');
 
-// Ensure .env is loaded
-const envPath = path.join(__dirname, '../.env');
-console.log('Trying to load .env from:', envPath);
-const result = require('dotenv').config({ path: envPath });
+// function to load env from multiple possible paths
+const loadEnv = () => {
+  const possiblePaths = [
+    path.join(__dirname, '../.env'), // src/server/.env
+    path.join(__dirname, '../../server/.env'), // Alternative structure
+    path.join(__dirname, '../../.env'), // src/.env
+    path.join(__dirname, '../../../.env'), // project root
+    path.join(process.cwd(), '.env') // current working directory
+  ];
 
-if (result.error) {
-  console.warn('⚠️  Failed to load specific .env file:', result.error.message);
-  // Fallback to default
-  require('dotenv').config();
-} else {
-  console.log('✅ Loaded .env file successfully');
-}
+  let loaded = false;
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      console.log(`Trying to load .env from: ${p}`);
+      const result = require('dotenv').config({ path: p });
+      if (!result.error) {
+        console.log(`✅ Loaded .env from ${p}`);
+        loaded = true;
+        // We don't break immediately because we might want to overlay, 
+        // but typically one is enough. Let's keep going to ensure we get *some* variables if split.
+        // However, usually first match is preferred or we want specific override.
+        // For now, let's assume if we find one valid one, we break? 
+        // Or keep loading to ensure all vars are present?
+        // Let's break on first successful load to avoid confusion, 
+        // assuming priority is top-down.
+        break;
+      }
+    }
+  }
+
+  // Fallback to default load which uses cwd
+  if (!loaded) {
+    console.log('Trying default dotenv load...');
+    require('dotenv').config();
+  }
+};
+
+loadEnv();
 
 const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');

@@ -5,8 +5,37 @@ const cookieParser = require('cookie-parser');
 const path = require('path');
 const fs = require('fs');
 const rateLimit = require('express-rate-limit');
-// Explicitly load .env from the server directory
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+
+// function to load env from multiple possible paths
+const loadEnv = () => {
+  const possiblePaths = [
+    path.join(__dirname, '.env'), // Current dir
+    path.join(__dirname, '../.env'), // src/
+    path.join(__dirname, '../../.env'), // project root
+    path.join(process.cwd(), '.env') // CWD
+  ];
+
+  let loaded = false;
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      console.log(`Trying to load .env from: ${p}`);
+      const result = require('dotenv').config({ path: p });
+      if (!result.error) {
+        console.log(`✅ Loaded .env from ${p}`);
+        loaded = true;
+        break;
+      }
+    }
+  }
+
+  // Fallback to default load
+  if (!loaded) {
+    console.log('Trying default dotenv load...');
+    require('dotenv').config();
+  }
+};
+
+loadEnv();
 
 // Validate required environment variables
 const requiredEnvVars = ['JWT_SECRET', 'DB_HOST', 'DB_USER', 'DB_NAME'];
