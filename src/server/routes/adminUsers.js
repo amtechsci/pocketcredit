@@ -212,6 +212,51 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
 
 
 
+    // Fetch bank details
+    let bankInfo = {
+      bankName: 'N/A',
+      accountNumber: 'N/A',
+      ifscCode: 'N/A',
+      accountType: 'N/A',
+      accountHolderName: 'N/A',
+      branchName: 'N/A',
+      verificationStatus: 'N/A',
+      verificationDate: null
+    };
+
+    try {
+      // Use SELECT * to avoid errors if specific columns don't exist yet
+      const bankQuery = `
+        SELECT *
+        FROM bank_details
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `;
+
+      const bankResults = await executeQuery(bankQuery, [id]);
+
+      if (bankResults.length > 0) {
+        const bank = bankResults[0];
+        bankInfo = {
+          id: bank.id,
+          bankName: bank.bank_name || 'N/A',
+          accountNumber: bank.account_number || 'N/A',
+          ifscCode: bank.ifsc_code || 'N/A',
+          accountType: bank.account_type || 'Savings',
+          accountHolderName: bank.account_holder_name || 'N/A',
+          branchName: bank.branch_name || 'N/A',
+          // Check for both is_verified and verification_status
+          verificationStatus: bank.is_verified ? 'verified' : (bank.verification_status || 'pending'),
+          verifiedDate: bank.is_verified ? bank.updated_at : null,
+          addedDate: bank.created_at,
+          isPrimary: bank.is_primary ? true : false
+        };
+      }
+    } catch (e) {
+      console.error('Error fetching bank details:', e);
+    }
+
     const userData = {
       id: user.id,
       name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Unknown User',
@@ -228,7 +273,8 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
       aadharNumber: user.aadhar_number,
       totalApplications: parseInt(user.totalApplications) || 0,
       approvedApplications: parseInt(user.approvedApplications) || 0,
-      rejectedApplications: parseInt(user.rejectedApplications) || 0
+      rejectedApplications: parseInt(user.rejectedApplications) || 0,
+      bankInfo: bankInfo
     };
 
     res.json({

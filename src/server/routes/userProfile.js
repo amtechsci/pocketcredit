@@ -180,6 +180,68 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       console.error('Error fetching KYC documents:', e);
     }
 
+    // Fetch Bank Details
+    let bankDetails = [];
+    try {
+      const bankQuery = `
+        SELECT *
+        FROM bank_details
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+      `;
+      const bankResults = await executeQuery(bankQuery, [userId]);
+
+      if (bankResults && bankResults.length > 0) {
+        bankDetails = bankResults.map(bank => ({
+          id: bank.id,
+          bankName: bank.bank_name,
+          accountNumber: bank.account_number,
+          ifscCode: bank.ifsc_code,
+          accountHolderName: bank.account_holder_name,
+          branchName: bank.branch_name || 'N/A',
+          accountType: bank.account_type || 'Savings',
+          isPrimary: bank.is_primary ? true : false,
+          verificationStatus: bank.verification_status || 'N/A',
+          createdAt: bank.created_at
+        }));
+      }
+    } catch (e) {
+      console.error('Error fetching bank details:', e);
+    }
+
+    // Construct bankInfo object for frontend compatibility (UserProfileDetail.tsx expects this structure)
+    let bankInfo = {
+      bankName: 'N/A',
+      accountNumber: 'N/A',
+      ifscCode: 'N/A',
+      accountType: 'N/A',
+      accountHolderName: 'N/A',
+      branchName: 'N/A',
+      verificationStatus: 'N/A',
+      verifiedDate: null,
+      addedDate: null,
+      isPrimary: false
+    };
+
+    if (bankDetails.length > 0) {
+      // Use the primary bank account if available, otherwise the most recent one
+      const primaryBank = bankDetails.find(b => b.isPrimary) || bankDetails[0];
+
+      bankInfo = {
+        id: primaryBank.id,
+        bankName: primaryBank.bankName || 'N/A',
+        accountNumber: primaryBank.accountNumber || 'N/A',
+        ifscCode: primaryBank.ifscCode || 'N/A',
+        accountType: primaryBank.accountType || 'Savings',
+        accountHolderName: primaryBank.accountHolderName || 'N/A',
+        branchName: primaryBank.branchName || 'N/A',
+        verificationStatus: primaryBank.verificationStatus || 'pending',
+        verifiedDate: primaryBank.verifiedDate || null,
+        addedDate: primaryBank.createdAt || null,
+        isPrimary: primaryBank.isPrimary
+      };
+    }
+
     // Transform user data to match frontend expectations
     const userProfile = {
       id: user.id,
@@ -229,7 +291,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       },
       // Default values for data not yet in MySQL
       documents: [],
-      bankDetails: [],
+      bankDetails: bankDetails,
+      bankInfo: bankInfo, // Added for frontend compatibility
       references: [],
       transactions: [],
       followUps: [],
@@ -471,6 +534,69 @@ router.put('/:userId/employment-info', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to update employment information'
+    });
+  }
+});
+
+// Update bank details status
+router.put('/:userId/bank-details/:bankId', authenticateAdmin, async (req, res) => {
+  try {
+    console.log('🏦 Updating bank details status:', req.params.bankId);
+    await initializeDatabase();
+    const { userId, bankId } = req.params;
+    const { verificationStatus, rejectionReason } = req.body;
+
+    // Map status to is_verified (1 for verified, 0 for others)
+    const isVerified = verificationStatus === 'verified' ? 1 : 0;
+
+    // Update query
+    // We try to update verification_status column too if it exists, otherwise just is_verified
+    // Since we can't easily check column existence in query, we'll try to update both
+    // If verification_status doesn't exist, this might fail, so we should check schema or use a safer approach
+    // For now, let's assume is_verified is the main flag and we'll try to update verification_status if possible
+
+    // First check if verification_status column exists
+    const columns = await executeQuery(`SHOW COLUMNS FROM bank_details LIKE 'verification_status'`);
+    const hasVerificationStatus = columns.length > 0;
+
+    const rejectionReasonColumn = await executeQuery(`SHOW COLUMNS FROM bank_details LIKE 'rejection_reason'`);
+    const hasRejectionReason = rejectionReasonColumn.length > 0;
+
+    let updateQuery = 'UPDATE bank_details SET is_verified = ?, updated_at = NOW()';
+    const params = [isVerified];
+
+    if (hasVerificationStatus) {
+      updateQuery += ', verification_status = ?';
+      params.push(verificationStatus);
+    }
+
+    if (hasRejectionReason && rejectionReason) {
+      updateQuery += ', rejection_reason = ?';
+      params.push(rejectionReason);
+    }
+
+    updateQuery += ' WHERE id = ? AND user_id = ?';
+    params.push(bankId, userId);
+
+    await executeQuery(updateQuery, params);
+
+    console.log('✅ Bank details status updated successfully');
+    res.json({
+      status: 'success',
+      message: 'Bank details status updated successfully',
+      data: {
+        id: bankId,
+        isVerified,
+        verificationStatus,
+        rejectionReason
+      }
+    });
+
+  } catch (error) {
+    console.error('Update bank details status error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update bank details status'
     });
   }
 });

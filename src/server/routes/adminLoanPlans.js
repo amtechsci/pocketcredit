@@ -9,7 +9,7 @@ const router = express.Router();
 router.get('/', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
-    
+
     const plans = await executeQuery(
       'SELECT * FROM loan_plans ORDER BY id ASC'
     );
@@ -195,13 +195,13 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
 router.post('/', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
-    const { 
-      plan_name, 
-      plan_code, 
-      plan_type, 
+    const {
+      plan_name,
+      plan_code,
+      plan_type,
       repayment_days,
       calculate_by_salary_date,
-      emi_frequency, 
+      emi_frequency,
       emi_count,
       interest_percent_per_day,
       eligible_member_tiers,
@@ -211,7 +211,8 @@ router.post('/', authenticateAdmin, async (req, res) => {
       terms_conditions,
       allow_extension,
       extension_show_from_days,
-      extension_show_till_days
+      extension_show_till_days,
+      is_default
     } = req.body;
 
     // Validate required fields
@@ -276,9 +277,9 @@ router.post('/', authenticateAdmin, async (req, res) => {
          is_active, is_default, description, terms_conditions, allow_extension, extension_show_from_days, extension_show_till_days)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        plan_name, 
-        plan_code, 
-        plan_type, 
+        plan_name,
+        plan_code,
+        plan_type,
         repayment_days || null,
         calculate_by_salary_date ? 1 : 0,
         emi_frequency || null,
@@ -320,13 +321,13 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
     const { id } = req.params;
-    const { 
-      plan_name, 
-      plan_code, 
-      plan_type, 
+    const {
+      plan_name,
+      plan_code,
+      plan_type,
       repayment_days,
       calculate_by_salary_date,
-      emi_frequency, 
+      emi_frequency,
       emi_count,
       interest_percent_per_day,
       eligible_member_tiers,
@@ -382,9 +383,9 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
           updated_at = NOW()
       WHERE id = ?`,
       [
-        plan_name, 
-        plan_code, 
-        plan_type, 
+        plan_name,
+        plan_code,
+        plan_type,
         repayment_days || null,
         calculate_by_salary_date ? 1 : 0,
         emi_frequency || null,
@@ -483,7 +484,7 @@ router.patch('/:id/set-default', authenticateAdmin, async (req, res) => {
 
     // Unset all other defaults
     await executeQuery('UPDATE loan_plans SET is_default = 0 WHERE is_default = 1');
-    
+
     // Set this plan as default
     await executeQuery(
       'UPDATE loan_plans SET is_default = 1, updated_at = NOW() WHERE id = ?',

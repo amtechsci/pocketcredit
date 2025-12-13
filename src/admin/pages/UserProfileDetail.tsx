@@ -436,6 +436,7 @@ export function UserProfileDetail() {
 
         if (response.status === 'success' && response.data) {
           setUserData(response.data);
+          console.log('Admin User Profile Loaded:', response.data);
 
           // Load user's selected loan plan from response data
           if (response.data.selectedLoanPlan) {
@@ -2218,6 +2219,72 @@ export function UserProfileDetail() {
     );
   };
 
+  // Bank Details Action Handlers
+  const handleApproveBankDetails = async (bankId: string) => {
+    if (!bankId) {
+      alert('Bank details ID not found');
+      return;
+    }
+
+    if (!confirm('Are you sure you want to approve these bank details?')) {
+      return;
+    }
+
+    try {
+      const response = await adminApiService.updateBankDetailsStatus(params.userId!, bankId, 'verified');
+      if (response.status === 'success') {
+        alert('Bank details approved successfully!');
+        // Refresh user data
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success') {
+          setUserData(profileResponse.data);
+        }
+      } else {
+        alert('Failed to approve bank details');
+      }
+    } catch (error) {
+      console.error('Error approving bank details:', error);
+      alert('Error approving bank details');
+    }
+  };
+
+  const handleRejectBankDetails = async (bankId: string) => {
+    if (!bankId) {
+      alert('Bank details ID not found');
+      return;
+    }
+
+    const reason = prompt('Please provide a reason for rejection:');
+    if (!reason) return;
+
+    try {
+      const response = await adminApiService.updateBankDetailsStatus(params.userId!, bankId, 'rejected', reason);
+      if (response.status === 'success') {
+        alert('Bank details rejected successfully!');
+        // Refresh user data
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success') {
+          setUserData(profileResponse.data);
+        }
+      } else {
+        alert('Failed to reject bank details');
+      }
+    } catch (error) {
+      console.error('Error rejecting bank details:', error);
+      alert('Error rejecting bank details');
+    }
+  };
+
+  const handleAddBankComment = async (bankId: string) => {
+    if (!bankId) {
+      alert('Bank details ID not found');
+      return;
+    }
+
+    // For now just show alert as comment functionality is not fully implemented in backend for bank details specifically
+    alert('Comment functionality coming soon');
+  };
+
   // Bank Information Tab
   const renderBankTab = () => (
     <div className="space-y-6">
@@ -2274,27 +2341,38 @@ export function UserProfileDetail() {
         </div>
 
         {/* Admin Actions for Bank Details */}
-        <div className="mt-6 pt-6 border-t border-gray-200">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-700">Admin Actions:</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <button className="flex items-center gap-1 text-green-600 hover:text-green-800 text-sm px-4 py-2 bg-green-50 border border-green-200 rounded-md hover:bg-green-100">
-                <CheckCircle className="w-4 h-4" />
-                Approve
-              </button>
-              <button className="flex items-center gap-1 text-red-600 hover:text-red-800 text-sm px-4 py-2 bg-red-50 border border-red-200 rounded-md hover:bg-red-100">
-                <XCircle className="w-4 h-4" />
-                Reject
-              </button>
-              <button className="flex items-center gap-1 text-gray-600 hover:text-gray-800 text-sm px-4 py-2 bg-gray-50 border border-gray-200 rounded-md hover:bg-gray-100">
-                <MessageSquare className="w-4 h-4" />
-                Add Comment
-              </button>
+        {getUserData('bankInfo.verificationStatus') !== 'verified' && (
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-700">Admin Actions:</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleApproveBankDetails(getUserData('bankInfo.id') || getUserData('bankDetails.0.id'))}
+                  className="flex items-center gap-1 text-green-600 hover:text-green-800 text-sm px-4 py-2 bg-green-50 border border-green-200 rounded-md hover:bg-green-100"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  Approve
+                </button>
+                <button
+                  onClick={() => handleRejectBankDetails(getUserData('bankInfo.id') || getUserData('bankDetails.0.id'))}
+                  className="flex items-center gap-1 text-red-600 hover:text-red-800 text-sm px-4 py-2 bg-red-50 border border-red-200 rounded-md hover:bg-red-100"
+                >
+                  <XCircle className="w-4 h-4" />
+                  Reject
+                </button>
+                <button
+                  onClick={() => handleAddBankComment(getUserData('bankInfo.id') || getUserData('bankDetails.0.id'))}
+                  className="flex items-center gap-1 text-gray-600 hover:text-gray-800 text-sm px-4 py-2 bg-gray-50 border border-gray-200 rounded-md hover:bg-gray-100"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  Add Comment
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Verification History */}
         {getUserData('bankInfo.verificationStatus') === 'verified' && (
