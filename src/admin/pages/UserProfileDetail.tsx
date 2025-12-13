@@ -28,7 +28,8 @@ import {
   RefreshCw,
   Filter,
   Flag,
-  Shield
+  Shield,
+  Wallet
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import { adminApiService } from '../../services/adminApi';
@@ -1577,6 +1578,7 @@ export function UserProfileDetail() {
     { id: 'notes', label: 'Note', icon: FileText },
     { id: 'sms', label: 'SMS', icon: MessageSquare },
     { id: 'login-data', label: 'Login Data', icon: Clock },
+    { id: 'accounts', label: 'Accounts', icon: Wallet },
   ];
 
 
@@ -2360,6 +2362,168 @@ export function UserProfileDetail() {
       </div>
     </div>
   );
+
+  // Accounts Tab (Account Aggregator)
+  const renderAccountsTab = () => {
+    const banks = getUserData('bankStatement.banks', []);
+
+    // If no data, showing a placeholder or empty state
+    if (!banks || banks.length === 0) {
+      return (
+        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Wallet className="w-8 h-8 text-gray-400" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Account Data Available</h3>
+          <p className="text-gray-600 mb-6">There is no account aggregator data available for this user.</p>
+          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+            Refresh Bank Data
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-6">
+        {banks.map((bank: any, bankIndex: number) => (
+          <div key={bankIndex} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-white rounded-full border border-gray-200 flex items-center justify-center">
+                  <Building className="w-5 h-5 text-gray-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">{bank.bank}</h3>
+                  <p className="text-sm text-gray-500">Source: {bank.source_bank_id || 'N/A'}</p>
+                </div>
+              </div>
+              {bank.multiple_accounts_found === 'yes' && (
+                <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-medium">
+                  Multiple Accounts
+                </span>
+              )}
+            </div>
+
+            <div className="p-6 space-y-8">
+              {bank.accounts.map((account: any, accIndex: number) => (
+                <div key={accIndex} className="border border-gray-200 rounded-lg overflow-hidden">
+                  {/* Account Header */}
+                  <div className="bg-gradient-to-r from-gray-50 to-white px-6 py-4 border-b border-gray-200">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <h4 className="font-semibold text-gray-900 text-lg">
+                            {account.account_type} Account
+                          </h4>
+                          <span className={`px-2 py-0.5 rounded text-xs font-semibold ${account.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                            }`}>
+                            {account.status || 'ACTIVE'}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-500 font-mono">
+                          {account.account_number} • {account.ifsc_code}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm text-gray-500 mb-1">Current Balance</p>
+                        <p className="text-2xl font-bold text-gray-900">
+                          {new Intl.NumberFormat('en-IN', {
+                            style: 'currency',
+                            currency: 'INR'
+                          }).format(parseFloat(account.current_balance || '0'))}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Account Details Grid */}
+                  <div className="px-6 py-4 bg-white border-b border-gray-200">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Customer Name</p>
+                        <p className="text-sm font-medium text-gray-900">{account.customer_info?.name || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Opening Date</p>
+                        <p className="text-sm font-medium text-gray-900">{account.opening_date || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Branch</p>
+                        <p className="text-sm font-medium text-gray-900">{account.location || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Nominee</p>
+                        <p className="text-sm font-medium text-gray-900">{account.nominee || 'N/A'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Transactions Preview */}
+                  {account.transactions && account.transactions.length > 0 && (
+                    <div className="bg-white">
+                      <div className="px-6 py-3 border-b border-gray-100 bg-gray-50">
+                        <h5 className="text-sm font-semibold text-gray-900">Recent Transactions</h5>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                          <thead className="text-xs text-gray-500 uppercase bg-gray-50">
+                            <tr>
+                              <th className="px-6 py-3">Date</th>
+                              <th className="px-6 py-3">Description</th>
+                              <th className="px-6 py-3">Ref No</th>
+                              <th className="px-6 py-3 text-right">Amount</th>
+                              <th className="px-6 py-3 text-right">Balance</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {account.transactions.slice(0, 5).map((txn: any, tIndex: number) => (
+                              <tr key={tIndex} className="hover:bg-gray-50">
+                                <td className="px-6 py-3 whitespace-nowrap">
+                                  {txn.date ? new Date(txn.date).toLocaleDateString('en-IN') : '-'}
+                                </td>
+                                <td className="px-6 py-3">
+                                  <div className="max-w-xs truncate" title={txn.narration}>
+                                    {txn.narration || txn.description}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3 font-mono text-xs">
+                                  {txn.cheque_num || txn.txn_id || '-'}
+                                </td>
+                                <td className={`px-6 py-3 text-right font-medium ${txn.type === 'DEBIT' ? 'text-red-600' : 'text-green-600'
+                                  }`}>
+                                  {txn.type === 'DEBIT' ? '-' : '+'}{new Intl.NumberFormat('en-IN', {
+                                    style: 'currency',
+                                    currency: 'INR'
+                                  }).format(parseFloat(txn.amount || '0'))}
+                                </td>
+                                <td className="px-6 py-3 text-right text-gray-600">
+                                  {new Intl.NumberFormat('en-IN', {
+                                    style: 'currency',
+                                    currency: 'INR'
+                                  }).format(parseFloat(txn.balance || '0'))}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {account.transactions.length > 5 && (
+                        <div className="px-6 py-3 bg-gray-50 border-t border-gray-100 text-center">
+                          <button className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+                            View All {account.transactions.length} Transactions
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   // Fetch loan calculation from backend (backend-only approach)
   const fetchLoanDocuments = async (loanId: number) => {
@@ -6865,6 +7029,7 @@ export function UserProfileDetail() {
         {activeTab === 'bank' && renderBankTab()}
         {activeTab === 'reference' && renderReferenceTab()}
         {activeTab === 'login-data' && renderLoginDataTab()}
+        {activeTab === 'accounts' && renderAccountsTab()}
         {activeTab === 'applied-loans' && renderAppliedLoansTab()}
         {activeTab === 'loans' && renderLoansTab()}
         {activeTab === 'transactions' && renderTransactionsTab()}

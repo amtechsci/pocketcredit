@@ -51,7 +51,7 @@ const createApplication = async (userId, applicationData) => {
 
     // Generate unique application number
     const application_number = generateApplicationNumber();
-    
+
     // Use plan_id or loan_plan_id (whichever is provided)
     const planId = plan_id || loan_plan_id || null;
 
@@ -65,9 +65,9 @@ const createApplication = async (userId, applicationData) => {
         total_repayable, late_fee_structure, emi_schedule,
         tenure_months, interest_rate, emi_amount,
         status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', NOW(), NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', NOW(), NOW())
     `;
-    
+
     // Prepare fees_breakdown JSON (use provided fees_breakdown or construct from fees array)
     let feesBreakdownJson = null;
     if (fees_breakdown) {
@@ -75,14 +75,14 @@ const createApplication = async (userId, applicationData) => {
     } else if (fees && Array.isArray(fees)) {
       feesBreakdownJson = JSON.stringify(fees);
     }
-    
+
     // Calculate disbursal_amount if not provided
-    const calculatedDisbursalAmount = disbursal_amount !== undefined 
-      ? disbursal_amount 
-      : (total_deduct_from_disbursal !== undefined 
-          ? loan_amount - total_deduct_from_disbursal 
-          : (processing_fee ? loan_amount - processing_fee : null));
-    
+    const calculatedDisbursalAmount = disbursal_amount !== undefined
+      ? disbursal_amount
+      : (total_deduct_from_disbursal !== undefined
+        ? loan_amount - total_deduct_from_disbursal
+        : (processing_fee ? loan_amount - processing_fee : null));
+
     const values = [
       userId,
       application_number,
@@ -106,7 +106,7 @@ const createApplication = async (userId, applicationData) => {
     ];
 
     const [result] = await pool.execute(query, values);
-    
+
     // Return the created application
     return await findApplicationById(result.insertId);
   } catch (error) {
@@ -130,7 +130,7 @@ const findApplicationById = async (applicationId) => {
       WHERE la.id = ?
     `;
     const [rows] = await pool.execute(query, [applicationId]);
-    
+
     return rows.length > 0 ? rows[0] : null;
   } catch (error) {
     console.error('Error finding application by ID:', error.message);
@@ -166,7 +166,7 @@ const findApplicationsByUserId = async (userId) => {
       ORDER BY la.created_at DESC
     `;
     const [rows] = await pool.execute(query, [userId]);
-    
+
     return rows;
   } catch (error) {
     console.error('Error finding applications by user ID:', error.message);
@@ -189,7 +189,7 @@ const findApplicationByNumber = async (applicationNumber) => {
       WHERE la.application_number = ?
     `;
     const [rows] = await pool.execute(query, [applicationNumber]);
-    
+
     return rows.length > 0 ? rows[0] : null;
   } catch (error) {
     console.error('Error finding application by number:', error.message);
@@ -206,31 +206,31 @@ const findApplicationByNumber = async (applicationNumber) => {
 const updateApplication = async (applicationId, updateData) => {
   try {
     const pool = getPool();
-    
+
     // Build dynamic query based on provided fields
     const fields = [];
     const values = [];
-    
+
     Object.keys(updateData).forEach(key => {
       if (updateData[key] !== undefined && updateData[key] !== null) {
         fields.push(`${key} = ?`);
         values.push(updateData[key]);
       }
     });
-    
+
     if (fields.length === 0) {
       throw new Error('No fields to update');
     }
-    
+
     values.push(applicationId);
     const query = `UPDATE loan_applications SET ${fields.join(', ')}, updated_at = NOW() WHERE id = ?`;
-    
+
     const [result] = await pool.execute(query, values);
-    
+
     if (result.affectedRows === 0) {
       return null;
     }
-    
+
     return await findApplicationById(applicationId);
   } catch (error) {
     console.error('Error updating application:', error.message);
@@ -259,7 +259,7 @@ const getApplicationStats = async (userId) => {
       WHERE user_id = ?
     `;
     const [rows] = await pool.execute(query, [userId]);
-    
+
     return rows[0] || {
       total_applications: 0,
       submitted_count: 0,
@@ -290,7 +290,7 @@ const hasPendingApplications = async (userId) => {
       AND status IN ('submitted', 'under_review')
     `;
     const [rows] = await pool.execute(query, [userId]);
-    
+
     return rows[0].count > 0;
   } catch (error) {
     console.error('Error checking pending applications:', error.message);

@@ -25,31 +25,39 @@ async function extractAndSaveBankDetails(reportData, userId) {
 
     // Parse report data if it's a string
     let report = typeof reportData === 'string' ? JSON.parse(reportData) : reportData;
-    
+
     // Try multiple possible paths for bank data
     let bankData = null;
-    
+
     // Path 1: report.bankData or report.bank_data
     bankData = report.bankData || report.bank_data || report.bankInfo || report.bank_info;
-    
+
     // Path 2: report.accountDetails or report.account_details
     if (!bankData) {
       bankData = report.accountDetails || report.account_details || report.accountInfo || report.account_info;
     }
-    
+
     // Path 3: report.data.bankData or report.data.bank_data
     if (!bankData && report.data) {
       bankData = report.data.bankData || report.data.bank_data || report.data.accountDetails || report.data.account_details;
     }
-    
+
     // Path 4: Direct account fields in report
     if (!bankData && (report.account_number || report.ifsc_code)) {
       bankData = report;
     }
-    
+
     // Path 5: Check if report is an array and look in first element
     if (!bankData && Array.isArray(report) && report.length > 0) {
       bankData = report[0].bankData || report[0].bank_data || report[0].accountDetails || report[0].account_details || report[0];
+    }
+
+    // Path 6: Account Aggregator format (banks[0].accounts[0])
+    if (!bankData && report.banks && Array.isArray(report.banks) && report.banks.length > 0) {
+      const bank = report.banks[0];
+      if (bank.accounts && Array.isArray(bank.accounts) && bank.accounts.length > 0) {
+        bankData = bank.accounts[0];
+      }
     }
 
     if (!bankData) {
@@ -179,7 +187,7 @@ async function extractAndSaveBankDetails(reportData, userId) {
 async function logWebhookPayload(req, webhookType, endpoint, processed = false, error = null) {
   try {
     await initializeDatabase();
-    
+
     const headers = {};
     Object.keys(req.headers).forEach(key => {
       headers[key] = req.headers[key];
@@ -187,7 +195,7 @@ async function logWebhookPayload(req, webhookType, endpoint, processed = false, 
 
     const queryParams = req.query && Object.keys(req.query).length > 0 ? req.query : null;
     const bodyData = req.body && Object.keys(req.body).length > 0 ? req.body : null;
-    
+
     // Extract common fields
     const requestId = req.body?.request_id || req.body?.requestId || req.query?.request_id || req.query?.requestId || null;
     const clientRefNum = req.body?.client_ref_num || req.body?.client_ref_num || req.query?.client_ref_num || null;
@@ -293,7 +301,7 @@ router.post('/initiate-bank-statement', requireAuth, async (req, res) => {
     // Validate destination
     const validDestinations = ['netbanking', 'accountaggregator', 'statementupload'];
     const selectedDestination = destination || 'accountaggregator';
-    
+
     if (!validDestinations.includes(selectedDestination)) {
       return res.status(400).json({
         success: false,
@@ -324,19 +332,19 @@ router.post('/initiate-bank-statement', requireAuth, async (req, res) => {
     }
 
     const clientRefNum = generateClientRefNum(userId, 0); // 0 for user-level
-    
+
     // Determine URLs - prioritize environment variables, then use production URLs as default
     // Only use localhost if explicitly in development mode
     const isDevelopment = process.env.NODE_ENV === 'development' || (!process.env.NODE_ENV && !process.env.FRONTEND_URL);
     const frontendUrl = process.env.FRONTEND_URL || (isDevelopment ? 'http://localhost:3000' : 'https://pocketcredit.in');
     const apiUrl = process.env.APP_URL || (isDevelopment ? 'http://localhost:3002' : 'https://pocketcredit.in/api');
-    
+
     // Return URL should point to backend first to log the callback, then redirect to frontend
     // Routes are mounted at /api/bank-statement, so paths are relative to that
     // apiUrl: production includes /api, development doesn't
     const returnUrl = isDevelopment ? `${apiUrl}/api/bank-statement/bank-data/success` : `${apiUrl}/bank-statement/bank-data/success`;
     const webhookUrl = isDevelopment ? `${apiUrl}/api/bank-statement/bank-data/webhook` : `${apiUrl}/bank-statement/bank-data/webhook`;
-    
+
     console.log('🔗 URLs configured:');
     console.log('   Return URL:', returnUrl);
     console.log('   Webhook URL:', webhookUrl);
@@ -345,7 +353,7 @@ router.post('/initiate-bank-statement', requireAuth, async (req, res) => {
     const endDate = new Date();
     const startDate = new Date();
     startDate.setMonth(startDate.getMonth() - 6);
-    
+
     // Format dates as YYYY-MM-DD
     const formatDate = (date) => {
       const year = date.getFullYear();
@@ -375,7 +383,7 @@ router.post('/initiate-bank-statement', requireAuth, async (req, res) => {
       console.error('❌ Digitap Generate URL failed:', result.error);
       console.log('⚠️  Note: Bank Statement API may require production Digitap credentials');
       console.log('⚠️  Demo credentials only support mobile_prefill (credit check) API');
-      
+
       return res.status(503).json({
         success: false,
         message: 'Bank Statement API unavailable with demo credentials. Please use Manual Upload option.',
@@ -480,7 +488,7 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
     // Upload to S3 first
     const s3Key = `user-bank-statements/${userId}/${Date.now()}_${req.file.originalname}`;
     const s3Result = await uploadToS3(req.file.buffer, s3Key, req.file.mimetype, false);
-    
+
     let fileUrl = null;
     if (s3Result.success) {
       fileUrl = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`;
@@ -529,7 +537,7 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
 
     res.json({
       success: true,
-      message: useDigitapAnalysis 
+      message: useDigitapAnalysis
         ? 'Bank statement uploaded successfully and sent for analysis'
         : 'Bank statement uploaded successfully',
       data: {
@@ -561,7 +569,7 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
 
     // Check if table exists first
     const tables = await executeQuery(`SHOW TABLES LIKE 'user_bank_statements'`);
-    
+
     if (!tables || tables.length === 0) {
       // Table doesn't exist yet
       return res.json({
@@ -596,17 +604,17 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     // If status is pending/InProgress and we have request_id, check with Digitap
     if (statement.request_id && (statement.status === 'pending' || statement.status === 'InProgress')) {
       const digitapStatus = await checkBankStatementStatus(statement.request_id);
-      
+
       if (digitapStatus.success && digitapStatus.data) {
         const newStatus = digitapStatus.data.overall_status;
-        
+
         await executeQuery(
           `UPDATE user_bank_statements 
            SET status = ?, transaction_data = ?, updated_at = NOW() 
            WHERE request_id = ?`,
           [newStatus, JSON.stringify(digitapStatus.data.txn_status), statement.request_id]
         );
-        
+
         statement.status = newStatus;
         statement.transaction_data = digitapStatus.data.txn_status;
       }
@@ -619,10 +627,10 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     let txnId = statement.txn_id;
     if (!txnId && statement.transaction_data) {
       try {
-        const transactionData = typeof statement.transaction_data === 'string' 
-          ? JSON.parse(statement.transaction_data) 
+        const transactionData = typeof statement.transaction_data === 'string'
+          ? JSON.parse(statement.transaction_data)
           : statement.transaction_data;
-        
+
         if (transactionData && transactionData.txn_id) {
           txnId = transactionData.txn_id;
           console.log(`📊 Extracted txn_id from transaction_data: ${txnId}`);
@@ -636,22 +644,22 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     if (hasStatement && !statement.report_data && (txnId || statement.client_ref_num)) {
       console.log('📊 Status is completed but report_data is empty, fetching report...');
       console.log(`📊 Using ${txnId ? `txn_id=${txnId}` : `client_ref_num=${statement.client_ref_num}`} to fetch report`);
-      
+
       try {
         // Fetch report from Digitap - use txn_id if available, otherwise use client_ref_num
         // IMPORTANT: When using txn_id, do NOT send client_ref_num (API doesn't allow both)
-        const reportResult = txnId 
+        const reportResult = txnId
           ? await retrieveBankStatementReport(null, 'json', txnId)
           : await retrieveBankStatementReport(statement.client_ref_num, 'json');
-        
+
         if (reportResult.success && reportResult.data && reportResult.data.report) {
           // Convert report to JSON string for storage
-          const reportJsonString = typeof reportResult.data.report === 'string' 
-            ? reportResult.data.report 
+          const reportJsonString = typeof reportResult.data.report === 'string'
+            ? reportResult.data.report
             : JSON.stringify(reportResult.data.report);
-          
+
           console.log(`📊 Saving report to database, size: ${reportJsonString.length} characters`);
-          
+
           // Save report to database
           await executeQuery(
             `UPDATE user_bank_statements 
@@ -659,19 +667,19 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
              WHERE request_id = ?`,
             [reportJsonString, statement.request_id]
           );
-          
+
           // Verify the save by checking the stored data length
           const verifyResult = await executeQuery(
             `SELECT LENGTH(report_data) as report_length FROM user_bank_statements WHERE request_id = ?`,
             [statement.request_id]
           );
-          
+
           if (verifyResult && verifyResult[0]) {
             console.log(`✅ Report saved successfully, stored length: ${verifyResult[0].report_length} characters`);
           } else {
             console.warn('⚠️  Could not verify report save');
           }
-          
+
           // Extract and save bank details from report
           try {
             const bankDetailsResult = await extractAndSaveBankDetails(reportResult.data.report, userId);
@@ -684,10 +692,10 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
             console.error('❌ Error extracting bank details:', bankDetailsError);
             // Don't fail the request if bank details extraction fails
           }
-          
+
           // Update statement object with fetched report
-          statement.report_data = typeof reportResult.data.report === 'string' 
-            ? reportResult.data.report 
+          statement.report_data = typeof reportResult.data.report === 'string'
+            ? reportResult.data.report
             : JSON.stringify(reportResult.data.report);
           reportJustFetched = true;
         } else {
@@ -703,8 +711,8 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     let transactionData = null;
     if (statement.transaction_data) {
       try {
-        transactionData = typeof statement.transaction_data === 'string' 
-          ? JSON.parse(statement.transaction_data) 
+        transactionData = typeof statement.transaction_data === 'string'
+          ? JSON.parse(statement.transaction_data)
           : statement.transaction_data;
       } catch (e) {
         console.warn('Could not parse transaction_data:', e.message);
@@ -731,7 +739,7 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error('Bank statement status check error:', error);
-    
+
     // If error is about missing column, table needs migration
     if (error.message && error.message.includes('Unknown column')) {
       console.warn('⚠️  Table schema is outdated, needs migration');
@@ -744,7 +752,7 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
         }
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Failed to check bank statement status'
@@ -782,10 +790,10 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
     let txnId = statement.txn_id;
     if (!txnId && statement.transaction_data) {
       try {
-        const transactionData = typeof statement.transaction_data === 'string' 
-          ? JSON.parse(statement.transaction_data) 
+        const transactionData = typeof statement.transaction_data === 'string'
+          ? JSON.parse(statement.transaction_data)
           : statement.transaction_data;
-        
+
         if (transactionData && transactionData.txn_id) {
           txnId = transactionData.txn_id;
           console.log(`📊 Extracted txn_id from transaction_data: ${txnId}`);
@@ -800,7 +808,7 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
     // For now, we'll skip status check if we only have txn_id
     let statusResult = null;
     let currentStatus = statement.status;
-    
+
     if (statement.client_ref_num) {
       // We need request_id for status check, but we can try with client_ref_num
       // Actually, checkBankStatementStatus expects request_id, so we'll skip this for now
@@ -823,7 +831,7 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
       // Fetch from Digitap - use txn_id if available, otherwise use client_ref_num
       // IMPORTANT: When using txn_id, do NOT send client_ref_num (API doesn't allow both)
       console.log(`📊 Fetching report using ${txnId ? `txn_id=${txnId}` : `client_ref_num=${statement.client_ref_num}`}`);
-      const reportResult = txnId 
+      const reportResult = txnId
         ? await retrieveBankStatementReport(null, 'json', txnId)
         : await retrieveBankStatementReport(statement.client_ref_num, 'json');
 
@@ -835,12 +843,12 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
       }
 
       // Convert report to JSON string for storage
-      const reportJsonString = typeof reportResult.data.report === 'string' 
-        ? reportResult.data.report 
+      const reportJsonString = typeof reportResult.data.report === 'string'
+        ? reportResult.data.report
         : JSON.stringify(reportResult.data.report);
-      
+
       console.log(`📊 Saving report to database, size: ${reportJsonString.length} characters`);
-      
+
       // Save report
       await executeQuery(
         `UPDATE user_bank_statements 
@@ -848,13 +856,13 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
          WHERE client_ref_num = ?`,
         [reportJsonString, statement.client_ref_num]
       );
-      
+
       // Verify the save
       const verifyResult = await executeQuery(
         `SELECT LENGTH(report_data) as report_length FROM user_bank_statements WHERE client_ref_num = ?`,
         [statement.client_ref_num]
       );
-      
+
       if (verifyResult && verifyResult[0]) {
         console.log(`✅ Report saved successfully, stored length: ${verifyResult[0].report_length} characters`);
       }
@@ -931,8 +939,8 @@ router.post('/extract-bank-details', requireAuth, async (req, res) => {
     // Parse report_data
     let reportData;
     try {
-      reportData = typeof statement.report_data === 'string' 
-        ? JSON.parse(statement.report_data) 
+      reportData = typeof statement.report_data === 'string'
+        ? JSON.parse(statement.report_data)
         : statement.report_data;
     } catch (parseError) {
       return res.status(400).json({
@@ -1017,14 +1025,14 @@ router.post('/bank-data/webhook', async (req, res) => {
 
 async function handleBankDataWebhook(req, res) {
   let processingError = null;
-  
+
   try {
     // Log webhook payload to database FIRST (before any processing)
     await logWebhookPayload(req, 'bank_data_webhook', '/api/bank-statement/bank-data/webhook', false, null);
-    
+
     // Log full webhook payload for debugging
     console.log('📥 Digitap Webhook received - Full payload:', JSON.stringify(req.body, null, 2));
-    
+
     const { request_id, txn_status, client_ref_num, status, code, client_ref_num: clientRefNum, txn_id } = req.body;
 
     // Handle different webhook formats
@@ -1035,11 +1043,11 @@ async function handleBankDataWebhook(req, res) {
     const actualStatus = status || req.body.status;
     const actualTxnId = txn_id || req.body.txn_id || req.body.txnId || null;
 
-    console.log('📥 Parsed webhook data:', { 
-      request_id: actualRequestId, 
+    console.log('📥 Parsed webhook data:', {
+      request_id: actualRequestId,
       client_ref_num: actualClientRefNum,
       txn_id: actualTxnId,
-      has_txn_status: !!actualTxnStatus 
+      has_txn_status: !!actualTxnStatus
     });
 
     await initializeDatabase();
@@ -1070,13 +1078,13 @@ async function handleBankDataWebhook(req, res) {
 
     // Check if all transactions are completed
     let allCompleted = false;
-    
+
     // Check for Digitap's "ReportGenerated" code format
     if (actualCode === 'ReportGenerated' && (actualStatus === 'Success' || actualStatus === 'success')) {
       allCompleted = true;
       console.log('✅ Report generated detected from code and status');
     }
-    
+
     // Check transaction status array format
     if (!allCompleted && actualTxnStatus) {
       if (Array.isArray(actualTxnStatus)) {
@@ -1088,7 +1096,7 @@ async function handleBankDataWebhook(req, res) {
         allCompleted = true;
       }
     }
-    
+
     // Also check if status field indicates completion
     if (!allCompleted && (actualStatus === 'success' || actualStatus === 'Success' || actualStatus === 'completed' || actualStatus === 'Completed')) {
       allCompleted = true;
@@ -1099,15 +1107,15 @@ async function handleBankDataWebhook(req, res) {
     // Update database with transaction data and txn_id
     const updateFields = ['status = ?', 'transaction_data = ?'];
     const updateValues = [newStatus, JSON.stringify(actualTxnStatus || req.body)];
-    
+
     // Add txn_id if provided
     if (actualTxnId) {
       updateFields.push('txn_id = ?');
       updateValues.push(actualTxnId);
     }
-    
+
     updateFields.push('updated_at = NOW()');
-    
+
     await executeQuery(
       `UPDATE user_bank_statements 
        SET ${updateFields.join(', ')} 
@@ -1120,11 +1128,11 @@ async function handleBankDataWebhook(req, res) {
     // If completed, automatically fetch and save the report
     if (allCompleted) {
       console.log('📊 All transactions completed, fetching report...');
-      
+
       try {
         const clientRefNum = statement.client_ref_num || actualClientRefNum;
         const txnId = actualTxnId || statement.txn_id;
-        
+
         // Priority: Use txn_id if available, otherwise use client_ref_num
         if (!txnId && !clientRefNum) {
           console.warn('⚠️  No txn_id or client_ref_num found, cannot fetch report');
@@ -1132,22 +1140,22 @@ async function handleBankDataWebhook(req, res) {
           // If we have "ReportGenerated" code, report is definitely ready - fetch directly
           if (actualCode === 'ReportGenerated') {
             console.log(`📥 ReportGenerated code detected - fetching report using ${txnId ? `txn_id=${txnId}` : `client_ref_num=${clientRefNum}`}`);
-            
+
             // Use txn_id if available, otherwise use client_ref_num
-            const reportResult = txnId 
+            const reportResult = txnId
               ? await retrieveBankStatementReport(null, 'json', txnId)
               : await retrieveBankStatementReport(clientRefNum, 'json');
-            
+
             console.log('📥 Report fetch result:', reportResult.success ? 'Success' : reportResult.error);
-            
+
             if (reportResult.success && reportResult.data && reportResult.data.report) {
               // Convert report to JSON string for storage
-              const reportJsonString = typeof reportResult.data.report === 'string' 
-                ? reportResult.data.report 
+              const reportJsonString = typeof reportResult.data.report === 'string'
+                ? reportResult.data.report
                 : JSON.stringify(reportResult.data.report);
-              
+
               console.log(`📊 Saving report to database, size: ${reportJsonString.length} characters`);
-              
+
               // Save report to database
               await executeQuery(
                 `UPDATE user_bank_statements 
@@ -1155,19 +1163,19 @@ async function handleBankDataWebhook(req, res) {
                  WHERE request_id = ?`,
                 [reportJsonString, actualRequestId]
               );
-              
+
               // Verify the save by checking the stored data length
               const verifyResult = await executeQuery(
                 `SELECT LENGTH(report_data) as report_length FROM user_bank_statements WHERE request_id = ?`,
                 [actualRequestId]
               );
-              
+
               if (verifyResult && verifyResult[0]) {
                 console.log(`✅ Report saved successfully, stored length: ${verifyResult[0].report_length} characters`);
               } else {
                 console.warn('⚠️  Could not verify report save');
               }
-              
+
               // Extract and save bank details from report
               try {
                 const bankDetailsResult = await extractAndSaveBankDetails(reportResult.data.report, statement.user_id);
@@ -1186,29 +1194,29 @@ async function handleBankDataWebhook(req, res) {
           } else {
             // For other completion formats, check status first
             await new Promise(resolve => setTimeout(resolve, 3000));
-            
+
             const statusResult = await checkBankStatementStatus(actualRequestId);
-            
+
             console.log('📊 Status check result:', JSON.stringify(statusResult, null, 2));
-            
+
             if (statusResult.success && (statusResult.data.overall_status === 'completed' || statusResult.data.is_complete)) {
               // Fetch the report - use txn_id if available, otherwise use client_ref_num
               console.log(`📥 Fetching report using ${txnId ? `txn_id=${txnId}` : `client_ref_num=${clientRefNum}`}`);
-              
-              const reportResult = txnId 
+
+              const reportResult = txnId
                 ? await retrieveBankStatementReport(null, 'json', txnId)
                 : await retrieveBankStatementReport(clientRefNum, 'json');
-              
+
               console.log('📥 Report fetch result:', reportResult.success ? 'Success' : reportResult.error);
-              
+
               if (reportResult.success && reportResult.data && reportResult.data.report) {
                 // Convert report to JSON string for storage
-                const reportJsonString = typeof reportResult.data.report === 'string' 
-                  ? reportResult.data.report 
+                const reportJsonString = typeof reportResult.data.report === 'string'
+                  ? reportResult.data.report
                   : JSON.stringify(reportResult.data.report);
-                
+
                 console.log(`📊 Saving report to database, size: ${reportJsonString.length} characters`);
-                
+
                 // Save report to database
                 await executeQuery(
                   `UPDATE user_bank_statements 
@@ -1216,19 +1224,19 @@ async function handleBankDataWebhook(req, res) {
                    WHERE request_id = ?`,
                   [reportJsonString, actualRequestId]
                 );
-                
+
                 // Verify the save
                 const verifyResult = await executeQuery(
                   `SELECT LENGTH(report_data) as report_length FROM user_bank_statements WHERE request_id = ?`,
                   [actualRequestId]
                 );
-                
+
                 if (verifyResult && verifyResult[0]) {
                   console.log(`✅ Report saved successfully, stored length: ${verifyResult[0].report_length} characters`);
                 } else {
                   console.warn('⚠️  Could not verify report save');
                 }
-                
+
                 // Extract and save bank details from report
                 try {
                   const bankDetailsResult = await extractAndSaveBankDetails(reportResult.data.report, statement.user_id);
@@ -1266,10 +1274,10 @@ async function handleBankDataWebhook(req, res) {
   } catch (error) {
     processingError = error.message || 'Unknown error';
     console.error('❌ Webhook processing error:', error);
-    
+
     // Update webhook log with error
     await logWebhookPayload(req, 'bank_data_webhook', '/api/bank-statement/bank-data/webhook', false, processingError);
-    
+
     res.status(500).json({
       success: false,
       message: 'Failed to process webhook'
@@ -1284,47 +1292,47 @@ async function handleBankDataWebhook(req, res) {
  */
 router.get('/bank-data/success', async (req, res) => {
   let processingError = null;
-  
+
   try {
     // Log the success callback FIRST with all query parameters
     console.log('📥 Return URL callback received - Full query:', JSON.stringify(req.query, null, 2));
     console.log('📥 Return URL callback received - Full URL:', req.url);
-    
+
     await logWebhookPayload(req, 'bank_data_success', '/api/bank-statement/bank-data/success', false, null);
-    
+
     await initializeDatabase();
-    
+
     // Try to extract and save any data from query parameters
     const { request_id, client_ref_num, status, txnId, success } = req.query;
-    
+
     // If we have request_id or client_ref_num, try to update the bank statement record
     if (request_id || client_ref_num) {
       try {
         const updateFields = [];
         const updateValues = [];
-        
+
         if (status) {
           updateFields.push('status = ?');
           updateValues.push(status);
         }
-        
+
         if (request_id) {
           updateFields.push('request_id = ?');
           updateValues.push(request_id);
         }
-        
+
         if (updateFields.length > 0) {
           updateFields.push('updated_at = NOW()');
           const whereClause = request_id ? 'WHERE request_id = ?' : 'WHERE client_ref_num = ?';
           const whereValue = request_id || client_ref_num;
-          
+
           await executeQuery(
             `UPDATE user_bank_statements 
              SET ${updateFields.join(', ')} 
              ${whereClause}`,
             [...updateValues, whereValue]
           );
-          
+
           console.log(`✅ Updated bank statement record: ${whereClause} = ${whereValue}`);
         }
       } catch (updateError) {
@@ -1332,26 +1340,26 @@ router.get('/bank-data/success', async (req, res) => {
         // Don't fail the redirect if update fails
       }
     }
-    
+
     // Mark webhook as processed
     await logWebhookPayload(req, 'bank_data_success', '/api/bank-statement/bank-data/success', true, null);
-    
+
     // Redirect to frontend success page with all query parameters preserved
     const isDevelopment = process.env.NODE_ENV === 'development' || (!process.env.NODE_ENV && !process.env.FRONTEND_URL);
     const frontendUrl = process.env.FRONTEND_URL || (isDevelopment ? 'http://localhost:3000' : 'https://pocketcredit.in');
     const queryString = new URLSearchParams(req.query).toString();
     const redirectUrl = `${frontendUrl}/bank-statement-success?${queryString}&complete=true`;
-    
+
     console.log(`🔄 Redirecting to frontend: ${redirectUrl}`);
     res.redirect(redirectUrl);
-    
+
   } catch (error) {
     processingError = error.message || 'Unknown error';
     console.error('❌ Return URL error:', error);
-    
+
     // Log the error
     await logWebhookPayload(req, 'bank_data_success', '/api/bank-statement/bank-data/success', false, processingError);
-    
+
     const isDevelopment = process.env.NODE_ENV === 'development' || (!process.env.NODE_ENV && !process.env.FRONTEND_URL);
     const frontendUrl = process.env.FRONTEND_URL || (isDevelopment ? 'http://localhost:3000' : 'https://pocketcredit.in');
     const queryString = new URLSearchParams(req.query).toString();
@@ -1369,11 +1377,11 @@ router.post('/init-bank-statement-table', async (req, res) => {
 
     // Check if table exists
     const tables = await executeQuery(`SHOW TABLES LIKE 'user_bank_statements'`);
-    
+
     if (tables && tables.length > 0) {
       // Table exists, add new columns if missing
       console.log('Table exists, checking for new columns...');
-      
+
       const columnsToAdd = [
         { name: 'request_id', definition: 'INT DEFAULT NULL AFTER client_ref_num' },
         { name: 'txn_id', definition: 'VARCHAR(255) DEFAULT NULL AFTER request_id' },

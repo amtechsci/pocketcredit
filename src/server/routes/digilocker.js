@@ -2,7 +2,54 @@ const express = require('express');
 const router = express.Router();
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
+const { uploadKYCDocument } = require('../services/s3Service');
 const axios = require('axios');
+
+/**
+ * Helper: Download and Upload Docs to S3
+ */
+async function processAndUploadDocs(userId, transactionId, docs) {
+  if (!docs || !Array.isArray(docs)) return;
+
+  console.log(`🔄 Processing ${docs.length} documents for S3 upload (User: ${userId})...`);
+
+  for (const doc of docs) {
+    const url = doc.url || doc.docLink || doc.uri;
+    if (!url) continue;
+
+    const docType = doc.docType || 'UNKNOWN';
+    const docExt = doc.docExtension || 'pdf';
+    const fileName = `${docType}_${Date.now()}.${docExt}`;
+    const mimeType = docExt === 'pdf' ? 'application/pdf' : (docExt === 'xml' ? 'text/xml' : 'image/jpeg');
+
+    try {
+      // Check if exists
+      const existing = await executeQuery(
+        'SELECT id FROM kyc_documents WHERE user_id = ? AND transaction_id = ? AND document_type = ?',
+        [userId, transactionId, docType]
+      );
+      if (existing.length > 0) continue;
+
+      // Download
+      const response = await axios.get(url, { responseType: 'arraybuffer', timeout: 30000 });
+      const buffer = Buffer.from(response.data);
+
+      // Upload
+      const result = await uploadKYCDocument(buffer, fileName, mimeType, userId, docType);
+
+      // Save to DB
+      await executeQuery(`
+        INSERT INTO kyc_documents 
+        (user_id, transaction_id, document_type, file_name, s3_key, s3_bucket, mime_type, file_size, doc_extension, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      `, [userId, transactionId, docType, fileName, result.key, result.bucket, mimeType, result.size, docExt]);
+
+      console.log(`   ✅ Uploaded ${docType} to S3`);
+    } catch (e) {
+      console.error(`   ❌ Failed to upload ${docType}: ${e.message}`);
+    }
+  }
+}
 
 /**
  * POST /api/digilocker/generate-kyc-url
@@ -41,10 +88,10 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
 
   try {
     await initializeDatabase();
-    
+
     // Generate unique UID for this KYC request
     const uid = `PC${userId}_${application_id}_${Date.now()}`;
-    
+
     // Prepare Digilocker API request
     const digilockerRequest = {
       uid: uid,
@@ -156,7 +203,7 @@ router.get('/kyc-status/:applicationId', requireAuth, async (req, res) => {
 
   try {
     await initializeDatabase();
-    
+
     const results = await executeQuery(
       `SELECT kyc_status, kyc_method, verified_at, created_at, verification_data 
        FROM kyc_verifications 
@@ -212,7 +259,6 @@ router.post('/fetch-kyc-data', requireAuth, async (req, res) => {
     console.log('📥 Fetching KYC data from Digilocker for txnId:', transaction_id);
 
     // Call Digilocker API to fetch actual KYC data
-    // TODO: Replace with actual Digilocker fetch data endpoint
     const digilockerResponse = await axios.post(
       process.env.DIGILOCKER_FETCH_API_URL || 'https://svcint.digitap.work/wrap/demo/api/ent/v1/kyc/fetch-data',
       {
@@ -242,6 +288,12 @@ router.post('/fetch-kyc-data', requireAuth, async (req, res) => {
          AND JSON_EXTRACT(verification_data, '$.transactionId') = ?`,
         [JSON.stringify(kycData), userId, transaction_id]
       );
+
+      // Process Docs if available in kycData
+      if (kycData.digilockerFiles && Array.isArray(kycData.digilockerFiles)) {
+        // Run in background to avoid blocking response
+        processAndUploadDocs(userId, transaction_id, kycData.digilockerFiles).catch(e => console.error('Bg Upload Error', e));
+      }
 
       res.json({
         success: true,
@@ -329,6 +381,10 @@ router.get('/list-docs/:transactionId', requireAuth, async (req, res) => {
        WHERE user_id = ? AND JSON_EXTRACT(verification_data, '$.transactionId') = ?`,
       [JSON.stringify(docsParsed), userId, transactionId]
     );
+
+    // Process Docs
+    processAndUploadDocs(userId, transactionId, docsParsed).catch(e => console.error('Bg Upload Error', e));
+
     res.json({ success: true, data: docs });
   } catch (e) {
     console.error('list-docs error:', e);

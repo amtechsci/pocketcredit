@@ -110,6 +110,23 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     }
     const memberLevel = riskCategory === 'Low' ? 'gold' : riskCategory === 'Medium' ? 'silver' : (riskCategory === 'High' ? 'bronze' : 'bronze');
 
+    // Fetch bank statement report
+    let bankStatement = null;
+    try {
+      const bankStmtResults = await executeQuery(
+        'SELECT report_data FROM user_bank_statements WHERE user_id = ? AND status = "completed" ORDER BY created_at DESC LIMIT 1',
+        [userId]
+      );
+      if (bankStmtResults.length > 0 && bankStmtResults[0].report_data) {
+        // Handle case where report_data might already be an object (if mysql driver parses JSON)
+        bankStatement = typeof bankStmtResults[0].report_data === 'string'
+          ? JSON.parse(bankStmtResults[0].report_data)
+          : bankStmtResults[0].report_data;
+      }
+    } catch (e) {
+      console.error('Error fetching bank statement:', e);
+    }
+
     // Transform user data to match frontend expectations
     const userProfile = {
       id: user.id,
@@ -166,6 +183,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       notes: [],
       smsHistory: [],
       loginHistory: [],
+      bankStatement: bankStatement,
       loans: applications.map(app => {
         // Calculate EMI if we have the required data
         const calculateEMI = (principal, rate, tenure) => {

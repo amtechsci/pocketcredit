@@ -1,10 +1,9 @@
 const axios = require('axios');
 
-const DIGITAP_API_URL = process.env.DIGITAP_API_URL || 'https://svcint.digitap.work/wrap/demo/svc/mobile_prefill/request';
-const DIGITAP_CLIENT_ID = process.env.DIGITAP_CLIENT_ID || '27108750';
-const DIGITAP_CLIENT_SECRET = process.env.DIGITAP_CLIENT_SECRET || 'RTpc4iV2TBqMtXJEdzkPaDnBD5YNOAFB';
+const DIGITAP_API_URL_MOBILE_PREFILL = process.env.DIGITAP_API_URL_MOBILE_PREFILL;
+const DIGITAP_CLIENT_ID = process.env.DIGITAP_CLIENT_ID;
+const DIGITAP_CLIENT_SECRET = process.env.DIGITAP_CLIENT_SECRET;
 
-// Generate Base64 encoded authorization header
 function getAuthHeader() {
   const credentials = `${DIGITAP_CLIENT_ID}:${DIGITAP_CLIENT_SECRET}`;
   const base64Credentials = Buffer.from(credentials).toString('base64');
@@ -27,7 +26,6 @@ function generateClientRefNum() {
  */
 async function fetchUserPrefillData(mobileNumber) {
   try {
-    // Validate mobile number format
     if (!mobileNumber || !/^[6-9]\d{9}$/.test(mobileNumber)) {
       return {
         success: false,
@@ -43,7 +41,7 @@ async function fetchUserPrefillData(mobileNumber) {
     const clientRefNum = generateClientRefNum();
 
     const response = await axios.post(
-      DIGITAP_API_URL,
+      DIGITAP_API_URL_MOBILE_PREFILL,
       {
         mobile_no: mobileNumber,
         client_ref_num: clientRefNum,
@@ -64,7 +62,7 @@ async function fetchUserPrefillData(mobileNumber) {
     // Check if response is successful (result_code 101 = success)
     if (response.data && response.data.result_code === 101 && response.data.result) {
       const result = response.data.result;
-      
+
       return {
         success: true,
         data: {
@@ -81,16 +79,16 @@ async function fetchUserPrefillData(mobileNumber) {
     } else {
       const resultCode = response.data?.result_code;
       const message = response.data?.message || 'API returned unsuccessful response';
-      
+
       console.warn(`Digitap API returned non-success result_code: ${resultCode}`);
       console.warn(`Digitap message: ${message}`);
-      
+
       // Common Digitap result codes:
       // 101 = Success
       // 102 = No data found
       // 103 = Invalid request
       // 104 = Rate limit exceeded
-      
+
       return {
         success: false,
         error: `${message} (Code: ${resultCode})`,
@@ -184,7 +182,7 @@ async function validatePANDetails(panNumber, clientRefNum = null) {
     // Check if response is successful (result_code 101 = success)
     if (response.data && response.data.http_response_code === 200 && response.data.result_code === 101 && response.data.result) {
       const result = response.data.result;
-      
+
       // Convert DOB from DD/MM/YYYY to YYYY-MM-DD
       let convertedDOB = null;
       if (result.dob) {
@@ -234,10 +232,10 @@ async function validatePANDetails(panNumber, clientRefNum = null) {
     } else {
       const resultCode = response.data?.result_code;
       const message = response.data?.message || 'API returned unsuccessful response';
-      
+
       console.warn(`PAN validation API returned non-success result_code: ${resultCode}`);
       console.warn(`PAN validation message: ${message}`);
-      
+
       return {
         success: false,
         error: `${message} (Code: ${resultCode})`,
