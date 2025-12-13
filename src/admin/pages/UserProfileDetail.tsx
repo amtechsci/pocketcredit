@@ -2366,9 +2366,10 @@ export function UserProfileDetail() {
   // Accounts Tab (Account Aggregator)
   const renderAccountsTab = () => {
     const banks = getUserData('bankStatement.banks', []);
+    const statementSummary = getUserData('bankStatement.request_level_summary_var', null);
 
     // If no data, showing a placeholder or empty state
-    if (!banks || banks.length === 0) {
+    if ((!banks || banks.length === 0) && !statementSummary) {
       return (
         <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
           <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -2385,7 +2386,109 @@ export function UserProfileDetail() {
 
     return (
       <div className="space-y-6">
-        {banks.map((bank: any, bankIndex: number) => (
+        {/* Statement Summary Card */}
+        {statementSummary && (
+          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-white rounded-full border border-gray-200 flex items-center justify-center">
+                  <TrendingUp className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Statement Summary</h3>
+                  <p className="text-sm text-gray-500">Analysis Overview</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {/* Balance Metrics */}
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Min Balance</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(statementSummary["Min Balance"] || 0)}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Max Balance</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(statementSummary["Max Balance"] || 0)}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Avg EOD Balance</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(statementSummary["Average EOD Balance"] || 0)}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Median EOD Balance</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(statementSummary["Median EOD Balance"] || 0)}
+                  </p>
+                </div>
+
+                {/* Transaction Metrics */}
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Total Credits</p>
+                  <p className="text-lg font-semibold text-green-700">
+                    {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(statementSummary["Total Amount of Credit Transactions"] || 0)}
+                    <span className="text-xs font-normal text-gray-500 ml-1">
+                      ({statementSummary["Total No. of Credit Transactions"] || 0} txns)
+                    </span>
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Total Debits</p>
+                  <p className="text-lg font-semibold text-red-700">
+                    {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(statementSummary["Total Amount of Debit Transactions"] || 0)}
+                    <span className="text-xs font-normal text-gray-500 ml-1">
+                      ({statementSummary["Total No. of Debit Transactions"] || 0} txns)
+                    </span>
+                  </p>
+                </div>
+
+                {/* Cash Metrics */}
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Cash Withdrawals</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(statementSummary["Total Amount of Cash Withdrawals"] || 0)}
+                    <span className="text-xs font-normal text-gray-500 ml-1">
+                      ({statementSummary["Total No. of Cash Withdrawals"] || 0})
+                    </span>
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Cash Deposits</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(statementSummary["Total Amount of Cash Deposits"] || 0)}
+                  </p>
+                </div>
+
+                {/* Loan & Bounce Metrics */}
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Loan/EMI Payments</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(statementSummary["Total Amount of EMI / loan Payments"] || 0)}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Bounce Count</p>
+                  <p className="text-lg font-semibold text-red-600">
+                    {parseInt(statementSummary["Total No. of I/W Bounced"] || 0) + parseInt(statementSummary["Total Number of Outward Cheque Bounces"] || 0)}
+                    <span className="text-xs font-normal text-gray-500 ml-1">
+                      (Cheque: {statementSummary["Total No. of I/W Chq Bounced"] || 0})
+                    </span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {banks && banks.map((bank: any, bankIndex: number) => (
+
           <div key={bankIndex} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
             <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex justify-between items-center">
               <div className="flex items-center gap-3">

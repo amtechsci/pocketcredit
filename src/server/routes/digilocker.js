@@ -9,7 +9,11 @@ const axios = require('axios');
  * Helper: Download and Upload Docs to S3
  */
 async function processAndUploadDocs(userId, transactionId, docs) {
-  if (!docs || !Array.isArray(docs)) return;
+  console.log(`🔍 processAndUploadDocs called for User ${userId}, Txn ${transactionId}`);
+  if (!docs || !Array.isArray(docs)) {
+    console.log('⚠️ No docs array provided to processAndUploadDocs');
+    return;
+  }
 
   console.log(`🔄 Processing ${docs.length} documents for S3 upload (User: ${userId})...`);
 
@@ -289,10 +293,17 @@ router.post('/fetch-kyc-data', requireAuth, async (req, res) => {
         [JSON.stringify(kycData), userId, transaction_id]
       );
 
+      console.log('📊 KYC Data Keys:', Object.keys(kycData));
+
+      const docsToProcess = kycData.digilockerFiles || kycData.docs;
+
       // Process Docs if available in kycData
-      if (kycData.digilockerFiles && Array.isArray(kycData.digilockerFiles)) {
+      if (docsToProcess && Array.isArray(docsToProcess)) {
+        console.log('🚀 Details found, triggering background upload...');
         // Run in background to avoid blocking response
-        processAndUploadDocs(userId, transaction_id, kycData.digilockerFiles).catch(e => console.error('Bg Upload Error', e));
+        processAndUploadDocs(userId, transaction_id, docsToProcess).catch(e => console.error('Bg Upload Error', e));
+      } else {
+        console.log('⚠️ No digilockerFiles or docs array found in response');
       }
 
       res.json({
