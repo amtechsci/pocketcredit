@@ -93,9 +93,9 @@ class ApiService {
       const hostname = window.location.hostname;
       this.baseURL = `http://${hostname}:3002/api`;
     }
-    
+
     console.log('🌐 API Base URL:', this.baseURL);
-    
+
     this.api = axios.create({
       baseURL: this.baseURL,
       timeout: 30000, // Increased timeout to 30 seconds
@@ -149,14 +149,14 @@ class ApiService {
       },
       (error: any) => {
         console.error('API Response Error:', error.response?.data || error.message);
-        
+
         // Handle specific error cases
         if (error.response?.status === 401) {
           // Session expired or invalid
           console.log('Session expired, redirecting to login');
           // Don't automatically redirect here, let components handle it
         }
-        
+
         return Promise.reject(error);
       }
     );
@@ -180,7 +180,7 @@ class ApiService {
       if (error.response?.data) {
         return error.response.data;
       }
-      
+
       throw new Error(error.message || 'API request failed');
     }
   }
@@ -192,12 +192,12 @@ class ApiService {
 
   async verifyOTP(mobile: string, otp: string): Promise<ApiResponse<LoginResponse & { token?: string }>> {
     const response = await this.request<LoginResponse & { token?: string }>('POST', '/auth/verify-otp', { mobile, otp });
-    
+
     // Store JWT token if provided
     if (response.status === 'success' && response.data?.token) {
       localStorage.setItem('pocket_user_token', response.data.token);
     }
-    
+
     return response;
   }
 
@@ -205,12 +205,16 @@ class ApiService {
     return this.request<{ user: User }>('GET', '/auth/profile');
   }
 
+  async getUserApplications() {
+    return this.request('GET', '/users/applications', {});
+  }
+
   async logout(): Promise<ApiResponse> {
     const response = await this.request('POST', '/auth/logout');
-    
+
     // Clear JWT token from localStorage
     localStorage.removeItem('pocket_user_token');
-    
+
     return response;
   }
 
@@ -225,9 +229,9 @@ class ApiService {
     pan_number?: string;
     latitude?: number | null;
     longitude?: number | null;
-  }): Promise<ApiResponse<{ 
-    user: User; 
-    next_step: string; 
+  }): Promise<ApiResponse<{
+    user: User;
+    next_step: string;
     step_completed: string;
     hold_permanent?: boolean;
     hold_until?: string;
@@ -244,7 +248,7 @@ class ApiService {
     current_state: string;
     current_pincode: string;
     current_country?: string;
-    
+
     // Permanent Address
     permanent_address_line1: string;
     permanent_address_line2?: string;
@@ -252,12 +256,12 @@ class ApiService {
     permanent_state: string;
     permanent_pincode: string;
     permanent_country?: string;
-    
-    
+
+
     // PAN number
     pan_number: string;
-  }): Promise<ApiResponse<{ 
-    user: User; 
+  }): Promise<ApiResponse<{
+    user: User;
     addresses: {
       current: any;
       permanent: any;
@@ -265,8 +269,8 @@ class ApiService {
     verification: {
       pan: any;
     };
-    profile_completed: boolean; 
-    step_completed: string 
+    profile_completed: boolean;
+    step_completed: string
   }>> {
     return this.request('PUT', '/user/profile/additional', profileData);
   }
@@ -607,12 +611,12 @@ class ApiService {
     };
   }>> {
     const token = localStorage.getItem('pocket_user_token');
-    
+
     // Append required fields to FormData
     formData.append('loan_application_id', loanApplicationId.toString());
     formData.append('document_name', documentName);
     formData.append('document_type', documentType);
-    
+
     const response = await fetch(`${this.baseURL}/loan-documents/upload`, {
       method: 'POST',
       headers: {
@@ -677,10 +681,10 @@ class ApiService {
     return this.request('POST', '/loan-applications/apply', loanData);
   }
 
-  async getLoanApplications(): Promise<ApiResponse<{ 
-    applications: LoanApplication[]; 
-    statistics: LoanApplicationStats; 
-    total_applications: number; 
+  async getLoanApplications(): Promise<ApiResponse<{
+    applications: LoanApplication[];
+    statistics: LoanApplicationStats;
+    total_applications: number;
   }>> {
     return this.request('GET', '/loan-applications');
   }
@@ -1165,7 +1169,7 @@ class ApiService {
     const formData = new FormData();
     formData.append('selfie', file);
     formData.append('applicationId', applicationId.toString());
-    
+
     // Use axios directly - the interceptor will remove Content-Type for FormData
     try {
       const response = await this.api.post('/post-disbursal/upload-selfie', formData);

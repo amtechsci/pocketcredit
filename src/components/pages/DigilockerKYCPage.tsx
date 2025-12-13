@@ -13,7 +13,8 @@ export const DigilockerKYCPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const { applicationId } = location.state || {};
+  const { applicationId: statePayloadId } = location.state || {};
+  const [applicationId, setApplicationId] = useState<string | null>(statePayloadId?.toString() || null);
 
   const [mobileNumber, setMobileNumber] = useState('');
   const [loading, setLoading] = useState(false);
@@ -25,15 +26,46 @@ export const DigilockerKYCPage: React.FC = () => {
 
   // Check if KYC is already verified on page load
   useEffect(() => {
+    const initPage = async () => {
+      // If no app ID, try to fetch the latest one
+      if (!applicationId) {
+        try {
+          const apps = await apiService.getUserApplications();
+          if (apps && apps.length > 0) {
+            // Assume the most recent one is relevant
+            const latest = apps[0];
+            setApplicationId(latest.id.toString());
+            // Update checking to true again to verify status for this ID
+          } else {
+            toast.error("No active application found.");
+            // navigate('/dashboard'); // Optional: redirect
+            setChecking(false);
+            return;
+          }
+        } catch (e) {
+          console.error("Failed to fetch user applications", e);
+          setChecking(false);
+          return;
+        }
+      }
+    };
+
+    if (!applicationId) {
+      initPage();
+    }
+  }, [applicationId]);
+
+  useEffect(() => {
     const checkKYCStatus = async () => {
       if (!applicationId) {
-        setChecking(false);
+        // Still waiting for ID
         return;
       }
 
+
       try {
         const response = await apiService.getKYCStatus(applicationId);
-        
+
         if (response.success && response.data.kyc_status === 'verified') {
           // KYC already completed - redirect to next step
           toast.success('KYC already verified! Proceeding to next step...');
@@ -92,7 +124,7 @@ export const DigilockerKYCPage: React.FC = () => {
 
       if (response.success && response.data.kycUrl) {
         toast.success('Redirecting to Digilocker for KYC verification...');
-        
+
         // Redirect to Digilocker KYC URL
         window.location.href = response.data.kycUrl;
       } else {

@@ -262,6 +262,23 @@ router.post('/', async (req, res) => {
 
     const kycRecord = kycRecords[0];
 
+    // Fallback: If application_id is missing, try to find the latest application for this user
+    if (!kycRecord.application_id) {
+      try {
+        const appCheck = await executeQuery(
+          'SELECT id FROM applications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+          [kycRecord.user_id]
+        );
+        if (appCheck.length > 0) {
+          kycRecord.application_id = appCheck[0].id;
+          // Heal
+          await executeQuery('UPDATE kyc_verifications SET application_id = ? WHERE id = ?', [kycRecord.application_id, kycRecord.id]);
+        }
+      } catch (err) {
+        console.error('❌ Error fetching fallback application (POST):', err);
+      }
+    }
+
     if (isSuccess) {
       await executeQuery(
         `UPDATE kyc_verifications 
