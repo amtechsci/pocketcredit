@@ -64,6 +64,9 @@ async function uploadToS3(fileBuffer, fileName, mimeType, options = {}) {
     const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
     const uniqueFileName = `${s3Path}/${timestamp}-${sanitizedFileName}`;
 
+    const BUCKET_NAME = process.env.AWS_S3_BUCKET;
+    if (!BUCKET_NAME) throw new Error('AWS_S3_BUCKET is not set');
+
     const uploadParams = {
       Bucket: BUCKET_NAME,
       Key: uniqueFileName,
