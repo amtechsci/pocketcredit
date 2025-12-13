@@ -55,11 +55,11 @@ async function uploadToS3(fileBuffer, fileName, mimeType, options = {}) {
 
     // Build S3 path: prefix/folder/userId/documentType/timestamp-filename
     let s3Path = S3_PREFIX;
-    
+
     if (folder) s3Path += `/${folder}`;
     if (userId) s3Path += `/${userId}`;
     if (documentType) s3Path += `/${documentType}`;
-    
+
     const timestamp = Date.now();
     const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
     const uniqueFileName = `${s3Path}/${timestamp}-${sanitizedFileName}`;
@@ -95,7 +95,7 @@ async function uploadToS3(fileBuffer, fileName, mimeType, options = {}) {
 
     const result = await upload.done();
 
-    const fileUrl = isPublic 
+    const fileUrl = isPublic
       ? `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${uniqueFileName}`
       : null; // For private files, use presigned URLs
 
@@ -123,6 +123,7 @@ async function uploadToS3(fileBuffer, fileName, mimeType, options = {}) {
  */
 async function deleteFromS3(key) {
   try {
+    const BUCKET_NAME = process.env.AWS_S3_BUCKET;
     const deleteParams = {
       Bucket: BUCKET_NAME,
       Key: key,
@@ -148,6 +149,9 @@ async function deleteFromS3(key) {
  */
 async function getPresignedUrl(key, expiresIn = 3600) {
   try {
+    const BUCKET_NAME = process.env.AWS_S3_BUCKET;
+    if (!BUCKET_NAME) throw new Error('AWS_S3_BUCKET is not set');
+
     const command = new GetObjectCommand({
       Bucket: BUCKET_NAME,
       Key: key,
@@ -272,7 +276,7 @@ module.exports = {
   getPresignedUrl,
   validateS3Config,
   s3Client,
-  
+
   // Convenience wrappers for specific use cases
   uploadStudentDocument,
   uploadKYCDocument,
