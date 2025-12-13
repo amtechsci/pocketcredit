@@ -1,3 +1,17 @@
+const path = require('path');
+const fs = require('fs');
+
+// Ensure .env is loaded
+const envPath = path.resolve(__dirname, '../../server/.env');
+require('dotenv').config({ path: fs.existsSync(envPath) ? envPath : undefined });
+// Fallback
+require('dotenv').config();
+
+const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { Upload } = require('@aws-sdk/lib-storage');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+
+// Log S3 configuration on startup
 console.log('🔧 S3 Configuration:');
 console.log('  AWS_REGION:', process.env.AWS_REGION || 'ap-south-1');
 console.log('  AWS_S3_BUCKET:', process.env.AWS_S3_BUCKET || 'NOT SET');
