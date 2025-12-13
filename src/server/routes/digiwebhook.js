@@ -8,7 +8,7 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 async function logWebhookPayload(req, webhookType, endpoint, processed = false, error = null) {
   try {
     await initializeDatabase();
-    
+
     const headers = {};
     Object.keys(req.headers).forEach(key => {
       headers[key] = req.headers[key];
@@ -16,7 +16,7 @@ async function logWebhookPayload(req, webhookType, endpoint, processed = false, 
 
     const queryParams = req.query && Object.keys(req.query).length > 0 ? req.query : null;
     const bodyData = req.body && Object.keys(req.body).length > 0 ? req.body : null;
-    
+
     // Extract common fields
     const requestId = req.body?.txnId || req.body?.transactionId || req.query?.txnId || req.query?.transactionId || null;
     const clientRefNum = req.body?.client_ref_num || req.query?.client_ref_num || null;
@@ -123,6 +123,30 @@ router.get('/', async (req, res) => {
     }
 
     const kycRecord = kycRecords[0];
+    console.log('✅ Webhook found KYC Record:', { id: kycRecord.id, user_id: kycRecord.user_id, app_id: kycRecord.application_id });
+
+    // Fallback: If application_id is missing, try to find the latest application for this user
+    if (!kycRecord.application_id) {
+      console.warn('⚠️ kycRecord.application_id is missing. Attempting to find latest application for user:', kycRecord.user_id);
+      try {
+        const appCheck = await executeQuery(
+          'SELECT id FROM applications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+          [kycRecord.user_id]
+        );
+        if (appCheck.length > 0) {
+          kycRecord.application_id = appCheck[0].id;
+          console.log('✨ Recovered application_id from applications table:', kycRecord.application_id);
+
+          // Optional: Heal the datum in kyc_verifications
+          await executeQuery('UPDATE kyc_verifications SET application_id = ? WHERE id = ?', [kycRecord.application_id, kycRecord.id]);
+        } else {
+          console.error('❌ Could not find any application for user:', kycRecord.user_id);
+        }
+      } catch (err) {
+        console.error('❌ Error fetching fallback application:', err);
+      }
+    }
+
     const isSuccess = success === 'true' || success === true;
 
     if (isSuccess) {
@@ -146,7 +170,7 @@ router.get('/', async (req, res) => {
       // TODO: Fetch actual KYC data from Digilocker
       // Call Digilocker API to get user details using transactionId
       // For now, we'll add a placeholder
-      
+
       // Update KYC status to verified
       await executeQuery(
         `UPDATE kyc_verifications 
@@ -192,10 +216,10 @@ router.get('/', async (req, res) => {
   } catch (error) {
     processingError = error.message || 'Unknown error';
     console.error('❌ Webhook processing error:', error);
-    
+
     // Update webhook log with error
     await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', false, processingError);
-    
+
     res.redirect(`${process.env.FRONTEND_URL || 'https://pocketcredit.in'}/kyc-failed?reason=processing_error`);
   }
 });
@@ -254,10 +278,10 @@ router.post('/', async (req, res) => {
       );
 
       console.log('✅ KYC Verified successfully for user (POST):', kycRecord.user_id);
-      
+
       // Update webhook log as processed
       await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', true, null);
-      
+
       return res.status(200).json({ success: true, message: 'KYC verified' });
     } else {
       await executeQuery(
@@ -269,19 +293,19 @@ router.post('/', async (req, res) => {
       );
 
       console.log('❌ KYC Failed for user (POST):', kycRecord.user_id);
-      
+
       // Update webhook log as processed
       await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', true, null);
-      
+
       return res.status(200).json({ success: false, message: 'KYC failed' });
     }
   } catch (error) {
     processingError = error.message || 'Unknown error';
     console.error('❌ Webhook POST processing error:', error);
-    
+
     // Update webhook log with error
     await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', false, processingError);
-    
+
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
