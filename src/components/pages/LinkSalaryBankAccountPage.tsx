@@ -57,6 +57,25 @@ export const LinkSalaryBankAccountPage = () => {
           return;
         }
 
+        // Method 2: Check if user has a primary bank account
+        try {
+          const bankDetailsResponse = await apiService.getUserBankDetails(user.id);
+          if (bankDetailsResponse.success && bankDetailsResponse.data) {
+            const hasPrimaryBank = bankDetailsResponse.data.some((bank: BankDetail) => {
+              // Check if is_primary is truthy
+              return Boolean(bank.is_primary);
+            });
+
+            if (hasPrimaryBank) {
+              console.log('Primary bank account found, step completed, redirecting');
+              navigate('/email-verification', { replace: true });
+              return;
+            }
+          }
+        } catch (bankError) {
+          console.log('Error checking bank details:', bankError);
+        }
+
         setCheckingEnach(false);
         checkAndFetchReport();
       } catch (error) {
