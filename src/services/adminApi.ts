@@ -62,6 +62,8 @@ export interface UserDetailData {
   loans: any[];
   documents: any[];
   notes: any[];
+  kycVerification?: any;
+  kycDocuments?: any[];
 }
 
 class AdminApiService {
@@ -145,9 +147,9 @@ class AdminApiService {
 
   // Authentication APIs
   async login(email: string, password: string): Promise<ApiResponse<AdminLoginResponse>> {
-    const response = await this.request<AdminLoginResponse>('POST', '/auth/login', { 
-      email, 
-      password 
+    const response = await this.request<AdminLoginResponse>('POST', '/auth/login', {
+      email,
+      password
     });
 
     if (response.status === 'success' && response.data) {
@@ -162,13 +164,13 @@ class AdminApiService {
 
   async logout(): Promise<ApiResponse<any>> {
     const response = await this.request('POST', '/auth/logout');
-    
+
     // Clear local storage and token
     this.token = null;
     this.clearAuthHeader();
     localStorage.removeItem('adminToken');
     localStorage.removeItem('adminUser');
-    
+
     return response;
   }
 
@@ -1025,10 +1027,10 @@ class AdminApiService {
   }
 
   async emailKFSPDF(loanId: number, htmlContent: string, recipientEmail: string, recipientName: string): Promise<ApiResponse<any>> {
-    const response = await axios.post(`/api/kfs/${loanId}/email-pdf`, { 
-      htmlContent, 
-      recipientEmail, 
-      recipientName 
+    const response = await axios.post(`/api/kfs/${loanId}/email-pdf`, {
+      htmlContent,
+      recipientEmail,
+      recipientName
     }, {
       headers: {
         'Authorization': `Bearer ${localStorage.getItem('adminToken')}`

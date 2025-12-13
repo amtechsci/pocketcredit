@@ -1566,6 +1566,7 @@ export function UserProfileDetail() {
 
   const tabs = [
     { id: 'personal', label: 'Personal', icon: User },
+    { id: 'kyc', label: 'KYC Details', icon: CheckCircle },
     { id: 'documents', label: 'Documents', icon: FileText },
     { id: 'bank', label: 'Bank Information', icon: CreditCard },
     { id: 'reference', label: 'Reference', icon: Phone },
@@ -1582,6 +1583,113 @@ export function UserProfileDetail() {
   ];
 
 
+
+  const renderKYCTab = () => {
+    const kycData = getUserData('kycVerification');
+    const kycDocs = getUserData('kycDocuments', []);
+    const verificationData = kycData?.verification_data || {};
+
+    return (
+      <div className="space-y-6">
+        {/* Verification Status Card */}
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-semibold text-gray-900">KYC Verification Details</h3>
+            <span className={`px-3 py-1 rounded-full text-sm font-medium ${kycData?.status === 'verified' ? 'bg-green-100 text-green-800' :
+                'bg-yellow-100 text-yellow-800'
+              }`}>
+              {kycData?.status?.toUpperCase() || 'NOT VERIFIED'}
+            </span>
+          </div>
+
+          {!kycData ? (
+            <div className="text-center py-8">
+              <Shield className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500">No KYC verification data available.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-500 mb-1">Full Name</label>
+                <p className="text-gray-900 font-medium">{verificationData.name || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-500 mb-1">Date of Birth</label>
+                <p className="text-gray-900">{verificationData.dob || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-500 mb-1">Gender</label>
+                <p className="text-gray-900">{verificationData.gender || 'N/A'}</p>
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-500 mb-1">Address</label>
+                <p className="text-gray-900 whitespace-pre-wrap">{JSON.stringify(verificationData.address || {}, null, 2)}</p>
+              </div>
+
+              {/* Raw Data Toggle (Simplified for now) */}
+              <div className="md:col-span-2 mt-4">
+                <details className="cursor-pointer">
+                  <summary className="text-sm text-blue-600 hover:text-blue-800 font-medium">View Raw Data</summary>
+                  <pre className="mt-2 bg-gray-50 p-4 rounded text-xs overflow-auto max-h-60 border border-gray-200">
+                    {JSON.stringify(verificationData, null, 2)}
+                  </pre>
+                </details>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* KYC Documents Card */}
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">KYC Documents</h3>
+          {kycDocs.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {kycDocs.map((doc: any, index: number) => (
+                <div key={index} className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-blue-50 p-2 rounded-lg">
+                        <FileText className="w-6 h-6 text-blue-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900 truncate max-w-[150px]" title={doc.document_type}>
+                          {doc.document_type || 'Document'}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {new Date(doc.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      onClick={() => window.open(doc.url, '_blank')}
+                      className="flex-1 px-3 py-2 bg-blue-600 text-white text-xs font-medium rounded hover:bg-blue-700 transition-colors flex items-center justify-center gap-1"
+                    >
+                      <Eye className="w-3 h-3" />
+                      View
+                    </button>
+                    <button
+                      onClick={() => window.open(doc.url, '_blank')}
+                      className="px-3 py-2 bg-gray-100 text-gray-700 text-xs font-medium rounded hover:bg-gray-200 transition-colors"
+                      title="Download"
+                    >
+                      <Download className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 bg-gray-50 rounded-lg border border-dashed border-gray-300">
+              <FileText className="w-10 h-10 text-gray-400 mx-auto mb-2" />
+              <p className="text-sm text-gray-500">No KYC documents found.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const renderPersonalTab = () => (
     <div className="space-y-6">
@@ -7128,6 +7236,7 @@ export function UserProfileDetail() {
       {/* Content Area */}
       <div className="p-6">
         {activeTab === 'personal' && renderPersonalTab()}
+        {activeTab === 'kyc' && renderKYCTab()}
         {activeTab === 'documents' && renderDocumentsTab()}
         {activeTab === 'bank' && renderBankTab()}
         {activeTab === 'reference' && renderReferenceTab()}

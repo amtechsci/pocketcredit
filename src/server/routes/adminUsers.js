@@ -7,7 +7,7 @@ const router = express.Router();
 router.get('/', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
-    
+
     const {
       page = 1,
       limit = 20,
@@ -87,7 +87,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
       FROM users u
       ${whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : ''}
     `;
-    
+
     const countResult = await executeQuery(countQuery, queryParams);
     const totalUsers = countResult[0].total;
 
@@ -98,7 +98,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
     // Execute the main query
     console.log('🔍 Executing users query with params:', queryParams);
     console.log('🔍 Query:', baseQuery);
-    
+
     let users;
     try {
       users = await executeQuery(baseQuery, queryParams);
@@ -147,9 +147,9 @@ router.get('/', authenticateAdmin, async (req, res) => {
 router.get('/:id', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
-    
+
     const { id } = req.params;
-    
+
     const userQuery = `
       SELECT 
         u.id,
@@ -175,18 +175,18 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
       WHERE u.id = ?
       GROUP BY u.id
     `;
-    
+
     const users = await executeQuery(userQuery, [id]);
-    
+
     if (users.length === 0) {
       return res.status(404).json({
         status: 'error',
         message: 'User not found'
       });
     }
-    
+
     const user = users[0];
-    
+
     // If PAN is not in users table, try to get it from digitap_responses
     let panNumber = user.pan_number;
     if (!panNumber) {
@@ -200,8 +200,8 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
         `;
         const digitapResults = await executeQuery(digitapQuery, [id]);
         if (digitapResults.length > 0 && digitapResults[0].response_data) {
-          const responseData = typeof digitapResults[0].response_data === 'string' 
-            ? JSON.parse(digitapResults[0].response_data) 
+          const responseData = typeof digitapResults[0].response_data === 'string'
+            ? JSON.parse(digitapResults[0].response_data)
             : digitapResults[0].response_data;
           panNumber = responseData.pan || null;
         }
@@ -209,7 +209,61 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
         console.error('Error fetching PAN from digitap_responses:', e);
       }
     }
-    
+
+    const { getPresignedUrl } = require('../services/s3Service');
+
+    // Fetch KYC Verification Data
+    let kycData = null;
+    try {
+      const kycQuery = `
+        SELECT verification_data, status, created_at, transaction_id
+        FROM kyc_verifications 
+        WHERE user_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `;
+      const kycResult = await executeQuery(kycQuery, [id]);
+
+      if (kycResult.length > 0) {
+        kycData = kycResult[0];
+        // Parse verification_data if it's a string
+        if (kycData.verification_data && typeof kycData.verification_data === 'string') {
+          try {
+            kycData.verification_data = JSON.parse(kycData.verification_data);
+          } catch (e) {
+            console.error('Error parsing KYC verification data:', e);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching KYC verification:', e);
+    }
+
+    // Fetch KYC Documents
+    let kycDocuments = [];
+    try {
+      const docsQuery = `
+        SELECT id, document_type, file_name, s3_key, s3_bucket, mime_type, file_size, doc_extension, created_at
+        FROM kyc_documents
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+      `;
+      const docsResult = await executeQuery(docsQuery, [id]);
+
+      // Generate presigned URLs for documents
+      kycDocuments = await Promise.all(docsResult.map(async (doc) => {
+        try {
+          const url = await getPresignedUrl(doc.s3_key);
+          return { ...doc, url };
+        } catch (err) {
+          console.error(`Failed to generate URL for doc ${doc.id}:`, err);
+          return { ...doc, url: null };
+        }
+      }));
+    } catch (e) {
+      console.error('Error fetching KYC documents:', e);
+    }
+
     const userData = {
       id: user.id,
       name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Unknown User',
@@ -226,14 +280,16 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
       aadharNumber: user.aadhar_number,
       totalApplications: parseInt(user.totalApplications) || 0,
       approvedApplications: parseInt(user.approvedApplications) || 0,
-      rejectedApplications: parseInt(user.rejectedApplications) || 0
+      rejectedApplications: parseInt(user.rejectedApplications) || 0,
+      kycVerification: kycData,
+      kycDocuments: kycDocuments
     };
-    
+
     res.json({
       status: 'success',
       data: userData
     });
-    
+
   } catch (error) {
     console.error('Get user details error:', error);
     res.status(500).json({
@@ -247,32 +303,32 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
 router.patch('/:id/status', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
-    
+
     const { id } = req.params;
     const { status } = req.body;
-    
+
     if (!status || !['active', 'inactive', 'pending'].includes(status)) {
       return res.status(400).json({
         status: 'error',
         message: 'Invalid status. Must be active, inactive, or pending'
       });
     }
-    
+
     const updateQuery = 'UPDATE users SET status = ?, updated_at = NOW() WHERE id = ?';
     const result = await executeQuery(updateQuery, [status, id]);
-    
+
     if (result.affectedRows === 0) {
       return res.status(404).json({
         status: 'error',
         message: 'User not found'
       });
     }
-    
+
     res.json({
       status: 'success',
       message: 'User status updated successfully'
     });
-    
+
   } catch (error) {
     console.error('Update user status error:', error);
     res.status(500).json({
@@ -286,35 +342,35 @@ router.patch('/:id/status', authenticateAdmin, async (req, res) => {
 router.delete('/:id', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
-    
+
     const { id } = req.params;
-    
+
     // Check if user has any applications
     const applicationsQuery = 'SELECT COUNT(*) as count FROM loan_applications WHERE user_id = ?';
     const applicationsResult = await executeQuery(applicationsQuery, [id]);
-    
+
     if (applicationsResult[0].count > 0) {
       return res.status(400).json({
         status: 'error',
         message: 'Cannot delete user with existing loan applications'
       });
     }
-    
+
     const deleteQuery = 'DELETE FROM users WHERE id = ?';
     const result = await executeQuery(deleteQuery, [id]);
-    
+
     if (result.affectedRows === 0) {
       return res.status(404).json({
         status: 'error',
         message: 'User not found'
       });
     }
-    
+
     res.json({
       status: 'success',
       message: 'User deleted successfully'
     });
-    
+
   } catch (error) {
     console.error('Delete user error:', error);
     res.status(500).json({
@@ -328,9 +384,9 @@ router.delete('/:id', authenticateAdmin, async (req, res) => {
 router.get('/:id/credit-analytics', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
-    
+
     const { id } = req.params;
-    
+
     // Fetch credit check data from credit_checks table
     const query = `
       SELECT 
@@ -355,9 +411,9 @@ router.get('/:id/credit-analytics', authenticateAdmin, async (req, res) => {
       ORDER BY checked_at DESC
       LIMIT 1
     `;
-    
+
     const results = await executeQuery(query, [id]);
-    
+
     if (results.length === 0) {
       return res.json({
         status: 'success',
@@ -365,9 +421,9 @@ router.get('/:id/credit-analytics', authenticateAdmin, async (req, res) => {
         data: null
       });
     }
-    
+
     const creditData = results[0];
-    
+
     // Parse JSON fields
     if (creditData.rejection_reasons) {
       try {
@@ -376,7 +432,7 @@ router.get('/:id/credit-analytics', authenticateAdmin, async (req, res) => {
         creditData.rejection_reasons = [];
       }
     }
-    
+
     if (creditData.negative_indicators) {
       try {
         creditData.negative_indicators = JSON.parse(creditData.negative_indicators);
@@ -384,7 +440,7 @@ router.get('/:id/credit-analytics', authenticateAdmin, async (req, res) => {
         creditData.negative_indicators = null;
       }
     }
-    
+
     if (creditData.full_report) {
       try {
         // Check if it's already an object or needs parsing
@@ -396,13 +452,13 @@ router.get('/:id/credit-analytics', authenticateAdmin, async (req, res) => {
         creditData.full_report = null;
       }
     }
-    
+
     res.json({
       status: 'success',
       message: 'Credit analytics data retrieved successfully',
       data: creditData
     });
-    
+
   } catch (error) {
     console.error('Get credit analytics error:', error);
     res.status(500).json({
@@ -468,8 +524,8 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
       );
 
       if (digitapData && digitapData.length > 0 && digitapData[0].response_data) {
-        const prefillData = typeof digitapData[0].response_data === 'string' 
-          ? JSON.parse(digitapData[0].response_data) 
+        const prefillData = typeof digitapData[0].response_data === 'string'
+          ? JSON.parse(digitapData[0].response_data)
           : digitapData[0].response_data;
 
         // Use pre-fill data if available
@@ -503,7 +559,7 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
 
     // Request credit report from Experian
     const clientRefNum = `PC${userId}_${Date.now()}`;
-    
+
     const creditReportResponse = await creditAnalyticsService.requestCreditReport({
       client_ref_num: clientRefNum,
       mobile_no: userData.phone,
