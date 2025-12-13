@@ -210,59 +210,7 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
       }
     }
 
-    const { getPresignedUrl } = require('../services/s3Service');
 
-    // Fetch KYC Verification Data
-    let kycData = null;
-    try {
-      const kycQuery = `
-        SELECT verification_data, status, created_at, transaction_id
-        FROM kyc_verifications 
-        WHERE user_id = ? 
-        ORDER BY created_at DESC 
-        LIMIT 1
-      `;
-      const kycResult = await executeQuery(kycQuery, [id]);
-
-      if (kycResult.length > 0) {
-        kycData = kycResult[0];
-        // Parse verification_data if it's a string
-        if (kycData.verification_data && typeof kycData.verification_data === 'string') {
-          try {
-            kycData.verification_data = JSON.parse(kycData.verification_data);
-          } catch (e) {
-            console.error('Error parsing KYC verification data:', e);
-          }
-        }
-      }
-    } catch (e) {
-      console.error('Error fetching KYC verification:', e);
-    }
-
-    // Fetch KYC Documents
-    let kycDocuments = [];
-    try {
-      const docsQuery = `
-        SELECT id, document_type, file_name, s3_key, s3_bucket, mime_type, file_size, doc_extension, created_at
-        FROM kyc_documents
-        WHERE user_id = ?
-        ORDER BY created_at DESC
-      `;
-      const docsResult = await executeQuery(docsQuery, [id]);
-
-      // Generate presigned URLs for documents
-      kycDocuments = await Promise.all(docsResult.map(async (doc) => {
-        try {
-          const url = await getPresignedUrl(doc.s3_key);
-          return { ...doc, url };
-        } catch (err) {
-          console.error(`Failed to generate URL for doc ${doc.id}:`, err);
-          return { ...doc, url: null };
-        }
-      }));
-    } catch (e) {
-      console.error('Error fetching KYC documents:', e);
-    }
 
     const userData = {
       id: user.id,
@@ -280,9 +228,7 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
       aadharNumber: user.aadhar_number,
       totalApplications: parseInt(user.totalApplications) || 0,
       approvedApplications: parseInt(user.approvedApplications) || 0,
-      rejectedApplications: parseInt(user.rejectedApplications) || 0,
-      kycVerification: kycData,
-      kycDocuments: kycDocuments
+      rejectedApplications: parseInt(user.rejectedApplications) || 0
     };
 
     res.json({

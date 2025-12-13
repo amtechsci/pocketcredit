@@ -1587,7 +1587,18 @@ export function UserProfileDetail() {
   const renderKYCTab = () => {
     const kycData = getUserData('kycVerification');
     const kycDocs = getUserData('kycDocuments', []);
-    const verificationData = kycData?.verification_data || {};
+
+    // Helper to extract the actual data object
+    const getVerificationData = () => {
+      const raw = kycData?.verification_data;
+      if (!raw) return {};
+      // Logic to handle nested kycData if present
+      if (raw.kycData) return raw.kycData;
+      return raw;
+    };
+
+    const verificationData = getVerificationData();
+    const isVerified = ['verified', 'completed', 'success'].includes(kycData?.status?.toLowerCase());
 
     return (
       <div className="space-y-6">
@@ -1595,8 +1606,7 @@ export function UserProfileDetail() {
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-semibold text-gray-900">KYC Verification Details</h3>
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${kycData?.status === 'verified' ? 'bg-green-100 text-green-800' :
-                'bg-yellow-100 text-yellow-800'
+            <span className={`px-3 py-1 rounded-full text-sm font-medium ${isVerified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
               }`}>
               {kycData?.status?.toUpperCase() || 'NOT VERIFIED'}
             </span>
@@ -1608,32 +1618,59 @@ export function UserProfileDetail() {
               <p className="text-gray-500">No KYC verification data available.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-500 mb-1">Full Name</label>
-                <p className="text-gray-900 font-medium">{verificationData.name || 'N/A'}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-500 mb-1">Date of Birth</label>
-                <p className="text-gray-900">{verificationData.dob || 'N/A'}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-500 mb-1">Gender</label>
-                <p className="text-gray-900">{verificationData.gender || 'N/A'}</p>
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-500 mb-1">Address</label>
-                <p className="text-gray-900 whitespace-pre-wrap">{JSON.stringify(verificationData.address || {}, null, 2)}</p>
-              </div>
+            <div className="flex flex-col md:flex-row gap-6">
+              {/* Profile Image */}
+              {verificationData.image && (
+                <div className="flex-shrink-0">
+                  <div className="w-32 h-32 rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                    <img
+                      src={`data:image/jpeg;base64,${verificationData.image}`}
+                      alt="KYC Profile"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                </div>
+              )}
 
-              {/* Raw Data Toggle (Simplified for now) */}
-              <div className="md:col-span-2 mt-4">
-                <details className="cursor-pointer">
-                  <summary className="text-sm text-blue-600 hover:text-blue-800 font-medium">View Raw Data</summary>
-                  <pre className="mt-2 bg-gray-50 p-4 rounded text-xs overflow-auto max-h-60 border border-gray-200">
-                    {JSON.stringify(verificationData, null, 2)}
-                  </pre>
-                </details>
+              <div className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-500 mb-1">Full Name</label>
+                  <p className="text-gray-900 font-medium">{verificationData.name || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-500 mb-1">Date of Birth</label>
+                  <p className="text-gray-900">{verificationData.dob || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-500 mb-1">Gender</label>
+                  <p className="text-gray-900">{verificationData.gender || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-500 mb-1">Masked Aadhaar</label>
+                  <p className="text-gray-900">{verificationData.maskedAdharNumber || 'N/A'}</p>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-500 mb-1">Care Of</label>
+                  <p className="text-gray-900">{verificationData.careOf || 'N/A'}</p>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-500 mb-1">Address</label>
+                  <p className="text-gray-900 whitespace-pre-wrap">
+                    {typeof verificationData.address === 'object'
+                      ? JSON.stringify(verificationData.address, null, 2)
+                      : (verificationData.address || 'N/A')}
+                  </p>
+                </div>
+
+                {/* Raw Data Toggle */}
+                <div className="md:col-span-2 mt-4">
+                  <details className="cursor-pointer">
+                    <summary className="text-sm text-blue-600 hover:text-blue-800 font-medium">View Raw Data</summary>
+                    <pre className="mt-2 bg-gray-50 p-4 rounded text-xs overflow-auto max-h-60 border border-gray-200">
+                      {JSON.stringify(verificationData, null, 2)}
+                    </pre>
+                  </details>
+                </div>
               </div>
             </div>
           )}

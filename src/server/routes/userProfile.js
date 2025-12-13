@@ -2,6 +2,7 @@ const express = require('express');
 const { authenticateAdmin } = require('../middleware/auth');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { validateRequest } = require('../middleware/validation');
+const { getPresignedUrl } = require('../services/s3Service');
 const router = express.Router();
 
 // Get user profile with all related data
@@ -127,6 +128,58 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       console.error('Error fetching bank statement:', e);
     }
 
+    // Fetch KYC Verification Data
+    let kycData = null;
+    try {
+      const kycQuery = `
+        SELECT verification_data, kyc_status as status, created_at
+        FROM kyc_verifications 
+        WHERE user_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `;
+      const kycResult = await executeQuery(kycQuery, [userId]);
+
+      if (kycResult.length > 0) {
+        kycData = kycResult[0];
+        // Parse verification_data if it's a string
+        if (kycData.verification_data && typeof kycData.verification_data === 'string') {
+          try {
+            kycData.verification_data = JSON.parse(kycData.verification_data);
+          } catch (e) {
+            console.error('Error parsing KYC verification data:', e);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching KYC verification:', e);
+    }
+
+    // Fetch KYC Documents
+    let kycDocuments = [];
+    try {
+      const docsQuery = `
+        SELECT id, document_type, file_name, s3_key, mime_type, created_at
+        FROM kyc_documents
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+      `;
+      const docsResult = await executeQuery(docsQuery, [userId]);
+
+      // Generate presigned URLs for documents
+      kycDocuments = await Promise.all(docsResult.map(async (doc) => {
+        try {
+          const url = await getPresignedUrl(doc.s3_key);
+          return { ...doc, url };
+        } catch (err) {
+          console.error(`Failed to generate URL for doc ${doc.id}:`, err);
+          return { ...doc, url: null };
+        }
+      }));
+    } catch (e) {
+      console.error('Error fetching KYC documents:', e);
+    }
+
     // Transform user data to match frontend expectations
     const userProfile = {
       id: user.id,
@@ -184,6 +237,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       smsHistory: [],
       loginHistory: [],
       bankStatement: bankStatement,
+      kycVerification: kycData,
+      kycDocuments: kycDocuments,
       loans: applications.map(app => {
         // Calculate EMI if we have the required data
         const calculateEMI = (principal, rate, tenure) => {
