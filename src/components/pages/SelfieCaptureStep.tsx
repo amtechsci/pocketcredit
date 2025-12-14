@@ -15,11 +15,11 @@ interface SelfieCaptureStepProps {
   };
 }
 
-export const SelfieCaptureStep = ({ 
-  applicationId, 
-  onComplete, 
+export const SelfieCaptureStep = ({
+  applicationId,
+  onComplete,
   saving,
-  progress 
+  progress
 }: SelfieCaptureStepProps) => {
   const [showNote, setShowNote] = useState(!progress.selfie_captured);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -47,13 +47,13 @@ export const SelfieCaptureStep = ({
   const startCamera = async () => {
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { 
+        video: {
           facingMode: 'user', // Front camera
           width: { ideal: 1280 },
           height: { ideal: 720 }
         }
       });
-      
+
       setStream(mediaStream);
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
@@ -78,14 +78,14 @@ export const SelfieCaptureStep = ({
     if (!videoRef.current || !canvasRef.current) return;
 
     setIsCapturing(true);
-    
+
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    
+
     // Set canvas dimensions to match video
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    
+
     // Draw video frame to canvas
     const ctx = canvas.getContext('2d');
     if (ctx) {
@@ -94,7 +94,7 @@ export const SelfieCaptureStep = ({
       setCapturedImage(imageData);
       stopCamera();
     }
-    
+
     setIsCapturing(false);
   };
 
@@ -119,29 +119,38 @@ export const SelfieCaptureStep = ({
         type: 'image/jpeg'
       });
 
-      // Upload selfie and verify
+      // Upload selfie and verify with face match API
       const uploadResponse = await apiService.uploadSelfieForVerification(applicationId, file);
-      
+
       if (uploadResponse.success) {
-        // Mock face match verification - will be replaced with actual Cashfree API
-        // For now, simulate verification with 80% success rate
-        const mockVerification = Math.random() > 0.2;
-        
-        if (mockVerification) {
+        const verification = uploadResponse.data?.verification;
+
+        // Check if verification was performed successfully
+        if (verification?.verified) {
           setVerificationResult({
             success: true,
-            message: 'Face match verified successfully'
+            message: `Face match verified successfully (${verification.confidence?.toFixed(1)}% confidence)`
           });
           toast.success('Selfie verified successfully');
-          
+
           // Wait a moment then complete
           setTimeout(() => {
             onComplete(true);
           }, 1500);
-        } else {
+        } else if (verification?.skipped) {
+          // Verification was skipped (no Digilocker photo or KYC data)
           setVerificationResult({
             success: false,
-            message: 'Face match failed. Please try again with better lighting and ensure your face is clearly visible.'
+            message: `Verification skipped: ${verification.reason}. Please ensure you have completed KYC verification.`
+          });
+          toast.warning('Face verification was skipped');
+          setRetryCount(prev => prev + 1);
+        } else {
+          // Verification failed (face didn't match or confidence too low)
+          const confidence = verification?.confidence || 0;
+          setVerificationResult({
+            success: false,
+            message: `Face match failed (${confidence.toFixed(1)}% confidence). Please try again with better lighting and ensure your face is clearly visible.`
           });
           toast.error('Face match verification failed');
           setRetryCount(prev => prev + 1);
@@ -290,11 +299,10 @@ export const SelfieCaptureStep = ({
       </div>
 
       {verificationResult && (
-        <Card className={`border-l-4 ${
-          verificationResult.success 
-            ? 'bg-green-50 border-green-500' 
+        <Card className={`border-l-4 ${verificationResult.success
+            ? 'bg-green-50 border-green-500'
             : 'bg-red-50 border-red-500'
-        }`}>
+          }`}>
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
               {verificationResult.success ? (

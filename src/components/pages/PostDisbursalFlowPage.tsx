@@ -10,9 +10,11 @@ import {
   ArrowRight,
   ArrowLeft,
   AlertCircle,
-  Loader2
+  Loader2,
+  Building2,
+  Plus
 } from 'lucide-react';
-import { Card, CardContent } from '../ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { DashboardHeader } from '../DashboardHeader';
 import { useAuth } from '../../contexts/AuthContext';
@@ -383,10 +385,151 @@ interface StepProps {
 }
 
 const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [existingSubscription, setExistingSubscription] = useState<any>(null);
+  const [bankDetails, setBankDetails] = useState<any>(null);
+  const [loadingBank, setLoadingBank] = useState(true);
+
+  useEffect(() => {
+    // Check if subscription already exists for this loan
+    checkExistingSubscription();
+    // Fetch bank details
+    fetchBankDetails();
+  }, [applicationId]);
+
+  const fetchBankDetails = async () => {
+    try {
+      setLoadingBank(true);
+      // Assuming we have user from context - you might need to adjust this
+      const userStr = localStorage.getItem('pocket_user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        const response = await apiService.getUserBankDetails(user.id);
+        if (response.success && response.data && response.data.length > 0) {
+          // Find primary bank or use the first one
+          const primaryBank = response.data.find((bank: any) => bank.is_primary) || response.data[0];
+          setBankDetails(primaryBank);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching bank details:', err);
+    } finally {
+      setLoadingBank(false);
+    }
+  };
+
+  const checkExistingSubscription = async () => {
+    try {
+      const response = await apiService.getEnachSubscription(applicationId);
+      if (response.success && response.data) {
+        setExistingSubscription(response.data);
+
+        // If subscription is already active, auto-complete this step
+        if (response.data.status === 'ACTIVE' || response.data.status === 'AUTHENTICATED') {
+          toast.success('eNACH mandate already authorized');
+          onComplete();
+        }
+      }
+    } catch (err) {
+      console.error('Error checking existing subscription:', err);
+    }
+  };
+
   const handleComplete = async () => {
-    // Mock API call - will be replaced with actual Cashfree E-NACH API
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    onComplete();
+    if (!bankDetails) {
+      toast.error('Please add your bank account details first');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Create eNACH subscription via Cashfree
+      const response = await apiService.createEnachSubscription(applicationId);
+
+      if (response.success && response.data) {
+        const { authorization_url, subscription_id, message } = response.data;
+
+        if (authorization_url) {
+          toast.success('Redirecting to eNACH authorization...');
+
+          // Store subscription ID in session for when user returns
+          sessionStorage.setItem('enach_subscription_id', subscription_id);
+
+          // Redirect to Cashfree authorization page
+          window.location.href = authorization_url;
+        } else {
+          // For eNACH, mandate link is sent via SMS/Email
+          toast.success(message || 'eNACH mandate link sent to your mobile and email');
+
+          // Show success message and mark as pending
+          setError(null);
+
+          // Auto-complete after showing message
+          setTimeout(() => {
+            toast.info('Please check your SMS/Email and authorize the eNACH mandate', {
+              duration: 5000
+            });
+            onComplete();
+          }, 2000);
+        }
+      } else {
+        throw new Error(response.message || 'Failed to create eNACH subscription');
+      }
+    } catch (err: any) {
+      console.error('Error creating eNACH subscription:', err);
+      setError(err.message || 'Failed to create eNACH subscription. Please try again.');
+      toast.error(err.message || 'Failed to create eNACH subscription');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Check if returning from authorization
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const enachComplete = urlParams.get('enach');
+    const subscriptionId = sessionStorage.getItem('enach_subscription_id');
+
+    if (enachComplete === 'complete' && subscriptionId) {
+      // User returned from authorization - check status
+      checkAuthorizationStatus(subscriptionId);
+      // Clean up
+      sessionStorage.removeItem('enach_subscription_id');
+      // Remove query param
+      window.history.replaceState({}, '', window.location.pathname + `?applicationId=${applicationId}`);
+    }
+  }, []);
+
+  const checkAuthorizationStatus = async (subscriptionId: string) => {
+    try {
+      const response = await apiService.getEnachSubscriptionStatus(subscriptionId);
+
+      if (response.success && response.data) {
+        const status = response.data.subscription_status;
+
+        if (status === 'ACTIVE' || status === 'AUTHENTICATED') {
+          toast.success('eNACH mandate authorized successfully!');
+          onComplete();
+        } else if (status === 'INITIALIZED' || status === 'PENDING') {
+          toast.info('eNACH authorization is pending. Please wait for bank verification.');
+          // Optionally poll for status updates
+        } else {
+          toast.error('eNACH authorization failed. Please try again.');
+        }
+      }
+    } catch (err) {
+      console.error('Error checking authorization status:', err);
+      toast.error('Failed to verify eNACH authorization status');
+    }
+  };
+
+  const handleAddBankAccount = () => {
+    // Navigate to bank linking page with allowEdit flag to bypass auto-redirect
+    navigate('/link-salary-bank-account?allowEdit=true');
   };
 
   return (
@@ -395,24 +538,237 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
         <CreditCard className="w-16 h-16 text-blue-600 mx-auto mb-4" />
         <h2 className="text-2xl font-bold mb-2">E-NACH Registration</h2>
         <p className="text-gray-600">
-          Register for automatic loan repayment through E-NACH mandate
+          Set up automatic loan repayment through E-NACH mandate
         </p>
       </div>
 
-      <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg">
-        <p className="text-sm text-gray-700">
-          <strong>Note:</strong> E-NACH allows us to automatically debit your loan EMI from your registered bank account on the due date.
-        </p>
+      {/* Bank Account Details Section */}
+      <Card className="border-gray-300">
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-blue-600" />
+              Your Bank Account
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleAddBankAccount}
+              className="text-sm"
+            >
+              <Plus className="w-4 h-4 mr-1" />
+              {bankDetails ? 'Change Bank' : 'Add Bank'}
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loadingBank ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+              <span className="ml-2 text-sm text-gray-600">Loading bank details...</span>
+            </div>
+          ) : bankDetails ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Bank Name</p>
+                  <p className="text-sm font-medium text-gray-900">{bankDetails.bank_name}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Account Number</p>
+                  <p className="text-sm font-medium text-gray-900 font-mono">
+                    ****{bankDetails.account_number?.slice(-4)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">IFSC Code</p>
+                  <p className="text-sm font-medium text-gray-900">{bankDetails.ifsc_code}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Account Type</p>
+                  <p className="text-sm font-medium text-gray-900">
+                    {bankDetails.account_type || 'Savings'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-green-50 border border-green-200 rounded-md p-3 mt-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-green-600" />
+                  <span className="text-xs text-green-800">
+                    This account will be used for automatic EMI deductions
+                  </span>
+                </div>
+              </div>
+
+              {/* Supported Banks Note */}
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mt-3">
+                <p className="text-xs font-medium text-blue-900 mb-1">Supported Banks:</p>
+                <p className="text-xs text-blue-700">
+                  HDFC Bank, ICICI Bank, State Bank of India, Axis Bank, Kotak Mahindra Bank,
+                  Yes Bank, IndusInd Bank, and other major Indian banks
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-6">
+              <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-3" />
+              <p className="text-sm font-medium text-gray-900 mb-2">No Bank Account Found</p>
+              <p className="text-xs text-gray-600 mb-4">
+                Please add your bank account details to continue with eNACH registration
+              </p>
+              <Button onClick={handleAddBankAccount} className="mx-auto">
+                <Plus className="w-4 h-4 mr-2" />
+                Add Bank Account
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Show existing subscription status if any */}
+      {existingSubscription && (
+        <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-blue-900">Existing Subscription</p>
+              <p className="text-xs text-blue-800 mt-1">
+                Status: <span className="font-semibold">{existingSubscription.status}</span>
+              </p>
+              <p className="text-xs text-blue-700 mt-1">
+                {existingSubscription.status === 'INITIALIZED' && 'Authorization pending - Click below to continue'}
+                {existingSubscription.status === 'PENDING' && 'Waiting for bank verification'}
+                {existingSubscription.status === 'ACTIVE' && 'Mandate is active'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error message */}
+      {error && (
+        <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-red-900">Error</p>
+              <p className="text-xs text-red-800 mt-1">{error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* What is e-NACH Card */}
+      <Card className="border-blue-200 bg-blue-50">
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <CreditCard className="w-5 h-5 text-blue-600" />
+            What is e-NACH / e-Mandate?
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-gray-700">
+            e-NACH (Electronic National Automated Clearing House) is a secure digital payment authorization system that allows automatic deduction of your loan EMI from your bank account on the due date.
+          </p>
+
+          <div className="space-y-3">
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-sm text-gray-900">Automatic Payments</p>
+                <p className="text-xs text-gray-600">Never miss a payment - EMI is auto-debited on due date</p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-sm text-gray-900">Secure & RBI Approved</p>
+                <p className="text-xs text-gray-600">Bank-grade security with Reserve Bank of India regulation</p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-sm text-gray-900">No Manual Transfers</p>
+                <p className="text-xs text-gray-600">Eliminate the hassle of remembering payment dates</p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-sm text-gray-900">Full Control</p>
+                <p className="text-xs text-gray-600">You can cancel or modify the mandate anytime through your bank</p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* How it Works */}
+      <Card className="border-gray-200">
+        <CardHeader>
+          <CardTitle className="text-lg">How It Works</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-sm flex-shrink-0">
+              1
+            </div>
+            <div>
+              <p className="font-medium text-sm text-gray-900">Complete e-NACH Registration</p>
+              <p className="text-xs text-gray-600">Authorize automatic deductions from your salary account</p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-sm flex-shrink-0">
+              2
+            </div>
+            <div>
+              <p className="font-medium text-sm text-gray-900">Bank Verification</p>
+              <p className="text-xs text-gray-600">Your bank will verify and activate the mandate (usually within 24-48 hours)</p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-sm flex-shrink-0">
+              3
+            </div>
+            <div>
+              <p className="font-medium text-sm text-gray-900">Automatic Deductions</p>
+              <p className="text-xs text-gray-600">EMI will be automatically deducted on your repayment date each month</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Important Note */}
+      <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-lg">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-amber-900">Important Information</p>
+            <ul className="text-xs text-amber-800 space-y-1 list-disc list-inside">
+              <li>Ensure sufficient balance in your account on the EMI due date</li>
+              <li>The mandate is specific to this loan and will auto-expire after final payment</li>
+              <li>You will receive SMS/Email notifications before each deduction</li>
+            </ul>
+          </div>
+        </div>
       </div>
 
       <div className="flex justify-end gap-4">
         <Button
           onClick={handleComplete}
-          disabled={saving}
-          className="min-w-[120px]"
+          disabled={loading || saving || !bankDetails || loadingBank}
+          className="min-w-[200px]"
         >
-          {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-          Complete
+          {(loading || saving) ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+          {loading ? 'Creating Mandate...' : 'Proceed to e-NACH Registration'}
         </Button>
       </div>
     </div>

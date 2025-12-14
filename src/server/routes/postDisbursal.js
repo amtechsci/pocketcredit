@@ -4,6 +4,8 @@ const multer = require('multer');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
 const { uploadToS3 } = require('../services/s3Service');
+const { compareFaces, downloadImage } = require('../services/faceMatchService');
+const axios = require('axios');
 
 // Configure multer for memory storage
 const upload = multer({
@@ -58,7 +60,7 @@ router.get('/progress/:applicationId', requireAuth, async (req, res) => {
       console.error('Error checking columns:', colError);
       // Continue with empty array - will return default values
     }
-    
+
     // Build SELECT query with only existing columns
     const selectFields = [];
     if (existingColumns.includes('enach_done')) selectFields.push('enach_done');
@@ -159,7 +161,7 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
       console.error('Error checking columns:', colError);
       // Continue with empty array - will return error message
     }
-    
+
     // If columns don't exist, return helpful error message
     if (existingColumns.length === 0) {
       console.error('Post-disbursal columns do not exist. Please run the migration.');
@@ -231,7 +233,7 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
       sqlMessage: error.sqlMessage,
       sql: error.sql
     });
-    
+
     // Check if it's a column not found error
     if (error.code === 'ER_BAD_FIELD_ERROR' || error.sqlMessage?.includes('Unknown column')) {
       return res.status(500).json({
@@ -240,7 +242,7 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
         error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Failed to update progress',
@@ -276,7 +278,7 @@ router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, 
       });
     }
 
-    // Upload to S3
+    // Upload selfie to S3 first
     const fileName = `selfies/${userId}/${applicationId}-${Date.now()}.jpg`;
     const s3Url = await uploadToS3(
       req.file.buffer,
@@ -284,6 +286,8 @@ router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, 
       req.file.mimetype,
       { folder: 'loan-selfies' }
     );
+
+    console.log(`📸 Selfie uploaded to S3: ${s3Url}`);
 
     // Update application with selfie URL and mark as captured
     await executeQuery(
@@ -293,13 +297,221 @@ router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, 
       [s3Url, applicationId]
     );
 
-    res.json({
-      success: true,
-      data: {
-        selfie_url: s3Url,
-        message: 'Selfie uploaded successfully'
+    // Now perform face match verification
+    try {
+      console.log(`🔍 Starting face match verification for application ${applicationId}...`);
+
+      // Get Digilocker photo from kyc_verifications
+      const kycResults = await executeQuery(
+        `SELECT verification_data 
+         FROM kyc_verifications 
+         WHERE user_id = ? AND application_id = ? 
+         ORDER BY created_at DESC 
+         LIMIT 1`,
+        [userId, applicationId]
+      );
+
+      if (!kycResults || kycResults.length === 0) {
+        console.warn('⚠️ No KYC verification data found - skipping face match');
+        return res.json({
+          success: true,
+          data: {
+            selfie_url: s3Url,
+            message: 'Selfie uploaded successfully. Face verification skipped - no KYC data found.',
+            verification: {
+              skipped: true,
+              reason: 'No KYC data'
+            }
+          }
+        });
       }
-    });
+
+      const verificationData = kycResults[0].verification_data;
+      let kycData = null;
+
+      // Parse verification_data JSON
+      if (typeof verificationData === 'string') {
+        kycData = JSON.parse(verificationData);
+      } else {
+        kycData = verificationData;
+      }
+
+      // Extract Digilocker photo
+      // The photo could be:
+      // 1. Base64 string in kycData.image (from Aadhaar XML)
+      // 2. URL in documents array
+      let digilockerPhotoBase64 = null;
+      let digilockerPhotoUrl = null;
+
+      // Check for base64 image first (most common from Aadhaar KYC)
+      if (kycData.kycData && kycData.kycData.image) {
+        digilockerPhotoBase64 = kycData.kycData.image;
+        console.log(`📸 Found Digilocker photo as base64 string (${digilockerPhotoBase64.length} chars)`);
+      }
+
+      // If no base64 image, look for photo URLs
+      if (!digilockerPhotoBase64) {
+        // Check various possible locations for photo URL
+        if (kycData.kycData) {
+          const kyc = kycData.kycData;
+
+          // Look for photo in documents array
+          if (kyc.digilockerFiles && Array.isArray(kyc.digilockerFiles)) {
+            const photoDoc = kyc.digilockerFiles.find(doc =>
+              doc.docType === 'PHOTO' ||
+              doc.docType === 'profile_photo' ||
+              doc.document_type === 'PHOTO'
+            );
+            digilockerPhotoUrl = photoDoc?.url || photoDoc?.docLink || photoDoc?.uri;
+          }
+
+          // Also check docs array
+          if (!digilockerPhotoUrl && kyc.docs && Array.isArray(kyc.docs)) {
+            const photoDoc = kyc.docs.find(doc =>
+              doc.docType === 'PHOTO' ||
+              doc.docType === 'profile_photo' ||
+              doc.document_type === 'PHOTO'
+            );
+            digilockerPhotoUrl = photoDoc?.url || photoDoc?.docLink || photoDoc?.uri;
+          }
+
+          // Check direct photo_url field
+          if (!digilockerPhotoUrl) {
+            digilockerPhotoUrl = kyc.photo_url || kyc.photoUrl || kyc.profile_photo;
+          }
+        }
+
+        // Also check in docs array at root level
+        if (!digilockerPhotoUrl && kycData.docs && Array.isArray(kycData.docs)) {
+          const photoDoc = kycData.docs.find(doc =>
+            doc.docType === 'PHOTO' ||
+            doc.docType === 'profile_photo' ||
+            doc.document_type === 'PHOTO'
+          );
+          digilockerPhotoUrl = photoDoc?.url || photoDoc?.docLink || photoDoc?.uri;
+        }
+      }
+
+      // Check if we have either base64 or URL
+      if (!digilockerPhotoBase64 && !digilockerPhotoUrl) {
+        console.warn('⚠️ No Digilocker photo found in KYC data');
+        console.log('KYC Data keys:', Object.keys(kycData));
+        if (kycData.kycData) {
+          console.log('kycData.kycData keys:', Object.keys(kycData.kycData));
+        }
+
+        return res.json({
+          success: true,
+          data: {
+            selfie_url: s3Url,
+            message: 'Selfie uploaded successfully. Face verification skipped - no Digilocker photo found.',
+            verification: {
+              skipped: true,
+              reason: 'No Digilocker photo'
+            }
+          }
+        });
+      }
+
+      // Get Digilocker photo as buffer
+      let digilockerPhotoBuffer;
+
+      if (digilockerPhotoBase64) {
+        // Photo is already base64, convert to buffer
+        console.log(`✅ Using base64 Digilocker photo from kycData.image`);
+        digilockerPhotoBuffer = Buffer.from(digilockerPhotoBase64, 'base64');
+      } else if (digilockerPhotoUrl) {
+        // Photo is a URL, need to download it
+        console.log(`📥 Found Digilocker photo URL: ${digilockerPhotoUrl.substring(0, 50)}...`);
+
+        try {
+          digilockerPhotoBuffer = await downloadImage(digilockerPhotoUrl);
+        } catch (downloadError) {
+          console.error('❌ Failed to download Digilocker photo:', downloadError.message);
+          return res.json({
+            success: true,
+            data: {
+              selfie_url: s3Url,
+              message: 'Selfie uploaded successfully. Face verification failed - could not download Digilocker photo.',
+              verification: {
+                skipped: true,
+                reason: 'Photo download failed',
+                error: downloadError.message
+              }
+            }
+          });
+        }
+      }
+
+      // Compare faces using face match API
+      console.log('🎯 Calling face match API...');
+      const faceMatchResult = await compareFaces(
+        req.file.buffer,           // Selfie
+        digilockerPhotoBuffer,     // Digilocker photo
+        applicationId
+      );
+
+      console.log('Face match result:', faceMatchResult);
+
+      // Determine if verification passed (confidence > 70%)
+      const verificationPassed = faceMatchResult.success &&
+        faceMatchResult.match &&
+        faceMatchResult.confidence >= 70;
+
+      // Update verification status in database
+      if (verificationPassed) {
+        await executeQuery(
+          `UPDATE loan_applications 
+           SET selfie_verified = 1, updated_at = NOW() 
+           WHERE id = ?`,
+          [applicationId]
+        );
+
+        // Store face match result in kyc_verifications
+        await executeQuery(
+          `UPDATE kyc_verifications 
+           SET verification_data = JSON_SET(
+             COALESCE(verification_data, '{}'),
+             '$.faceMatch', ?
+           )
+           WHERE user_id = ? AND application_id = ?`,
+          [JSON.stringify(faceMatchResult), userId, applicationId]
+        );
+      }
+
+      res.json({
+        success: true,
+        data: {
+          selfie_url: s3Url,
+          message: verificationPassed
+            ? 'Selfie verified successfully'
+            : 'Face verification failed - please try again',
+          verification: {
+            verified: verificationPassed,
+            match: faceMatchResult.match,
+            confidence: faceMatchResult.confidence,
+            details: faceMatchResult.details
+          }
+        }
+      });
+
+    } catch (faceMatchError) {
+      console.error('❌ Face match verification error:', faceMatchError);
+
+      // Return success for upload but indicate verification failure
+      res.json({
+        success: true,
+        data: {
+          selfie_url: s3Url,
+          message: 'Selfie uploaded but verification failed. Please try again.',
+          verification: {
+            verified: false,
+            error: faceMatchError.message
+          }
+        }
+      });
+    }
+
   } catch (error) {
     console.error('Error uploading selfie:', error);
     res.status(500).json({
@@ -342,7 +554,7 @@ router.post('/complete/:applicationId', requireAuth, async (req, res) => {
       [applicationId]
     );
 
-    const allStepsComplete = 
+    const allStepsComplete =
       progress.enach_done &&
       progress.selfie_verified &&
       progress.references_completed &&

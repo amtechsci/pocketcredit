@@ -41,6 +41,17 @@ export const LinkSalaryBankAccountPage = () => {
   });
 
   useEffect(() => {
+    // Check URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const allowEdit = urlParams.get('allowEdit');
+
+    // If allowEdit=true, skip the completion check and just load the page
+    if (allowEdit === 'true') {
+      setCheckingEnach(false);
+      checkAndFetchReport();
+      return;
+    }
+
     // Check if user has already completed this step by checking:
     // 1. If user has a primary bank account (set during e-NACH registration)
     // 2. If email is already verified (comes after e-NACH)

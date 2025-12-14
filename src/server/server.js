@@ -222,6 +222,14 @@ app.use('/api/admin/loan-calculations', loanCalculationsRoutes);
 app.use('/api/kfs', kfsRoutes);
 app.use('/api/post-disbursal', postDisbursalRoutes);
 
+// eNACH Subscription routes
+const enachRoutes = require('./routes/enach');
+const enachWebhookRoutes = require('./routes/enachWebhooks');
+app.use('/api/enach', enachRoutes);
+app.use('/api/enach', enachWebhookRoutes);  // Webhooks on /api/enach/webhook
+
+
+
 // Digitap API routes
 const digitapRoutes = require('./routes/digitap');
 app.use('/api/digitap', digitapRoutes);

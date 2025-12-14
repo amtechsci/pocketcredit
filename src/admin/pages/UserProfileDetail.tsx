@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -3028,7 +3028,7 @@ export function UserProfileDetail() {
                       }
 
                       return (
-                        <React.Fragment key={loanId}>
+                        <Fragment key={loanId}>
                           <tr className="hover:bg-gray-50">
                             {/* Loan ID */}
                             <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
@@ -3228,7 +3228,7 @@ export function UserProfileDetail() {
                               </td>
                             </tr>
                           )}
-                        </React.Fragment>
+                        </Fragment>
                       );
                     })}
                   </tbody>

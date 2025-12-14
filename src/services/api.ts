@@ -1172,6 +1172,15 @@ class ApiService {
   ): Promise<ApiResponse<{
     selfie_url: string;
     message: string;
+    verification?: {
+      verified?: boolean;
+      match?: boolean;
+      confidence?: number;
+      skipped?: boolean;
+      reason?: string;
+      error?: string;
+      details?: any;
+    };
   }>> {
     const formData = new FormData();
     formData.append('selfie', file);
@@ -1204,6 +1213,35 @@ class ApiService {
    */
   async getKFS(loanId: number): Promise<ApiResponse<any>> {
     return this.request('GET', `/kfs/user/${loanId}`);
+  }
+
+  /**
+   * eNACH Subscription APIs
+   */
+
+  /**
+   * Create eNACH subscription for loan application
+   */
+  async createEnachSubscription(applicationId: number): Promise<ApiResponse<{
+    subscription_id: string;
+    authorization_url: string;
+    subscription_status: string;
+  }>> {
+    return this.request('POST', '/enach/create-subscription', { applicationId });
+  }
+
+  /**
+   * Get subscription status
+   */
+  async getEnachSubscriptionStatus(subscriptionId: string): Promise<ApiResponse<any>> {
+    return this.request('GET', `/enach/subscription-status/${subscriptionId}`);
+  }
+
+  /**
+   * Get subscription for loan application
+   */
+  async getEnachSubscription(applicationId: number): Promise<ApiResponse<any>> {
+    return this.request('GET', `/enach/subscription/${applicationId}`);
   }
 }
 
