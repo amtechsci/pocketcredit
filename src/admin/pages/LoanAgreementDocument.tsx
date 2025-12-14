@@ -30,7 +30,7 @@ export function LoanAgreementDocument() {
   useEffect(() => {
     const adminToken = localStorage.getItem('adminToken');
     const adminUser = localStorage.getItem('adminUser');
-    
+
     if (!adminToken && !adminUser) {
       navigate('/admin/login');
       return;
@@ -70,16 +70,16 @@ export function LoanAgreementDocument() {
   const handleDownload = async () => {
     try {
       setDownloading(true);
-      
+
       const agreementElement = document.querySelector('.loan-agreement-content');
       if (!agreementElement) {
         alert('Loan Agreement content not found');
         return;
       }
-      
+
       const htmlContent = agreementElement.outerHTML;
       const pdfBlob = await adminApiService.generateKFSPDF(parseInt(loanId!), htmlContent);
-      
+
       const url = window.URL.createObjectURL(pdfBlob);
       const link = document.createElement('a');
       link.href = url;
@@ -88,7 +88,7 @@ export function LoanAgreementDocument() {
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-      
+
       console.log('✅ PDF downloaded successfully');
     } catch (error: any) {
       console.error('Error downloading PDF:', error);
@@ -103,32 +103,32 @@ export function LoanAgreementDocument() {
       const confirmed = window.confirm(
         `Send Loan Agreement PDF to ${agreementData?.borrower.email}?\n\nThe borrower will receive an email with the loan agreement attached.`
       );
-      
+
       if (!confirmed) return;
-      
+
       setEmailing(true);
-      
+
       const agreementElement = document.querySelector('.loan-agreement-content');
       if (!agreementElement) {
         alert('Loan Agreement content not found');
         return;
       }
-      
+
       const htmlContent = agreementElement.outerHTML;
-      
+
       const response = await adminApiService.emailKFSPDF(
         parseInt(loanId!),
         htmlContent,
         agreementData?.borrower.email,
         agreementData?.borrower.name
       );
-      
+
       if (response.success) {
         alert(`✅ Loan Agreement sent successfully to ${response.data.recipientEmail}`);
       } else {
         alert('Failed to send email: ' + response.message);
       }
-      
+
     } catch (error: any) {
       console.error('Error emailing PDF:', error);
       alert('Failed to send email: ' + (error.message || 'Unknown error'));
@@ -156,7 +156,7 @@ export function LoanAgreementDocument() {
   const formatAddress = (address: any) => {
     if (typeof address === 'string') return address;
     if (!address) return 'N/A';
-    
+
     const parts = [
       address.line1,
       address.line2,
@@ -165,7 +165,7 @@ export function LoanAgreementDocument() {
       address.pincode,
       address.country
     ].filter(Boolean);
-    
+
     return parts.join(', ') || 'N/A';
   };
 
@@ -209,15 +209,15 @@ export function LoanAgreementDocument() {
             Back
           </Button>
           <div className="flex gap-2">
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={handleDownload}
               disabled={downloading}
             >
               <Download className="w-4 h-4 mr-2" />
               {downloading ? 'Generating...' : 'Download PDF'}
             </Button>
-            <Button 
+            <Button
               variant="outline"
               onClick={handleEmail}
               disabled={emailing}
@@ -236,7 +236,7 @@ export function LoanAgreementDocument() {
       {/* Loan Agreement Document */}
       <div className="loan-agreement-content max-w-[210mm] mx-auto my-8 print:my-0 bg-white shadow-lg print:shadow-none">
         <div className="p-12" style={{ fontFamily: "'Times New Roman', Times, serif" }}>
-        
+
           {/* Header */}
           <div className="text-center mb-6" style={{ fontSize: '8pt', lineHeight: '1.6' }}>
             <strong>{agreementData.company.name}</strong><br />
@@ -273,7 +273,7 @@ export function LoanAgreementDocument() {
             <li className="mb-2">The Borrower confirms that they have read, understood, and accepted the terms of this Agreement, along with the Lender's Privacy Policy and Terms and Conditions, and agrees to comply with all provisions therein in consideration of availing the loan facility.</li>
             <li className="mb-2">Relying on the representations and information provided by the Borrower, the Lender has agreed to sanction the Loan for the purpose specified herein, subject to the terms and conditions contained in this Agreement.</li>
           </ol>
-          
+
           <div className="page-break-before" />
 
           <p className="font-bold mb-4" style={{ fontSize: '8pt' }}>NOW THIS LOAN AGREEMENT WITNESSETH AS FOLLOWS:</p>
@@ -292,7 +292,7 @@ export function LoanAgreementDocument() {
             <li className="mb-2">Lender may withhold or cancel the disbursement of the Loan or any installment thereof in the event of a breach of this Agreement or any applicable law by the Borrower.</li>
             <li className="mb-2">The Lender will decide on the grant of the Loan based on the merits of the application, at its sole discretion.</li>
           </ol>
-          
+
           <div className="page-break-before" />
 
           <ol type="i" start={10} style={{ fontSize: '8pt', lineHeight: '1.5', textAlign: 'justify', paddingLeft: '40px' }}>
@@ -353,7 +353,7 @@ export function LoanAgreementDocument() {
           <ol type="i" style={{ fontSize: '8pt', lineHeight: '1.5', textAlign: 'justify', paddingLeft: '40px' }}>
             <li className="mb-2">The Repayment Method and corresponding due dates as detailed under the Annexure -II shall be specified in the Loan agreement and KFS and the Borrower undertakes to make regular repayments in accordance with the Annexure -1.</li>
           </ol>
-          
+
           <div className="page-break-before" />
 
           <ol type="i" start={2} style={{ fontSize: '8pt', lineHeight: '1.5', textAlign: 'justify', paddingLeft: '40px' }}>
@@ -378,7 +378,7 @@ export function LoanAgreementDocument() {
             <li className="mb-2">The Borrower shall duly and punctually comply with all the terms and conditions this Agreement. The Borrower affirms that they are legally competent and possess the necessary legal authority to enter into, execute, and fulfill the obligations outlined in this Agreement. Borrower warrants that obtaining the Loan, complying with the terms and conditions of this Agreement, and executing this Agreement do not and will not violate any applicable laws or the Borrower's contractual obligations. Furthermore, the Borrower fully understands the terms of this Agreement and is both financially and legally competent of entering into this arrangement and performing all obligations stipulated herein.</li>
             <li className="mb-2">The Borrower shall be solely and unconditionally liable for the repayment of all amounts due and will make payments regardless of any reminders, demands, or notices issued. Borrower shall not withhold payment Lender under these terms and conditions, and agrees to receive updates, messages, or other communications with reference to the Loan on the designated mobile number or email address.</li>
           </ol>
-          
+
           <div className="page-break-before" />
 
           <ol type="i" start={4} style={{ fontSize: '8pt', lineHeight: '1.5', textAlign: 'justify', paddingLeft: '40px' }}>
@@ -399,7 +399,7 @@ export function LoanAgreementDocument() {
             <li className="mb-2">The Borrower understands and acknowledges that the Lender shall have absolute discretion, without assigning any reason to reject his / her Application Form and that the Lender shall not be responsible/liable in any manner whatsoever for such rejection.</li>
             <li className="mb-2">The Borrower hereby consents to the verification of the Know Your Customer (KYC) details by the Lender or their authorized representatives or agents.</li>
           </ol>
-          
+
           <div className="page-break-before" />
 
           <ol type="i" start={6} style={{ fontSize: '8pt', lineHeight: '1.5', textAlign: 'justify', paddingLeft: '40px' }}>
@@ -428,7 +428,7 @@ export function LoanAgreementDocument() {
           <ol type="i" style={{ fontSize: '8pt', lineHeight: '1.5', textAlign: 'justify', paddingLeft: '40px' }}>
             <li className="mb-2">Default shall have occurred in the performance of any of the covenants, conditions or agreements on the part of the Borrower under this Agreement in respect of the Loan and such default shall have continued over a period of 30 days after notice thereof shall have been given by the Lender to the Borrower, or if the Borrower fails to inform the Lender of the happening of event of default.</li>
           </ol>
-          
+
           <div className="page-break-before" />
 
           <ol type="i" start={2} style={{ fontSize: '8pt', lineHeight: '1.5', textAlign: 'justify', paddingLeft: '40px' }}>
@@ -450,7 +450,7 @@ export function LoanAgreementDocument() {
             <li className="mb-2">The Borrower acknowledges that the Lender may enforce payment of all outstanding amounts under this Agreement against the Borrower's estate and assets, and that this Agreement shall remain binding on the Borrower's heirs, executors, legal representatives, and administrators.</li>
             <li className="mb-2">Without prejudice to any other rights available to the Lender under this Agreement, the Lender shall have the right to initiate criminal proceedings or take any other appropriate legal action against the Borrower if, at its sole discretion, it has reasonable grounds to believe that the Borrower has provided any false information, misrepresented facts, or submitted forged documents or fabricated data. Further, if the Borrower becomes untraceable, the Lender reserves the right to contact the Borrower's family members, referees, or friends to ascertain the Borrower's whereabouts.</li>
           </ol>
-          
+
           <div className="page-break-before" />
 
           <h2 className="font-bold mt-5 mb-3" style={{ fontSize: '9pt', borderBottom: '1px solid #000', paddingBottom: '3px' }}>
@@ -480,7 +480,7 @@ export function LoanAgreementDocument() {
           <p style={{ fontSize: '8pt', lineHeight: '1.5', textAlign: 'justify', marginBottom: '10px' }}>
             The Lender has established an adequate grievance redressal policy to address any complaints or grievances from the Borrower with relation to the credit facility, which the Borrower may refer to on the Lender's website.
           </p>
-          
+
           <div className="page-break-before" />
 
           <h2 className="font-bold mt-5 mb-3" style={{ fontSize: '9pt', borderBottom: '1px solid #000', paddingBottom: '3px' }}>
@@ -504,7 +504,7 @@ export function LoanAgreementDocument() {
             <li className="mb-2">The Borrower shall not hold the Lender liable for the use of this information or for conducting any background checks and verifications;</li>
             <li className="mb-2">The Borrower grants the Lender consent to collect, store, process and utilise information and data about the Borrower as outlined in the Privacy Policy and Terms and Conditions of the Lender.</li>
           </ol>
-          
+
           <div className="page-break-before" />
 
           <h2 className="font-bold mt-5 mb-3" style={{ fontSize: '9pt', borderBottom: '1px solid #000', paddingBottom: '3px' }}>
@@ -560,7 +560,7 @@ export function LoanAgreementDocument() {
               Borrower Signature
             </div>
           </div>
-          
+
           <div className="page-break-before" />
 
           <h2 className="font-bold mb-4" style={{ fontSize: '9pt', borderBottom: '1px solid #000', paddingBottom: '3px' }}>
@@ -616,7 +616,7 @@ export function LoanAgreementDocument() {
           <h2 className="font-bold mt-8 mb-4" style={{ fontSize: '9pt', borderBottom: '1px solid #000', paddingBottom: '3px' }}>
             ANNEXURE II – Loan Facility Summary
           </h2>
-          
+
           {/* Loan Summary Table */}
           <table className="w-full border-collapse mb-4" style={{ fontSize: '8pt', border: '1px solid #000' }}>
             <thead>
@@ -702,7 +702,7 @@ export function LoanAgreementDocument() {
                     return deductFees + addFees + (agreementData.fees?.gst > 0 ? 2 : 1) + 2;
                   })()}
                 </td>
-                <td className="border border-black p-2">Interest ({agreementData.interest.rate_per_day}% per day for {agreementData.loan.loan_term_days} days)</td>
+                <td className="border border-black p-2">Interest ({((agreementData.interest.rate_per_day || 0) * 100).toFixed(2)}% per day for {agreementData.loan.loan_term_days} days)</td>
                 <td className="border border-black p-2">+{formatCurrency(agreementData.calculations.interest)}</td>
               </tr>
               <tr className="font-bold bg-gray-50">

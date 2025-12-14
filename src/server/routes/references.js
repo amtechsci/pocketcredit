@@ -10,7 +10,7 @@ router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
     await initializeDatabase();
     const userId = req.userId;
     const { references, alternate_mobile, company_name, company_email } = req.body;
-    
+
     // Get user's registered phone number
     const userData = await executeQuery('SELECT phone FROM users WHERE id = ?', [userId]);
     const userPhone = userData.length > 0 ? userData[0].phone : null;
@@ -18,7 +18,7 @@ router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
     if (!userId) {
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
-    
+
     // Validate references - exactly 3 required
     if (!references || !Array.isArray(references) || references.length === 0) {
       return res.status(400).json({ success: false, message: 'References array is required' });
@@ -26,24 +26,26 @@ router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
     if (references.length !== 3) {
       return res.status(400).json({ success: false, message: 'Exactly 3 references are required' });
     }
-    
-    // Validate alternate data
-    if (!alternate_mobile || !company_name || !company_email) {
-      return res.status(400).json({ success: false, message: 'Alternate mobile, company name, and company email are required' });
+
+    // Validate alternate mobile is required
+    if (!alternate_mobile) {
+      return res.status(400).json({ success: false, message: 'Alternate mobile is required' });
     }
-    
+
     // Validate alternate mobile format
     const phoneRegex = /^[6-9]\d{9}$/;
     if (!phoneRegex.test(alternate_mobile)) {
       return res.status(400).json({ success: false, message: 'Invalid alternate mobile number format' });
     }
-    
-    // Validate company email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(company_email)) {
-      return res.status(400).json({ success: false, message: 'Invalid company email format' });
+
+    // Validate company email format if provided
+    if (company_email) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(company_email)) {
+        return res.status(400).json({ success: false, message: 'Invalid company email format' });
+      }
     }
-    
+
     // Check if any reference phone matches user's own registered phone
     if (userPhone) {
       for (let i = 0; i < references.length; i++) {
@@ -51,13 +53,13 @@ router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
           return res.status(400).json({ success: false, message: `Reference ${i + 1}: Cannot use your own registered phone number` });
         }
       }
-      
+
       // Check if alternate mobile matches user's own registered phone
       if (alternate_mobile === userPhone) {
         return res.status(400).json({ success: false, message: 'Alternate mobile cannot be your own registered phone number' });
       }
     }
-    
+
     // Check for duplicate phone numbers across all references
     const allReferencePhones = references.map(ref => ref.phone);
     for (let i = 0; i < allReferencePhones.length; i++) {
@@ -67,12 +69,12 @@ router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
         }
       }
     }
-    
+
     // Check that alternate mobile is different from reference phones
     if (allReferencePhones.includes(alternate_mobile)) {
       return res.status(400).json({ success: false, message: 'Alternate mobile number cannot be same as any reference number' });
     }
-    
+
     // Final check: all numbers should be unique
     const allPhones = [...allReferencePhones, alternate_mobile];
     const uniquePhones = new Set(allPhones);
@@ -105,10 +107,26 @@ router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
       insertedRefs.push({ id: result.insertId, ...ref, relationship });
     }
 
-    // Update user with alternate data
+    // Update user with alternate data (only update company fields if provided)
+    const updateFields = ['alternate_mobile = ?'];
+    const updateValues = [alternate_mobile];
+
+    if (company_name) {
+      updateFields.push('company_name = ?');
+      updateValues.push(company_name);
+    }
+
+    if (company_email) {
+      updateFields.push('company_email = ?');
+      updateValues.push(company_email);
+    }
+
+    updateFields.push('updated_at = NOW()');
+    updateValues.push(userId);
+
     await executeQuery(
-      'UPDATE users SET alternate_mobile = ?, company_name = ?, company_email = ?, updated_at = NOW() WHERE id = ?',
-      [alternate_mobile, company_name, company_email, userId]
+      `UPDATE users SET ${updateFields.join(', ')} WHERE id = ?`,
+      updateValues
     );
 
     res.status(201).json({
@@ -152,8 +170,8 @@ router.get('/', requireAuth, async (req, res) => {
       [userId]
     );
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       data: {
         references: references || [],
         alternate_data: userData.length > 0 ? {

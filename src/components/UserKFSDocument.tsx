@@ -72,8 +72,8 @@ export function UserKFSDocument({ loanId }: UserKFSDocumentProps) {
 
   const calculateAPR = () => {
     if (!kfsData) return '0.00';
-    const totalCharges = kfsData.fees.processing_fee + kfsData.fees.gst + 
-                        (kfsData.fees.total_add_to_total || 0) + kfsData.calculations.interest;
+    const totalCharges = kfsData.fees.processing_fee + kfsData.fees.gst +
+      (kfsData.fees.total_add_to_total || 0) + kfsData.calculations.interest;
     const principal = kfsData.loan.sanctioned_amount;
     const days = kfsData.loan.loan_term_days;
     return ((totalCharges / principal) / days * 36500).toFixed(2);
@@ -184,7 +184,7 @@ export function UserKFSDocument({ loanId }: UserKFSDocumentProps) {
             <tr>
               <td className="border border-black p-2">6</td>
               <td className="border border-black p-2">Interest rate (%) and type (fixed or floating or hybrid)</td>
-              <td className="border border-black p-2" colSpan={3}>{kfsData.interest.rate || kfsData.interest.rate_per_day || '0'}% per day (fixed)</td>
+              <td className="border border-black p-2" colSpan={3}>{((kfsData.interest.rate_per_day || 0) * 100).toFixed(2)}% per day (fixed)</td>
             </tr>
             <tr>
               <td className="border border-black p-2">7</td>
@@ -350,7 +350,7 @@ export function UserKFSDocument({ loanId }: UserKFSDocumentProps) {
                 </ul>
                 <p className="mb-2"><strong>Clarification:</strong> For the avoidance of doubt, it is hereby clarified that the Penal Charges will be calculated on the principal overdue amount only and shall be levied distinctly and separately from the components of the principal overdue amount and the loan interest. These charges are not added to the rate of interest against which the loan has been advanced and are also not subject to any further interest. Please note that these charges are calculated in a manner so as to be commensurate to the default and are levied in a non-discriminatory manner for this loan product.</p>
                 <p><strong>b) Annualized Rate of Interest post-due date:</strong></p>
-                <p>In case of loan repayment overdue, basic interest charges shall continue to accrue at the same rate at {kfsData.interest.rate || kfsData.interest.rate_per_day || '0'}% per day on the Principal overdue amount from the First Overdue Day to Till the Loan is closed.</p>
+                <p>In case of loan repayment overdue, basic interest charges shall continue to accrue at the same rate at {((kfsData.interest.rate_per_day || 0) * 100).toFixed(2)}% per day on the Principal overdue amount from the First Overdue Day to Till the Loan is closed.</p>
               </td>
             </tr>
             <tr>
@@ -523,7 +523,7 @@ export function UserKFSDocument({ loanId }: UserKFSDocumentProps) {
             <tr>
               <td className="border border-black p-2">4</td>
               <td className="border border-black p-2">Rate of Interest</td>
-              <td className="border border-black p-2">{kfsData.interest.rate || kfsData.interest.rate_per_day || '0'}% per day</td>
+              <td className="border border-black p-2">{((kfsData.interest.rate_per_day || 0) * 100).toFixed(2)}% per day</td>
             </tr>
             <tr>
               <td className="border border-black p-2">5</td>
@@ -535,8 +535,8 @@ export function UserKFSDocument({ loanId }: UserKFSDocumentProps) {
               <td className="border border-black p-2">Fee/ Charges payable (in Rupees)</td>
               <td className="border border-black p-2">
                 {formatCurrency(
-                  kfsData.fees.processing_fee + 
-                  kfsData.fees.gst + 
+                  kfsData.fees.processing_fee +
+                  kfsData.fees.gst +
                   (kfsData.fees.total_add_to_total || 0)
                 )}
               </td>
@@ -552,8 +552,8 @@ export function UserKFSDocument({ loanId }: UserKFSDocumentProps) {
               <td className="border border-black p-2"></td>
               <td className="border border-black p-2">B Payable to third-party routed through RE</td>
               <td className="border border-black p-2">
-                {kfsData.fees.total_add_to_total > 0 
-                  ? formatCurrency(kfsData.fees.total_add_to_total) 
+                {kfsData.fees.total_add_to_total > 0
+                  ? formatCurrency(kfsData.fees.total_add_to_total)
                   : 'N/A'}
               </td>
             </tr>
@@ -634,11 +634,11 @@ export function UserKFSDocument({ loanId }: UserKFSDocumentProps) {
 
         <div className="mb-3 text-xs leading-relaxed">
           <p className="mb-2">With reference to your application for availing a loan we are pleased to sanction the same subject to the terms and conditions as mentioned above in Key Facts Statement in PART A and in the loan agreement to be executed. Payable in the manner as mentioned in the Key Facts Statement (KFS) above & in the loan agreement to be executed.</p>
-          
+
           <p className="mb-2">The Borrower understands that the Lender has adopted risk-based pricing which is arrived by considering broad parameters like the borrower's financial and credit risk profile. Hence the rates of Interest will be different for different categories of borrowers based on the internal credit risk algorithms.</p>
-          
+
           <p className="mb-2">Please note that this communication should not be construed as giving rise to any obligation on the part of LSP/DLA/RE unless the loan agreement and the other documents relating to the above assistance are executed by you in such form and manner as may be required by LSP/DLA/RE.</p>
-          
+
           <p className="mb-3">We look forward to your availing of the sanctioned loan and assure you our best service always.</p>
         </div>
 

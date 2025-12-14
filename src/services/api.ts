@@ -409,15 +409,15 @@ class ApiService {
       relation: string;
     }>;
     alternate_mobile: string;
-    company_name: string;
-    company_email: string;
+    company_name?: string;
+    company_email?: string;
   }): Promise<ApiResponse<{
     references_count: number;
     user_id: number;
     alternate_data: {
       alternate_mobile: string;
-      company_name: string;
-      company_email: string;
+      company_name?: string;
+      company_email?: string;
     };
   }>> {
     return this.request('POST', '/references', data);

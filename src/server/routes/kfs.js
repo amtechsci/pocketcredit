@@ -16,22 +16,22 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     await initializeDatabase();
     const { loanId } = req.params;
     const userId = req.userId;
-    
+
     console.log('📄 User fetching KFS for loan ID:', loanId);
-    
+
     // Verify loan belongs to user
     const loans = await executeQuery(`
       SELECT id, user_id, status FROM loan_applications 
       WHERE id = ? AND user_id = ?
     `, [loanId, userId]);
-    
+
     if (!loans || loans.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Loan application not found or access denied'
       });
     }
-    
+
     // Use the same KFS generation logic as admin endpoint
     // Fetch full loan application details
     const fullLoans = await executeQuery(`
@@ -46,25 +46,25 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       INNER JOIN users u ON la.user_id = u.id
       WHERE la.id = ?
     `, [loanId]);
-    
+
     if (!fullLoans || fullLoans.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Loan application not found'
       });
     }
-    
+
     const loan = fullLoans[0];
-    
+
     // Get address details
     const addresses = await executeQuery(`
       SELECT * FROM addresses 
       WHERE user_id = ? AND is_primary = 1 
       LIMIT 1
     `, [loan.user_id]);
-    
+
     const address = addresses[0] || {};
-    
+
     // Get employment details and income range from users
     const employment = await executeQuery(`
       SELECT ed.*, u.income_range 
@@ -73,9 +73,9 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       WHERE ed.user_id = ? 
       LIMIT 1
     `, [loan.user_id]);
-    
+
     const employmentDetails = employment[0] || {};
-    
+
     // Get bank details for the loan application
     const bankDetailsQuery = await executeQuery(`
       SELECT bd.* FROM bank_details bd
@@ -83,9 +83,9 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       WHERE la.id = ?
       LIMIT 1
     `, [loanId]);
-    
+
     const bankDetails = bankDetailsQuery[0] || null;
-    
+
     // Convert income_range to approximate monthly income for display
     const getMonthlyIncomeFromRange = (range) => {
       const ranges = {
@@ -98,16 +98,16 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       };
       return ranges[range] || 0;
     };
-    
+
     const monthlyIncome = getMonthlyIncomeFromRange(employmentDetails.income_range);
-    
+
     // Get loan plan details
     const loanPlans = await executeQuery(`
       SELECT * FROM loan_plans WHERE id = ?
     `, [loan.loan_plan_id]);
-    
+
     const loanPlan = loanPlans[0] || {};
-    
+
     // Prepare loan data for calculation
     const loanData = {
       loan_amount: loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0,
@@ -115,11 +115,11 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       status: loan.status,
       disbursed_at: loan.disbursed_at
     };
-    
+
     // Prepare plan data for calculation
     const planSnapshot = loan.plan_snapshot ? (typeof loan.plan_snapshot === 'string' ? JSON.parse(loan.plan_snapshot) : loan.plan_snapshot) : loanPlan;
     const defaultRepaymentDays = planSnapshot.repayment_days || planSnapshot.total_duration_days || loanPlan.repayment_days || loanPlan.total_duration_days || 15;
-    
+
     const planData = {
       plan_id: planSnapshot.plan_id || loanPlan.id || null,
       plan_type: planSnapshot.plan_type || loanPlan.plan_type || 'single',
@@ -131,42 +131,43 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       calculate_by_salary_date: planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true || loanPlan.calculate_by_salary_date === 1 || false,
       fees: planSnapshot.fees || loanPlan.fees || []
     };
-    
+
     // Get user data for salary date calculation
+    const userResult = await executeQuery(`
+      SELECT salary_date FROM users WHERE id = ?
+    `, [loan.user_id]);
+
+    const userSalaryDate = userResult[0]?.salary_date || null;
+
     const userData = {
       user_id: loan.user_id,
-      salary_date: loan.salary_date || null
+      salary_date: userSalaryDate
     };
-    
-    // For repayment schedule: calculate interest based on actual days elapsed from disbursed date
-    // If loan has been disbursed, use actual days from disbursed_at to today
-    let calculationOptions = {};
-    if (loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)) {
-      // Calculate actual days from disbursed date to today (inclusive)
-      const actualDays = calculateTotalDays(loan.disbursed_at);
-      calculationOptions = {
-        customDays: actualDays,
-        calculationDate: new Date() // Use today as calculation date
-      };
-      console.log(`📅 Loan disbursed on ${loan.disbursed_at}, calculating interest for ${actualDays} days (from disbursed date to today)`);
-    }
-    
-    // Calculate loan values with actual days if disbursed, otherwise use plan days
+
+    // KFS should show the original planned loan terms, not actual elapsed days
+    // Use plan's repayment days calculation (could be fixed days or salary-based)
+    const calculationOptions = {
+      calculationDate: loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)
+        ? new Date(loan.disbursed_at)  // Use disbursed date for calculation
+        : new Date()  // Use today for pending loans
+    };
+
+    // Calculate loan values using plan days (not actual elapsed days)
     const loanValues = calculateCompleteLoanValues(loanData, planData, userData, calculationOptions);
-    
+
     // Parse fees breakdown if it's a JSON string
     let feesBreakdown = [];
     if (loan.fees_breakdown) {
       try {
-        feesBreakdown = typeof loan.fees_breakdown === 'string' 
-          ? JSON.parse(loan.fees_breakdown) 
+        feesBreakdown = typeof loan.fees_breakdown === 'string'
+          ? JSON.parse(loan.fees_breakdown)
           : loan.fees_breakdown;
       } catch (e) {
         console.error('Error parsing fees_breakdown:', e);
         feesBreakdown = [];
       }
     }
-    
+
     // Build KFS data structure (same as admin endpoint)
     const kfsData = {
       company: {
@@ -189,8 +190,8 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         principal_amount: loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0,
         disbursal_amount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
         disbursed_at: loan.disbursed_at || null,
-        loan_term_days: loan.loan_term_days || loanPlan.tenure_days || loanPlan.repayment_days || loanPlan.total_duration_days || 0,
-        loan_term_months: Math.ceil((loan.loan_term_days || loanPlan.tenure_days || loanPlan.repayment_days || loanPlan.total_duration_days || 0) / 30),
+        loan_term_days: loanValues.interest?.days || loan.loan_term_days || loanPlan.tenure_days || loanPlan.repayment_days || loanPlan.total_duration_days || 0,
+        loan_term_months: Math.ceil((loanValues.interest?.days || loan.loan_term_days || loanPlan.tenure_days || loanPlan.repayment_days || loanPlan.total_duration_days || 0) / 30),
         interest_rate: loan.interest_rate || loanPlan.base_interest_rate || 0,
         repayment_frequency: loanPlan.repayment_frequency || 'Monthly'
       },
@@ -273,14 +274,14 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       } : null,
       generated_at: new Date().toISOString()
     };
-    
+
     console.log('✅ KFS data generated successfully for user');
-    
+
     res.json({
       success: true,
       data: kfsData
     });
-    
+
   } catch (error) {
     console.error('❌ Error generating KFS for user:', error);
     res.status(500).json({
@@ -299,9 +300,9 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
     const { loanId } = req.params;
-    
+
     console.log('📄 Generating KFS for loan ID:', loanId);
-    
+
     // Fetch loan application details including dynamic fees
     const loans = await executeQuery(`
       SELECT 
@@ -315,25 +316,25 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       INNER JOIN users u ON la.user_id = u.id
       WHERE la.id = ?
     `, [loanId]);
-    
+
     if (!loans || loans.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Loan application not found'
       });
     }
-    
+
     const loan = loans[0];
-    
+
     // Get address details
     const addresses = await executeQuery(`
       SELECT * FROM addresses 
       WHERE user_id = ? AND is_primary = 1 
       LIMIT 1
     `, [loan.user_id]);
-    
+
     const address = addresses[0] || {};
-    
+
     // Get employment details and income range from users
     const employment = await executeQuery(`
       SELECT ed.*, u.income_range 
@@ -342,9 +343,9 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       WHERE ed.user_id = ? 
       LIMIT 1
     `, [loan.user_id]);
-    
+
     const employmentDetails = employment[0] || {};
-    
+
     // Convert income_range to approximate monthly income for display
     const getMonthlyIncomeFromRange = (range) => {
       if (!range) return 0;
@@ -356,45 +357,45 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       };
       return rangeMap[range] || 0;
     };
-    
+
     // Parse plan snapshot
     let planSnapshot = null;
     if (loan.plan_snapshot) {
       try {
-        planSnapshot = typeof loan.plan_snapshot === 'string' 
-          ? JSON.parse(loan.plan_snapshot) 
+        planSnapshot = typeof loan.plan_snapshot === 'string'
+          ? JSON.parse(loan.plan_snapshot)
           : loan.plan_snapshot;
       } catch (e) {
         console.error('Error parsing plan_snapshot:', e);
       }
     }
-    
+
     // Parse fees breakdown if available
     let feesBreakdown = [];
     if (loan.fees_breakdown) {
       try {
-        feesBreakdown = typeof loan.fees_breakdown === 'string' 
-          ? JSON.parse(loan.fees_breakdown) 
+        feesBreakdown = typeof loan.fees_breakdown === 'string'
+          ? JSON.parse(loan.fees_breakdown)
           : loan.fees_breakdown;
       } catch (e) {
         console.error('Error parsing fees_breakdown:', e);
       }
     }
-    
+
     // Fetch user data for salary date calculation
     const users = await executeQuery(
       `SELECT id, salary_date FROM users WHERE id = ?`,
       [loan.user_id]
     );
-    
+
     const userData = users && users.length > 0 ? {
       user_id: users[0].id,
       salary_date: users[0].salary_date
     } : { user_id: null, salary_date: null };
-    
+
     // Prepare data for centralized calculation
     const principal = parseFloat(loan.loan_amount || 0);
-    
+
     // If no plan snapshot, create one from fees_breakdown or use defaults
     if (!planSnapshot) {
       planSnapshot = {
@@ -409,7 +410,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         }))
       };
     }
-    
+
     // Ensure fees array exists in plan snapshot
     if (!planSnapshot.fees && feesBreakdown.length > 0) {
       planSnapshot.fees = feesBreakdown.map(fee => ({
@@ -418,18 +419,18 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         application_method: fee.application_method || 'deduct_from_disbursal'
       }));
     }
-    
+
     const loanData = {
       loan_amount: principal,
       loan_id: loan.id,
       status: loan.status,
       disbursed_at: loan.disbursed_at
     };
-    
+
     // Ensure planData has all required fields for calculateInterestDays
     // Default repayment_days to 15 if not set (for single payment plans)
     const defaultRepaymentDays = planSnapshot.repayment_days || planSnapshot.total_duration_days || 15;
-    
+
     const planData = {
       plan_id: planSnapshot.plan_id || null,
       plan_type: planSnapshot.plan_type || 'single',
@@ -441,12 +442,12 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       calculate_by_salary_date: planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true || false,
       fees: planSnapshot.fees || []
     };
-    
+
     // Determine calculation date - use disbursed_at if loan is disbursed, otherwise use today
     const calculationDate = loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)
       ? new Date(loan.disbursed_at)
       : new Date();
-    
+
     // Use centralized calculation function
     let calculations;
     try {
@@ -460,7 +461,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       console.error('User Data:', JSON.stringify(userData, null, 2));
       throw error;
     }
-    
+
     // Extract values for KFS
     const processingFee = calculations.totals.disbursalFee;
     const gst = calculations.totals.disbursalFeeGST + calculations.totals.repayableFeeGST;
@@ -468,12 +469,12 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     const interest = calculations.interest.amount;
     const days = calculations.interest.days;
     const totalRepayable = calculations.total.repayable;
-    
+
     // Calculate APR (Annual Percentage Rate)
     // APR = ((All Fees + GST + Interest) / Loan Amount) / Days * 36500
     const totalCharges = processingFee + gst + calculations.totals.repayableFee + interest;
     const apr = days > 0 ? ((totalCharges / principal) / days) * 36500 : 0;
-    
+
     // Generate due date from repayment date or calculate
     let dueDate;
     if (calculations.interest.repayment_date) {
@@ -483,7 +484,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       dueDate = new Date(today);
       dueDate.setDate(today.getDate() + days);
     }
-    
+
     // Prepare KFS data
     const kfsData = {
       // Company Information
@@ -498,7 +499,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         website: 'www.pocketcredit.in',
         jurisdiction: 'Gurugram, Haryana'
       },
-      
+
       // Loan Details
       loan: {
         id: loan.id,
@@ -514,7 +515,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         disbursed_date: loan.disbursed_at,
         due_date: dueDate.toISOString()
       },
-      
+
       // Borrower Details
       borrower: {
         name: `${loan.first_name} ${loan.last_name || ''}`.trim(),
@@ -542,7 +543,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           monthly_income: getMonthlyIncomeFromRange(employmentDetails.income_range)
         }
       },
-      
+
       // Interest & Charges
       interest: {
         rate_per_day: calculations.interest.rate_per_day,
@@ -550,7 +551,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         total_interest: interest,
         calculation_days: days
       },
-      
+
       // Fees & Charges (dynamic fees support with GST)
       fees: {
         processing_fee: processingFee,
@@ -581,7 +582,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         gst_on_deduct_from_disbursal: calculations.totals.disbursalFeeGST,
         gst_on_add_to_total: calculations.totals.repayableFeeGST
       },
-      
+
       // Calculations
       calculations: {
         principal: principal,
@@ -592,7 +593,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         total_repayable: totalRepayable,
         apr: parseFloat(apr.toFixed(2))
       },
-      
+
       // Repayment Schedule
       repayment: {
         type: 'Bullet Payment',
@@ -610,7 +611,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           }
         ]
       },
-      
+
       // Penal Charges (with 18% GST)
       penal_charges: {
         late_payment_fee: '4% of overdue principal + 18% GST (one-time on first day)',
@@ -620,7 +621,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         gst_on_penalties: 18,
         note: 'All penalty charges are subject to 18% GST'
       },
-      
+
       // Grievance Redressal
       grievance: {
         nodal_officer: {
@@ -635,14 +636,14 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           email: 'compliance@pocketcredit.in'
         }
       },
-      
+
       // Digital Loan Specific
       digital_loan: {
         cooling_off_period: '3 days',
         lsp_list_url: 'https://pocketcredit.in/lsp',
         payment_method: 'Digital payment through app or payment link'
       },
-      
+
       // Additional Info
       additional: {
         loan_transferable: 'Yes',
@@ -650,19 +651,19 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         recovery_clause: '1(X)',
         grievance_clause: '12'
       },
-      
+
       // Generated metadata
       generated_at: new Date().toISOString(),
       generated_by: req.admin?.id || 'system'
     };
-    
+
     console.log('✅ KFS data generated successfully');
-    
+
     res.json({
       success: true,
       data: kfsData
     });
-    
+
   } catch (error) {
     console.error('❌ Error generating KFS:', error);
     res.status(500).json({
@@ -681,50 +682,50 @@ router.post('/:loanId/generate-pdf', authenticateAdmin, async (req, res) => {
   try {
     const { loanId } = req.params;
     const { htmlContent } = req.body;
-    
+
     if (!htmlContent) {
       return res.status(400).json({
         success: false,
         message: 'HTML content is required'
       });
     }
-    
+
     console.log('📄 Generating PDF for loan ID:', loanId);
-    
+
     // Get loan data for filename
     const db = await initializeDatabase();
     const [loans] = await db.execute(
       'SELECT application_number FROM loan_applications WHERE id = ?',
       [loanId]
     );
-    
+
     if (!loans || loans.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Loan not found'
       });
     }
-    
+
     const applicationNumber = loans[0].application_number;
     const filename = `KFS_${applicationNumber}.pdf`;
-    
+
     // Generate PDF
     const pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
-    
+
     console.log('📤 Sending PDF, size:', pdfResult.buffer.length, 'bytes');
-    
+
     // Set headers for download
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Length', pdfResult.buffer.length);
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Accept-Ranges', 'bytes');
-    
+
     // Send PDF buffer directly
     res.end(pdfResult.buffer, 'binary');
-    
+
     console.log('✅ PDF sent successfully');
-    
+
   } catch (error) {
     console.error('❌ Error generating PDF:', error);
     res.status(500).json({
@@ -743,16 +744,16 @@ router.post('/:loanId/email-pdf', authenticateAdmin, async (req, res) => {
   try {
     const { loanId } = req.params;
     const { htmlContent, recipientEmail, recipientName } = req.body;
-    
+
     if (!htmlContent) {
       return res.status(400).json({
         success: false,
         message: 'HTML content is required'
       });
     }
-    
+
     console.log('📧 Generating and emailing PDF for loan ID:', loanId);
-    
+
     // Get loan data
     const db = await initializeDatabase();
     const [loans] = await db.execute(`
@@ -763,24 +764,24 @@ router.post('/:loanId/email-pdf', authenticateAdmin, async (req, res) => {
       INNER JOIN users u ON la.user_id = u.id
       WHERE la.id = ?
     `, [loanId]);
-    
+
     if (!loans || loans.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Loan not found'
       });
     }
-    
+
     const loan = loans[0];
     const filename = `KFS_${loan.application_number}.pdf`;
-    
+
     // Generate PDF
     const pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
-    
+
     // Prepare email data
     const emailRecipient = recipientEmail || loan.email;
     const emailName = recipientName || `${loan.first_name} ${loan.last_name}`;
-    
+
     // Send email
     const emailResult = await emailService.sendKFSEmail({
       loanId: loan.id,
@@ -796,7 +797,7 @@ router.post('/:loanId/email-pdf', authenticateAdmin, async (req, res) => {
       pdfFilename: filename,
       sentBy: req.admin?.id
     });
-    
+
     res.json({
       success: true,
       message: 'PDF generated and email sent successfully',
@@ -806,9 +807,9 @@ router.post('/:loanId/email-pdf', authenticateAdmin, async (req, res) => {
         messageId: emailResult.messageId
       }
     });
-    
+
     console.log('✅ PDF emailed successfully');
-    
+
   } catch (error) {
     console.error('❌ Error emailing PDF:', error);
     res.status(500).json({
@@ -826,14 +827,14 @@ router.post('/:loanId/email-pdf', authenticateAdmin, async (req, res) => {
 router.get('/:loanId/email-history', authenticateAdmin, async (req, res) => {
   try {
     const { loanId } = req.params;
-    
+
     const history = await emailService.getEmailHistory(loanId);
-    
+
     res.json({
       success: true,
       data: history
     });
-    
+
   } catch (error) {
     console.error('❌ Error fetching email history:', error);
     res.status(500).json({
