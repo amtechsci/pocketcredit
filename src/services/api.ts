@@ -1243,6 +1243,28 @@ class ApiService {
   async getEnachSubscription(applicationId: number): Promise<ApiResponse<any>> {
     return this.request('GET', `/enach/subscription/${applicationId}`);
   }
+
+  /**
+   * Payment Gateway APIs (One-time repayments)
+   */
+
+  /**
+   * Create payment order for loan repayment
+   */
+  async createPaymentOrder(loanId: number, amount: number): Promise<ApiResponse<{
+    orderId: string;
+    paymentSessionId: string;
+    checkoutUrl: string;
+  }>> {
+    return this.request('POST', '/payment/create-order', { loanId, amount });
+  }
+
+  /**
+   * Get payment order status
+   */
+  async getPaymentOrderStatus(orderId: string): Promise<ApiResponse<any>> {
+    return this.request('GET', `/payment/order-status/${orderId}`);
+  }
 }
 
 // Export singleton instance

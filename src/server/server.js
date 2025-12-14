@@ -228,6 +228,10 @@ const enachWebhookRoutes = require('./routes/enachWebhooks');
 app.use('/api/enach', enachRoutes);
 app.use('/api/enach', enachWebhookRoutes);  // Webhooks on /api/enach/webhook
 
+// Payment Gateway routes (One-time payments)
+const paymentRoutes = require('./routes/payment');
+app.use('/api/payment', paymentRoutes);
+
 
 
 // Digitap API routes

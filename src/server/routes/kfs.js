@@ -159,9 +159,34 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     let feesBreakdown = [];
     if (loan.fees_breakdown) {
       try {
-        feesBreakdown = typeof loan.fees_breakdown === 'string'
+        const parsedFees = typeof loan.fees_breakdown === 'string'
           ? JSON.parse(loan.fees_breakdown)
           : loan.fees_breakdown;
+
+
+        // Transform old fee structure to new structure
+        feesBreakdown = parsedFees.map(fee => {
+          // If fee already has application_method, use as-is
+          if (fee.application_method) {
+            return {
+              fee_name: fee.fee_name || fee.name,
+              amount: fee.amount,
+              application_method: fee.application_method,
+              gst_amount: fee.gst_amount,
+              total_with_gst: fee.total_with_gst
+            };
+          }
+
+          // Transform old structure: assume processing fees are deducted from disbursal
+          return {
+            fee_name: fee.name || 'Processing Fee',
+            amount: fee.amount,
+            application_method: 'deduct_from_disbursal', // Default for old fees
+            gst_amount: fee.gst_amount,
+            total_with_gst: fee.total_with_gst
+          };
+        });
+
       } catch (e) {
         console.error('Error parsing fees_breakdown:', e);
         feesBreakdown = [];
@@ -370,17 +395,44 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // Parse fees breakdown if available
+    // Parse fees breakdown if it's a JSON string (Admin endpoint)
     let feesBreakdown = [];
     if (loan.fees_breakdown) {
       try {
-        feesBreakdown = typeof loan.fees_breakdown === 'string'
+        const parsedFees = typeof loan.fees_breakdown === 'string'
           ? JSON.parse(loan.fees_breakdown)
           : loan.fees_breakdown;
+
+
+        // Transform old fee structure to new structure
+        feesBreakdown = parsedFees.map(fee => {
+          // If fee already has application_method, use as-is
+          if (fee.application_method) {
+            return {
+              fee_name: fee.fee_name || fee.name,
+              amount: fee.amount,
+              application_method: fee.application_method,
+              gst_amount: fee.gst_amount,
+              total_with_gst: fee.total_with_gst
+            };
+          }
+
+          // Transform old structure: assume processing fees are deducted from disbursal
+          return {
+            fee_name: fee.name || 'Processing Fee',
+            amount: fee.amount,
+            application_method: 'deduct_from_disbursal', // Default for old fees
+            gst_amount: fee.gst_amount,
+            total_with_gst: fee.total_with_gst
+          };
+        });
+
       } catch (e) {
         console.error('Error parsing fees_breakdown:', e);
+        feesBreakdown = [];
       }
     }
+
 
     // Fetch user data for salary date calculation
     const users = await executeQuery(

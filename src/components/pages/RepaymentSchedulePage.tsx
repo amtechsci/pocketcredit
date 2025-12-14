@@ -221,7 +221,7 @@ export const RepaymentSchedulePage = () => {
               </div>
             </div>
           </div>
-          
+
           <CardContent className="p-6 space-y-6">
             {/* Total Outstanding - Prominent Display */}
             <div className="text-center py-4 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border-2 border-blue-200">
@@ -270,9 +270,36 @@ export const RepaymentSchedulePage = () => {
             <div className="space-y-3 pt-4 border-t border-gray-200">
               <Button
                 className="w-full h-14 text-lg font-bold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all transform hover:scale-[1.02]"
-                onClick={() => {
-                  toast.success('Redirecting to Payment Gateway...');
-                  // navigate('/payment-gateway') 
+                onClick={async () => {
+                  try {
+                    toast.loading('Creating payment order...');
+
+                    // Get loan ID - try multiple sources
+                    const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
+                    const amount = calculations.total_repayable;
+
+                    console.log('💳 Payment Data:', { loanId, amount });
+
+                    if (!loanId || !amount) {
+                      toast.error('Unable to process payment');
+                      return;
+                    }
+
+                    // Create payment order
+                    const response = await apiService.createPaymentOrder(loanId, amount);
+
+                    if (response.success && response.data?.checkoutUrl) {
+                      toast.success('Redirecting to payment gateway...');
+
+                      // Redirect to Cashfree checkout
+                      window.location.href = response.data.checkoutUrl;
+                    } else {
+                      toast.error(response.message || 'Failed to create payment order');
+                    }
+                  } catch (error: any) {
+                    console.error('Payment error:', error);
+                    toast.error(error.message || 'Failed to initiate payment');
+                  }
                 }}
               >
                 Repay Now
