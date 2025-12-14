@@ -3028,8 +3028,8 @@ export function UserProfileDetail() {
                       }
 
                       return (
-                        <>
-                          <tr key={index} className="hover:bg-gray-50">
+                        <React.Fragment key={loanId}>
+                          <tr className="hover:bg-gray-50">
                             {/* Loan ID */}
                             <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                               {shortLoanId}
@@ -3170,7 +3170,7 @@ export function UserProfileDetail() {
                             </td>
                           </tr>
                           {expandedLoanDocuments[loanId] && (
-                            <tr key={`${index}-docs`}>
+                            <tr>
                               <td colSpan={13} className="px-3 py-4 bg-gray-50">
                                 {documentsLoading[loanId] ? (
                                   <div className="text-center py-4">
@@ -3228,7 +3228,7 @@ export function UserProfileDetail() {
                               </td>
                             </tr>
                           )}
-                        </>
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
