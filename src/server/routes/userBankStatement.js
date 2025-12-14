@@ -343,7 +343,7 @@ router.post('/initiate-bank-statement', requireAuth, async (req, res) => {
     // Routes are mounted at /api/bank-statement, so paths are relative to that
     // apiUrl: production includes /api, development doesn't
     const returnUrl = isDevelopment ? `${apiUrl}/api/bank-statement/bank-data/success` : `${apiUrl}/api/bank-statement/bank-data/success`;
-    const webhookUrl = isDevelopment ? `${apiUrl}/api/bank-statement/bank-data/webhook` : `${apiUrl}/bank-statement/bank-data/webhook`;
+    const webhookUrl = isDevelopment ? `${apiUrl}/api/bank-statement/bank-data/webhook` : `${apiUrl}/api/bank-statement/bank-data/webhook`;
 
     console.log('🔗 URLs configured:');
     console.log('   Return URL:', returnUrl);
@@ -611,8 +611,8 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
         await executeQuery(
           `UPDATE user_bank_statements 
            SET status = ?, transaction_data = ?, updated_at = NOW() 
-           WHERE request_id = ?`,
-          [newStatus, JSON.stringify(digitapStatus.data.txn_status), statement.request_id]
+           WHERE request_id = ? OR client_ref_num = ?`,
+          [newStatus, JSON.stringify(digitapStatus.data.txn_status), statement.request_id, statement.client_ref_num]
         );
 
         statement.status = newStatus;
@@ -641,13 +641,17 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     }
 
     // If status is completed but report_data is empty, fetch it
-    if (hasStatement && !statement.report_data && (txnId || statement.client_ref_num)) {
+    // Added retry logic - if status is completed for a long time but no report, try refetching
+    // But limit retries? For now, we rely on the check below.
+    if ((hasStatement && !statement.report_data && (txnId || statement.client_ref_num)) ||
+      (statement.status === 'completed' && !statement.report_data)) {
       console.log('📊 Status is completed but report_data is empty, fetching report...');
       console.log(`📊 Using ${txnId ? `txn_id=${txnId}` : `client_ref_num=${statement.client_ref_num}`} to fetch report`);
 
       try {
         // Fetch report from Digitap - use txn_id if available, otherwise use client_ref_num
         // IMPORTANT: When using txn_id, do NOT send client_ref_num (API doesn't allow both)
+        console.log(`📊 Attempting fetch with txnId: ${txnId}, clientRefNum: ${statement.client_ref_num}`);
         const reportResult = txnId
           ? await retrieveBankStatementReport(null, 'json', txnId)
           : await retrieveBankStatementReport(statement.client_ref_num, 'json');
