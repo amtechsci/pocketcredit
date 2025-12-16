@@ -93,7 +93,8 @@ async function saveUserInfoFromDigilocker(userId, kycData, transactionId) {
     } else {
       // Mark other digilocker records as not primary
       await executeQuery(
-        `UPDATE user_info SET is_primary = 0 WHERE user_id = ? AND source = 'digilocker'`
+        `UPDATE user_info SET is_primary = 0 WHERE user_id = ? AND source = 'digilocker'`,
+        [userId]
       );
 
       // Insert new record

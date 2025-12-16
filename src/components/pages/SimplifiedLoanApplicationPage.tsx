@@ -187,13 +187,16 @@ export function SimplifiedLoanApplicationPage() {
 
   // Generate loan amount options based on user's limit
   const generateLoanAmountOptions = (limit: number): number[] => {
-    if (limit < 5000) {
+    // Ensure limit is an integer
+    const intLimit = Math.round(limit);
+    
+    if (intLimit < 5000) {
       // For very small limits, just return the limit
-      return [limit];
+      return [intLimit];
     }
 
     // Calculate base increment (limit / 5)
-    const baseIncrement = limit / 5;
+    const baseIncrement = intLimit / 5;
     
     // Round to nearest nice number from common increments
     const niceNumbers = [1000, 2000, 4000, 5000, 10000, 20000, 50000, 100000];
@@ -222,18 +225,18 @@ export function SimplifiedLoanApplicationPage() {
     // Generate 4 options with the increment
     const options: number[] = [];
     for (let i = 1; i <= 4; i++) {
-      const amount = increment * i;
-      if (amount < limit) {
+      const amount = Math.round(increment * i);
+      if (amount < intLimit) {
         options.push(amount);
       }
     }
     
-    // Always add the max limit as the last option
-    options.push(limit);
+    // Always add the max limit as the last option (as integer)
+    options.push(intLimit);
     
     // Ensure we have at least 2 options and at most 5
     if (options.length < 2) {
-      return [Math.min(increment, limit), limit];
+      return [Math.min(increment, intLimit), intLimit];
     }
     
     return options.slice(0, 5);

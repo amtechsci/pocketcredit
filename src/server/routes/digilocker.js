@@ -136,12 +136,10 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
     console.log('🔐 Generating Digilocker KYC URL:', { uid, mobile: mobile_number });
 
     // Call Digilocker API to generate KYC URL
-    // Production: https://api.digitap.ai/ent/v1/kyc/generate-url
-    // UAT/Demo: https://apidemo.digitap.work/ent/v1/kyc/generate-url
-    const digilockerApiUrl = process.env.DIGILOCKER_API_URL || 
-      (process.env.NODE_ENV === 'production' 
-        ? 'https://api.digitap.ai/ent/v1/kyc/generate-url'
-        : 'https://apidemo.digitap.work/ent/v1/kyc/generate-url');
+    const digilockerApiUrl = process.env.DIGILOCKER_API_URL;
+    if (!digilockerApiUrl) {
+      throw new Error('DIGILOCKER_API_URL environment variable is required');
+    }
     
     // Get auth token from env or construct from client_id:client_secret
     let authToken = process.env.DIGILOCKER_AUTH_TOKEN;
@@ -328,12 +326,10 @@ router.post('/fetch-kyc-data', requireAuth, async (req, res) => {
     console.log('📥 Fetching KYC data from Digilocker for txnId:', transaction_id);
 
     // Call Digilocker API to fetch actual KYC data
-    // Production: https://api.digitap.ai/ent/v1/kyc/fetch-data
-    // UAT/Demo: https://apidemo.digitap.work/ent/v1/kyc/fetch-data
-    const fetchApiUrl = process.env.DIGILOCKER_FETCH_API_URL || 
-      (process.env.NODE_ENV === 'production'
-        ? 'https://api.digitap.ai/ent/v1/kyc/fetch-data'
-        : 'https://apidemo.digitap.work/ent/v1/kyc/fetch-data');
+    const fetchApiUrl = process.env.DIGILOCKER_FETCH_API_URL;
+    if (!fetchApiUrl) {
+      throw new Error('DIGILOCKER_FETCH_API_URL environment variable is required');
+    }
     
     // Get auth token (same logic as generate-kyc-url)
     let authToken = process.env.DIGILOCKER_AUTH_TOKEN;
@@ -420,12 +416,10 @@ router.get('/get-details/:transactionId', requireAuth, async (req, res) => {
   }
   try {
     await initializeDatabase();
-    // Production: https://api.digitap.ai/ent/v1/kyc/get-digilocker-details
-    // UAT/Demo: https://apidemo.digitap.work/ent/v1/kyc/get-digilocker-details
-    const apiUrl = process.env.DIGILOCKER_GET_DETAILS_URL || 
-      (process.env.NODE_ENV === 'production'
-        ? 'https://api.digitap.ai/ent/v1/kyc/get-digilocker-details'
-        : 'https://apidemo.digitap.work/ent/v1/kyc/get-digilocker-details');
+    const apiUrl = process.env.DIGILOCKER_GET_API_URL;
+    if (!apiUrl) {
+      return res.status(500).json({ success: false, message: 'DIGILOCKER_GET_API_URL environment variable is required' });
+    }
     
     // Get auth token
     let authToken = process.env.DIGILOCKER_AUTH_TOKEN;
@@ -472,12 +466,10 @@ router.get('/list-docs/:transactionId', requireAuth, async (req, res) => {
   }
   try {
     await initializeDatabase();
-    // Production: https://api.digitap.ai/ent/v1/digilocker/list-docs
-    // UAT/Demo: https://apidemo.digitap.work/ent/v1/digilocker/list-docs
-    const apiUrl = process.env.DIGILOCKER_LIST_DOCS_URL || 
-      (process.env.NODE_ENV === 'production'
-        ? 'https://api.digitap.ai/ent/v1/digilocker/list-docs'
-        : 'https://apidemo.digitap.work/ent/v1/digilocker/list-docs');
+    const apiUrl = process.env.DIGILOCKER_LIST_DOCS_URL;
+    if (!apiUrl) {
+      return res.status(500).json({ success: false, message: 'DIGILOCKER_LIST_DOCS_URL environment variable is required' });
+    }
     
     // Get auth token
     let authToken = process.env.DIGILOCKER_AUTH_TOKEN;
