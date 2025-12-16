@@ -82,7 +82,29 @@ export const BankStatementSuccessPage = () => {
           // Continue to e-NACH page if check fails
         }
         
-        // Redirect to link salary bank account page
+        // Get active loan application ID before redirecting
+        try {
+          const applicationsResponse = await apiService.getLoanApplications();
+          const isSuccess = applicationsResponse.success || applicationsResponse.status === 'success';
+          if (isSuccess && applicationsResponse.data?.applications) {
+            const applications = applicationsResponse.data.applications;
+            const activeApplication = applications.find((app: any) => 
+              ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(app.status)
+            );
+            
+            if (activeApplication) {
+              // Redirect with application ID
+              setTimeout(() => {
+                navigate(`/link-salary-bank-account?applicationId=${activeApplication.id}`);
+              }, 1500);
+              return;
+            }
+          }
+        } catch (appError) {
+          console.error('Error fetching loan applications:', appError);
+        }
+        
+        // Fallback: Redirect without application ID (page will fetch it)
         setTimeout(() => {
           navigate('/link-salary-bank-account');
         }, 1500);
@@ -106,7 +128,29 @@ export const BankStatementSuccessPage = () => {
           // Continue to e-NACH page if check fails
         }
         
-        // Redirect to link salary bank account page after processing
+        // Get active loan application ID before redirecting
+        try {
+          const applicationsResponse = await apiService.getLoanApplications();
+          const isSuccess = applicationsResponse.success || applicationsResponse.status === 'success';
+          if (isSuccess && applicationsResponse.data?.applications) {
+            const applications = applicationsResponse.data.applications;
+            const activeApplication = applications.find((app: any) => 
+              ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(app.status)
+            );
+            
+            if (activeApplication) {
+              // Redirect with application ID
+              setTimeout(() => {
+                navigate(`/link-salary-bank-account?applicationId=${activeApplication.id}`);
+              }, 2000);
+              return;
+            }
+          }
+        } catch (appError) {
+          console.error('Error fetching loan applications:', appError);
+        }
+        
+        // Fallback: Redirect without application ID (page will fetch it)
         setTimeout(() => {
           navigate('/link-salary-bank-account');
         }, 2000);
@@ -131,7 +175,29 @@ export const BankStatementSuccessPage = () => {
         // Continue to e-NACH page if check fails
       }
       
-      // Redirect to link salary bank account page
+      // Get active loan application ID before redirecting
+      try {
+        const applicationsResponse = await apiService.getLoanApplications();
+        const isSuccess = applicationsResponse.success || applicationsResponse.status === 'success';
+        if (isSuccess && applicationsResponse.data?.applications) {
+          const applications = applicationsResponse.data.applications;
+          const activeApplication = applications.find((app: any) => 
+            ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(app.status)
+          );
+          
+          if (activeApplication) {
+            // Redirect with application ID
+            setTimeout(() => {
+              navigate(`/link-salary-bank-account?applicationId=${activeApplication.id}`);
+            }, 1500);
+            return;
+          }
+        }
+      } catch (appError) {
+        console.error('Error fetching loan applications:', appError);
+      }
+      
+      // Fallback: Redirect without application ID (page will fetch it)
       setTimeout(() => {
         navigate('/link-salary-bank-account');
       }, 1500);

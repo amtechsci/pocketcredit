@@ -44,9 +44,18 @@ export const LinkSalaryBankAccountPage = () => {
     // Check URL parameters
     const urlParams = new URLSearchParams(window.location.search);
     const allowEdit = urlParams.get('allowEdit');
+    const applicationIdParam = urlParams.get('applicationId');
 
     // If allowEdit=true, skip the completion check and just load the page
     if (allowEdit === 'true') {
+      setCheckingEnach(false);
+      checkAndFetchReport();
+      return;
+    }
+
+    // If applicationId is provided in URL, skip the application check
+    if (applicationIdParam) {
+      console.log('✅ Application ID provided in URL:', applicationIdParam);
       setCheckingEnach(false);
       checkAndFetchReport();
       return;

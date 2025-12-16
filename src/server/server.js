@@ -89,6 +89,10 @@ const activityProcessor = require('./workers/activityProcessor');
 const app = express();
 const PORT = process.env.PORT || 3002;
 
+// Trust proxy - required when behind reverse proxy (nginx, load balancer, etc.)
+// This allows express-rate-limit to correctly identify client IPs from X-Forwarded-For header
+app.set('trust proxy', true);
+
 // Security middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
