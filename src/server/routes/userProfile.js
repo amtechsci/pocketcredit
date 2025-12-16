@@ -963,8 +963,24 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
     }
 
     const kycRecord = kycRecords[0];
-    const verificationData = kycRecord.verification_data || {};
-    const transactionId = verificationData.transactionId;
+    
+    // Parse verification_data if it's a JSON string
+    let verificationData;
+    if (typeof kycRecord.verification_data === 'string') {
+      try {
+        verificationData = JSON.parse(kycRecord.verification_data);
+      } catch (e) {
+        console.error('❌ Error parsing verification_data:', e);
+        verificationData = {};
+      }
+    } else {
+      verificationData = kycRecord.verification_data || {};
+    }
+    
+    // Get transactionId from various possible locations
+    const transactionId = verificationData.transactionId || 
+                          verificationData.transaction_id || 
+                          (verificationData.verification_data && verificationData.verification_data.transactionId);
 
     if (!transactionId) {
       return res.status(400).json({
@@ -974,18 +990,49 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
     }
 
     console.log('📥 Fetching KYC data from Digilocker for txnId:', transactionId);
+    console.log('📋 Verification data structure:', JSON.stringify(verificationData, null, 2));
+
+    if (!transactionId) {
+      console.error('❌ Transaction ID not found. Verification data keys:', Object.keys(verificationData));
+      return res.status(400).json({
+        status: 'error',
+        message: 'No transaction ID found in KYC verification record',
+        debug: {
+          verificationDataKeys: Object.keys(verificationData),
+          verificationDataSample: verificationData
+        }
+      });
+    }
 
     // Import axios and processAndUploadDocs
     const axios = require('axios');
-    const digilockerRoutes = require('./digilocker');
-    const processAndUploadDocs = digilockerRoutes.processAndUploadDocs;
+    
+    // Import processAndUploadDocs function
+    let processAndUploadDocs;
+    try {
+      const digilockerRoutes = require('./digilocker');
+      processAndUploadDocs = digilockerRoutes.processAndUploadDocs;
+      if (!processAndUploadDocs) {
+        throw new Error('processAndUploadDocs function not found in digilocker routes');
+      }
+      console.log('✅ Successfully imported processAndUploadDocs');
+    } catch (importError) {
+      console.error('❌ Error importing processAndUploadDocs:', importError);
+      console.error('❌ Import error stack:', importError.stack);
+      return res.status(500).json({
+        status: 'error',
+        message: `Failed to import processAndUploadDocs: ${importError.message}`,
+        error: process.env.NODE_ENV === 'development' ? importError.stack : undefined
+      });
+    }
 
     // Call Digilocker API to fetch actual KYC data
+    // Use get-digilocker-details endpoint (same as get-details route)
     const useProduction = process.env.DIGILOCKER_USE_PRODUCTION === 'true';
-    const fetchApiUrl = process.env.DIGILOCKER_FETCH_API_URL || 
+    const apiUrl = process.env.DIGILOCKER_GET_DETAILS_URL || 
       (useProduction
-        ? 'https://api.digitap.ai/ent/v1/kyc/fetch-data'
-        : 'https://apidemo.digitap.work/ent/v1/kyc/fetch-data');
+        ? 'https://api.digitap.ai/ent/v1/kyc/get-digilocker-details'
+        : 'https://apidemo.digitap.work/ent/v1/kyc/get-digilocker-details');
     
     // Get auth token
     let authToken = process.env.DIGILOCKER_AUTH_TOKEN;
@@ -1002,14 +1049,14 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
       authToken = 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=';
     }
 
+    console.log('🔗 Calling Digilocker get-details API:', apiUrl);
+    console.log('🔑 Using auth token:', authToken ? 'Yes' : 'No');
+
     const digilockerResponse = await axios.post(
-      fetchApiUrl,
-      {
-        transactionId: transactionId
-      },
+      apiUrl,
+      { transactionId: transactionId },
       {
         headers: {
-          'Authorization': authToken,
           'ent_authorization': authToken,
           'Content-Type': 'application/json'
         },
@@ -1037,23 +1084,55 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
         [JSON.stringify(kycData), kycRecord.id]
       );
 
-      // Process and upload documents
-      const docsToProcess = kycData.digilockerFiles || kycData.docs;
+      // Also fetch documents using list-docs endpoint
       let documentsProcessed = 0;
+      try {
+        const listDocsUrl = process.env.DIGILOCKER_LIST_DOCS_URL || 
+          (useProduction
+            ? 'https://api.digitap.ai/ent/v1/digilocker/list-docs'
+            : 'https://apidemo.digitap.work/ent/v1/digilocker/list-docs');
+        
+        console.log('📄 Fetching documents from list-docs endpoint...');
+        const docsResponse = await axios.post(
+          listDocsUrl,
+          { transactionId: transactionId },
+          {
+            headers: {
+              'ent_authorization': authToken,
+              'Content-Type': 'application/json'
+            },
+            timeout: 30000
+          }
+        );
 
-      if (docsToProcess && Array.isArray(docsToProcess) && docsToProcess.length > 0) {
-        console.log(`🚀 Processing ${docsToProcess.length} documents...`);
-        try {
-          // Process documents synchronously for admin refetch (so we can report results)
-          await processAndUploadDocs(parseInt(userId), transactionId, docsToProcess);
-          documentsProcessed = docsToProcess.length;
-          console.log(`✅ Successfully processed ${documentsProcessed} documents`);
-        } catch (docError) {
-          console.error('❌ Error processing documents:', docError);
-          // Continue even if document processing fails
+        if (docsResponse.data && docsResponse.data.code === '200') {
+          const docs = docsResponse.data.model || docsResponse.data.data;
+          const docsParsed = typeof docs === 'string' ? JSON.parse(docs) : docs;
+          
+          console.log(`📄 Found ${Array.isArray(docsParsed) ? docsParsed.length : 0} documents`);
+          
+          // Process and upload documents
+          if (docsParsed && Array.isArray(docsParsed) && docsParsed.length > 0) {
+            console.log(`🚀 Processing ${docsParsed.length} documents...`);
+            try {
+              const userIdInt = parseInt(userId);
+              if (isNaN(userIdInt)) {
+                throw new Error(`Invalid user ID: ${userId}`);
+              }
+              await processAndUploadDocs(userIdInt, transactionId, docsParsed);
+              documentsProcessed = docsParsed.length;
+              console.log(`✅ Successfully processed ${documentsProcessed} documents`);
+            } catch (docError) {
+              console.error('❌ Error processing documents:', docError);
+              console.error('❌ Document processing error stack:', docError.stack);
+            }
+          }
+        } else {
+          console.log('⚠️ list-docs returned non-200 code:', docsResponse.data?.code);
         }
-      } else {
-        console.log('⚠️ No digilockerFiles or docs array found in response');
+      } catch (docsError) {
+        console.error('❌ Error fetching documents from list-docs:', docsError.message);
+        // Continue even if document fetch fails
       }
 
       res.json({
@@ -1075,10 +1154,12 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
 
   } catch (error) {
     console.error('❌ Refetch KYC data error:', error);
+    console.error('❌ Error stack:', error.stack);
     res.status(500).json({
       status: 'error',
       message: 'Failed to refetch KYC data from Digilocker',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
