@@ -45,6 +45,23 @@ export const KYCCheckPage: React.FC = () => {
             setStatus('verified');
             toast.success('KYC verification successful!');
             
+            // Check if PAN document exists
+            try {
+              const panCheckResponse = await apiService.checkPanDocument(applicationId);
+              if (panCheckResponse.success && !panCheckResponse.data?.hasPanDocument) {
+                // No PAN document - redirect to KYC page to show PAN input
+                setTimeout(() => {
+                  navigate('/loan-application/kyc-verification', {
+                    state: { applicationId, showPanInput: true }
+                  });
+                }, 2000);
+                return;
+              }
+            } catch (panError) {
+              console.error('Error checking PAN document:', panError);
+              // Continue to next step even if PAN check fails
+            }
+            
             // Wait 2 seconds then proceed to employment details
             setTimeout(() => {
               navigate('/loan-application/employment-details', {

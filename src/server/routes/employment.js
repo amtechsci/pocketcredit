@@ -211,12 +211,6 @@ router.get('/status', requireAuth, async (req, res) => {
     const userId = req.userId;
 
     // Check if employment details exist for this user (user-specific, one-time step)
-    const applicationEmploymentDetails = await executeQuery(
-      'SELECT * FROM application_employment_details WHERE user_id = ?',
-      [userId]
-    );
-
-    // Also check if user has employment details in the main employment_details table
     const userEmploymentDetails = await executeQuery(
       'SELECT * FROM employment_details WHERE user_id = ?',
       [userId]
@@ -228,34 +222,33 @@ router.get('/status', requireAuth, async (req, res) => {
       [userId]
     );
 
-    // Employment is considered completed if either:
-    // 1. application_employment_details exists (user-specific), OR
-    // 2. User has main employment details
-    const completed = applicationEmploymentDetails.length > 0 || userEmploymentDetails.length > 0;
+    // Employment is considered completed if all required fields are present
+    let completed = false;
+    
+    if (userEmploymentDetails.length > 0) {
+      const empDetails = userEmploymentDetails[0];
+      // Check if all required fields are present
+      completed = !!(
+        empDetails.company_name &&
+        empDetails.industry &&
+        empDetails.department &&
+        empDetails.designation &&
+        empDetails.education &&
+        userData[0]?.monthly_net_income &&
+        userData[0]?.salary_date
+      );
+    }
 
     // Return employment data for pre-filling the form
     let employmentData = null;
-    if (applicationEmploymentDetails.length > 0) {
-      // Use application_employment_details (now user-specific)
-      const appDetails = applicationEmploymentDetails[0];
+    if (userEmploymentDetails.length > 0) {
+      const empDetails = userEmploymentDetails[0];
       employmentData = {
-        company_name: appDetails.company_name,
-        designation: appDetails.designation,
-        industry: appDetails.industry,
-        department: appDetails.department,
-        education: appDetails.education,
-        monthly_net_income: userData[0]?.monthly_net_income || null,
-        salary_date: userData[0]?.salary_date || null
-      };
-    } else if (userEmploymentDetails.length > 0) {
-      // Use main employment details as fallback
-      const userDetails = userEmploymentDetails[0];
-      employmentData = {
-        company_name: userDetails.company_name || null,
-        designation: userDetails.designation || null,
-        industry: null, // Not stored in main employment_details
-        department: null, // Not stored in main employment_details
-        education: null, // Not stored in main employment_details
+        company_name: empDetails.company_name || null,
+        designation: empDetails.designation || null,
+        industry: empDetails.industry || null,
+        department: empDetails.department || null,
+        education: empDetails.education || null,
         monthly_net_income: userData[0]?.monthly_net_income || null,
         salary_date: userData[0]?.salary_date || null
       };
@@ -266,8 +259,7 @@ router.get('/status', requireAuth, async (req, res) => {
       message: 'Employment status retrieved',
       data: {
         completed: completed,
-        hasEmploymentDetails: applicationEmploymentDetails.length > 0,
-        hasUserEmploymentDetails: userEmploymentDetails.length > 0,
+        hasEmploymentDetails: userEmploymentDetails.length > 0,
         employmentData: employmentData // Return data for pre-filling
       }
     });
@@ -350,19 +342,20 @@ router.post('/details', requireAuth, async (req, res) => {
 
     // Check if employment details already exist for this user (user-specific, one record per user)
     const existing = await executeQuery(
-      'SELECT id FROM application_employment_details WHERE user_id = ?',
+      'SELECT id FROM employment_details WHERE user_id = ?',
       [userId]
     );
 
     if (existing.length > 0) {
       // Update existing record (user-specific, not application-specific)
       await executeQuery(
-        `UPDATE application_employment_details 
+        `UPDATE employment_details 
          SET company_name = ?, 
              education = ?,
              industry = ?, 
              department = ?, 
-             designation = ?, 
+             designation = ?,
+             employment_type = COALESCE(employment_type, 'salaried'),
              updated_at = NOW() 
          WHERE user_id = ?`,
         [company_name, education, industry, department, designation, userId]
@@ -370,34 +363,10 @@ router.post('/details', requireAuth, async (req, res) => {
     } else {
       // Insert new record (user-specific, one record per user)
       await executeQuery(
-        `INSERT INTO application_employment_details 
-         (user_id, company_name, education, industry, department, designation, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-        [userId, company_name, education, industry, department, designation]
-      );
-    }
-
-    // Also update the employment_details table for user's profile
-    const employmentExists = await executeQuery(
-      'SELECT id FROM employment_details WHERE user_id = ?',
-      [userId]
-    );
-
-    if (employmentExists.length > 0) {
-      await executeQuery(
-        `UPDATE employment_details 
-         SET company_name = ?, 
-             designation = ?, 
-             updated_at = NOW() 
-         WHERE user_id = ?`,
-        [company_name, designation, userId]
-      );
-    } else {
-      await executeQuery(
         `INSERT INTO employment_details 
-         (user_id, company_name, designation, employment_type, created_at, updated_at) 
-         VALUES (?, ?, ?, 'salaried', NOW(), NOW())`,
-        [userId, company_name, designation]
+         (user_id, company_name, education, industry, department, designation, employment_type, created_at, updated_at) 
+         VALUES (?, ?, ?, ?, ?, ?, 'salaried', NOW(), NOW())`,
+        [userId, company_name, education, industry, department, designation]
       );
     }
 

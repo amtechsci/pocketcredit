@@ -683,7 +683,7 @@ router.post('/additional-information', requireAuth, async (req, res) => {
     );
 
     // Note: work_experience_range is saved to users table above
-    // No need to update application_employment_details as work_experience_range
+    // Note: Employment details are now stored in employment_details table only (user-specific)
     // is a user-level field, not employment-details-specific
 
     res.json({

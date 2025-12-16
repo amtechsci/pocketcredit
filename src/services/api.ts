@@ -955,6 +955,16 @@ class ApiService {
   }
 
   /**
+   * Digilocker - Check if PAN document exists
+   */
+  async checkPanDocument(applicationId: string): Promise<ApiResponse<{
+    hasPanDocument: boolean;
+    transactionId: string | null;
+  }>> {
+    return this.request('GET', `/digilocker/check-pan-document/${applicationId}`);
+  }
+
+  /**
    * Submit Employment Details
    */
   async submitEmploymentDetails(data: {

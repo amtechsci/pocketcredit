@@ -12,6 +12,7 @@ const {
   retrieveBankStatementReport,
   generateClientRefNum
 } = require('../services/digitapBankStatementService');
+const { saveUserInfoFromBankAPI } = require('../services/userInfoService');
 
 /**
  * Helper function to extract bank details from Digitap report data
@@ -882,6 +883,18 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
 
       if (verifyResult && verifyResult[0]) {
         console.log(`✅ Report saved successfully, stored length: ${verifyResult[0].report_length} characters`);
+      }
+
+      // Extract and save user info from bank report
+      try {
+        const requestId = statement.client_ref_num || txnId;
+        const userInfoResult = await saveUserInfoFromBankAPI(userId, reportResult.data.report, requestId);
+        if (userInfoResult.success) {
+          console.log(`✅ User info saved from Bank API: ${userInfoResult.action}`);
+        }
+      } catch (infoError) {
+        console.error('❌ Error saving user info from Bank API:', infoError);
+        // Don't fail the request if info extraction fails
       }
 
       // Extract and save bank details from report

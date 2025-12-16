@@ -30,15 +30,21 @@ export interface StepStatus {
   error: string | null;
 }
 
+/**
+ * Step order for loan application flow
+ * IMPORTANT: This order determines the sequence users must complete
+ * - After KYC verification, users MUST complete employment-details before bank-statement
+ * - Employment details includes: company name, salary date, monthly income, etc.
+ */
 const STEP_ORDER: LoanApplicationStep[] = [
-  'application',
-  'kyc-verification',
-  'employment-details',
-  'bank-statement',
-  'bank-details',
-  'references',
-  'upload-documents',
-  'steps'
+  'application',           // Step 1: Create loan application
+  'kyc-verification',      // Step 2: Complete KYC verification (Digilocker)
+  'employment-details',     // Step 3: Enter company details, salary, etc. (REQUIRED after KYC)
+  'bank-statement',         // Step 4: Upload bank statement
+  'bank-details',           // Step 5: Link salary bank account
+  'references',             // Step 6: Add references
+  'upload-documents',       // Step 7: Upload any additional documents
+  'steps'                   // Step 8: Final completion
 ];
 
 const STEP_ROUTES: Record<LoanApplicationStep, string> = {
@@ -114,17 +120,22 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
     return false;
   }, []);
 
-  // Check employment details status
-  const checkEmploymentStatus = useCallback(async (applicationId: number) => {
+  // Check employment details status (user-specific, no longer requires applicationId)
+  const checkEmploymentStatus = useCallback(async (_applicationId: number) => {
     try {
-      const response = await apiService.getEmploymentDetailsStatus(applicationId);
-      return response.status === 'success' && response.data?.completed === true;
+      // Employment details is now user-specific, so we don't need applicationId
+      const response = await apiService.getEmploymentDetailsStatus();
+      console.log('📋 Employment status check response:', response);
+      const isCompleted = response.status === 'success' && response.data?.completed === true;
+      console.log('📋 Employment details completed?', isCompleted);
+      return isCompleted;
     } catch (error: any) {
-      // If 404, application doesn't exist - return false but don't log as error
+      // If 404, employment details don't exist - return false but don't log as error
       if (error?.response?.status === 404) {
+        console.log('📋 No employment details found (404)');
         return false;
       }
-      console.error('Error checking employment status:', error);
+      console.error('❌ Error checking employment status:', error);
       return false;
     }
   }, []);

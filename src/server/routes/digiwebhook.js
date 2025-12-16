@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const { executeQuery, initializeDatabase } = require('../config/database');
+const { saveUserInfoFromDigilocker, saveAddressFromDigilocker } = require('../services/userInfoService');
 
 // Import processAndUploadDocs for document processing
 let processAndUploadDocs;
@@ -232,6 +233,22 @@ router.get('/', async (req, res) => {
             );
 
             console.log('✅ KYC data saved to database for verification ID:', kycRecord.id);
+
+            // Extract and save user info and address from KYC data
+            try {
+              const userInfoResult = await saveUserInfoFromDigilocker(kycRecord.user_id, kycData, txnId);
+              if (userInfoResult.success) {
+                console.log(`✅ User info saved from Digilocker: ${userInfoResult.action}`);
+              }
+              
+              const addressResult = await saveAddressFromDigilocker(kycRecord.user_id, kycData, txnId);
+              if (addressResult.success) {
+                console.log(`✅ Address saved from Digilocker: ${addressResult.action}`);
+              }
+            } catch (infoError) {
+              console.error('❌ Error saving user info/address from Digilocker:', infoError);
+              // Don't fail the webhook if info extraction fails
+            }
 
             // Also fetch documents using list-docs endpoint
             try {

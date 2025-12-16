@@ -57,6 +57,7 @@ const { initializeSession, sessionCleanup } = require('./middleware/session');
 // Import routes
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
+const userInfoRoutes = require('./routes/userInfo');
 const loanApplicationRoutes = require('./routes/loanApplicationRoutes');
 const loanRoutes = require('./routes/loans');
 const adminAuthRoutes = require('./routes/adminAuth');
@@ -199,6 +200,7 @@ if (!fs.existsSync(uploadsDir)) {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api/user-info', userInfoRoutes);
 app.use('/api/loan-applications', loanApplicationRoutes);
 app.use('/api/loans', loanRoutes);
 app.use('/api/admin/auth', adminAuthRoutes);

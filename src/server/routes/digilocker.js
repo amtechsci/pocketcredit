@@ -516,6 +516,76 @@ router.get('/list-docs/:transactionId', requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * GET /api/digilocker/check-pan-document/:applicationId
+ * Check if PAN document exists in Digilocker KYC documents
+ */
+router.get('/check-pan-document/:applicationId', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+    const applicationId = parseInt(req.params.applicationId);
+
+    // Get KYC verification record
+    const kycRecords = await executeQuery(
+      `SELECT id, verification_data 
+       FROM kyc_verifications 
+       WHERE user_id = ? 
+       ORDER BY created_at DESC 
+       LIMIT 1`,
+      [userId]
+    );
+
+    if (kycRecords.length === 0) {
+      return res.json({
+        success: true,
+        hasPanDocument: false,
+        message: 'No KYC verification found'
+      });
+    }
+
+    const kycRecord = kycRecords[0];
+    let verificationData = kycRecord.verification_data;
+
+    // Parse if it's a string
+    if (typeof verificationData === 'string') {
+      try {
+        verificationData = JSON.parse(verificationData);
+      } catch (e) {
+        return res.json({
+          success: true,
+          hasPanDocument: false,
+          message: 'Invalid verification data format'
+        });
+      }
+    }
+
+    // Check for documents in various possible locations
+    const docs = verificationData.docs || verificationData.digilockerFiles || [];
+    const docsArray = Array.isArray(docs) ? docs : [];
+
+    // Check if PAN document exists
+    // PAN documents might be labeled as: 'PAN', 'PAN_CARD', 'PAN_CARD_PDF', etc.
+    const hasPanDocument = docsArray.some((doc) => {
+      const docType = (doc.docType || doc.document_type || '').toUpperCase();
+      return docType.includes('PAN') || docType === 'PAN';
+    });
+
+    res.json({
+      success: true,
+      hasPanDocument: hasPanDocument,
+      transactionId: verificationData.transactionId || null
+    });
+  } catch (error) {
+    console.error('Error checking PAN document:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check PAN document',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 module.exports = router;
 module.exports.processAndUploadDocs = processAndUploadDocs;
 

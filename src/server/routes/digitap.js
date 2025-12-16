@@ -4,6 +4,7 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
 const { checkHoldStatus } = require('../middleware/checkHoldStatus');
 const { fetchUserPrefillData, validatePANDetails } = require('../services/digitapService');
+const { saveUserInfoFromPANAPI, saveAddressFromPANAPI } = require('../services/userInfoService');
 
 // POST /api/digitap/prefill - Fetch user data from Digitap API
 // NOTE: No checkHoldStatus here - allow fetching data even if on hold
@@ -340,6 +341,22 @@ router.post('/validate-pan', requireAuth, checkHoldStatus, async (req, res) => {
         document_number = VALUES(document_number),
         updated_at = NOW()
     `, [userId, pan.toUpperCase()]);
+
+    // Save user info and address from PAN API to user_info table
+    try {
+      const userInfoResult = await saveUserInfoFromPANAPI(userId, panData, pan.toUpperCase());
+      if (userInfoResult.success) {
+        console.log(`✅ User info saved from PAN API: ${userInfoResult.action}`);
+      }
+      
+      const addressResult = await saveAddressFromPANAPI(userId, panData, pan.toUpperCase());
+      if (addressResult.success) {
+        console.log(`✅ Address saved from PAN API: ${addressResult.action}`);
+      }
+    } catch (infoError) {
+      console.error('❌ Error saving user info/address from PAN API:', infoError);
+      // Don't fail the request if info extraction fails
+    }
 
     console.log('PAN validation data saved to users table');
 

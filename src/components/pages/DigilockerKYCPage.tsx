@@ -13,7 +13,7 @@ export const DigilockerKYCPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const { applicationId: statePayloadId } = location.state || {};
+  const { applicationId: statePayloadId, showPanInput: stateShowPanInput } = location.state || {};
   const [applicationId, setApplicationId] = useState<string | null>(statePayloadId?.toString() || null);
 
   const [mobileNumber, setMobileNumber] = useState('');
@@ -23,6 +23,20 @@ export const DigilockerKYCPage: React.FC = () => {
   const [verificationStatus, setVerificationStatus] = useState<'idle' | 'success' | 'failed'>('idle');
   const [kycDeclaration, setKycDeclaration] = useState(false);
   const maxAttempts = 2;
+  
+  // PAN input state (shown if Digilocker doesn't return PAN document)
+  const [showPanInput, setShowPanInput] = useState(false);
+  const [panNumber, setPanNumber] = useState('');
+  const [validatingPan, setValidatingPan] = useState(false);
+  const [panValidated, setPanValidated] = useState(false);
+
+  // Check if we should show PAN input from state (when redirected from KYCCheckPage)
+  useEffect(() => {
+    if (stateShowPanInput) {
+      setShowPanInput(true);
+      setChecking(false);
+    }
+  }, [stateShowPanInput]);
 
   // Check if KYC is already verified on page load
   useEffect(() => {
@@ -65,8 +79,24 @@ export const DigilockerKYCPage: React.FC = () => {
         const response = await apiService.getKYCStatus(checkId);
 
         if (response.success && response.data.kyc_status === 'verified') {
-          // KYC already completed - redirect to next step
-          // Note: StepGuard will also handle this, but we check here for immediate feedback
+          // KYC verified - check if PAN document exists
+          if (applicationId) {
+            try {
+              const panCheckResponse = await apiService.checkPanDocument(applicationId);
+              if (panCheckResponse.success && !panCheckResponse.data?.hasPanDocument) {
+                // No PAN document found - show PAN input
+                setShowPanInput(true);
+                setChecking(false);
+                toast.info('Please enter your PAN number to complete verification');
+                return;
+              }
+            } catch (panError) {
+              console.error('Error checking PAN document:', panError);
+              // Continue to next step even if PAN check fails
+            }
+          }
+          
+          // KYC already completed and PAN exists (or check skipped) - redirect to next step
           toast.success('KYC already verified! Proceeding to next step...');
           setTimeout(() => {
             if (applicationId) {
@@ -128,6 +158,7 @@ export const DigilockerKYCPage: React.FC = () => {
         toast.success('Redirecting to Digilocker for KYC verification...');
 
         // Redirect to Digilocker KYC URL
+        // After returning from Digilocker, we'll check for PAN document
         window.location.href = response.data.kycUrl;
       } else {
         setVerificationStatus('failed');
@@ -226,8 +257,60 @@ export const DigilockerKYCPage: React.FC = () => {
               </div>
             )}
 
+            {/* PAN Input Section (shown if Digilocker didn't return PAN document) */}
+            {showPanInput && !panValidated && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 space-y-4">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="font-medium text-yellow-900">PAN Document Not Found</p>
+                    <p className="text-sm text-yellow-700 mt-1">
+                      Your Digilocker KYC didn't include a PAN document. Please enter your PAN number to complete verification.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="pan" className="text-base">
+                    PAN Number <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="pan"
+                    type="text"
+                    value={panNumber}
+                    onChange={handlePanChange}
+                    placeholder="ABCDE1234F"
+                    className="h-12 text-lg uppercase font-mono"
+                    maxLength={10}
+                    disabled={validatingPan}
+                  />
+                  <p className="text-sm text-gray-500">
+                    Format: 5 letters, 4 digits, 1 letter (e.g., ABCDE1234F)
+                  </p>
+                </div>
+
+                <Button
+                  onClick={handleValidatePAN}
+                  disabled={validatingPan || panNumber.length !== 10}
+                  className="w-full h-12 text-base"
+                >
+                  {validatingPan ? (
+                    <>
+                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                      Validating PAN...
+                    </>
+                  ) : (
+                    <>
+                      <Shield className="w-5 h-5 mr-2" />
+                      Validate PAN
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+
             {/* Mobile Number Input */}
-            {verificationStatus !== 'success' && (
+            {!showPanInput && verificationStatus !== 'success' && (
               <>
                 <div className="space-y-2">
                   <Label htmlFor="mobile" className="text-base">
