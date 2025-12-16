@@ -185,8 +185,10 @@ async function validatePANDetails(panNumber, clientRefNum = null) {
     const refNum = clientRefNum || generateClientRefNum();
     
     // Use environment variable for PAN validation URL, with fallback
+    // Production: https://api.digitap.ai/validation/kyc/v1/pan_details
+    // Demo: https://svcint.digitap.work/wrap/demo/svc/validation/kyc/v1/pan_details
     const PAN_VALIDATION_URL = process.env.DIGITAP_PAN_VALIDATION_URL || 
-      'https://svcint.digitap.work/wrap/demo/svc/validation/kyc/v1/pan_details';
+      'https://api.digitap.ai/validation/kyc/v1/pan_details';
 
     console.log(`Calling Digitap PAN validation API for PAN: ${panNumber}`);
     console.log(`Client Ref Num: ${refNum}`);
@@ -197,6 +199,12 @@ async function validatePANDetails(panNumber, clientRefNum = null) {
     if (!authToken) {
       throw new Error('Authentication token not available. Please configure DIGILOCKER_AUTH_TOKEN or DIGITAP_CLIENT_ID/SECRET');
     }
+    
+    // Debug: Log token source (first 20 chars only for security)
+    console.log(`🔑 Auth token source: ${process.env.DIGILOCKER_AUTH_TOKEN ? 'DIGILOCKER_AUTH_TOKEN' : 
+      (process.env.DIGILOCKER_CLIENT_ID ? 'DIGILOCKER_CLIENT_ID/SECRET' : 
+      (DIGITAP_CLIENT_ID ? 'DIGITAP_CLIENT_ID/SECRET' : 'Development fallback'))}`);
+    console.log(`🔑 Auth token (first 20 chars): ${authToken.substring(0, 20)}...`);
 
     const response = await axios.post(
       PAN_VALIDATION_URL,
@@ -208,7 +216,7 @@ async function validatePANDetails(panNumber, clientRefNum = null) {
       },
       {
         headers: {
-          'ent_authorization': authToken,
+          'Authorization': authToken,
           'Content-Type': 'application/json'
         },
         timeout: 15000 // 15 seconds
