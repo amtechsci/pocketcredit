@@ -297,7 +297,27 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         ifsc_code: bankDetails.ifsc_code || 'N/A',
         account_holder_name: bankDetails.account_holder_name || 'N/A'
       } : null,
-      generated_at: new Date().toISOString()
+      generated_at: new Date().toISOString(),
+
+      // Signature data (if agreement is signed)
+      signature: (() => {
+        if (loan.clickwrap_signed_at && loan.clickwrap_webhook_data) {
+          try {
+            const webhookData = typeof loan.clickwrap_webhook_data === 'string' 
+              ? JSON.parse(loan.clickwrap_webhook_data) 
+              : loan.clickwrap_webhook_data;
+            
+            return {
+              signed_at: loan.clickwrap_signed_at,
+              signers_info: webhookData['signers-info'] || webhookData.signersInfo || []
+            };
+          } catch (e) {
+            console.error('Error parsing clickwrap_webhook_data:', e);
+            return null;
+          }
+        }
+        return null;
+      })()
     };
 
     console.log('✅ KFS data generated successfully for user');
@@ -706,7 +726,27 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
 
       // Generated metadata
       generated_at: new Date().toISOString(),
-      generated_by: req.admin?.id || 'system'
+      generated_by: req.admin?.id || 'system',
+
+      // Signature data (if agreement is signed)
+      signature: (() => {
+        if (loan.clickwrap_signed_at && loan.clickwrap_webhook_data) {
+          try {
+            const webhookData = typeof loan.clickwrap_webhook_data === 'string' 
+              ? JSON.parse(loan.clickwrap_webhook_data) 
+              : loan.clickwrap_webhook_data;
+            
+            return {
+              signed_at: loan.clickwrap_signed_at,
+              signers_info: webhookData['signers-info'] || webhookData.signersInfo || []
+            };
+          } catch (e) {
+            console.error('Error parsing clickwrap_webhook_data:', e);
+            return null;
+          }
+        }
+        return null;
+      })()
     };
 
     console.log('✅ KFS data generated successfully');

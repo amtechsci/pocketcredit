@@ -20,6 +20,18 @@ interface LoanAgreementData {
     bank_details: any;
     additional: any;
     generated_at: string;
+    signature?: {
+        signed_at?: string;
+        ip?: string;
+        signers_info?: Array<{
+            fname?: string;
+            lname?: string;
+            status?: string;
+            otp?: string;
+            otpValue?: string;
+            ip?: string;
+        }>;
+    };
 }
 
 interface SharedLoanAgreementDocumentProps {
@@ -27,27 +39,6 @@ interface SharedLoanAgreementDocumentProps {
 }
 
 export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreementDocumentProps) {
-    const formatCurrency = (amount: number) => {
-        return new Intl.NumberFormat('en-IN', {
-            style: 'currency',
-            currency: 'INR',
-            minimumFractionDigits: 2
-        }).format(amount);
-    };
-
-    const formatDate = (dateString: string) => {
-        if (!dateString || dateString === 'N/A') return 'N/A';
-        try {
-            return new Date(dateString).toLocaleDateString('en-IN', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric'
-            });
-        } catch {
-            return dateString;
-        }
-    };
-
     const formatAddress = (address: any) => {
         if (typeof address === 'string') return address;
         if (!address) return 'N/A';
@@ -58,6 +49,19 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
     const maskAadhar = (aadhar: string) => {
         if (!aadhar || aadhar === 'N/A') return 'N/A';
         return 'XXXXXXXX' + aadhar.slice(-4);
+    };
+
+    const formatDate = (dateString: string) => {
+        if (!dateString || dateString === 'N/A') return 'N/A';
+        try {
+            const date = new Date(dateString);
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            return `${day}/${month}/${year}`;
+        } catch {
+            return dateString;
+        }
     };
 
     return (
@@ -93,7 +97,7 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
                 <p className="text-center font-bold my-4">AND</p>
 
                 <p className="text-justify mb-4">
-                    <strong>{agreementData.company.name.toUpperCase()}</strong>, a company incorporated under the Companies Act, 1956, having its registered office at {agreementData.company.registered_office || agreementData.company.address} (hereinafter referred to as the "<strong>Company</strong>", which term shall include its successors-in-interest and permitted assigns),<br />
+                    <strong>SPHEETI FINTECH PRIVATE LIMITED</strong>, a company incorporated under the Companies Act, 1956, having its registered office at Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar, Mumbai, Maharashtra – 421001 (hereinafter referred to as the "<strong>Company</strong>", which term shall include its successors-in-interest and permitted assigns),<br />
                     <strong>OF THE SECOND PART</strong>
                 </p>
 
@@ -164,7 +168,14 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
                     <li className="mb-2">Any dispute regarding interest or EMI computation shall not permit the Borrower to withhold payment.</li>
                     <li className="mb-2">Delay in repayment will attract overdue charges as per Schedule (1).</li>
                     <li className="mb-2">Foreclosure is permitted subject to Company rules; upfront processing fee is non-refundable.</li>
-                    <li className="mb-2">The Company may: withhold or cancel disbursement upon breach, recall the Loan by giving notice, accept partial payments and adjust them in the order: overdue → charges → interest → principal, consider settlement at its discretion.</li>
+                    <li className="mb-2">The Company may:
+                        <ul className="list-disc ml-6 mt-1">
+                            <li>withhold or cancel disbursement upon breach,</li>
+                            <li>recall the Loan by giving notice,</li>
+                            <li>accept partial payments and adjust them in the order: overdue → charges → interest → principal,</li>
+                            <li>consider settlement at its discretion.</li>
+                        </ul>
+                    </li>
                     <li className="mb-2">The Company adheres to fair-practice standards, ensures transparency, prohibits harassment, and maintains proper grievance redressal.</li>
                     <li className="mb-2">The Borrower consents to the Company's collection, storage, and use of personal data in accordance with Privacy Policy and applicable law.</li>
                     <li className="mb-2">The Company may disclose Borrower information to credit bureaus, authorities, service providers, or agencies as permitted by law.</li>
@@ -184,7 +195,15 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
                     <li className="mb-2">Confirms that borrowing the Loan does not violate any laws or contractual obligations.</li>
                     <li className="mb-2">Will promptly notify the Company of any change in information.</li>
                     <li className="mb-2">Understands that the Company may conduct audits where necessary.</li>
-                    <li className="mb-2">Will use the Loan only for the permitted purpose and not for: illegal activities, speculative or stock-market activities, money lending, securities investment, or any unrelated or prohibited purpose.</li>
+                    <li className="mb-2">Will use the Loan only for the permitted purpose and not for:
+                        <ul className="list-none ml-6 mt-1">
+                            <li>o illegal activities</li>
+                            <li>o speculative or stock-market activities</li>
+                            <li>o money lending</li>
+                            <li>o securities investment</li>
+                            <li>o any unrelated or prohibited purpose</li>
+                        </ul>
+                    </li>
                     <li className="mb-2">Will repay only through approved payment modes.</li>
                     <li className="mb-2">Will comply with all Company rules and platform terms.</li>
                     <li className="mb-2">Has reviewed the Company's website and is aware of the policies.</li>
@@ -217,71 +236,64 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
 
                 {/* Section 6: Term & Termination */}
                 <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>6. TERM & TERMINATION</h2>
-                <p className="mb-2">This Agreement takes effect from the date the Borrower signs it and continues until all Loan-related obligations are fully discharged.</p>
-                <p className="mb-4">Upon full repayment, the Company shall issue a No Dues Certificate if no other amounts are outstanding.</p>
+                <p className="mb-4">This Agreement remains valid from the disbursement date until full repayment, unless terminated earlier under an Event of Default or foreclosure.</p>
 
-                {/* Section 7: General Provisions */}
-                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>7. GENERAL PROVISIONS</h2>
-                <ol className="list-decimal ml-8 mb-4 text-justify">
-                    <li className="mb-2"><strong>No Waiver:</strong> Failure to exercise any right does not constitute waiver.</li>
-                    <li className="mb-2"><strong>Notices:</strong> All notices shall be sent to the addresses recorded in Company's system.</li>
-                    <li className="mb-2"><strong>Assignment:</strong> The Company may assign/transfer its rights without Borrower's consent. Borrower may not assign.</li>
-                    <li className="mb-2"><strong>Severability:</strong> If any provision is invalid, others remain enforceable.</li>
-                    <li className="mb-2"><strong>Entire Agreement:</strong> This Agreement supersedes all prior discussions.</li>
-                    <li className="mb-2"><strong>Amendments:</strong> The Company may amend this Agreement after providing reasonable notice.</li>
-                    <li className="mb-2"><strong>Governing Law:</strong> This Agreement is governed by the laws of India. Jurisdiction: {agreementData.company.jurisdiction || 'India'}.</li>
-                    <li className="mb-2"><strong>Arbitration:</strong> Disputes shall be referred to a sole arbitrator appointed by the Company in accordance with the Arbitration and Conciliation Act, 1996. Arbitration venue: {agreementData.company.jurisdiction || 'India'}.</li>
-                </ol>
-
-                {/* Section 8: Loan Purpose */}
-                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>8. LOAN PURPOSE</h2>
-                <p className="mb-4">The Loan shall be utilized only for the purpose specified in the Loan Application Form. Diversion of funds constitutes an Event of Default.</p>
-
-                {/* Section 9: Collections & Recovery */}
-                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>9. COLLECTIONS & RECOVERY</h2>
-                <p className="mb-2">For collecting overdue amounts, the Company may:</p>
+                {/* Section 7: Privacy */}
+                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>7. PRIVACY</h2>
+                <p className="mb-2">Borrower information will be collected and used strictly as per this Agreement, the Privacy Policy and applicable laws. The Borrower agrees that:</p>
                 <ul className="list-disc ml-8 mb-4">
-                    <li>Engage authorized recovery agents or lending service providers (LSPs).</li>
-                    <li>Send reminders via SMS, email, calls, or WhatsApp.</li>
-                    <li>Initiate legal proceedings if necessary.</li>
-                    <li>Report defaults to credit bureaus.</li>
+                    <li className="mb-2">The Company may share loan-related information with regulators, service providers, credit bureaus, fraud-control agencies, or other authorised entities.</li>
+                    <li className="mb-2">The Company may obtain credit reports or other data from authorised organisations.</li>
+                    <li className="mb-2">The Company may appoint recovery agents and share necessary information with them.</li>
+                    <li className="mb-2">The Borrower shall not hold the Company liable for lawful use of information.</li>
                 </ul>
-                <p className="mb-4">The Company ensures fair recovery practices and prohibits harassment.</p>
 
-                {/* Section 10: Insurance */}
-                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>10. INSURANCE</h2>
-                <p className="mb-4">The Company may offer or require insurance on the Loan. Premiums, if any, will be disclosed upfront.</p>
-
-                {/* Section 11: Digital Loan Specific Terms */}
-                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>11. DIGITAL LOAN SPECIFIC TERMS</h2>
+                {/* Section 8: General Provisions */}
+                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>8. GENERAL PROVISIONS</h2>
                 <ol className="list-decimal ml-8 mb-4 text-justify">
-                    <li className="mb-2"><strong>Cooling-Off Period:</strong> The Borrower may prepay the Loan within 3 days from disbursement without any foreclosure charges.</li>
-                    <li className="mb-2"><strong>Electronic Communications:</strong> The Borrower consents to receive communications via email, SMS, app notifications, and WhatsApp.</li>
-                    <li className="mb-2"><strong>Digital Signature:</strong> The Borrower's electronic/Aadhaar-based signature is binding.</li>
-                    <li className="mb-2"><strong>Platform Terms:</strong> The Borrower agrees to the Company's app/website terms and conditions.</li>
-                    <li className="mb-2"><strong>Third-Party Services:</strong> The Company may use LSPs, DLAs, or other service providers for processing or servicing.</li>
+                    <li className="mb-2">The Borrower shall indemnify the Company against losses arising from breach of this Agreement.</li>
+                    <li className="mb-2">Courts in Mumbai, Maharashtra shall have exclusive jurisdiction.</li>
+                    <li className="mb-2">Complaints will be handled as per the Company's grievance redressal mechanism.</li>
+                    <li className="mb-2">The Company may assign its rights under this Agreement.</li>
+                    <li className="mb-2">Any amendment shall be communicated to the Borrower.</li>
+                    <li className="mb-2">Any invalid provision shall not affect the remainder of this Agreement.</li>
+                    <li className="mb-2">The Borrower acknowledges availability of a vernacular version on request.</li>
+                    <li className="mb-2">Communication shall be made to the addresses provided in the LAF or platform.</li>
+                    <li className="mb-2">This Agreement, the Application Form and platform terms constitute the entire agreement.</li>
                 </ol>
-
-                {/* Section 12: Grievance Redressal */}
-                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>12. GRIEVANCE REDRESSAL</h2>
-                <p className="mb-2">For any complaint or grievance, the Borrower may contact:</p>
-                <p className="mb-2"><strong>Nodal Officer:</strong> {agreementData.grievance.nodal_officer?.name || 'N/A'}</p>
-                <p className="mb-2"><strong>Email:</strong> {agreementData.grievance.nodal_officer?.email || 'N/A'}</p>
-                <p className="mb-4"><strong>Phone:</strong> {agreementData.grievance.nodal_officer?.phone || 'N/A'}</p>
-                <p className="mb-4">If unresolved within 30 days, the Borrower may escalate to the Reserve Bank of India's Ombudsman Scheme.</p>
 
                 <div style={{ pageBreakBefore: 'always' }} />
 
-                {/* Borrower Details Table */}
+                {/* Loan Agreement Declaration */}
+                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>Loan Agreement Declaration</h2>
+                <p className="mb-2">I hereby consent to the terms of this Loan Agreement. I understand that the Agreement becomes enforceable only upon approval of my Loan Application.</p>
+                <p className="mb-2">I further acknowledge that upon approval, the Loan Application submitted via the Platform together with this consent shall constitute a binding contract, without the need for any further execution.</p>
+                <p className="mb-4">I understand that the Company follows risk-based pricing based on financial and credit parameters.</p>
+
+                <div style={{ pageBreakBefore: 'always' }} />
+
+                {/* Schedule (1): Key Facts Statement */}
                 <h2 className="font-bold mt-6 mb-4" style={{ fontSize: '12pt', textAlign: 'center' }}>
-                    BORROWER DETAILS
+                    SCHEDULE (1): KEY FACT STATEMENT (KFS)
+                </h2>
+
+                {/* Include the full KFS document */}
+                <div className="kfs-embedded">
+                    <SharedKFSDocument kfsData={agreementData} />
+                </div>
+
+                <div style={{ pageBreakBefore: 'always' }} />
+
+                {/* Loan Application Form (borrower details) */}
+                <h2 className="font-bold mt-6 mb-4" style={{ fontSize: '12pt', textAlign: 'center' }}>
+                    Loan Application Form (borrower details)
                 </h2>
 
                 <table className="w-full border-collapse text-xs mb-6" style={{ border: '1px solid #000' }}>
                     <tbody>
                         <tr>
                             <td className="border border-black p-2" style={{ width: '30%' }}><strong>Name</strong></td>
-                            <td className="border border-black p-2">{agreementData.borrower.name}</td>
+                            <td className="border border-black p-2">{agreementData.borrower.name || 'N/A'}</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2"><strong>PAN Number</strong></td>
@@ -297,11 +309,11 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
                         </tr>
                         <tr>
                             <td className="border border-black p-2"><strong>Phone Number</strong></td>
-                            <td className="border border-black p-2">{agreementData.borrower.phone}</td>
+                            <td className="border border-black p-2">{agreementData.borrower.phone || 'N/A'}</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2"><strong>Email ID</strong></td>
-                            <td className="border border-black p-2">{agreementData.borrower.email}</td>
+                            <td className="border border-black p-2">{agreementData.borrower.email || 'N/A'}</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2"><strong>Bank Name & IFSC</strong></td>
@@ -316,14 +328,49 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
 
                 <div style={{ pageBreakBefore: 'always' }} />
 
-                {/* Schedule (1): Key Facts Statement */}
-                <h2 className="font-bold mt-6 mb-4" style={{ fontSize: '12pt', textAlign: 'center' }}>
-                    SCHEDULE (1): KEY FACTS STATEMENT (KFS)
-                </h2>
+                {/* Applicant's Undertaking */}
+                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>APPLICANT'S UNDERTAKING</h2>
+                <p className="mb-3">The Applicant hereby agrees, declares and confirms that:</p>
+                <ol className="list-decimal ml-8 mb-4 text-justify">
+                    <li className="mb-2">He/She understands that submitting the Loan Application Form (LAF) does not guarantee that the Company will sanction the Loan.</li>
+                    <li className="mb-2">The Company will evaluate the application on its merits and may approve or reject the Loan at its sole and absolute discretion.</li>
+                    <li className="mb-2">The Loan amount, if sanctioned, shall be utilized strictly for lawful and legitimate purposes only.</li>
+                    <li className="mb-2">The bank account details provided in the LAF belong exclusively to the Applicant.</li>
+                    <li className="mb-2">All information furnished in the LAF is true, complete and accurate. The Applicant shall immediately notify the Company of any changes to the information provided.</li>
+                    <li className="mb-2">The Applicant has fully understood every term of the Loan and confirms that he/she is financially and legally eligible to avail the Loan. The Loan amount shall be credited only to the bank account specified by the Applicant.</li>
+                    <li className="mb-2">The Company shall be entitled to share the Applicant's loan-related information, including credit history, repayment status and defaults, with the Reserve Bank of India, Banks, Financial Institutions, Credit Bureaus, Statutory Authorities, Tax Authorities, Central Information Bureau, Research Agencies and any other entities as the Company considers appropriate. The Applicant shall not hold the Company liable for any use of such information.</li>
+                    <li className="mb-2">The Applicant shall remain solely, absolutely and unconditionally responsible for repayment of all Outstanding Dues at all times, and shall make timely payments regardless of any reminders, notices or communications issued by Spheeti Fintech Pvt. Ltd or its Service Provider.</li>
+                    <li className="mb-2">The Applicant shall not, under any circumstances, withhold or delay payment of any amount due to Spheeti Fintech Pvt. Ltd under these Terms & Conditions. The Applicant also consents to receive updates, messages or any other communications from Spheeti Fintech Pvt. Ltd or the Service Provider on the registered mobile number and email address.</li>
+                    <li className="mb-2">The Applicant shall not assign, sell, transfer or otherwise convey any of his/her rights or obligations under these Terms & Conditions to any third party without prior written approval of Spheeti Fintech Pvt. Ltd or the Service Provider.</li>
+                    <li className="mb-2">The Company reserves the right to reject the LAF and retain the form along with the Applicant's photograph.</li>
+                    <li className="mb-2">The Applicant confirms that he/she has not taken any credit facility from any lender other than those specifically disclosed in the LAF.</li>
+                    <li className="mb-2">The Applicant shall submit any additional documents and undertake any acts or formalities that the Company may require in connection with this LAF.</li>
+                    <li className="mb-2">The Applicant shall comply with all applicable laws, including anti-money laundering and anti-terrorism financing laws, with respect to the end use of the Loan.</li>
+                </ol>
 
-                {/* Include the full KFS document */}
-                <div className="kfs-embedded">
-                    <SharedKFSDocument kfsData={agreementData} />
+                <p className="mb-4 font-bold">I HEREBY CONFIRM THAT I HAVE READ AND UNDERSTOOD ALL PROVISIONS OF THE LAF, INCLUDING THE DECLARATIONS, TERMS & CONDITIONS, AND UNDERTAKINGS PROVIDED HEREIN, AND I AGREE TO BE BOUND BY THEM.</p>
+
+                <div style={{ pageBreakBefore: 'always' }} />
+
+                {/* Signature Section */}
+                <div className="mt-8 space-y-4">
+                    <div>
+                        <p className="mb-2">Name of Lender: Spheeti Fintech Pvt. Ltd.</p>
+                        <p className="mb-2">Signature (Authorised Signatory)</p>
+                        <p className="mb-2">Date: {agreementData.signature?.signed_at ? formatDate(agreementData.signature.signed_at) : formatDate(new Date().toISOString())}</p>
+                    </div>
+
+                    <div className="mt-6">
+                        <p className="mb-2">Borrowers Name and {agreementData.borrower.name || 'N/A'} Signed By: {agreementData.signature?.signers_info?.[0] ? `${agreementData.signature.signers_info[0].fname || ''} ${agreementData.signature.signers_info[0].lname || ''}`.trim() || agreementData.borrower.name : agreementData.borrower.name || 'N/A'}</p>
+                        <p className="mb-2">Signature {agreementData.borrower.name || 'N/A'}</p>
+                        <p className="mb-2">Reason: Loan Agreement</p>
+                        <p className="mb-2">Signed on: {agreementData.signature?.signed_at ? formatDate(agreementData.signature.signed_at) : formatDate(new Date().toISOString())}</p>
+                        <p className="mb-2">Remark: Signed using</p>
+                        <p className="mb-2">OTP(Clickwrap</p>
+                        <p className="mb-2">sign)/Electronic</p>
+                        <p className="mb-2">signature: {agreementData.signature?.signers_info?.[0]?.otp || agreementData.signature?.signers_info?.[0]?.otpValue || 'N/A'}</p>
+                        <p className="mb-2">IP{agreementData.signature?.signers_info?.[0]?.ip ? ' ' + agreementData.signature.signers_info[0].ip : agreementData.signature?.ip ? ' ' + agreementData.signature.ip : 'N/A'}</p>
+                    </div>
                 </div>
 
             </div>
