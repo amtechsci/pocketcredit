@@ -44,7 +44,7 @@ router.post('/webhook', async (req, res) => {
     const application = applications[0];
 
     // Check if all signers have signed
-    const allSigned = signersInfo && signersInfo.every((signer: any) => signer.status === 'SIGNED');
+    const allSigned = signersInfo && signersInfo.every((signer) => signer.status === 'SIGNED');
 
     if (allSigned) {
       // Update agreement as signed
