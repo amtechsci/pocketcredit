@@ -83,12 +83,37 @@ export const DigilockerKYCPage: React.FC = () => {
           if (applicationId) {
             try {
               const panCheckResponse = await apiService.checkPanDocument(applicationId);
+              console.log('🔍 PAN check response:', panCheckResponse);
+              
               if (panCheckResponse.success && !panCheckResponse.data?.hasPanDocument) {
-                // No PAN document found - show PAN input
+                // No PAN document found - but check if employment details are already completed
+                // If employment is completed, user has already progressed past KYC, so skip PAN requirement
+                try {
+                  const employmentResponse = await apiService.getEmploymentStatus(applicationId);
+                  if (employmentResponse.status === 'success' && employmentResponse.data?.completed) {
+                    console.log('✅ Employment details completed - skipping PAN requirement');
+                    // Employment completed means user already passed this step - proceed to next
+                    toast.success('KYC already verified! Proceeding to next step...');
+                    setTimeout(() => {
+                      navigate('/loan-application/employment-details', {
+                        state: { applicationId },
+                        replace: true
+                      });
+                    }, 1500);
+                    return;
+                  }
+                } catch (empError) {
+                  console.error('Error checking employment status:', empError);
+                }
+                
+                // No PAN document found and employment not completed - show PAN input
+                console.log('⚠️ No PAN document found - showing PAN input');
                 setShowPanInput(true);
                 setChecking(false);
                 toast.info('Please enter your PAN number to complete verification');
                 return;
+              } else {
+                console.log('✅ PAN document found');
               }
             } catch (panError) {
               console.error('Error checking PAN document:', panError);

@@ -625,7 +625,10 @@ router.get('/check-pan-document/:applicationId', requireAuth, async (req, res) =
     if (kycRecords.length === 0) {
       return res.json({
         success: true,
-        hasPanDocument: false,
+        data: {
+          hasPanDocument: false,
+          transactionId: null
+        },
         message: 'No KYC verification found'
       });
     }
@@ -640,7 +643,10 @@ router.get('/check-pan-document/:applicationId', requireAuth, async (req, res) =
       } catch (e) {
         return res.json({
           success: true,
-          hasPanDocument: false,
+          data: {
+            hasPanDocument: false,
+            transactionId: null
+          },
           message: 'Invalid verification data format'
         });
       }
@@ -650,11 +656,18 @@ router.get('/check-pan-document/:applicationId', requireAuth, async (req, res) =
     const docs = verificationData.docs || verificationData.digilockerFiles || [];
     const docsArray = Array.isArray(docs) ? docs : [];
 
+    console.log(`🔍 Checking PAN document for user ${userId}, application ${applicationId}`);
+    console.log(`📄 Documents array length: ${docsArray.length}`);
+
     // Check if PAN document exists in documents
     // PAN documents might be labeled as: 'PAN', 'PAN_CARD', 'PAN_CARD_PDF', 'PANCR', etc.
     let hasPanDocument = docsArray.some((doc) => {
       const docType = (doc.docType || doc.document_type || '').toUpperCase();
-      return docType.includes('PAN') || docType === 'PAN' || docType === 'PANCR';
+      const matches = docType.includes('PAN') || docType === 'PAN' || docType === 'PANCR';
+      if (matches) {
+        console.log(`✅ Found PAN document: ${docType}`);
+      }
+      return matches;
     });
 
     // Also check if PAN number was extracted and saved to users table
@@ -666,8 +679,10 @@ router.get('/check-pan-document/:applicationId', requireAuth, async (req, res) =
           [userId]
         );
         if (userPan && userPan.length > 0 && userPan[0].pan_number) {
-          console.log('✅ PAN number found in users table, considering PAN document as available');
+          console.log(`✅ PAN number found in users table: ${userPan[0].pan_number.substring(0, 3)}***`);
           hasPanDocument = true;
+        } else {
+          console.log('⚠️ No PAN number found in users table');
         }
       } catch (panCheckError) {
         console.error('Error checking PAN in users table:', panCheckError);
@@ -675,10 +690,31 @@ router.get('/check-pan-document/:applicationId', requireAuth, async (req, res) =
       }
     }
 
+    // Also check verification_records table for PAN verification
+    if (!hasPanDocument) {
+      try {
+        const panVerification = await executeQuery(
+          `SELECT id FROM verification_records 
+           WHERE user_id = ? AND document_type = 'PAN' AND verification_status = 'verified'`,
+          [userId]
+        );
+        if (panVerification && panVerification.length > 0) {
+          console.log('✅ PAN found in verification_records table');
+          hasPanDocument = true;
+        }
+      } catch (verificationError) {
+        console.error('Error checking verification_records:', verificationError);
+      }
+    }
+
+    console.log(`📊 PAN document check result: ${hasPanDocument ? 'FOUND' : 'NOT FOUND'}`);
+
     res.json({
       success: true,
-      hasPanDocument: hasPanDocument,
-      transactionId: verificationData.transactionId || null
+      data: {
+        hasPanDocument: hasPanDocument,
+        transactionId: verificationData.transactionId || null
+      }
     });
   } catch (error) {
     console.error('Error checking PAN document:', error);
