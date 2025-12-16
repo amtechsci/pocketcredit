@@ -91,8 +91,10 @@ const app = express();
 const PORT = process.env.PORT || 3002;
 
 // Trust proxy - required when behind reverse proxy (nginx, load balancer, etc.)
+// Set to 1 to trust only the first proxy (more secure than true)
 // This allows express-rate-limit to correctly identify client IPs from X-Forwarded-For header
-app.set('trust proxy', true);
+// while preventing IP spoofing attacks
+app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet({
@@ -114,6 +116,14 @@ const limiter = rateLimit({
   },
   standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
   legacyHeaders: false,
+  // Fix trust proxy warning by using a custom key generator
+  // This prevents IP spoofing when trust proxy is enabled
+  keyGenerator: (req) => {
+    // Use req.ip which respects trust proxy but is safer than X-Forwarded-For
+    // For additional security, you could also validate the IP format
+    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+    return ip;
+  },
   skip: (req) => {
     // Skip rate limiting for health checks
     return req.path === '/api/health';
