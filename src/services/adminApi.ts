@@ -126,7 +126,8 @@ class AdminApiService {
     method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
     endpoint: string,
     data?: any,
-    params?: any
+    params?: any,
+    timeout?: number
   ): Promise<ApiResponse<T>> {
     try {
       const response = await this.api.request({
@@ -134,6 +135,7 @@ class AdminApiService {
         url: endpoint,
         data,
         params,
+        timeout: timeout || this.api.defaults.timeout,
       });
 
       return response.data;
@@ -201,7 +203,8 @@ class AdminApiService {
   }
 
   async refetchKYCData(userId: string): Promise<ApiResponse<any>> {
-    return this.request('POST', `/user-profile/${userId}/refetch-kyc`);
+    // Use longer timeout for refetch operation (60 seconds) as it involves downloading and uploading documents
+    return this.request('POST', `/user-profile/${userId}/refetch-kyc`, undefined, undefined, 60000);
   }
 
   // Loan Management APIs
