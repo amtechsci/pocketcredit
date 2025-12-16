@@ -40,6 +40,29 @@ function getEntAuthToken() {
 }
 
 /**
+ * Get authentication token for PAN validation API
+ * Uses DIGITAP_API_KEY if available, otherwise falls back to DIGITAP_CLIENT_ID/SECRET
+ * @returns {string|null} - Base64 encoded auth token or null
+ */
+function getPANValidationAuthToken() {
+  // Try DIGITAP_API_KEY first (specific for PAN validation)
+  let authToken = process.env.DIGITAP_API_KEY;
+  
+  // Fallback to DIGITAP credentials if API_KEY not set
+  if (!authToken && DIGITAP_CLIENT_ID && DIGITAP_CLIENT_SECRET) {
+    const credentials = `${DIGITAP_CLIENT_ID}:${DIGITAP_CLIENT_SECRET}`;
+    authToken = Buffer.from(credentials).toString('base64');
+  }
+  
+  // Development fallback (only if not in production)
+  if (!authToken && process.env.NODE_ENV !== 'production') {
+    authToken = 'MjU4NDU3MjE6bzBHSHVxVnlzZ1VLSjJMTlFDN0JCNDZhbWM1ckJxSDg=';
+  }
+  
+  return authToken;
+}
+
+/**
  * Generate client reference number for Digitap API
  */
 function generateClientRefNum() {
@@ -194,16 +217,15 @@ async function validatePANDetails(panNumber, clientRefNum = null) {
     console.log(`Client Ref Num: ${refNum}`);
     console.log(`PAN Validation URL: ${PAN_VALIDATION_URL}`);
 
-    // Get authentication token (same method as Digilocker APIs)
-    const authToken = getEntAuthToken();
+    // Get authentication token for PAN validation (uses DIGITAP_API_KEY)
+    const authToken = getPANValidationAuthToken();
     if (!authToken) {
-      throw new Error('Authentication token not available. Please configure DIGILOCKER_AUTH_TOKEN or DIGITAP_CLIENT_ID/SECRET');
+      throw new Error('Authentication token not available. Please configure DIGITAP_API_KEY or DIGITAP_CLIENT_ID/SECRET');
     }
     
     // Debug: Log token source (first 20 chars only for security)
-    console.log(`🔑 Auth token source: ${process.env.DIGILOCKER_AUTH_TOKEN ? 'DIGILOCKER_AUTH_TOKEN' : 
-      (process.env.DIGILOCKER_CLIENT_ID ? 'DIGILOCKER_CLIENT_ID/SECRET' : 
-      (DIGITAP_CLIENT_ID ? 'DIGITAP_CLIENT_ID/SECRET' : 'Development fallback'))}`);
+    console.log(`🔑 Auth token source: ${process.env.DIGITAP_API_KEY ? 'DIGITAP_API_KEY' : 
+      (DIGITAP_CLIENT_ID ? 'DIGITAP_CLIENT_ID/SECRET' : 'Development fallback')}`);
     console.log(`🔑 Auth token (first 20 chars): ${authToken.substring(0, 20)}...`);
 
     const response = await axios.post(
