@@ -88,7 +88,15 @@ router.get('/', authenticateAdmin, async (req, res) => {
         COALESCE(lp.plan_name, '') as plan_name
       FROM loan_applications la
       LEFT JOIN users u ON la.user_id = u.id
-      LEFT JOIN employment_details ed ON u.id = ed.user_id
+      LEFT JOIN (
+        SELECT ed1.user_id, ed1.employment_type, ed1.company_name, ed1.designation, ed1.work_experience_years
+        FROM employment_details ed1
+        INNER JOIN (
+          SELECT user_id, MAX(id) as max_id
+          FROM employment_details
+          GROUP BY user_id
+        ) ed2 ON ed1.user_id = ed2.user_id AND ed1.id = ed2.max_id
+      ) ed ON u.id = ed.user_id
       LEFT JOIN addresses a ON u.id = a.user_id AND a.is_primary = 1
       LEFT JOIN loan_plans lp ON la.loan_plan_id = lp.id
     `;
@@ -135,6 +143,9 @@ router.get('/', authenticateAdmin, async (req, res) => {
     if (whereConditions.length > 0) {
       baseQuery += ' WHERE ' + whereConditions.join(' AND ');
     }
+
+    // Add GROUP BY to prevent duplicates (group by loan application ID)
+    baseQuery += ' GROUP BY la.id';
 
     // Add ORDER BY clause
     const validSortFields = {

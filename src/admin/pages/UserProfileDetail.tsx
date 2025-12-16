@@ -646,9 +646,7 @@ export function UserProfileDetail() {
       let loansToFetch: any[] = [];
 
       if (activeTab === 'applied-loans') {
-        loansToFetch = getArray('loans').filter((loan: any) =>
-          ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(loan.status)
-        );
+        loansToFetch = getArray('loans'); // Fetch all loans, no status filter
       } else if (activeTab === 'loans') {
         loansToFetch = getArray('loans').filter((loan: any) =>
           ['account_manager', 'cleared'].includes(loan.status)
@@ -3099,11 +3097,9 @@ export function UserProfileDetail() {
     }
   };
 
-  // Applied Loans Tab (Submitted -> Under Review -> Follow Up -> Disbursal)
+  // Applied Loans Tab - Show all loans regardless of status
   const renderAppliedLoansTab = () => {
-    const appliedLoans = getArray('loans').filter((loan: any) =>
-      ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(loan.status)
-    );
+    const appliedLoans = getArray('loans'); // Show all loans, no status filter
 
     const handleEdit = (loan: any) => {
       setEditingLoan(loan.id);
@@ -3147,7 +3143,7 @@ export function UserProfileDetail() {
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           <div className="mb-6">
             <h3 className="text-lg font-semibold text-gray-900">Applied Loans</h3>
-            <p className="text-sm text-gray-600 mt-1">Loans in application process (Submitted → Under Review → Follow Up → Disbursal)</p>
+            <p className="text-sm text-gray-600 mt-1">All loan applications for this user</p>
           </div>
 
           {appliedLoans.length > 0 ? (
