@@ -1638,10 +1638,20 @@ export function UserProfileDetail() {
       
       // If raw is an object, check for nested kycData
       if (typeof raw === 'object' && raw !== null) {
-        // Check if kycData exists (nested structure from refetch)
-        if (raw.kycData && typeof raw.kycData === 'object') {
-          console.log('✅ Found nested kycData');
-          return raw.kycData;
+        // Check if kycData exists - it might be a string that needs parsing
+        if (raw.kycData) {
+          if (typeof raw.kycData === 'string') {
+            try {
+              const parsedKycData = JSON.parse(raw.kycData);
+              console.log('✅ Parsed kycData string, keys:', Object.keys(parsedKycData || {}));
+              return parsedKycData;
+            } catch (e) {
+              console.error('❌ Error parsing kycData string:', e);
+            }
+          } else if (typeof raw.kycData === 'object') {
+            console.log('✅ Found nested kycData object');
+            return raw.kycData;
+          }
         }
         // Check if the object itself has KYC fields (direct structure)
         if (raw.name || raw.maskedAdharNumber || raw.dob || raw.status) {
@@ -1652,8 +1662,19 @@ export function UserProfileDetail() {
         // Try to find kycData in nested structure
         if (raw.verification_data && typeof raw.verification_data === 'object') {
           if (raw.verification_data.kycData) {
-            console.log('✅ Found kycData in nested verification_data');
-            return raw.verification_data.kycData;
+            // Check if nested kycData is also a string
+            if (typeof raw.verification_data.kycData === 'string') {
+              try {
+                const parsedKycData = JSON.parse(raw.verification_data.kycData);
+                console.log('✅ Parsed nested kycData string, keys:', Object.keys(parsedKycData || {}));
+                return parsedKycData;
+              } catch (e) {
+                console.error('❌ Error parsing nested kycData string:', e);
+              }
+            } else {
+              console.log('✅ Found kycData in nested verification_data');
+              return raw.verification_data.kycData;
+            }
           }
         }
       }
