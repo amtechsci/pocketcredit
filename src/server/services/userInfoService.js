@@ -68,6 +68,27 @@ async function saveUserInfoFromDigilocker(userId, kycData, transactionId) {
         [name, gender, dob, JSON.stringify(additionalDetails), existing[0].id]
       );
       console.log(`✅ Updated user_info from Digilocker for user ${userId}`);
+      
+      // Update users table with first_name and last_name if they're null
+      if (name) {
+        const nameParts = name.trim().split(/\s+/);
+        const firstName = nameParts[0] || null;
+        const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
+        
+        // Update only if first_name or last_name is null
+        await executeQuery(
+          `UPDATE users 
+           SET first_name = COALESCE(first_name, ?),
+               last_name = COALESCE(last_name, ?),
+               date_of_birth = COALESCE(date_of_birth, ?),
+               gender = COALESCE(gender, ?),
+               updated_at = NOW()
+           WHERE id = ? AND (first_name IS NULL OR last_name IS NULL)`,
+          [firstName, lastName, dob, gender, userId]
+        );
+        console.log(`✅ Updated users table with name from Digilocker for user ${userId}`);
+      }
+      
       return { success: true, id: existing[0].id, action: 'updated' };
     } else {
       // Mark other digilocker records as not primary
@@ -83,6 +104,27 @@ async function saveUserInfoFromDigilocker(userId, kycData, transactionId) {
         [userId, name, gender, dob, JSON.stringify(additionalDetails), transactionId]
       );
       console.log(`✅ Saved user_info from Digilocker for user ${userId}`);
+      
+      // Update users table with first_name and last_name if they're null
+      if (name) {
+        const nameParts = name.trim().split(/\s+/);
+        const firstName = nameParts[0] || null;
+        const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
+        
+        // Update only if first_name or last_name is null
+        await executeQuery(
+          `UPDATE users 
+           SET first_name = COALESCE(first_name, ?),
+               last_name = COALESCE(last_name, ?),
+               date_of_birth = COALESCE(date_of_birth, ?),
+               gender = COALESCE(gender, ?),
+               updated_at = NOW()
+           WHERE id = ? AND (first_name IS NULL OR last_name IS NULL)`,
+          [firstName, lastName, dob, gender, userId]
+        );
+        console.log(`✅ Updated users table with name from Digilocker for user ${userId}`);
+      }
+      
       return { success: true, id: result.insertId, action: 'created' };
     }
   } catch (error) {
@@ -320,6 +362,37 @@ async function saveUserInfoFromPANAPI(userId, panData, panNumber) {
         [name, phone, email, gender, dob, JSON.stringify(additionalDetails), existing[0].id]
       );
       console.log(`✅ Updated user_info from PAN API for user ${userId}`);
+      
+      // Update users table with first_name and last_name if they're null
+      // Use first_name/last_name from panData if available, otherwise split the name
+      let firstName = panData.first_name || null;
+      let lastName = panData.last_name || null;
+      
+      // If first_name/last_name not in panData, split the name
+      if (!firstName && !lastName && name) {
+        const nameParts = name.trim().split(/\s+/);
+        firstName = nameParts[0] || null;
+        lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
+      }
+      
+      // Update only if first_name or last_name is null
+      if (firstName || lastName) {
+        await executeQuery(
+          `UPDATE users 
+           SET first_name = COALESCE(first_name, ?),
+               last_name = COALESCE(last_name, ?),
+               date_of_birth = COALESCE(date_of_birth, ?),
+               gender = COALESCE(gender, ?),
+               pan_number = COALESCE(pan_number, ?),
+               email = COALESCE(email, ?),
+               phone = COALESCE(phone, ?),
+               updated_at = NOW()
+           WHERE id = ? AND (first_name IS NULL OR last_name IS NULL)`,
+          [firstName, lastName, dob, gender, panNumber.toUpperCase(), email, phone, userId]
+        );
+        console.log(`✅ Updated users table with name from PAN API for user ${userId}`);
+      }
+      
       return { success: true, id: existing[0].id, action: 'updated' };
     } else {
       // Mark other pan_api records as not primary
@@ -335,6 +408,37 @@ async function saveUserInfoFromPANAPI(userId, panData, panNumber) {
         [userId, name, phone, email, gender, dob, JSON.stringify(additionalDetails), panNumber.toUpperCase()]
       );
       console.log(`✅ Saved user_info from PAN API for user ${userId}`);
+      
+      // Update users table with first_name and last_name if they're null
+      // Use first_name/last_name from panData if available, otherwise split the name
+      let firstName = panData.first_name || null;
+      let lastName = panData.last_name || null;
+      
+      // If first_name/last_name not in panData, split the name
+      if (!firstName && !lastName && name) {
+        const nameParts = name.trim().split(/\s+/);
+        firstName = nameParts[0] || null;
+        lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
+      }
+      
+      // Update only if first_name or last_name is null
+      if (firstName || lastName) {
+        await executeQuery(
+          `UPDATE users 
+           SET first_name = COALESCE(first_name, ?),
+               last_name = COALESCE(last_name, ?),
+               date_of_birth = COALESCE(date_of_birth, ?),
+               gender = COALESCE(gender, ?),
+               pan_number = COALESCE(pan_number, ?),
+               email = COALESCE(email, ?),
+               phone = COALESCE(phone, ?),
+               updated_at = NOW()
+           WHERE id = ? AND (first_name IS NULL OR last_name IS NULL)`,
+          [firstName, lastName, dob, gender, panNumber.toUpperCase(), email, phone, userId]
+        );
+        console.log(`✅ Updated users table with name from PAN API for user ${userId}`);
+      }
+      
       return { success: true, id: result.insertId, action: 'created' };
     }
   } catch (error) {

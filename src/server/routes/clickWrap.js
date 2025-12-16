@@ -58,7 +58,7 @@ router.post('/initiate', requireAuth, async (req, res) => {
     if (!email) {
       return res.status(400).json({
         success: false,
-        message: 'User email is required for e-signature'
+        message: 'User email is required for e-signature. Please update your profile with an email address.'
       });
     }
 
@@ -67,16 +67,44 @@ router.post('/initiate', requireAuth, async (req, res) => {
     if (!mobile) {
       return res.status(400).json({
         success: false,
-        message: 'User mobile number is required for OTP'
+        message: 'User mobile number is required for OTP. Please update your profile with a mobile number.'
+      });
+    }
+
+    // Get and validate names
+    // If first_name or last_name is missing, use fallback values
+    let fname = user.first_name;
+    let lname = user.last_name;
+
+    // If either name is missing, provide defaults
+    if (!fname && !lname) {
+      // Both names missing - use "User" as fallback
+      fname = 'User';
+      lname = '';
+    } else if (!fname) {
+      // First name missing - use last name as first name
+      fname = lname;
+      lname = '';
+    } else if (!lname) {
+      // Last name missing - keep first name, use empty string for last name
+      lname = '';
+    }
+
+    // Clean and validate mobile number
+    const cleanMobile = mobile.replace(/\D/g, '').slice(-10);
+    if (cleanMobile.length !== 10 || !/^[6-9]\d{9}$/.test(cleanMobile)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid mobile number format. Must be 10 digits starting with 6-9.'
       });
     }
 
     // Initiate ClickWrap
     const initiateResult = await initiateClickWrap({
-      fname: user.first_name || '',
-      lname: user.last_name || '',
-      email: email,
-      mobile: mobile.replace(/\D/g, '').slice(-10), // Ensure 10 digits
+      fname: fname.trim(),
+      lname: lname.trim(),
+      email: email.trim(),
+      mobile: cleanMobile,
       reason: 'loan_agreement'
     });
 

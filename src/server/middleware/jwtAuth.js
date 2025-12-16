@@ -14,9 +14,12 @@ const requireAuth = async (req, res, next) => {
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
     if (!token) {
+      console.log('❌ No token found in request headers');
+      console.log('   Authorization header:', authHeader);
+      console.log('   All headers:', Object.keys(req.headers));
       return res.status(401).json({
-        status: 'error',
-        message: 'Access token required'
+        success: false,
+        message: 'Missing Authentication Token'
       });
     }
 
@@ -25,8 +28,9 @@ const requireAuth = async (req, res, next) => {
     try {
       decoded = jwt.verify(token, JWT_SECRET);
     } catch (jwtError) {
+      console.log('❌ JWT verification failed:', jwtError.message);
       return res.status(401).json({
-        status: 'error',
+        success: false,
         message: 'Invalid or expired token'
       });
     }
@@ -35,8 +39,9 @@ const requireAuth = async (req, res, next) => {
     const user = await findUserById(decoded.id);
     
     if (!user) {
+      console.log('❌ User not found for ID:', decoded.id);
       return res.status(401).json({
-        status: 'error',
+        success: false,
         message: 'User not found'
       });
     }
@@ -44,8 +49,9 @@ const requireAuth = async (req, res, next) => {
     // Allow 'active' and 'on_hold' users to authenticate
     // Users on hold can view their dashboard but can't progress (enforced by checkHoldStatus middleware)
     if (user.status !== 'active' && user.status !== 'on_hold') {
+      console.log('❌ User account is not active. Status:', user.status);
       return res.status(401).json({
-        status: 'error',
+        success: false,
         message: 'Account is not active'
       });
     }
@@ -59,7 +65,7 @@ const requireAuth = async (req, res, next) => {
   } catch (error) {
     console.error('JWT Authentication error:', error);
     res.status(500).json({
-      status: 'error',
+      success: false,
       message: 'Authentication failed'
     });
   }

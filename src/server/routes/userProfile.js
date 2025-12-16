@@ -1084,6 +1084,20 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
         [JSON.stringify(kycData), kycRecord.id]
       );
 
+      // Extract and save user info from Digilocker KYC data
+      try {
+        const { saveUserInfoFromDigilocker, saveAddressFromDigilocker } = require('../services/userInfoService');
+        await saveUserInfoFromDigilocker(kycRecord.user_id, kycData, transactionId);
+        console.log('✅ User info extracted and saved from Digilocker KYC.');
+        
+        // Also save address if available
+        await saveAddressFromDigilocker(kycRecord.user_id, kycData, transactionId);
+        console.log('✅ Address extracted and saved from Digilocker KYC.');
+      } catch (infoError) {
+        console.error('❌ Error saving user info from Digilocker KYC:', infoError.message);
+        // Continue even if user info extraction fails
+      }
+
       // Also fetch documents using list-docs endpoint
       let documentsProcessed = 0;
       try {
