@@ -1616,14 +1616,60 @@ export function UserProfileDetail() {
 
     // Helper to extract the actual data object
     const getVerificationData = () => {
-      const raw = kycData?.verification_data;
-      if (!raw) return {};
-      // Logic to handle nested kycData if present
-      if (raw.kycData) return raw.kycData;
-      return raw;
+      let raw = kycData?.verification_data;
+      if (!raw) {
+        console.log('🔍 No verification_data found in kycData');
+        return {};
+      }
+      
+      console.log('🔍 Raw verification_data type:', typeof raw);
+      console.log('🔍 Raw verification_data keys:', typeof raw === 'object' && raw !== null ? Object.keys(raw) : 'N/A');
+      
+      // Parse if it's a JSON string
+      if (typeof raw === 'string') {
+        try {
+          raw = JSON.parse(raw);
+          console.log('✅ Parsed JSON string, keys:', Object.keys(raw || {}));
+        } catch (e) {
+          console.error('❌ Error parsing verification_data:', e);
+          return {};
+        }
+      }
+      
+      // If raw is an object, check for nested kycData
+      if (typeof raw === 'object' && raw !== null) {
+        // Check if kycData exists (nested structure from refetch)
+        if (raw.kycData && typeof raw.kycData === 'object') {
+          console.log('✅ Found nested kycData');
+          return raw.kycData;
+        }
+        // Check if the object itself has KYC fields (direct structure)
+        if (raw.name || raw.maskedAdharNumber || raw.dob || raw.status) {
+          console.log('✅ Found direct KYC fields in root');
+          return raw;
+        }
+        // If it has transactionId but no KYC fields, it might be the wrapper
+        // Try to find kycData in nested structure
+        if (raw.verification_data && typeof raw.verification_data === 'object') {
+          if (raw.verification_data.kycData) {
+            console.log('✅ Found kycData in nested verification_data');
+            return raw.verification_data.kycData;
+          }
+        }
+      }
+      
+      console.log('⚠️ Returning raw data as-is');
+      return raw || {};
     };
 
     const verificationData = getVerificationData();
+    console.log('📊 Extracted verificationData keys:', Object.keys(verificationData));
+    console.log('📊 Sample verificationData:', {
+      name: verificationData.name,
+      dob: verificationData.dob,
+      gender: verificationData.gender,
+      maskedAdharNumber: verificationData.maskedAdharNumber
+    });
     const isVerified = ['verified', 'completed', 'success'].includes(kycData?.status?.toLowerCase());
     const hasTransactionId = kycData?.verification_data?.transactionId;
 
@@ -1674,30 +1720,47 @@ export function UserProfileDetail() {
               <div className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Full Name</label>
-                  <p className="text-gray-900 font-medium">{verificationData.name || 'N/A'}</p>
+                  <p className="text-gray-900 font-medium">{verificationData?.name || verificationData?.Name || 'N/A'}</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Date of Birth</label>
-                  <p className="text-gray-900">{verificationData.dob || 'N/A'}</p>
+                  <p className="text-gray-900">{verificationData?.dob || verificationData?.dob || 'N/A'}</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Gender</label>
-                  <p className="text-gray-900">{verificationData.gender || 'N/A'}</p>
+                  <p className="text-gray-900">{verificationData?.gender || verificationData?.Gender || 'N/A'}</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">Masked Aadhaar</label>
-                  <p className="text-gray-900">{verificationData.maskedAdharNumber || 'N/A'}</p>
+                  <p className="text-gray-900">{verificationData?.maskedAdharNumber || verificationData?.masked_adhar_number || verificationData?.uid || 'N/A'}</p>
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-500 mb-1">Care Of</label>
-                  <p className="text-gray-900">{verificationData.careOf || 'N/A'}</p>
+                  <p className="text-gray-900">{verificationData?.careOf || verificationData?.care_of || 'N/A'}</p>
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-500 mb-1">Address</label>
                   <p className="text-gray-900 whitespace-pre-wrap">
-                    {typeof verificationData.address === 'object'
-                      ? JSON.stringify(verificationData.address, null, 2)
-                      : (verificationData.address || 'N/A')}
+                    {(() => {
+                      const addr = verificationData.address;
+                      if (!addr) return 'N/A';
+                      if (typeof addr === 'string') return addr;
+                      if (typeof addr === 'object') {
+                        // Format address object nicely
+                        const parts = [];
+                        if (addr.house) parts.push(addr.house);
+                        if (addr.loc) parts.push(addr.loc);
+                        if (addr.street) parts.push(addr.street);
+                        if (addr.landmark) parts.push(addr.landmark);
+                        if (addr.vtc || addr.po) parts.push(addr.vtc || addr.po);
+                        if (addr.dist || addr.subdist) parts.push(addr.dist || addr.subdist);
+                        if (addr.state) parts.push(addr.state);
+                        if (addr.pc) parts.push(`PIN: ${addr.pc}`);
+                        if (addr.country) parts.push(addr.country);
+                        return parts.length > 0 ? parts.join(', ') : JSON.stringify(addr, null, 2);
+                      }
+                      return 'N/A';
+                    })()}
                   </p>
                 </div>
 

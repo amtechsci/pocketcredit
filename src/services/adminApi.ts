@@ -73,7 +73,7 @@ class AdminApiService {
   constructor() {
     this.api = axios.create({
       baseURL: '/api/admin', // Direct admin API calls
-      timeout: 10000,
+      timeout: 60000, // Default 60 seconds, can be overridden per request
       withCredentials: true,
       headers: {
         'Content-Type': 'application/json',
@@ -203,8 +203,20 @@ class AdminApiService {
   }
 
   async refetchKYCData(userId: string): Promise<ApiResponse<any>> {
-    // Use longer timeout for refetch operation (60 seconds) as it involves downloading and uploading documents
-    return this.request('POST', `/user-profile/${userId}/refetch-kyc`, undefined, undefined, 60000);
+    // Use longer timeout for refetch operation (90 seconds) as it involves downloading and uploading documents
+    try {
+      const response = await this.api.request({
+        method: 'POST',
+        url: `/user-profile/${userId}/refetch-kyc`,
+        timeout: 90000, // 90 seconds for document processing
+      });
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.data) {
+        return error.response.data;
+      }
+      throw new Error(error.message || 'Failed to refetch KYC data');
+    }
   }
 
   // Loan Management APIs
