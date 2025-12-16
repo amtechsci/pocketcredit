@@ -9,14 +9,18 @@ const JWT_SECRET = process.env.JWT_SECRET || 'pocket-credit-secret-key-2025';
  */
 const requireAuth = async (req, res, next) => {
   try {
-    // Get JWT token from Authorization header
-    const authHeader = req.headers['authorization'];
+    // Get JWT token from Authorization header (case-insensitive)
+    const authHeader = req.headers['authorization'] || req.headers['Authorization'];
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
     if (!token) {
       console.log('❌ No token found in request headers');
       console.log('   Authorization header:', authHeader);
+      console.log('   Request method:', req.method);
+      console.log('   Request path:', req.path);
+      console.log('   Request URL:', req.url);
       console.log('   All headers:', Object.keys(req.headers));
+      console.log('   Headers object:', JSON.stringify(req.headers, null, 2));
       return res.status(401).json({
         success: false,
         message: 'Missing Authentication Token'

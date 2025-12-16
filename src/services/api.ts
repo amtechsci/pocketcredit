@@ -111,6 +111,10 @@ class ApiService {
         const token = localStorage.getItem('pocket_user_token');
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
+          // Also set lowercase version for compatibility
+          config.headers.authorization = `Bearer ${token}`;
+        } else {
+          console.warn('⚠️ No JWT token found in localStorage for request:', config.url);
         }
         // If data is FormData, remove Content-Type header so axios can set it with boundary
         if (config.data instanceof FormData) {
