@@ -96,26 +96,26 @@ export const ResidenceAddressPage = () => {
         // Add Digilocker address
         if (response.data.digilocker_address) {
           const digilockerAddr = {
-            id: 'digilocker',
-            source: 'digilocker',
+            id: response.data.digilocker_address.id || 'digilocker',
+            source: response.data.digilocker_address.source || 'digilocker',
             ...response.data.digilocker_address,
-            label: 'Address from Digilocker'
+            label: response.data.digilocker_address.label || 'Address from Digilocker'
           };
           console.log('📋 Digilocker address:', digilockerAddr);
           addresses.push(digilockerAddr);
         }
         
-        // Add Experian addresses
+        // Add Experian addresses (includes addresses from pan_api and other sources)
         if (response.data.experian_addresses && Array.isArray(response.data.experian_addresses)) {
           response.data.experian_addresses.forEach((addr: any, index: number) => {
-            const experianAddr = {
-              id: `experian_${index}`,
-              source: 'experian',
+            const addrOption = {
+              id: addr.id || `experian_${index}`,
+              source: addr.source || 'experian',
               ...addr,
-              label: `Address ${index + 1} from Experian`
+              label: addr.label || `Address ${index + 1} from ${addr.source === 'pan_api' ? 'PAN API' : (addr.source || 'Experian')}`
             };
-            console.log(`📋 Experian address ${index + 1}:`, experianAddr);
-            addresses.push(experianAddr);
+            console.log(`📋 Address ${index + 1} (${addrOption.source}):`, addrOption);
+            addresses.push(addrOption);
           });
         }
         

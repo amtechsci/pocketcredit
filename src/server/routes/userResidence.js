@@ -407,6 +407,69 @@ router.get('/available-addresses', requireAuth, async (req, res) => {
       // Continue even if fetch fails
     }
 
+    // Fetch all addresses from addresses table (includes digilocker, pan_api, etc.)
+    try {
+      const dbAddresses = await executeQuery(
+        `SELECT id, address_type, address_line1, address_line2, city, state, pincode, country, source, source_reference, is_primary
+         FROM addresses 
+         WHERE user_id = ? AND address_type = 'permanent'
+         ORDER BY is_primary DESC, created_at DESC`,
+        [userId]
+      );
+
+      if (dbAddresses && dbAddresses.length > 0) {
+        console.log(`📋 Found ${dbAddresses.length} addresses in addresses table`);
+        
+        dbAddresses.forEach((dbAddr) => {
+          const formattedAddr = {
+            id: dbAddr.id,
+            address_line1: dbAddr.address_line1 || '',
+            address_line2: dbAddr.address_line2 || '',
+            city: dbAddr.city || '',
+            state: dbAddr.state || '',
+            pincode: dbAddr.pincode || '',
+            country: dbAddr.country || 'India',
+            source: dbAddr.source || 'unknown',
+            source_reference: dbAddr.source_reference || null,
+            is_primary: dbAddr.is_primary || 0
+          };
+
+          // Build full address
+          const addressParts = [];
+          if (formattedAddr.address_line1) addressParts.push(formattedAddr.address_line1);
+          if (formattedAddr.address_line2) addressParts.push(formattedAddr.address_line2);
+          if (formattedAddr.city) addressParts.push(formattedAddr.city);
+          if (formattedAddr.state) addressParts.push(formattedAddr.state);
+          if (formattedAddr.pincode) addressParts.push(formattedAddr.pincode);
+          if (formattedAddr.country && formattedAddr.country !== 'India') addressParts.push(formattedAddr.country);
+          formattedAddr.full_address = addressParts.length > 0 ? addressParts.join(', ') : null;
+
+          // Add to appropriate array based on source
+          if (dbAddr.source === 'digilocker') {
+            // If we don't already have a digilocker address from kyc_verifications, use this one
+            if (!addresses.digilocker_address) {
+              addresses.digilocker_address = formattedAddr;
+            } else {
+              // If we have multiple digilocker addresses, add the rest to experian_addresses
+              addresses.experian_addresses.push({
+                ...formattedAddr,
+                label: `Address from ${dbAddr.source} (ID: ${dbAddr.id})`
+              });
+            }
+          } else {
+            // Add addresses from other sources (pan_api, etc.) to experian_addresses array
+            addresses.experian_addresses.push({
+              ...formattedAddr,
+              label: `Address from ${dbAddr.source === 'pan_api' ? 'PAN API' : dbAddr.source}`
+            });
+          }
+        });
+      }
+    } catch (dbAddressError) {
+      console.error('Error fetching addresses from addresses table:', dbAddressError);
+      // Continue even if fetch fails
+    }
+
     // Log addresses for debugging - detailed output
     console.log('\n📋 ========== AVAILABLE ADDRESSES RESPONSE ==========');
     console.log('📋 Digilocker Address:', JSON.stringify(addresses.digilocker_address, null, 2));
