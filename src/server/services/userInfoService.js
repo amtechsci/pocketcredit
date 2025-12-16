@@ -398,7 +398,8 @@ async function saveUserInfoFromPANAPI(userId, panData, panNumber) {
     } else {
       // Mark other pan_api records as not primary
       await executeQuery(
-        `UPDATE user_info SET is_primary = 0 WHERE user_id = ? AND source = 'pan_api'`
+        `UPDATE user_info SET is_primary = 0 WHERE user_id = ? AND source = 'pan_api'`,
+        [userId]
       );
 
       // Insert new record
