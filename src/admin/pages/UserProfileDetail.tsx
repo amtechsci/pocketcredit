@@ -67,6 +67,7 @@ export function UserProfileDetail() {
   const [documentsLoading, setDocumentsLoading] = useState<{ [loanId: number]: boolean }>({});
   const [expandedLoanDocuments, setExpandedLoanDocuments] = useState<{ [loanId: number]: boolean }>({});
   const [error, setError] = useState<string | null>(null);
+  const [downloadingExcel, setDownloadingExcel] = useState(false);
 
   // Form state for modals
   const [basicInfoForm, setBasicInfoForm] = useState({
@@ -2586,10 +2587,41 @@ export function UserProfileDetail() {
     </div>
   );
 
+  // Handle Excel download (component-level function)
+  const handleDownloadExcel = async (txnId: string | null) => {
+    if (!txnId) {
+      alert('Transaction ID not available. Cannot download Excel report.');
+      return;
+    }
+
+    try {
+      setDownloadingExcel(true);
+      const excelBlob = await adminApiService.downloadBankStatementExcel(txnId);
+      
+      // Create download link
+      const url = window.URL.createObjectURL(excelBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `bank_statement_${txnId}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      console.log('✅ Excel downloaded successfully');
+    } catch (error: any) {
+      console.error('Error downloading Excel:', error);
+      alert('Failed to download Excel report: ' + (error.message || 'Unknown error'));
+    } finally {
+      setDownloadingExcel(false);
+    }
+  };
+
   // Accounts Tab (Account Aggregator)
   const renderAccountsTab = () => {
     const banks = getUserData('bankStatement.banks', []);
     const statementSummary = getUserData('bankStatement.request_level_summary_var', null);
+    const txnId = getUserData('bankStatement.txn_id', null);
 
     // If no data, showing a placeholder or empty state
     if ((!banks || banks.length === 0) && !statementSummary) {
@@ -2622,6 +2654,25 @@ export function UserProfileDetail() {
                   <p className="text-sm text-gray-500">Analysis Overview</p>
                 </div>
               </div>
+              {txnId && (
+                <button
+                  onClick={() => handleDownloadExcel(txnId)}
+                  disabled={downloadingExcel}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {downloadingExcel ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Downloading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4" />
+                      <span>Download Excel</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
 
             <div className="p-6">

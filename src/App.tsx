@@ -39,6 +39,7 @@ import { RepaymentSchedulePage } from './components/pages/RepaymentSchedulePage'
 import { AccountAggregatorFlow } from './components/pages/AccountAggregatorFlow';
 import { ApplicationFlow } from './components/ApplicationFlow';
 import { CreditScorePage } from './components/pages/CreditScorePage';
+import { StepGuard } from './components/loan-application/StepGuard';
 import { ResourcesPage } from './components/pages/ResourcesPage';
 import { ContactPage } from './components/pages/ContactPage';
 import { PrivacyPolicyPage } from './components/pages/PrivacyPolicyPage';
@@ -82,65 +83,65 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
 
 // Admin Access Page Component
 function AdminAccessPage() {
-        return (
-          <div className="min-h-screen w-full flex items-center justify-center" style={{ backgroundColor: '#F5F7FA' }}>
-            <div className="text-center p-8 w-full max-w-md mx-auto">
-              <div className="bg-white rounded-lg shadow-xl p-8">
-                <div className="flex justify-center mb-6">
-                  <Logo size="xl" variant="default" />
-                </div>
-                <h1 className="text-2xl mb-4 font-bold" style={{ color: '#1E2A3B' }}>Admin Access</h1>
-                <p className="mb-6 text-gray-600">
-                  Access the Admin Panel to manage loans, users, and system operations.
-                </p>
-                <div className="space-y-4">
-            <a 
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center" style={{ backgroundColor: '#F5F7FA' }}>
+      <div className="text-center p-8 w-full max-w-md mx-auto">
+        <div className="bg-white rounded-lg shadow-xl p-8">
+          <div className="flex justify-center mb-6">
+            <Logo size="xl" variant="default" />
+          </div>
+          <h1 className="text-2xl mb-4 font-bold" style={{ color: '#1E2A3B' }}>Admin Access</h1>
+          <p className="mb-6 text-gray-600">
+            Access the Admin Panel to manage loans, users, and system operations.
+          </p>
+          <div className="space-y-4">
+            <a
               href="/admin"
               className="w-full px-6 py-3 rounded-lg transition-colors btn-mobile touch-manipulation font-medium inline-block"
-                    style={{ backgroundColor: '#0052FF', color: 'white' }}
-                  >
-                    Open Admin Panel
+              style={{ backgroundColor: '#0052FF', color: 'white' }}
+            >
+              Open Admin Panel
             </a>
-            <a 
+            <a
               href="/"
               className="w-full px-6 py-2 rounded-lg transition-colors touch-manipulation border border-gray-300 text-gray-700 hover:bg-gray-50 inline-block"
-                  >
-                    Back to Home
+            >
+              Back to Home
             </a>
-                </div>
-                <div className="mt-6 pt-4 border-t text-left">
-                  <p className="text-sm font-medium text-gray-700 mb-2">Demo Credentials:</p>
-                  <div className="space-y-1 text-xs text-gray-600">
-                    <div>Super Admin: admin@pocketcredit.com</div>
-                    <div>Manager: manager@pocketcredit.com</div>
-                    <div>Officer: officer@pocketcredit.com</div>
-                    <div className="mt-2">Password: <code className="bg-gray-100 px-1 rounded">admin123</code></div>
-                  </div>
-                </div>
-              </div>
+          </div>
+          <div className="mt-6 pt-4 border-t text-left">
+            <p className="text-sm font-medium text-gray-700 mb-2">Demo Credentials:</p>
+            <div className="space-y-1 text-xs text-gray-600">
+              <div>Super Admin: admin@pocketcredit.com</div>
+              <div>Manager: manager@pocketcredit.com</div>
+              <div>Officer: officer@pocketcredit.com</div>
+              <div className="mt-2">Password: <code className="bg-gray-100 px-1 rounded">admin123</code></div>
             </div>
           </div>
-        );
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // 404 Not Found Page
 function NotFoundPage() {
-        return (
-          <div className="min-h-screen w-full flex items-center justify-center" style={{ backgroundColor: '#F0F4F8' }}>
-            <div className="text-center p-8 w-full max-w-md mx-auto">
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center" style={{ backgroundColor: '#F0F4F8' }}>
+      <div className="text-center p-8 w-full max-w-md mx-auto">
         <h1 className="text-3xl mb-4" style={{ color: '#1E2A3B' }}>404 - Page Not Found</h1>
         <p className="mb-4" style={{ color: '#1E2A3B' }}>The page you're looking for doesn't exist.</p>
-        <a 
+        <a
           href="/"
-                className="px-6 py-2 rounded-lg transition-colors btn-mobile touch-manipulation"
-                style={{ backgroundColor: '#0052FF', color: 'white' }}
-              >
-                Back to Home
+          className="px-6 py-2 rounded-lg transition-colors btn-mobile touch-manipulation"
+          style={{ backgroundColor: '#0052FF', color: 'white' }}
+        >
+          Back to Home
         </a>
-            </div>
-          </div>
-        );
-    }
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   return (
@@ -148,7 +149,7 @@ export default function App() {
       {/* Admin routes - no AuthProvider needed */}
       <Route path="/admin/login" element={<AdminLoginPage />} />
       <Route path="/admin/*" element={<AdminApp />} />
-      
+
       {/* All other routes - wrapped with AuthProvider */}
       <Route path="*" element={
         <AuthProvider>
@@ -201,115 +202,115 @@ function AppContent() {
             <HomePage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/home" element={
           <LayoutWithHeaderFooter>
             <HomePage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/personal-loan" element={
           <LayoutWithHeaderFooter>
             <PersonalLoanPage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/business-loan" element={
           <LayoutWithHeaderFooter>
             <BusinessLoanPage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/credit-score" element={
           <LayoutWithHeaderFooter>
             <CreditScorePage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/resources" element={
           <LayoutWithHeaderFooter>
             <ResourcesPage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/contact" element={
           <LayoutWithHeaderFooter>
             <ContactPage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/about" element={
           <LayoutWithHeaderFooter>
             <AboutPage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/privacy" element={
           <LayoutWithHeaderFooter>
             <PrivacyPolicyPage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/terms" element={
           <LayoutWithHeaderFooter>
             <TermsConditionsPage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/fair-practice" element={
           <LayoutWithHeaderFooter>
             <FairPracticeCodePage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/it-policy" element={
           <LayoutWithHeaderFooter>
             <ITPolicy />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/fees-policy" element={
           <LayoutWithHeaderFooter>
             <FeesPolicy />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/refund-cancellation-policy" element={
           <LayoutWithHeaderFooter>
             <RefundCancellationPolicyPage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/partners" element={
           <LayoutWithHeaderFooter>
             <PartnersPage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/media" element={
           <LayoutWithHeaderFooter>
             <MediaPage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/careers" element={
           <LayoutWithHeaderFooter>
             <CareersPage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/grievance" element={
           <LayoutWithHeaderFooter>
             <GrievanceRedressalPage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/it-fees-fair-practice-policy" element={
           <LayoutWithHeaderFooter>
             <DisclaimerPage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/auth" element={
           <LayoutWithHeaderFooter>
             <AuthOnlyRoute>
@@ -317,13 +318,13 @@ function AppContent() {
             </AuthOnlyRoute>
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/admin/login" element={
           <LayoutWithHeaderFooter>
             <AdminLoginPage />
           </LayoutWithHeaderFooter>
         } />
-        
+
         <Route path="/application" element={
           <DashboardLayout>
             <SimplifiedLoanApplicationPage />
@@ -336,35 +337,49 @@ function AppContent() {
             <LoanApplicationConfirmation />
           </DashboardLayout>
         } />
-        
+
         <Route path="/loan-application/bank-details" element={
-          <DashboardLayout>
-            <BankDetailsPage />
-          </DashboardLayout>
-        } />
-        
-        <Route path="/loan-application/references" element={
-          <DashboardLayout>
-            <ReferenceDetailsPage />
-          </DashboardLayout>
-        } />
-        
-        <Route path="/user-references" element={
-          <DashboardLayout>
-            <EnhancedUserReferencesPage />
-          </DashboardLayout>
-        } />
-        
-        <Route path="/loan-application/kyc-verification" element={
           isAuthenticated ? (
             <DashboardLayout>
-              <DigilockerKYCPage />
+              <StepGuard step="bank-details">
+                <BankDetailsPage />
+              </StepGuard>
             </DashboardLayout>
           ) : (
             <Navigate to="/auth" replace />
           )
         } />
-        
+
+        <Route path="/loan-application/references" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <StepGuard step="references">
+                <ReferenceDetailsPage />
+              </StepGuard>
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+
+        <Route path="/user-references" element={
+          <DashboardLayout>
+            <EnhancedUserReferencesPage />
+          </DashboardLayout>
+        } />
+
+        <Route path="/loan-application/kyc-verification" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <StepGuard step="kyc-verification">
+                <DigilockerKYCPage />
+              </StepGuard>
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+
         <Route path="/loan-application/kyc-check" element={
           isAuthenticated ? (
             <DashboardLayout>
@@ -374,7 +389,7 @@ function AppContent() {
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/loan-application/upload-documents" element={
           isAuthenticated ? (
             <DashboardLayout>
@@ -384,7 +399,7 @@ function AppContent() {
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/post-disbursal" element={
           isAuthenticated ? (
             <DashboardLayout>
@@ -394,7 +409,7 @@ function AppContent() {
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/repayment-schedule" element={
           isAuthenticated ? (
             <DashboardLayout>
@@ -404,11 +419,13 @@ function AppContent() {
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/loan-application/bank-statement" element={
           isAuthenticated ? (
             <DashboardLayout>
-              <BankStatementUploadPage />
+              <StepGuard step="bank-statement">
+                <BankStatementUploadPage />
+              </StepGuard>
             </DashboardLayout>
           ) : (
             <Navigate to="/auth" replace />
@@ -432,7 +449,7 @@ function AppContent() {
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/link-salary-bank-account" element={
           isAuthenticated ? (
             <LinkSalaryBankAccountPage />
@@ -440,7 +457,7 @@ function AppContent() {
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/email-verification" element={
           isAuthenticated ? (
             <EmailVerificationPage />
@@ -448,7 +465,7 @@ function AppContent() {
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/residence-address" element={
           isAuthenticated ? (
             <ResidenceAddressPage />
@@ -456,7 +473,7 @@ function AppContent() {
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/additional-information" element={
           isAuthenticated ? (
             <AdditionalInformationPage />
@@ -464,7 +481,7 @@ function AppContent() {
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/application-under-review" element={
           isAuthenticated ? (
             <ApplicationUnderReviewPage />
@@ -472,7 +489,7 @@ function AppContent() {
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/loan-application/aa-flow" element={
           isAuthenticated ? (
             <AccountAggregatorFlow />
@@ -480,17 +497,19 @@ function AppContent() {
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/loan-application/employment-details" element={
           isAuthenticated ? (
             <DashboardLayout>
-              <EmploymentDetailsPage />
+              <StepGuard step="employment-details">
+                <EmploymentDetailsPage />
+              </StepGuard>
             </DashboardLayout>
           ) : (
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/loan-application/credit-check" element={
           isAuthenticated ? (
             <DashboardLayout>
@@ -500,15 +519,15 @@ function AppContent() {
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/loan-application/steps" element={
           <DashboardLayout>
             <LoanApplicationStepsPage />
           </DashboardLayout>
         } />
-        
+
         <Route path="/admin-access" element={<AdminAccessPage />} />
-        
+
         {/* Dashboard Pages (No Header/Footer) */}
         <Route path="/profile-completion" element={
           isAuthenticated ? (
@@ -521,58 +540,54 @@ function AppContent() {
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/dashboard" element={
           isAuthenticated ? (
-            user?.profile_completed ? (
-              <DashboardLayout>
-                <DashboardPage />
-              </DashboardLayout>
-            ) : (
-              <Navigate to="/profile-completion" replace />
-            )
+            <DashboardLayout>
+              <DashboardPage />
+            </DashboardLayout>
           ) : (
             <Navigate to="/auth" replace />
           )
         } />
-        
+
         <Route path="/pay-emi" element={
           <DashboardLayout>
             <PayEMIPage />
           </DashboardLayout>
         } />
-        
+
         <Route path="/loan-details/:loanId" element={
           <DashboardLayout>
             <LoanDetailsPage />
           </DashboardLayout>
         } />
-        
+
         <Route path="/payment-history" element={
           <DashboardLayout>
             <PaymentHistoryPage />
           </DashboardLayout>
         } />
-        
+
         {/* Additional Dashboard Routes */}
         <Route path="/my-loans" element={
           <DashboardLayout>
             <LoanDetailsPage />
           </DashboardLayout>
         } />
-        
+
         <Route path="/profile" element={
           <DashboardLayout>
             <DashboardPage />
           </DashboardLayout>
         } />
-        
+
         {/* Admin Panel - moved to top level routes */}
-        
+
         {/* 404 Page */}
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
-      
+
       <Toaster />
     </div>
   );

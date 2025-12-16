@@ -123,18 +123,29 @@ export function SimplifiedLoanApplicationPage() {
     const loadUserPlan = async () => {
       try {
         const response = await apiService.getSelectedLoanPlan();
+        console.log('📋 Loan plan response:', response);
+        
         if (response && (response as any).status === 'success' && (response as any).data) {
           const planData = (response as any).data;
+          console.log('📋 Plan data:', planData);
+          
           if (planData.plan && planData.plan.id) {
-            console.log('Auto-using user\'s assigned plan:', planData.plan.plan_name);
+            console.log('✅ Auto-using user\'s assigned plan:', planData.plan.plan_name, 'ID:', planData.plan.id);
             handleInputChange('selectedPlanId', planData.plan.id);
             // Also set available plans for display purposes
             setAvailablePlans([planData.plan]);
+          } else {
+            console.warn('⚠️ No plan found in response data:', planData);
+            toast.error('No loan plan available. Please contact support.');
           }
+        } else {
+          console.warn('⚠️ Invalid response structure:', response);
+          toast.error('Failed to load loan plan. Please contact support.');
         }
-      } catch (error) {
-        console.error('Error loading user plan:', error);
-        toast.error('Failed to load loan plan. Please try again.');
+      } catch (error: any) {
+        console.error('❌ Error loading user plan:', error);
+        console.error('Error details:', error.response?.data || error.message);
+        toast.error('Failed to load loan plan. Please contact support.');
       }
     };
 
@@ -272,11 +283,26 @@ export function SimplifiedLoanApplicationPage() {
       const totalAddToTotal = calcData?.breakdown?.total_add_to_total || 0;
       const disbursalAmount = calcData?.breakdown?.disbursal_amount || formData.desiredAmount;
 
+      // Ensure plan_id is set - use selectedPlanId from formData
+      const planIdToSend = formData.selectedPlanId;
+      console.log('📤 Submitting loan application');
+      console.log('   - plan_id:', planIdToSend);
+      console.log('   - formData:', formData);
+      console.log('   - availablePlans:', availablePlans);
+      
+      if (!planIdToSend) {
+        console.error('❌ Loan plan ID is missing!');
+        toast.error('Loan plan ID is missing. Please refresh the page and try again.');
+        setLoading(false);
+        return;
+      }
+
       const response = await apiService.applyForLoan({
         loan_amount: formData.desiredAmount,
         tenure_months: Math.ceil((calcData?.plan?.duration_days || 15) / 30),
         loan_purpose: formData.purpose,
-        plan_id: formData.selectedPlanId,
+        plan_id: planIdToSend,
+        loan_plan_id: planIdToSend, // Also send as loan_plan_id for backward compatibility
         plan_code: calcData?.plan?.code || null,
         plan_snapshot: calcData?.plan ? {
           plan_name: calcData.plan.name,

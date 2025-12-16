@@ -305,10 +305,10 @@ router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, 
       const kycResults = await executeQuery(
         `SELECT verification_data 
          FROM kyc_verifications 
-         WHERE user_id = ? AND application_id = ? 
+         WHERE user_id = ? 
          ORDER BY created_at DESC 
          LIMIT 1`,
-        [userId, applicationId]
+        [userId]
       );
 
       if (!kycResults || kycResults.length === 0) {
@@ -474,8 +474,8 @@ router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, 
              COALESCE(verification_data, '{}'),
              '$.faceMatch', ?
            )
-           WHERE user_id = ? AND application_id = ?`,
-          [JSON.stringify(faceMatchResult), userId, applicationId]
+           WHERE user_id = ?`,
+          [JSON.stringify(faceMatchResult), userId]
         );
       }
 

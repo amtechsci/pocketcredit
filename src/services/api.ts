@@ -921,7 +921,7 @@ class ApiService {
    */
   async generateDigilockerKYCUrl(data: {
     mobile_number: string;
-    application_id: number;
+    application_id?: number;
     first_name?: string;
     last_name?: string;
     email?: string;
@@ -966,18 +966,21 @@ class ApiService {
     industry: string;
     department: string;
     designation: string;
-    application_id: number;
+    // application_id is no longer required - employment details is now user-specific
   }): Promise<ApiResponse<{ message: string }>> {
     return this.request('POST', '/employment-details/details', data);
   }
 
   /**
-   * Check Employment Details Status
+   * Check Employment Details Status (user-specific, no longer requires applicationId)
    */
-  async getEmploymentDetailsStatus(applicationId: number | string): Promise<ApiResponse<{
+  async getEmploymentDetailsStatus(): Promise<ApiResponse<{
     completed: boolean;
+    hasEmploymentDetails: boolean;
+    hasUserEmploymentDetails: boolean;
+    employmentData: any;
   }>> {
-    return this.request('GET', `/employment-details/status/${applicationId}`);
+    return this.request('GET', '/employment-details/status');
   }
 
   /**

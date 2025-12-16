@@ -143,14 +143,9 @@ export const EmploymentDetailsPage: React.FC = () => {
 
   useEffect(() => {
     const checkEmploymentStatus = async () => {
-      if (!applicationId) {
-        setChecking(false);
-        return;
-      }
-
       try {
-        // Check if employment details already exist for this application
-        const response = await apiService.getEmploymentDetailsStatus(applicationId);
+        // Check if employment details already exist (user-specific, no longer requires applicationId)
+        const response = await apiService.getEmploymentDetailsStatus();
         
         if (response.status === 'success' && response.data?.completed) {
           // Employment details already completed - redirect to next step
@@ -161,7 +156,21 @@ export const EmploymentDetailsPage: React.FC = () => {
             });
           }, 1500);
         } else {
-          // Not complete - show the form
+          // Not complete - pre-fill form if data exists
+          if (response.data?.employmentData) {
+            const data = response.data.employmentData;
+            setFormData(prev => ({
+              ...prev,
+              company_name: data.company_name || prev.company_name,
+              designation: data.designation || prev.designation,
+              industry: data.industry || prev.industry,
+              department: data.department || prev.department,
+              education: data.education || prev.education,
+              monthly_net_income: data.monthly_net_income ? data.monthly_net_income.toString() : prev.monthly_net_income,
+              salary_date: data.salary_date ? data.salary_date.toString() : prev.salary_date
+            }));
+            toast.info('Found existing employment details. Please review and submit.');
+          }
           setChecking(false);
         }
       } catch (error) {
@@ -172,7 +181,7 @@ export const EmploymentDetailsPage: React.FC = () => {
     };
 
     checkEmploymentStatus();
-  }, [applicationId, navigate]);
+  }, [navigate]);
 
   // Load initial companies on mount
   useEffect(() => {
@@ -323,14 +332,10 @@ export const EmploymentDetailsPage: React.FC = () => {
       return;
     }
 
-    if (!applicationId) {
-      toast.error('Application ID is missing');
-      return;
-    }
-
     setLoading(true);
 
     try {
+      // Employment details is now user-specific (one-time step), no longer requires application_id
       const response = await apiService.submitEmploymentDetails({
         company_name: formData.company_name,
         monthly_net_income: parseFloat(formData.monthly_net_income),
@@ -339,8 +344,8 @@ export const EmploymentDetailsPage: React.FC = () => {
         salary_date: parseInt(formData.salary_date),
         industry: formData.industry === 'Others' ? formData.industry_other : formData.industry,
         department: formData.department === 'Others' ? formData.department_other : formData.department,
-        designation: formData.designation,
-        application_id: applicationId
+        designation: formData.designation
+        // application_id is no longer required - this is user-specific
       });
 
       if (response.success) {

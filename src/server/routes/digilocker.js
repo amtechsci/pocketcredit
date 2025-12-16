@@ -63,10 +63,10 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
   const { mobile_number, application_id, first_name, last_name, email } = req.body;
   const userId = req.userId;
 
-  if (!mobile_number || !application_id) {
+  if (!mobile_number) {
     return res.status(400).json({
       success: false,
-      message: 'Mobile number and application ID are required'
+      message: 'Mobile number is required'
     });
   }
 
@@ -94,7 +94,7 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
     await initializeDatabase();
 
     // Generate unique UID for this KYC request
-    const uid = `PC${userId}_${application_id}_${Date.now()}`;
+    const uid = `PC${userId}_${application_id || 'NONE'}_${Date.now()}`;
 
     // Prepare Digilocker API request
     const digilockerRequest = {
@@ -108,8 +108,21 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
       // APP_URL: production includes /api, development doesn't
       redirectionUrl: (() => {
         const isDevelopment = process.env.NODE_ENV === 'development';
-        // Ensure we target the API URL, not the frontend URL
-        const baseUrl = process.env.API_URL || (isDevelopment ? 'http://localhost:3002' : 'https://pocketcredit.in/api');
+        // Ensure we target the API URL with /api prefix
+        let baseUrl = process.env.API_URL;
+        
+        if (!baseUrl) {
+          if (isDevelopment) {
+            baseUrl = 'http://localhost:3002/api'; // Include /api in development
+          } else {
+            baseUrl = 'https://pocketcredit.in/api';
+          }
+        } else {
+          // If API_URL is set, ensure it has /api prefix
+          if (!baseUrl.endsWith('/api')) {
+            baseUrl = baseUrl.endsWith('/') ? `${baseUrl}api` : `${baseUrl}/api`;
+          }
+        }
 
         // Remove trailing slash if present
         const cleanBaseUrl = baseUrl.replace(/\/$/, '');
@@ -144,8 +157,8 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
 
       // Store KYC verification record with transaction ID
       const kycCheck = await executeQuery(
-        'SELECT id FROM kyc_verifications WHERE user_id = ? AND application_id = ?',
-        [userId, application_id]
+        'SELECT id FROM kyc_verifications WHERE user_id = ?',
+        [userId]
       );
 
       const verificationData = JSON.stringify({
@@ -171,12 +184,37 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
         );
       } else {
         // Create new record
-        await executeQuery(
-          `INSERT INTO kyc_verifications 
-           (user_id, application_id, kyc_status, kyc_method, mobile_number, verification_data, created_at, updated_at) 
-           VALUES (?, ?, 'pending', 'digilocker', ?, ?, NOW(), NOW())`,
-          [userId, application_id, mobile_number, verificationData]
-        );
+        // Note: application_id is optional - KYC is per-user, not per-application
+        // If application_id column exists and is NOT NULL, we'll need to handle it
+        // For now, try INSERT without application_id first
+        try {
+          await executeQuery(
+            `INSERT INTO kyc_verifications 
+             (user_id, kyc_status, kyc_method, mobile_number, verification_data, created_at, updated_at) 
+             VALUES (?, 'pending', 'digilocker', ?, ?, NOW(), NOW())`,
+            [userId, mobile_number, verificationData]
+          );
+        } catch (insertError) {
+          // If error is about application_id, try with NULL or a placeholder
+          if (insertError.message && insertError.message.includes('application_id')) {
+            // Try with NULL if column allows it, or with a placeholder application_id
+            // First, check if we have an application_id from the request
+            if (application_id) {
+              await executeQuery(
+                `INSERT INTO kyc_verifications 
+                 (user_id, application_id, kyc_status, kyc_method, mobile_number, verification_data, created_at, updated_at) 
+                 VALUES (?, ?, 'pending', 'digilocker', ?, ?, NOW(), NOW())`,
+                [userId, application_id, mobile_number, verificationData]
+              );
+            } else {
+              // If no application_id and column requires it, we need to alter the table
+              // For now, throw a more helpful error
+              throw new Error('KYC table requires application_id but it was removed. Please run: ALTER TABLE kyc_verifications MODIFY COLUMN application_id INT NULL;');
+            }
+          } else {
+            throw insertError;
+          }
+        }
       }
 
       res.json({
@@ -204,7 +242,7 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
 
 /**
  * GET /api/digilocker/kyc-status/:applicationId
- * Get KYC verification status for an application
+ * Get KYC verification status for a user (applicationId kept for backward compatibility but not used)
  */
 router.get('/kyc-status/:applicationId', requireAuth, async (req, res) => {
   const { applicationId } = req.params;
@@ -216,10 +254,10 @@ router.get('/kyc-status/:applicationId', requireAuth, async (req, res) => {
     const results = await executeQuery(
       `SELECT kyc_status, kyc_method, verified_at, created_at, verification_data 
        FROM kyc_verifications 
-       WHERE user_id = ? AND application_id = ? 
+       WHERE user_id = ? 
        ORDER BY created_at DESC 
        LIMIT 1`,
-      [userId, applicationId]
+      [userId]
     );
 
     if (results.length === 0) {

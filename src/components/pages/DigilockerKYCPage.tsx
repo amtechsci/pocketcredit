@@ -57,22 +57,27 @@ export const DigilockerKYCPage: React.FC = () => {
 
   useEffect(() => {
     const checkKYCStatus = async () => {
-      if (!applicationId) {
-        // Still waiting for ID
-        return;
-      }
-
+      // KYC is per-user, so we can check even without applicationId
+      // But we need applicationId for navigation purposes
+      const checkId = applicationId || '0'; // Use '0' as placeholder if no applicationId
 
       try {
-        const response = await apiService.getKYCStatus(applicationId);
+        const response = await apiService.getKYCStatus(checkId);
 
         if (response.success && response.data.kyc_status === 'verified') {
           // KYC already completed - redirect to next step
+          // Note: StepGuard will also handle this, but we check here for immediate feedback
           toast.success('KYC already verified! Proceeding to next step...');
           setTimeout(() => {
-            navigate('/loan-application/employment-details', {
-              state: { applicationId }
-            });
+            if (applicationId) {
+              navigate('/loan-application/employment-details', {
+                state: { applicationId },
+                replace: true
+              });
+            } else {
+              // If no applicationId, try to get latest application or go to dashboard
+              navigate('/dashboard', { replace: true });
+            }
           }, 1500);
         } else {
           // KYC not complete - show the form
@@ -85,6 +90,8 @@ export const DigilockerKYCPage: React.FC = () => {
       }
     };
 
+    // Only check if we have an applicationId or if we're not being managed by StepGuard
+    // StepGuard handles validation, but we still check here for immediate UI feedback
     checkKYCStatus();
   }, [applicationId, navigate]);
 
@@ -104,19 +111,14 @@ export const DigilockerKYCPage: React.FC = () => {
       return;
     }
 
-    if (!applicationId) {
-      toast.error('Application ID is missing');
-      return;
-    }
-
     setLoading(true);
     setAttempts(prev => prev + 1);
 
     try {
-      // Generate Digilocker KYC URL
+      // Generate Digilocker KYC URL (application_id is optional, KYC is per user)
       const response = await apiService.generateDigilockerKYCUrl({
         mobile_number: mobileNumber,
-        application_id: parseInt(applicationId as string),
+        application_id: applicationId ? parseInt(applicationId as string) : undefined,
         first_name: user?.first_name || user?.name?.split(' ')[0],
         last_name: user?.last_name || user?.name?.split(' ').slice(1).join(' '),
         email: user?.email

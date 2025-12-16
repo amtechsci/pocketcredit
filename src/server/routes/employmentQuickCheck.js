@@ -9,9 +9,9 @@ const router = express.Router();
 router.get('/income-ranges', async (req, res) => {
   try {
     await initializeDatabase();
-    
+
     console.log('📊 Fetching income ranges from loan_limit_tiers...');
-    
+
     // Get active loan tiers with income ranges
     const tiers = await executeQuery(
       `SELECT 
@@ -31,7 +31,7 @@ router.get('/income-ranges', async (req, res) => {
     // Format for frontend
     const incomeRanges = (tiers || []).map(tier => ({
       value: tier.income_range,
-      label: tier.max_salary 
+      label: tier.max_salary
         ? `₹${parseInt(tier.min_salary).toLocaleString('en-IN')} to ₹${parseInt(tier.max_salary).toLocaleString('en-IN')}`
         : `Above ₹${parseInt(tier.min_salary).toLocaleString('en-IN')}`,
       min_salary: tier.min_salary,
@@ -71,9 +71,9 @@ router.post('/', requireAuth, async (req, res) => {
 
     // Validate required fields
     if (!employment_type) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Employment type is required' 
+      return res.status(400).json({
+        success: false,
+        message: 'Employment type is required'
       });
     }
 
@@ -85,7 +85,7 @@ router.post('/', requireAuth, async (req, res) => {
 
     // Handle different employment types
     const holdTypes = ['self_employed', 'part_time', 'freelancer', 'homemaker', 'retired', 'no_job', 'others'];
-    
+
     if (holdTypes.includes(employment_type)) {
       // Hold application permanently
       await executeQuery(
@@ -107,18 +107,18 @@ router.post('/', requireAuth, async (req, res) => {
     // For salaried users - validate salary fields
     if (employment_type === 'salaried') {
       if (!income_range || !eligible_loan_amount || !payment_mode || !date_of_birth) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Income range, payment mode, and date of birth are required for salaried users' 
+        return res.status(400).json({
+          success: false,
+          message: 'Income range, payment mode, and date of birth are required for salaried users'
         });
       }
 
       // Age validation - hold permanently if age > 45
       const dob = new Date(date_of_birth);
       const today = new Date();
-      const age = today.getFullYear() - dob.getFullYear() - 
-        ((today.getMonth() < dob.getMonth() || 
-         (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate())) ? 1 : 0);
+      const age = today.getFullYear() - dob.getFullYear() -
+        ((today.getMonth() < dob.getMonth() ||
+          (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate())) ? 1 : 0);
 
       if (age > 45) {
         // Hold application permanently due to age
@@ -171,10 +171,10 @@ router.post('/', requireAuth, async (req, res) => {
 
       // Check if this income range requires permanent hold
       if (rangeConfig.hold_permanent === 1) {
-        const salaryRange = rangeConfig.max_salary 
+        const salaryRange = rangeConfig.max_salary
           ? `₹${parseInt(rangeConfig.min_salary).toLocaleString('en-IN')} to ₹${parseInt(rangeConfig.max_salary).toLocaleString('en-IN')}`
           : `₹${parseInt(rangeConfig.min_salary).toLocaleString('en-IN')} and above`;
-        
+
         await executeQuery(
           'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
           ['on_hold', 'not_eligible', `Application held: Gross monthly income ${salaryRange}`, userId]
@@ -212,7 +212,7 @@ router.post('/', requireAuth, async (req, res) => {
         // Cheque payment - hold for 90 days
         const holdUntil = new Date();
         holdUntil.setDate(holdUntil.getDate() + holdDays);
-        
+
         await executeQuery(
           'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, hold_until_date = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
           ['on_hold', 'not_eligible', 'Cheque payment mode', holdUntil, userId]
@@ -233,10 +233,11 @@ router.post('/', requireAuth, async (req, res) => {
       if (eligible) {
         // Use the loan limit from database tier configuration, or fallback to calculated amount
         const loanLimit = rangeConfig?.loan_limit ? parseFloat(rangeConfig.loan_limit) : parseFloat(eligible_loan_amount);
-        
+
         // User is eligible - update profile step, set loan limit, income range, date of birth, and save employment info
+        // NEW: Mark profile_completed = 1 to skip remaining steps as per user request
         await executeQuery(
-          'UPDATE users SET profile_completion_step = 2, status = ?, eligibility_status = ?, loan_limit = ?, income_range = ?, date_of_birth = ?, updated_at = NOW() WHERE id = ?',
+          'UPDATE users SET profile_completion_step = 2, profile_completed = 1, status = ?, eligibility_status = ?, loan_limit = ?, income_range = ?, date_of_birth = ?, updated_at = NOW() WHERE id = ?',
           ['active', 'eligible', loanLimit, income_range, date_of_birth, userId]
         );
 

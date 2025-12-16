@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
+const { authenticateAdmin } = require('../middleware/auth');
 const { uploadToS3 } = require('../services/s3Service');
 const {
   generateBankStatementURL,
@@ -281,21 +282,33 @@ router.post('/initiate-bank-statement', requireAuth, async (req, res) => {
       });
     }
 
+    // For manual upload (statementupload), mobile number is optional
+    // For online methods (accountaggregator, netbanking), mobile number is required
     const mobile_number = providedMobile || users[0].phone;
 
-    if (!mobile_number) {
-      return res.status(400).json({
-        success: false,
-        message: 'Mobile number is required'
-      });
-    }
+    if (destination !== 'statementupload') {
+      // Online methods require mobile number
+      if (!mobile_number) {
+        return res.status(400).json({
+          success: false,
+          message: 'Mobile number is required for online verification'
+        });
+      }
 
-    // Validate mobile number
-    if (!/^[6-9]\d{9}$/.test(mobile_number)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid mobile number format'
-      });
+      // Validate mobile number format
+      if (!/^[6-9]\d{9}$/.test(mobile_number)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid mobile number format'
+        });
+      }
+    } else {
+      // For manual upload, use user's phone if available, but don't require it
+      // Digitap may still need it for tracking, so we'll use user's phone if available
+      if (!mobile_number) {
+        console.warn('⚠️  No mobile number available for manual upload, using placeholder');
+        // Use a placeholder - Digitap may handle this differently
+      }
     }
 
     // Validate destination
@@ -1481,6 +1494,67 @@ router.post('/init-bank-statement-table', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to create table',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/bank-statement/download-excel
+ * Admin endpoint to download Excel report from Digitap
+ * Requires txn_id in request body
+ */
+router.post('/download-excel', authenticateAdmin, async (req, res) => {
+  try {
+    const { txn_id } = req.body;
+
+    if (!txn_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Transaction ID (txn_id) is required'
+      });
+    }
+
+    console.log(`📥 Admin requesting Excel download for txn_id: ${txn_id}`);
+
+    // Call Digitap API to retrieve Excel report
+    const result = await retrieveBankStatementReport(null, 'xlsx', txn_id);
+
+    if (!result.success) {
+      console.error('❌ Failed to retrieve Excel report:', result.error);
+      return res.status(500).json({
+        success: false,
+        message: result.error || 'Failed to retrieve Excel report from Digitap'
+      });
+    }
+
+    // Check if we got binary data (Excel file)
+    if (result.data && result.data.report) {
+      const excelData = result.data.report;
+      
+      // If it's a Buffer or binary data, send it directly
+      if (Buffer.isBuffer(excelData) || typeof excelData === 'string') {
+        const buffer = Buffer.isBuffer(excelData) ? excelData : Buffer.from(excelData, 'base64');
+        
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="bank_statement_${txn_id}.xlsx"`);
+        res.send(buffer);
+        return;
+      }
+    }
+
+    // If we get here, the response format is unexpected
+    console.error('❌ Unexpected response format from Digitap');
+    return res.status(500).json({
+      success: false,
+      message: 'Unexpected response format from Digitap API'
+    });
+
+  } catch (error) {
+    console.error('❌ Excel download error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to download Excel report',
       error: error.message
     });
   }

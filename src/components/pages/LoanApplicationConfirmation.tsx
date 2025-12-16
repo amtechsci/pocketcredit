@@ -27,7 +27,7 @@ export const LoanApplicationConfirmation: React.FC = () => {
     // Redirect back if required data is missing
     React.useEffect(() => {
       toast.error('Invalid loan application data');
-      navigate('/loan-application');
+      navigate('/application'); // Redirect to application creation page
     }, []);
     return null;
   }

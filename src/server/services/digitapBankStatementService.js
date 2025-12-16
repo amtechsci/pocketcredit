@@ -5,9 +5,17 @@ const axios = require('axios');
  * Handles bank statement collection and analysis using Digitap APIs
  */
 
-const DIGITAP_BASE_URL = process.env.DIGITAP_BANK_STATEMENT_URL || 'https://svcdemo.digitap.work';
-const DIGITAP_CLIENT_ID = process.env.DIGITAP_CLIENT_ID || '27108750';
-const DIGITAP_CLIENT_SECRET = process.env.DIGITAP_CLIENT_SECRET || 'RTpc4iV2TBqMtXJEdzkPaDnBD5YNOAFB';
+// Production Digitap Bank Statement API Configuration
+// Base URL: https://svc.digitap.ai
+// Remove trailing slash if present to avoid double slashes in URLs
+const getBaseUrl = () => {
+  const url = process.env.DIGITAP_BANK_STATEMENT_URL || process.env.DIGITAP_API_URL || 'https://svc.digitap.ai';
+  return url.replace(/\/+$/, ''); // Remove trailing slashes
+};
+
+const DIGITAP_BASE_URL = getBaseUrl();
+const DIGITAP_CLIENT_ID = process.env.DIGITAP_CLIENT_ID || '25845721';
+const DIGITAP_CLIENT_SECRET = process.env.DIGITAP_CLIENT_SECRET || 'o0GHuqVysgUKJ2LNQC7BB46amc5rBqH8';
 
 // Correct API Endpoints for Bank Statement
 const ENDPOINTS = {
@@ -51,7 +59,7 @@ function generateClientRefNum(userId, applicationId) {
  * @param {string} params.start_date - Start date (YYYY-MM-DD format)
  * @param {string} params.end_date - End date (YYYY-MM-DD format)
  * @param {string} params.destination - Method: 'accountaggregator', 'netbanking', 'pdf'
- * @param {string} params.aa_vendor - AA vendor (e.g., 'onemoney') - default: 'onemoney'
+ * @param {string} params.aa_vendor - AA vendor (optional, configurable via DIGITAP_AA_VENDOR env var). If not provided, Digitap will use default vendor for your account
  * @param {string} params.multi_aa - Multi AA flag: '0' or '1' - default: '0'
  * @param {string} params.acceptance_policy - Acceptance policy - default: 'atLeastOneTransactionInRange'
  * @param {string} params.txn_id - Transaction ID (optional)
@@ -69,7 +77,7 @@ async function generateBankStatementURL(params) {
       start_date,
       end_date,
       destination = 'accountaggregator',
-      aa_vendor = 'onemoney',
+      aa_vendor = process.env.DIGITAP_AA_VENDOR || null, // Make configurable, default to null (let Digitap choose)
       multi_aa = '0',
       acceptance_policy = 'atLeastOneTransactionInRange',
       txn_id,
@@ -85,12 +93,17 @@ async function generateBankStatementURL(params) {
       };
     }
 
-    if (!mobile_num) {
+    // Mobile number is required for accountaggregator and netbanking
+    // For statementupload (manual), it's optional but recommended
+    if (destination !== 'statementupload' && !mobile_num) {
       return {
         success: false,
-        error: 'Mobile number is required'
+        error: 'Mobile number is required for online verification methods'
       };
     }
+    
+    // For manual upload, use a placeholder if not provided
+    const mobileNumToUse = mobile_num || '0000000000';
 
     console.log(`📊 Generating Digitap Bank Statement URL`);
     console.log('Using endpoint:', ENDPOINTS.GENERATE_URL);
@@ -169,10 +182,14 @@ async function generateBankStatementURL(params) {
       acceptance_policy: acceptance_policy,
       return_url: return_url || returnPath,
       mobile_num: mobile_num,
-      aa_vendor: aa_vendor,
       multi_aa: multi_aa,
       consent_request: consent_request
     };
+
+    // Only include aa_vendor if provided (some clients may not have specific vendors configured)
+    if (aa_vendor) {
+      requestBody.aa_vendor = aa_vendor;
+    }
 
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
     console.log('Authorization:', getAuthHeader());
@@ -458,6 +475,7 @@ async function retrieveBankStatementReport(client_ref_num = null, format = 'json
       requestBody.client_ref_num = client_ref_num;
     }
 
+    // For Excel format, we need to receive binary data
     const response = await axios.post(
       ENDPOINTS.RETRIEVE_REPORT,
       requestBody,
@@ -466,11 +484,48 @@ async function retrieveBankStatementReport(client_ref_num = null, format = 'json
           'Authorization': getAuthHeader(),
           'Content-Type': 'application/json'
         },
+        responseType: format === 'xlsx' ? 'arraybuffer' : 'json', // Binary for Excel, JSON for other formats
         timeout: 30000
       }
     );
 
     console.log('✅ Report Retrieved, status:', response.status);
+    
+    // Handle Excel format (binary response)
+    if (format === 'xlsx') {
+      if (response.data && Buffer.isBuffer(response.data)) {
+        console.log('✅ Excel file received, size:', response.data.length, 'bytes');
+        return {
+          success: true,
+          data: {
+            report: response.data, // Binary buffer
+            txn_id: txn_id || null,
+            format: 'xlsx',
+            message: 'Excel report retrieved successfully'
+          }
+        };
+      } else if (response.data) {
+        // If it's not a buffer, try to convert it
+        const buffer = Buffer.from(response.data);
+        console.log('✅ Excel file converted to buffer, size:', buffer.length, 'bytes');
+        return {
+          success: true,
+          data: {
+            report: buffer,
+            txn_id: txn_id || null,
+            format: 'xlsx',
+            message: 'Excel report retrieved successfully'
+          }
+        };
+      } else {
+        return {
+          success: false,
+          error: 'No Excel data received from Digitap'
+        };
+      }
+    }
+
+    // Handle JSON format
     console.log('📊 Report response structure:', {
       hasResult: !!response.data?.result,
       hasData: !!response.data?.data,

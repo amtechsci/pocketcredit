@@ -113,9 +113,10 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
 
     // Fetch bank statement report
     let bankStatement = null;
+    let txnId = null;
     try {
       const bankStmtResults = await executeQuery(
-        'SELECT report_data FROM user_bank_statements WHERE user_id = ? AND status = "completed" ORDER BY created_at DESC LIMIT 1',
+        'SELECT report_data, txn_id FROM user_bank_statements WHERE user_id = ? AND status = "completed" ORDER BY created_at DESC LIMIT 1',
         [userId]
       );
       if (bankStmtResults.length > 0 && bankStmtResults[0].report_data) {
@@ -123,6 +124,11 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         bankStatement = typeof bankStmtResults[0].report_data === 'string'
           ? JSON.parse(bankStmtResults[0].report_data)
           : bankStmtResults[0].report_data;
+        // Include txn_id for Excel download
+        txnId = bankStmtResults[0].txn_id;
+        if (bankStatement && txnId) {
+          bankStatement.txn_id = txnId;
+        }
       }
     } catch (e) {
       console.error('Error fetching bank statement:', e);

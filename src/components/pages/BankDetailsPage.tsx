@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, IndianRupee, Building2, Check, ExternalLink, Plus, CreditCard } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
@@ -48,16 +48,15 @@ export function BankDetailsPage() {
     confirmDetails: false
   });
 
-  // Get application ID from URL params
+  // Get application ID from URL params or location state
   useEffect(() => {
-    const appId = searchParams.get('applicationId');
+    const appId = searchParams.get('applicationId') || (location.state as any)?.applicationId;
     if (appId) {
-      setApplicationId(appId);
-    } else {
-      // If no application ID, redirect back to loan application
-      navigate('/application');
+      setApplicationId(String(appId));
     }
-  }, [searchParams, navigate]);
+    // Don't redirect here - let StepGuard handle redirects based on prerequisites
+    // StepGuard will redirect to the correct step if prerequisites aren't met
+  }, [searchParams, location.state]);
 
   // Redirect if not authenticated
   useEffect(() => {

@@ -1026,6 +1026,16 @@ class AdminApiService {
     return response.data;
   }
 
+  async downloadBankStatementExcel(txnId: string): Promise<Blob> {
+    const response = await axios.post('/api/bank-statement/download-excel', { txn_id: txnId }, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      },
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
   async emailKFSPDF(loanId: number, htmlContent: string, recipientEmail: string, recipientName: string): Promise<ApiResponse<any>> {
     const response = await axios.post(`/api/kfs/${loanId}/email-pdf`, {
       htmlContent,

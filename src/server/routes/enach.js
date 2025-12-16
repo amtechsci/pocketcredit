@@ -38,13 +38,15 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             });
         }
 
-        // Fetch loan application details
+        // Fetch loan application details with all email fields
         const loanQuery = `
       SELECT 
         la.*,
         u.first_name,
         u.last_name,
         u.email,
+        u.personal_email,
+        u.official_email,
         u.phone
       FROM loan_applications la
       JOIN users u ON la.user_id = u.id
@@ -61,6 +63,16 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         }
 
         const loan = loans[0];
+        
+        // Get email - use personal_email, official_email, or email (in that priority order)
+        const customerEmail = loan.personal_email || loan.official_email || loan.email;
+        
+        if (!customerEmail) {
+            return res.status(400).json({
+                success: false,
+                message: 'Customer email is required. Please update your email in profile settings.'
+            });
+        }
 
         // Fetch primary bank details
         const bankQuery = `
@@ -118,7 +130,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             subscription_id: subscriptionId,
             customer_details: {
                 customer_name: `${loan.first_name} ${loan.last_name}`,
-                customer_email: loan.email,
+                customer_email: customerEmail, // Use personal_email, official_email, or email
                 customer_phone: loan.phone,
                 customer_bank_account_holder_name: bank.account_holder_name || `${loan.first_name} ${loan.last_name}`,
                 customer_bank_account_number: bank.account_number,

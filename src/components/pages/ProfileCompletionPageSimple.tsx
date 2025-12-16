@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  User, 
-  MapPin, 
+import {
+  User,
+  MapPin,
   ArrowRight,
   Shield,
   Mail
@@ -114,11 +114,11 @@ const ProfileCompletionPageSimple = () => {
   useEffect(() => {
     if (user) {
       const fullName = user.first_name && user.last_name ? `${user.first_name} ${user.last_name}`.trim() : user.first_name || '';
-      let lat = null; 
+      let lat = null;
       let lng = null;
       if (user.latlong) {
         const [latitude, longitude] = user.latlong.split(',');
-        lat = parseFloat(latitude) || null; 
+        lat = parseFloat(latitude) || null;
         lng = parseFloat(longitude) || null;
       }
 
@@ -151,7 +151,7 @@ const ProfileCompletionPageSimple = () => {
   // Auto-capture GPS location when Step 2 is reached (only for salaried)
   useEffect(() => {
     const isSalaried = user?.employment_type === 'salaried' || employmentQuickCheckData.employment_type === 'salaried';
-    
+
     if (currentStep === 2 && isSalaried && !basicFormData.latitude && !basicFormData.longitude) {
       console.log('📍 Auto-capturing location for salaried user...');
       captureLocation();
@@ -162,7 +162,7 @@ const ProfileCompletionPageSimple = () => {
   useEffect(() => {
     const isSalaried = user?.employment_type === 'salaried' || employmentQuickCheckData.employment_type === 'salaried';
     const profileComplete = user?.profile_completed;
-    
+
     console.log('Digitap trigger check:', {
       currentStep,
       userEmploymentType: user?.employment_type,
@@ -172,26 +172,30 @@ const ProfileCompletionPageSimple = () => {
       digitapCalled: digitapCalled,
       digitapCalledRef: digitapCalledRef.current
     });
-    
+
     // Don't call Digitap if profile is already complete or if it's already been called
     if (currentStep === 2 && isSalaried && !digitapCalled && !digitapCalledRef.current && !profileComplete) {
-      console.log('✅ Triggering Digitap API call...');
-      digitapCalledRef.current = true; // Set ref immediately to prevent multiple calls
-      fetchDigitapData();
-      
+      console.log('✅ Triggering Digitap API call... SKIPPED BY USER REQUEST');
+      // digitapCalledRef.current = true; // Set ref immediately to prevent multiple calls
+      // fetchDigitapData();
+
+      // Force redirect if somehow we end up here
+      window.location.href = '/dashboard';
+
       // Safety: Show manual form after 20 seconds if Digitap hasn't responded
-      const timeoutId = setTimeout(() => {
-        if (!showPrefillConfirm && !showManualForm && !loading) {
-          console.log('⏰ Digitap timeout - showing manual form');
-          setShowManualForm(true);
-          toast.info('Taking too long? You can enter details manually');
-        }
-      }, 20000); // 20 seconds
-      
-      return () => clearTimeout(timeoutId);
+      // const timeoutId = setTimeout(() => {
+      //   if (!showPrefillConfirm && !showManualForm && !loading) {
+      //     console.log('⏰ Digitap timeout - showing manual form');
+      //     setShowManualForm(true);
+      //     toast.info('Taking too long? You can enter details manually');
+      //   }
+      // }, 20000); // 20 seconds
+
+      // return () => clearTimeout(timeoutId);
+      return;
     }
   }, [currentStep, user?.employment_type, employmentQuickCheckData.employment_type, digitapCalled, user?.profile_completed]);
-  
+
   // Skip Step 2 for students - go directly to Step 3
   useEffect(() => {
     if (currentStep === 2 && user?.employment_type === 'student') {
@@ -235,14 +239,14 @@ const ProfileCompletionPageSimple = () => {
       try {
         console.log('Fetching income ranges from API...');
         const response = await fetch('/api/employment-quick-check/income-ranges');
-        
+
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
+
         const result = await response.json();
         console.log('Income ranges API response:', result);
-        
+
         if (result.success && result.data && Array.isArray(result.data) && result.data.length > 0) {
           console.log('Setting income ranges:', result.data);
           setIncomeRanges(result.data);
@@ -281,47 +285,78 @@ const ProfileCompletionPageSimple = () => {
   const fetchDigitapData = async () => {
     setDigitapCalled(true);
     setFetchingPrefill(true);
-    
+
     try {
       console.log('Fetching Digitap prefill data...');
       const response = await apiService.fetchDigitapPrefill();
-      
+
       if (response && response.data) {
         console.log('Digitap data received:', response.data);
-        
+
         // Show confirmation dialog with the fetched data
         setDigitapData(response.data);
-        setShowPrefillConfirm(true);
-        setShowManualForm(false); // Hide manual form when Digitap succeeds
-        toast.success('We found your details automatically!');
+        toast.success('We found your details automatically! Saving and redirecting...');
+
+        // Auto-save and redirect
+        try {
+          console.log('Auto-saving Digitap data...');
+          const saveResponse = await apiService.saveDigitapPrefill({
+            name: response.data.name || '',
+            dob: response.data.dob || '',
+            pan: response.data.pan || '',
+            gender: response.data.gender ? response.data.gender.toLowerCase() : '',
+            email: response.data.email || '',
+            address: response.data.address || []
+          });
+
+          if (saveResponse && saveResponse.status === 'success') {
+            console.log('Digitap data saved automatically');
+            // Allow a moment for the toast to be seen
+            setTimeout(() => {
+              window.location.href = '/dashboard';
+            }, 1000);
+          } else {
+            console.error('Failed to auto-save, redirecting anyway');
+            window.location.href = '/dashboard';
+          }
+        } catch (saveError) {
+          console.error('Auto-save error:', saveError);
+          window.location.href = '/dashboard';
+        }
       } else if ((response as any)?.hold_applied) {
         // Credit score too low - hold applied
         const creditScore = (response as any).credit_score;
         const holdDays = (response as any).hold_days || 60;
-        
+
         console.log(`❌ Credit score (${creditScore}) below 630 - applying ${holdDays}-day hold`);
-        
+
         // Show detailed error message
         toast.error(
-          (response as any).message || 
+          (response as any).message ||
           `Your credit score (${creditScore}) is below our minimum requirement of 630. You can reapply after ${holdDays} days.`,
           { duration: 6000 }
         );
-        
+
         // Wait a bit then redirect to dashboard where hold banner will be shown
         setTimeout(() => {
           window.location.href = '/dashboard';
         }, 4000);
       } else {
-        // API failed or returned no data - allow manual entry
-        console.log('Digitap API failed or no data, proceeding with manual entry');
-        setShowManualForm(true); // Show manual form when Digitap fails
-        toast.info('Please enter your details manually');
+        // API failed or returned no data - SKIP manual entry and go to Dashboard
+        console.log('Digitap API failed or no data, skipping manual entry...');
+        // setShowManualForm(true); // OLD: Show manual form when Digitap fails
+        toast.info('Skipping manual entry, redirecting to dashboard...');
+        setTimeout(() => {
+          window.location.href = '/dashboard';
+        }, 1000);
       }
     } catch (error) {
       console.error('Digitap fetch error:', error);
-      setShowManualForm(true); // Show manual form on error
-      toast.info('Please enter your details manually');
+      // setShowManualForm(true); // OLD: Show manual form on error
+      toast.info('Skipping manual entry, redirecting to dashboard...');
+      setTimeout(() => {
+        window.location.href = '/dashboard';
+      }, 1000);
     } finally {
       setFetchingPrefill(false);
     }
@@ -329,7 +364,7 @@ const ProfileCompletionPageSimple = () => {
 
   const handlePrefillConfirm = async () => {
     if (!digitapData) return;
-    
+
     setLoading(true);
     try {
       // Save Digitap prefill data to database
@@ -345,7 +380,7 @@ const ProfileCompletionPageSimple = () => {
       if (saveResponse && saveResponse.status === 'success') {
         console.log('Digitap data saved to database');
         toast.success('Profile completed! Redirecting to dashboard...');
-        
+
         // Use window.location.href for a hard redirect to avoid React state timing issues
         console.log('✅ Redirecting to dashboard with full page reload...');
         setTimeout(() => {
@@ -387,9 +422,9 @@ const ProfileCompletionPageSimple = () => {
 
         const dob = new Date(employmentQuickCheckData.date_of_birth);
         const today = new Date();
-        const age = today.getFullYear() - dob.getFullYear() - 
-          ((today.getMonth() < dob.getMonth() || 
-           (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate())) ? 1 : 0);
+        const age = today.getFullYear() - dob.getFullYear() -
+          ((today.getMonth() < dob.getMonth() ||
+            (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate())) ? 1 : 0);
 
         if (age > 45) {
           toast.error('Sorry, applicants above 45 years of age are not eligible at this time.');
@@ -409,8 +444,9 @@ const ProfileCompletionPageSimple = () => {
         if (response.data.eligible) {
           toast.success('Eligibility verified! Please continue with your profile.');
           await refreshUser();
-          
-          // For salaried users, pre-fetch Digitap data for next step
+
+          // OLD: For salaried users, pre-fetch Digitap data for next step
+          /*
           if (employmentQuickCheckData.employment_type === 'salaried' && !digitapCalled) {
             console.log('🔄 Pre-fetching Digitap data after employment verification...');
             // Don't await this - let it run in background
@@ -420,6 +456,14 @@ const ProfileCompletionPageSimple = () => {
               }
             }, 500);
           }
+          */
+
+          // NEW: Skip everything and go to dashboard
+          console.log('Skipping API calls, redirecting to dashboard...');
+          toast.success('Eligibility verified! Redirecting to dashboard...');
+          setTimeout(() => {
+            window.location.href = '/dashboard';
+          }, 1000);
         } else {
           toast.error(response.data.message || 'You are not eligible at this time.');
         }
@@ -454,15 +498,15 @@ const ProfileCompletionPageSimple = () => {
       // Call PAN validation API
       console.log('Validating PAN:', basicFormData.pan_number);
       const response = await apiService.validatePAN(basicFormData.pan_number.toUpperCase());
-      
+
       if (response.status === 'success' && response.data) {
         console.log('PAN validated successfully, data saved:', response.data);
-        
+
         toast.success('PAN validated! Your details have been saved automatically.');
-        
+
         // Refresh user data
         await refreshUser();
-        
+
         // Redirect to dashboard
         setTimeout(() => {
           window.location.href = '/dashboard';
@@ -498,18 +542,18 @@ const ProfileCompletionPageSimple = () => {
     setLoading(true);
     try {
       const response = await apiService.updateStudentProfile(studentFormData);
-      
+
       if (response.status === 'success' && response.data) {
         // Check if hold was applied due to age
         if (response.data.hold_permanent || response.data.hold_until) {
           const holdMessage = response.data.hold_reason || response.message;
           toast.error(holdMessage);
-          
+
           // Redirect to dashboard where they can see the hold banner
           setTimeout(() => navigate('/dashboard'), 2000);
           return;
         }
-        
+
         updateUser(response.data.user);
         toast.success('Student profile completed successfully!');
         navigate('/dashboard');
@@ -528,7 +572,7 @@ const ProfileCompletionPageSimple = () => {
     switch (currentStep) {
       case 1: return 'Employment Type Selection';
       case 2: return 'Basic Information';
-      case 3: 
+      case 3:
         if (user?.employment_type === 'salaried') {
           return 'Additional Details';
         }
@@ -623,8 +667,8 @@ const ProfileCompletionPageSimple = () => {
                           onChange={(e) => {
                             const range = e.target.value;
                             const loanAmount = calculateLoanAmount(range);
-                            setEmploymentQuickCheckData(prev => ({ 
-                              ...prev, 
+                            setEmploymentQuickCheckData(prev => ({
+                              ...prev,
                               income_range: range,
                               eligible_loan_amount: loanAmount
                             }));

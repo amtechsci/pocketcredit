@@ -55,6 +55,7 @@ export const LinkSalaryBankAccountPage = () => {
     // Check if user has already completed this step by checking:
     // 1. If user has a primary bank account (set during e-NACH registration)
     // 2. If email is already verified (comes after e-NACH)
+    // 3. If user has an active loan application (if not, redirect to dashboard)
     const checkCompletionAndRedirect = async () => {
       if (!user?.id) {
         setCheckingEnach(false);
@@ -62,6 +63,33 @@ export const LinkSalaryBankAccountPage = () => {
       }
 
       try {
+        // First, check if user has an active/pending loan application
+        try {
+          const applicationsResponse = await apiService.getLoanApplications();
+          if (applicationsResponse.success && applicationsResponse.data?.applications) {
+            const applications = applicationsResponse.data.applications;
+            const activeApplication = applications.find((app: any) => 
+              ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(app.status)
+            );
+            
+            if (!activeApplication) {
+              console.log('No active loan application found, redirecting to dashboard');
+              toast.info('No active loan application found. Redirecting to dashboard...');
+              setTimeout(() => navigate('/dashboard', { replace: true }), 1500);
+              return;
+            }
+          } else {
+            // No applications at all, redirect to dashboard
+            console.log('No loan applications found, redirecting to dashboard');
+            toast.info('No loan application found. Redirecting to dashboard...');
+            setTimeout(() => navigate('/dashboard', { replace: true }), 1500);
+            return;
+          }
+        } catch (appError) {
+          console.error('Error checking loan applications:', appError);
+          // Continue with other checks even if this fails
+        }
+
         // Method 1: Check if email is already verified
         if (user.personal_email_verified) {
           navigate('/email-verification', { replace: true });

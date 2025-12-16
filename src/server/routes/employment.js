@@ -202,39 +202,73 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 /**
- * GET /api/employment-details/status/:applicationId
- * Check if employment details are already completed for an application
+ * GET /api/employment-details/status
+ * Check if employment details are already completed (user-specific, not application-specific)
  */
-router.get('/status/:applicationId', requireAuth, async (req, res) => {
+router.get('/status', requireAuth, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;
-    const { applicationId } = req.params;
 
-    // Verify the application belongs to the user
-    const application = await executeQuery(
-      'SELECT id FROM loan_applications WHERE id = ? AND user_id = ?',
-      [applicationId, userId]
+    // Check if employment details exist for this user (user-specific, one-time step)
+    const applicationEmploymentDetails = await executeQuery(
+      'SELECT * FROM application_employment_details WHERE user_id = ?',
+      [userId]
     );
 
-    if (!application || application.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Loan application not found'
-      });
+    // Also check if user has employment details in the main employment_details table
+    const userEmploymentDetails = await executeQuery(
+      'SELECT * FROM employment_details WHERE user_id = ?',
+      [userId]
+    );
+
+    // Get user's monthly_net_income and salary_date from users table
+    const userData = await executeQuery(
+      'SELECT monthly_net_income, salary_date FROM users WHERE id = ?',
+      [userId]
+    );
+
+    // Employment is considered completed if either:
+    // 1. application_employment_details exists (user-specific), OR
+    // 2. User has main employment details
+    const completed = applicationEmploymentDetails.length > 0 || userEmploymentDetails.length > 0;
+
+    // Return employment data for pre-filling the form
+    let employmentData = null;
+    if (applicationEmploymentDetails.length > 0) {
+      // Use application_employment_details (now user-specific)
+      const appDetails = applicationEmploymentDetails[0];
+      employmentData = {
+        company_name: appDetails.company_name,
+        designation: appDetails.designation,
+        industry: appDetails.industry,
+        department: appDetails.department,
+        education: appDetails.education,
+        monthly_net_income: userData[0]?.monthly_net_income || null,
+        salary_date: userData[0]?.salary_date || null
+      };
+    } else if (userEmploymentDetails.length > 0) {
+      // Use main employment details as fallback
+      const userDetails = userEmploymentDetails[0];
+      employmentData = {
+        company_name: userDetails.company_name || null,
+        designation: userDetails.designation || null,
+        industry: null, // Not stored in main employment_details
+        department: null, // Not stored in main employment_details
+        education: null, // Not stored in main employment_details
+        monthly_net_income: userData[0]?.monthly_net_income || null,
+        salary_date: userData[0]?.salary_date || null
+      };
     }
-
-    // Check if employment details exist
-    const employmentDetails = await executeQuery(
-      'SELECT id FROM application_employment_details WHERE application_id = ?',
-      [applicationId]
-    );
 
     res.json({
       status: 'success',
       message: 'Employment status retrieved',
       data: {
-        completed: employmentDetails.length > 0
+        completed: completed,
+        hasEmploymentDetails: applicationEmploymentDetails.length > 0,
+        hasUserEmploymentDetails: userEmploymentDetails.length > 0,
+        employmentData: employmentData // Return data for pre-filling
       }
     });
 
@@ -250,7 +284,7 @@ router.get('/status/:applicationId', requireAuth, async (req, res) => {
 
 /**
  * POST /api/employment-details/details
- * Submit detailed employment information for loan application
+ * Submit detailed employment information (user-specific, one-time step)
  */
 router.post('/details', requireAuth, async (req, res) => {
   try {
@@ -264,8 +298,8 @@ router.post('/details', requireAuth, async (req, res) => {
       salary_date,
       industry, 
       department, 
-      designation, 
-      application_id 
+      designation
+      // application_id is no longer required - this is now user-specific
     } = req.body;
 
     // Validation
@@ -304,32 +338,6 @@ router.post('/details', requireAuth, async (req, res) => {
       });
     }
 
-    if (!application_id) {
-      return res.status(400).json({
-        success: false,
-        message: 'Application ID is required'
-      });
-    }
-
-    // Verify the application belongs to the user
-    const application = await executeQuery(
-      'SELECT id, user_id FROM loan_applications WHERE id = ? AND user_id = ?',
-      [application_id, userId]
-    );
-
-    if (!application || application.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Loan application not found'
-      });
-    }
-
-    // Check if employment details already exist for this application
-    const existing = await executeQuery(
-      'SELECT id FROM application_employment_details WHERE application_id = ?',
-      [application_id]
-    );
-
     // Update users table with monthly_net_income and salary_date
     await executeQuery(
       `UPDATE users 
@@ -340,8 +348,14 @@ router.post('/details', requireAuth, async (req, res) => {
       [monthly_net_income, parseInt(salary_date), userId]
     );
 
+    // Check if employment details already exist for this user (user-specific, one record per user)
+    const existing = await executeQuery(
+      'SELECT id FROM application_employment_details WHERE user_id = ?',
+      [userId]
+    );
+
     if (existing.length > 0) {
-      // Update existing record
+      // Update existing record (user-specific, not application-specific)
       await executeQuery(
         `UPDATE application_employment_details 
          SET company_name = ?, 
@@ -350,16 +364,16 @@ router.post('/details', requireAuth, async (req, res) => {
              department = ?, 
              designation = ?, 
              updated_at = NOW() 
-         WHERE application_id = ?`,
-        [company_name, education, industry, department, designation, application_id]
+         WHERE user_id = ?`,
+        [company_name, education, industry, department, designation, userId]
       );
     } else {
-      // Insert new record
+      // Insert new record (user-specific, one record per user)
       await executeQuery(
         `INSERT INTO application_employment_details 
-         (application_id, user_id, company_name, education, industry, department, designation, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-        [application_id, userId, company_name, education, industry, department, designation]
+         (user_id, company_name, education, industry, department, designation, created_at, updated_at) 
+         VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [userId, company_name, education, industry, department, designation]
       );
     }
 

@@ -53,7 +53,38 @@ const createApplication = async (userId, applicationData) => {
     const application_number = generateApplicationNumber();
 
     // Use plan_id or loan_plan_id (whichever is provided)
-    const planId = plan_id || loan_plan_id || null;
+    let planId = plan_id || loan_plan_id || null;
+
+    // If no plan_id provided, try to get user's selected plan or default plan
+    if (!planId) {
+      try {
+        const { executeQuery } = require('../config/database');
+        // Get user's selected plan
+        const users = await executeQuery(
+          'SELECT selected_loan_plan_id FROM users WHERE id = ?',
+          [userId]
+        );
+        
+        if (users && users.length > 0 && users[0].selected_loan_plan_id) {
+          planId = users[0].selected_loan_plan_id;
+          console.log(`✅ Using user's selected plan ID: ${planId}`);
+        } else {
+          // Get system default plan
+          const defaultPlans = await executeQuery(
+            'SELECT id FROM loan_plans WHERE is_default = 1 AND is_active = 1 LIMIT 1'
+          );
+          if (defaultPlans && defaultPlans.length > 0) {
+            planId = defaultPlans[0].id;
+            console.log(`✅ Using system default plan ID: ${planId}`);
+          } else {
+            console.warn('⚠️ No plan_id provided and no default plan found. Application will be created without plan.');
+          }
+        }
+      } catch (planError) {
+        console.error('Error fetching fallback plan:', planError);
+        // Continue without plan - application will be created with null plan_id
+      }
+    }
 
     const query = `
       INSERT INTO loan_applications (

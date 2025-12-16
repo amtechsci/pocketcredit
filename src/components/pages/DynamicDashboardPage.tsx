@@ -7,10 +7,10 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Progress } from '../ui/progress';
-import { 
-  CreditCard, 
-  User, 
-  TrendingUp, 
+import {
+  CreditCard,
+  User,
+  TrendingUp,
   Calendar,
   CheckCircle,
   Clock,
@@ -135,7 +135,7 @@ export function DynamicDashboardPage() {
     try {
       setLoading(true);
       setError(null);
-      
+
       // First check if user has an application under review
       try {
         const applicationsResponse = await apiService.getLoanApplications();
@@ -153,19 +153,25 @@ export function DynamicDashboardPage() {
         console.error('Error checking applications:', appError);
         // Continue to load dashboard
       }
-      
+
       const response = await apiService.getDashboardSummary();
-      
+
       if (response.status === 'success' && response.data) {
         setDashboardData(response.data);
-        
+
         // Check if user can apply for new loan
         if ((response.data as any).loan_status) {
           setCanApplyForLoan((response.data as any).loan_status.can_apply);
         }
       } else if (response.status === 'profile_incomplete') {
-        // User needs to complete their profile
-        console.log('Profile incomplete, redirecting to profile completion:', response.data);
+        const incompleteData = response.data as any;
+        console.log('Profile incomplete, redirecting to completion:', incompleteData);
+
+        // If the backend says profile is incomplete, we should generally respect it
+        // especially for Step 1 (Employment Check) which is critical.
+        // For Step 2, our backend fix (profile_completed=1) should have prevented this status.
+        // So if we are here, it's either a new user or the fix didn't apply.
+        // Safe fallback is to redirect.
         navigate('/profile-completion');
         return;
       } else {
@@ -184,47 +190,47 @@ export function DynamicDashboardPage() {
     try {
       console.log('🔄 Fetching pending applications...');
       const response = await apiService.getPendingLoanApplications();
-      
+
       console.log('📊 Pending applications response:', response);
-      
+
       if (response.status === 'success' || response.success === true) {
         const applications = response.data?.applications || [];
         console.log('📋 Raw applications:', applications);
-        
+
         // Remove duplicates based on application ID
-        const uniqueApplications = applications.filter((app: any, index: number, self: any[]) => 
+        const uniqueApplications = applications.filter((app: any, index: number, self: any[]) =>
           index === self.findIndex((a: any) => a.id === app.id)
         );
-        
+
         console.log('✅ Unique applications:', uniqueApplications);
-        
+
         // Check for account_manager status - redirect to repayment schedule
-        const accountManagerApp = uniqueApplications.find((app: any) => 
+        const accountManagerApp = uniqueApplications.find((app: any) =>
           app.status === 'account_manager'
         );
-        
+
         if (accountManagerApp) {
           navigate(`/repayment-schedule?applicationId=${accountManagerApp.id}`);
           return;
         }
-        
+
         // Check for ready_for_disbursement status - show waiting message (admin needs to add transaction)
-        const readyForDisbursementApp = uniqueApplications.find((app: any) => 
+        const readyForDisbursementApp = uniqueApplications.find((app: any) =>
           app.status === 'ready_for_disbursement'
         );
-        
+
         if (readyForDisbursementApp) {
           // Don't redirect - just show the dashboard with a message
           // The loan will appear in "Running Loans" section
           // Once admin adds transaction, status will change to account_manager and user will see repayment schedule
         }
-        
+
         // Check for disbursal status - redirect to post-disbursal flow
         // But check if user has already completed all steps first
-        const disbursalApp = uniqueApplications.find((app: any) => 
+        const disbursalApp = uniqueApplications.find((app: any) =>
           app.status === 'disbursal'
         );
-        
+
         if (disbursalApp) {
           // Check if user has completed step 6 (agreement signed)
           // If yes, redirect to post-disbursal to show "You will get funds shortly" message
@@ -255,19 +261,19 @@ export function DynamicDashboardPage() {
             return;
           }
         }
-        
+
         // Split applications into applied loans and running loans
-        const applied = uniqueApplications.filter((app: any) => 
+        const applied = uniqueApplications.filter((app: any) =>
           ['submitted', 'under_review', 'follow_up'].includes(app.status)
         );
-        
-        const running = uniqueApplications.filter((app: any) => 
+
+        const running = uniqueApplications.filter((app: any) =>
           ['account_manager', 'cleared', 'ready_for_disbursement'].includes(app.status)
         );
-        
+
         console.log('📝 Applied loans:', applied);
         console.log('🏃 Running loans:', running);
-        
+
         setPendingApplications(uniqueApplications);
         setAppliedLoans(applied);
         setRunningLoans(running);
@@ -279,7 +285,7 @@ export function DynamicDashboardPage() {
       }
     } catch (error: any) {
       console.error('❌ Error fetching pending applications:', error);
-      
+
       // Handle timeout errors specifically
       if (error.message?.includes('timeout')) {
         console.warn('API timeout - this might be a server issue. Retrying in 5 seconds...');
@@ -288,7 +294,7 @@ export function DynamicDashboardPage() {
           fetchPendingApplications();
         }, 5000);
       }
-      
+
       // Set empty array to prevent UI issues
       setPendingApplications([]);
       setAppliedLoans([]);
@@ -306,7 +312,7 @@ export function DynamicDashboardPage() {
     if (!dashboardData) {
       loadDashboardData();
     }
-    
+
     // Fetch pending applications
     if (user) {
       fetchPendingApplications();
@@ -396,7 +402,7 @@ export function DynamicDashboardPage() {
   const hasActiveOrPendingLoans = () => {
     const hasActiveLoans = active_loans && active_loans.length > 0;
     const hasPendingApplications = pendingApplications && pendingApplications.length > 0;
-    
+
     // Debug logging
     console.log('🔍 Loan Status Check:', {
       activeLoans: active_loans?.length || 0,
@@ -405,7 +411,7 @@ export function DynamicDashboardPage() {
       hasPendingApplications,
       result: hasActiveLoans || hasPendingApplications
     });
-    
+
     return hasActiveLoans || hasPendingApplications;
   };
 
@@ -425,11 +431,11 @@ export function DynamicDashboardPage() {
               </div>
             </div>
             {canApplyForLoan && !hasActiveOrPendingLoans() && (
-              <Button 
+              <Button
                 onClick={() => {
-                        console.log('Apply for a Loan button clicked');
-                        navigate('/application');
-                      }}
+                  console.log('Apply for a Loan button clicked');
+                  navigate('/application');
+                }}
                 className="bg-white/20 hover:bg-white/30 text-white border-white/30"
                 variant="outline"
                 type="button"
@@ -438,7 +444,7 @@ export function DynamicDashboardPage() {
               </Button>
             )}
           </div>
-          
+
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
             {/* Hide Credit Score for students */}
             {userData.employment_type !== 'student' && (
@@ -525,7 +531,7 @@ export function DynamicDashboardPage() {
               <p className="text-blue-100 text-xs">Manage your loans and track payments</p>
             </div>
           </div>
-          
+
           <div className="grid grid-cols-1 gap-3">
             {/* Hide Credit Score for students */}
             {userData.employment_type !== 'student' && (
@@ -589,12 +595,12 @@ export function DynamicDashboardPage() {
               {appliedLoans.length} in progress
             </Badge>
           </div>
-          
+
           <div className="text-center py-4">
             <p className="text-gray-600 mb-4">
               You have {appliedLoans.length} loan application{appliedLoans.length !== 1 ? 's' : ''} in progress.
             </p>
-            <Button 
+            <Button
               onClick={() => setActiveTab('applied-loans')}
               className="bg-yellow-600 hover:bg-yellow-700 text-white"
             >
@@ -603,7 +609,7 @@ export function DynamicDashboardPage() {
           </div>
         </div>
       )}
-      
+
       {/* Running Loans - Overview */}
       {runningLoans.length > 0 && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-6">
@@ -614,12 +620,12 @@ export function DynamicDashboardPage() {
               {runningLoans.length} active
             </Badge>
           </div>
-          
+
           <div className="text-center py-4">
             <p className="text-gray-600 mb-4">
               You have {runningLoans.length} loan{runningLoans.length !== 1 ? 's' : ''} with account manager.
             </p>
-            <Button 
+            <Button
               onClick={() => setActiveTab('loans')}
               className="bg-green-600 hover:bg-green-700 text-white"
             >
@@ -646,7 +652,7 @@ export function DynamicDashboardPage() {
                   View All
                 </Button>
               </div>
-              
+
               {active_loans.length > 0 ? (
                 active_loans.map((loan) => (
                   <div key={loan.id} className="border rounded-lg p-6 mb-4 hover:bg-gray-50 transition-colors">
@@ -659,7 +665,7 @@ export function DynamicDashboardPage() {
                         {loan.status}
                       </Badge>
                     </div>
-                    
+
                     <div className="grid grid-cols-4 gap-6 mb-6">
                       <div>
                         <p className="text-sm text-gray-600">Loan Amount</p>
@@ -678,7 +684,7 @@ export function DynamicDashboardPage() {
                         <p className="text-xl font-semibold">{formatDate(loan.first_emi_date)}</p>
                       </div>
                     </div>
-                    
+
                     <div className="mb-6">
                       <div className="flex justify-between text-sm mb-2">
                         <span>Progress ({loan.completed_tenure}/{loan.tenure_months} months)</span>
@@ -686,17 +692,17 @@ export function DynamicDashboardPage() {
                       </div>
                       <Progress value={loan.progress_percentage} className="h-3" />
                     </div>
-                    
+
                     <div className="flex gap-3">
-                      <Button 
+                      <Button
                         className="px-6"
                         onClick={() => navigate('/pay-emi')}
                         style={{ backgroundColor: '#0052FF' }}
                       >
                         Pay EMI
                       </Button>
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         onClick={() => navigate(`/loan-details/${loan.id}`)}
                       >
                         View Details
@@ -714,7 +720,7 @@ export function DynamicDashboardPage() {
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Loans</h3>
                   <p className="text-gray-600 mb-4">You don't have any active loans at the moment.</p>
                   {canApplyForLoan && !hasActiveOrPendingLoans() && (
-                    <Button 
+                    <Button
                       onClick={() => {
                         console.log('Apply for a Loan button clicked');
                         navigate('/application');
@@ -732,9 +738,9 @@ export function DynamicDashboardPage() {
           {/* Right Sidebar */}
           <div className="col-span-4 space-y-6">
             {/* Graduation Upsell Card for Students OR Credit Score Widget for Others */}
-            {userData.employment_type === 'student' && 
-             userData.graduation_status === 'not_graduated' && 
-             userData.loan_limit ? (
+            {userData.employment_type === 'student' &&
+              userData.graduation_status === 'not_graduated' &&
+              userData.loan_limit ? (
               <GraduationUpsellCard
                 currentLoanLimit={userData.loan_limit}
                 onSuccess={() => {
@@ -794,7 +800,7 @@ export function DynamicDashboardPage() {
             <CreditCard className="w-5 h-5 text-blue-600" />
             Active Loans
           </h3>
-          
+
           {active_loans.length > 0 ? (
             active_loans.map((loan) => (
               <div key={loan.id} className="border rounded-lg p-4 mb-4">
@@ -807,7 +813,7 @@ export function DynamicDashboardPage() {
                     {loan.status}
                   </Badge>
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <p className="text-sm text-gray-600">Loan Amount</p>
@@ -826,17 +832,17 @@ export function DynamicDashboardPage() {
                     <p className="font-semibold">{Math.round(loan.progress_percentage)}%</p>
                   </div>
                 </div>
-                
+
                 <div className="flex gap-2">
-                  <Button 
+                  <Button
                     className="flex-1"
                     onClick={() => navigate('/pay-emi')}
                     style={{ backgroundColor: '#0052FF' }}
                   >
                     Pay EMI
                   </Button>
-                  <Button 
-                    variant="outline" 
+                  <Button
+                    variant="outline"
                     className="flex-1"
                     onClick={() => navigate('/loan-details')}
                   >
@@ -851,11 +857,11 @@ export function DynamicDashboardPage() {
               <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Loans</h3>
               <p className="text-gray-600 mb-4">You don't have any active loans at the moment.</p>
               {canApplyForLoan && (
-                <Button 
+                <Button
                   onClick={() => {
-                        console.log('Apply for a Loan button clicked');
-                        navigate('/application');
-                      }}
+                    console.log('Apply for a Loan button clicked');
+                    navigate('/application');
+                  }}
                   style={{ backgroundColor: '#0052FF' }}
                 >
                   Apply for a Loan
@@ -871,7 +877,7 @@ export function DynamicDashboardPage() {
   return (
     <div className="min-h-screen bg-gray-50 overflow-x-hidden">
       <DashboardHeader userName={userData.name} />
-      
+
       <div className="flex">
         {/* Desktop Sidebar - Hidden on mobile */}
         <div className="hidden lg:block w-64 bg-white shadow-sm">
@@ -880,22 +886,20 @@ export function DynamicDashboardPage() {
             <nav className="space-y-2">
               <button
                 onClick={() => setActiveTab('overview')}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
-                  activeTab === 'overview' 
-                    ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700' 
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${activeTab === 'overview'
+                  ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+                  }`}
               >
                 <Home className="w-5 h-5" />
                 Overview
               </button>
               <button
                 onClick={() => setActiveTab('applied-loans')}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
-                  activeTab === 'applied-loans' 
-                    ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700' 
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${activeTab === 'applied-loans'
+                  ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+                  }`}
               >
                 <Clock className="w-5 h-5" />
                 Applied Loans
@@ -905,11 +909,10 @@ export function DynamicDashboardPage() {
               </button>
               <button
                 onClick={() => setActiveTab('loans')}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
-                  activeTab === 'loans' 
-                    ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700' 
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${activeTab === 'loans'
+                  ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+                  }`}
               >
                 <CreditCard className="w-5 h-5" />
                 Loans
@@ -919,17 +922,16 @@ export function DynamicDashboardPage() {
               </button>
               <button
                 onClick={() => setActiveTab('profile')}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
-                  activeTab === 'profile' 
-                    ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700' 
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${activeTab === 'profile'
+                  ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+                  }`}
               >
                 <User className="w-5 h-5" />
                 Profile
               </button>
             </nav>
-            
+
           </div>
         </div>
 
@@ -960,11 +962,11 @@ export function DynamicDashboardPage() {
               </TabsList>
             </Tabs>
           </div>
-          
+
           <div className="w-full max-w-7xl mx-auto px-3 py-4">
             {/* Hold Status Banner */}
             {dashboardData.hold_info && <HoldBanner holdInfo={dashboardData.hold_info} />}
-            
+
             {/* Eligibility Status Check */}
             {userData.eligibility_status === 'not_eligible' && (
               <div className="mb-6 p-6 bg-red-50 border border-red-200 rounded-lg">
@@ -986,462 +988,461 @@ export function DynamicDashboardPage() {
                 </div>
               </div>
             )}
-            
+
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          
-          <TabsContent value="overview">
-            {renderOverview()}
-          </TabsContent>
-          
-          <TabsContent value="applied-loans">
-            <div className="space-y-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-base lg:text-xl font-semibold">Applied Loans</h3>
-                  <p className="text-xs lg:text-sm text-gray-600 mt-0.5 lg:mt-1">Track your loan applications</p>
-                </div>
-                {canApplyForLoan && !hasActiveOrPendingLoans() && (
-                  <Button 
-                    onClick={() => {
-                      console.log('Apply for a Loan button clicked');
-                      navigate('/application');
-                    }}
-                    style={{ backgroundColor: '#0052FF' }}
-                    className="text-xs lg:text-sm whitespace-nowrap"
-                    size="sm"
-                  >
-                    Apply
-                  </Button>
-                )}
-              </div>
 
-              {/* Status Flow Indicator */}
-              <Card className="p-3 lg:p-6 bg-gradient-to-r from-blue-50 to-indigo-50">
-                <h4 className="text-xs lg:text-sm font-semibold text-gray-700 mb-3">Application Status Flow</h4>
-                <div className="flex items-center justify-between">
-                  <div className="flex flex-col items-center">
-                    <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-blue-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">1</div>
-                    <p className="text-[10px] lg:text-xs text-center font-medium">Submitted</p>
-                  </div>
-                  <div className="flex-1 h-0.5 lg:h-1 bg-blue-300 mx-1 lg:mx-2"></div>
-                  <div className="flex flex-col items-center">
-                    <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-blue-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">2</div>
-                    <p className="text-[10px] lg:text-xs text-center font-medium">Review</p>
-                  </div>
-                  <div className="flex-1 h-0.5 lg:h-1 bg-blue-300 mx-1 lg:mx-2"></div>
-                  <div className="flex flex-col items-center">
-                    <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-yellow-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">3</div>
-                    <p className="text-[10px] lg:text-xs text-center font-medium">Follow Up</p>
-                  </div>
-                  <div className="flex-1 h-0.5 lg:h-1 bg-blue-300 mx-1 lg:mx-2"></div>
-                  <div className="flex flex-col items-center">
-                    <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-green-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">4</div>
-                    <p className="text-[10px] lg:text-xs text-center font-medium">Disbursal</p>
-                  </div>
-                </div>
-              </Card>
+              <TabsContent value="overview">
+                {renderOverview()}
+              </TabsContent>
 
-              {/* Applied Loan Applications */}
-              {appliedLoans.length > 0 ? (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {appliedLoans.map((application) => (
-                    <Card key={application.id} className="p-3 lg:p-6 hover:shadow-md transition-shadow">
-                      <div className="flex justify-between items-start mb-3 lg:mb-4">
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-sm lg:text-lg font-semibold truncate">{application.loan_purpose || 'Personal Loan'}</h4>
-                          <p className="text-gray-600 text-xs lg:text-sm truncate">App: {application.application_number}</p>
-                        </div>
-                        <Badge 
-                          variant="secondary" 
-                          className={`text-[10px] lg:text-xs px-1.5 lg:px-2.5 py-0.5 ${
-                            application.status === 'submitted' ? 'bg-blue-100 text-blue-800' :
-                            application.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
-                            application.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
-                            application.status === 'disbursal' ? 'bg-green-100 text-green-800' :
-                            'bg-gray-100 text-gray-800'
-                          }`}
-                        >
-                          {application.status.replace('_', ' ')}
-                        </Badge>
+              <TabsContent value="applied-loans">
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-base lg:text-xl font-semibold">Applied Loans</h3>
+                      <p className="text-xs lg:text-sm text-gray-600 mt-0.5 lg:mt-1">Track your loan applications</p>
+                    </div>
+                    {canApplyForLoan && !hasActiveOrPendingLoans() && (
+                      <Button
+                        onClick={() => {
+                          console.log('Apply for a Loan button clicked');
+                          navigate('/application');
+                        }}
+                        style={{ backgroundColor: '#0052FF' }}
+                        className="text-xs lg:text-sm whitespace-nowrap"
+                        size="sm"
+                      >
+                        Apply
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Status Flow Indicator */}
+                  <Card className="p-3 lg:p-6 bg-gradient-to-r from-blue-50 to-indigo-50">
+                    <h4 className="text-xs lg:text-sm font-semibold text-gray-700 mb-3">Application Status Flow</h4>
+                    <div className="flex items-center justify-between">
+                      <div className="flex flex-col items-center">
+                        <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-blue-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">1</div>
+                        <p className="text-[10px] lg:text-xs text-center font-medium">Submitted</p>
                       </div>
-                      
-                      <div className="grid grid-cols-2 gap-2 lg:gap-4 mb-3 lg:mb-4">
-                        <div>
-                          <p className="text-xs lg:text-sm text-gray-500">Loan Amount</p>
-                          <p className="text-sm lg:text-lg font-semibold">₹{Number(application.loan_amount).toLocaleString()}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs lg:text-sm text-gray-500">Applied On</p>
-                          <p className="text-xs lg:text-sm font-medium">{formatDate(application.created_at)}</p>
-                        </div>
+                      <div className="flex-1 h-0.5 lg:h-1 bg-blue-300 mx-1 lg:mx-2"></div>
+                      <div className="flex flex-col items-center">
+                        <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-blue-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">2</div>
+                        <p className="text-[10px] lg:text-xs text-center font-medium">Review</p>
                       </div>
-                      
-                      <div className="flex flex-col lg:flex-row justify-between lg:items-center pt-3 lg:pt-4 border-t gap-2">
-                        <p className="text-[10px] lg:text-xs text-gray-500">
-                          {application.status === 'submitted' && 'Application submitted'}
-                          {application.status === 'under_review' && 'Under review'}
-                          {application.status === 'follow_up' && 'Info required'}
-                          {application.status === 'disbursal' && 'Processing disbursal'}
-                        </p>
-                        <Button 
+                      <div className="flex-1 h-0.5 lg:h-1 bg-blue-300 mx-1 lg:mx-2"></div>
+                      <div className="flex flex-col items-center">
+                        <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-yellow-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">3</div>
+                        <p className="text-[10px] lg:text-xs text-center font-medium">Follow Up</p>
+                      </div>
+                      <div className="flex-1 h-0.5 lg:h-1 bg-blue-300 mx-1 lg:mx-2"></div>
+                      <div className="flex flex-col items-center">
+                        <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-green-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">4</div>
+                        <p className="text-[10px] lg:text-xs text-center font-medium">Disbursal</p>
+                      </div>
+                    </div>
+                  </Card>
+
+                  {/* Applied Loan Applications */}
+                  {appliedLoans.length > 0 ? (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {appliedLoans.map((application) => (
+                        <Card key={application.id} className="p-3 lg:p-6 hover:shadow-md transition-shadow">
+                          <div className="flex justify-between items-start mb-3 lg:mb-4">
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-sm lg:text-lg font-semibold truncate">{application.loan_purpose || 'Personal Loan'}</h4>
+                              <p className="text-gray-600 text-xs lg:text-sm truncate">App: {application.application_number}</p>
+                            </div>
+                            <Badge
+                              variant="secondary"
+                              className={`text-[10px] lg:text-xs px-1.5 lg:px-2.5 py-0.5 ${application.status === 'submitted' ? 'bg-blue-100 text-blue-800' :
+                                application.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
+                                  application.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
+                                    application.status === 'disbursal' ? 'bg-green-100 text-green-800' :
+                                      'bg-gray-100 text-gray-800'
+                                }`}
+                            >
+                              {application.status.replace('_', ' ')}
+                            </Badge>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 lg:gap-4 mb-3 lg:mb-4">
+                            <div>
+                              <p className="text-xs lg:text-sm text-gray-500">Loan Amount</p>
+                              <p className="text-sm lg:text-lg font-semibold">₹{Number(application.loan_amount).toLocaleString()}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs lg:text-sm text-gray-500">Applied On</p>
+                              <p className="text-xs lg:text-sm font-medium">{formatDate(application.created_at)}</p>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col lg:flex-row justify-between lg:items-center pt-3 lg:pt-4 border-t gap-2">
+                            <p className="text-[10px] lg:text-xs text-gray-500">
+                              {application.status === 'submitted' && 'Application submitted'}
+                              {application.status === 'under_review' && 'Under review'}
+                              {application.status === 'follow_up' && 'Info required'}
+                              {application.status === 'disbursal' && 'Processing disbursal'}
+                            </p>
+                            <Button
+                              onClick={() => {
+                                console.log('View Details clicked for:', application.id);
+                                if (application.status === 'follow_up') {
+                                  // Redirect to document upload page for follow_up status
+                                  navigate('/loan-application/upload-documents', {
+                                    state: { applicationId: application.id }
+                                  });
+                                } else {
+                                  navigate('/loan-application/kyc-verification', {
+                                    state: { applicationId: application.id }
+                                  });
+                                }
+                              }}
+                              variant="outline"
+                              size="sm"
+                              className="text-xs lg:text-sm whitespace-nowrap"
+                            >
+                              {application.status === 'follow_up' ? 'Upload Documents' : 'View'}
+                            </Button>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  ) : (
+                    <Card className="p-6 lg:p-8 text-center">
+                      <Clock className="w-12 h-12 lg:w-16 lg:h-16 text-gray-400 mx-auto mb-3 lg:mb-4" />
+                      <h3 className="text-base lg:text-lg font-semibold text-gray-900 mb-2">No Applied Loans</h3>
+                      <p className="text-xs lg:text-sm text-gray-600 mb-3 lg:mb-4">You don't have any loan applications in progress.</p>
+                      {canApplyForLoan && (
+                        <Button
                           onClick={() => {
-                            console.log('View Details clicked for:', application.id);
-                            if (application.status === 'follow_up') {
-                              // Redirect to document upload page for follow_up status
-                              navigate('/loan-application/upload-documents', {
-                                state: { applicationId: application.id }
-                              });
-                            } else {
-                              navigate('/loan-application/kyc-verification', {
-                                state: { applicationId: application.id }
-                              });
-                            }
-                          }}
-                          variant="outline"
-                          size="sm"
-                          className="text-xs lg:text-sm whitespace-nowrap"
-                        >
-                          {application.status === 'follow_up' ? 'Upload Documents' : 'View'}
-                        </Button>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              ) : (
-                <Card className="p-6 lg:p-8 text-center">
-                  <Clock className="w-12 h-12 lg:w-16 lg:h-16 text-gray-400 mx-auto mb-3 lg:mb-4" />
-                  <h3 className="text-base lg:text-lg font-semibold text-gray-900 mb-2">No Applied Loans</h3>
-                  <p className="text-xs lg:text-sm text-gray-600 mb-3 lg:mb-4">You don't have any loan applications in progress.</p>
-                  {canApplyForLoan && (
-                    <Button 
-                      onClick={() => {
-                        console.log('Apply for a Loan button clicked');
-                        navigate('/application');
-                      }}
-                      style={{ backgroundColor: '#0052FF' }}
-                      className="text-xs lg:text-sm"
-                      size="sm"
-                    >
-                      Apply for a Loan
-                    </Button>
-                  )}
-                </Card>
-              )}
-            </div>
-          </TabsContent>
-          
-          <TabsContent value="loans">
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-semibold">My Loans</h3>
-                  <p className="text-sm text-gray-600 mt-1">Manage your active loans with account manager</p>
-                </div>
-              </div>
-
-              {/* Running Loans (Account Manager) */}
-              {runningLoans.length > 0 ? (
-                <div className="grid gap-6">
-                  {runningLoans.map((loan) => (
-                    <Card key={loan.id} className="p-6 hover:shadow-md transition-shadow border-l-4 border-l-green-500">
-                      <div className="flex justify-between items-start mb-4">
-                        <div>
-                          <h4 className="text-lg font-semibold">{loan.loan_purpose || 'Personal Loan'}</h4>
-                          <p className="text-gray-600 text-sm">Application: {loan.application_number}</p>
-                        </div>
-                        <Badge 
-                          variant="secondary" 
-                          className={
-                            loan.status === 'account_manager' ? 'bg-green-100 text-green-800' :
-                            loan.status === 'cleared' ? 'bg-blue-100 text-blue-800' :
-                            'bg-gray-100 text-gray-800'
-                          }
-                        >
-                          {loan.status.replace('_', ' ')}
-                        </Badge>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
-                        <div>
-                          <p className="text-sm text-gray-600">Loan Amount</p>
-                          <p className="text-xl font-semibold">₹{Number(loan.loan_amount).toLocaleString()}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-gray-600">Status</p>
-                          <p className="text-sm font-medium capitalize">{loan.status.replace('_', ' ')}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-gray-600">Applied On</p>
-                          <p className="text-sm font-medium">{formatDate(loan.created_at)}</p>
-                        </div>
-                      </div>
-                      
-                      <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <CheckCircle className="w-5 h-5 text-green-600" />
-                          <p className="text-sm font-semibold text-green-900">Loan with Account Manager</p>
-                        </div>
-                        <p className="text-xs text-green-700">
-                          Your loan has been assigned to an account manager. They will contact you shortly to complete the process.
-                        </p>
-                      </div>
-                      
-                      <div className="flex gap-3">
-                        <Button 
-                          onClick={() => {
-                            console.log('View Details clicked for:', loan.id);
-                            navigate('/loan-application/kyc-verification', {
-                              state: { applicationId: loan.id }
-                            });
+                            console.log('Apply for a Loan button clicked');
+                            navigate('/application');
                           }}
                           style={{ backgroundColor: '#0052FF' }}
+                          className="text-xs lg:text-sm"
+                          size="sm"
                         >
-                          View Details
+                          Apply for a Loan
                         </Button>
-                        <Button 
-                          variant="outline"
-                          onClick={() => navigate('/contact-support')}
-                        >
-                          Contact Support
-                        </Button>
-                      </div>
+                      )}
                     </Card>
-                  ))}
+                  )}
                 </div>
-              ) : (
-                <Card className="p-8 text-center">
-                  <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No Running Loans</h3>
-                  <p className="text-gray-600 mb-4">You don't have any loans with account manager at the moment.</p>
-                  <p className="text-sm text-gray-500">Check the "Applied Loans" tab to track your applications in progress.</p>
-                </Card>
-              )}
-            </div>
-          </TabsContent>
-          
-          <TabsContent value="profile">
-            <div className="space-y-6">
-              {/* Profile Header */}
-              <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-4 text-white">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center text-xl font-bold">
-                    {userData.name?.charAt(0).toUpperCase() || 'U'}
-                  </div>
-                  <div className="flex-1">
-                    <h2 className="text-lg font-bold mb-0.5">{userData.name || 'User'}</h2>
-                    <p className="text-blue-100 text-xs">Member since {formatDate(userData.member_since)}</p>
-                  </div>
-                </div>
-                
-                {/* User Info Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  <div className="bg-white/10 backdrop-blur-sm rounded-lg p-2.5">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
-                        <Phone className="w-4 h-4" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-blue-100 text-[10px] mb-0.5">Phone Number</p>
-                        <p className="font-medium text-white truncate text-sm">{userData.phone || 'N/A'}</p>
-                      </div>
+              </TabsContent>
+
+              <TabsContent value="loans">
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-xl font-semibold">My Loans</h3>
+                      <p className="text-sm text-gray-600 mt-1">Manage your active loans with account manager</p>
                     </div>
                   </div>
-                  
-                  <div className="bg-white/10 backdrop-blur-sm rounded-lg p-2.5">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
-                        <Mail className="w-4 h-4" />
+
+                  {/* Running Loans (Account Manager) */}
+                  {runningLoans.length > 0 ? (
+                    <div className="grid gap-6">
+                      {runningLoans.map((loan) => (
+                        <Card key={loan.id} className="p-6 hover:shadow-md transition-shadow border-l-4 border-l-green-500">
+                          <div className="flex justify-between items-start mb-4">
+                            <div>
+                              <h4 className="text-lg font-semibold">{loan.loan_purpose || 'Personal Loan'}</h4>
+                              <p className="text-gray-600 text-sm">Application: {loan.application_number}</p>
+                            </div>
+                            <Badge
+                              variant="secondary"
+                              className={
+                                loan.status === 'account_manager' ? 'bg-green-100 text-green-800' :
+                                  loan.status === 'cleared' ? 'bg-blue-100 text-blue-800' :
+                                    'bg-gray-100 text-gray-800'
+                              }
+                            >
+                              {loan.status.replace('_', ' ')}
+                            </Badge>
+                          </div>
+
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+                            <div>
+                              <p className="text-sm text-gray-600">Loan Amount</p>
+                              <p className="text-xl font-semibold">₹{Number(loan.loan_amount).toLocaleString()}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-600">Status</p>
+                              <p className="text-sm font-medium capitalize">{loan.status.replace('_', ' ')}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-600">Applied On</p>
+                              <p className="text-sm font-medium">{formatDate(loan.created_at)}</p>
+                            </div>
+                          </div>
+
+                          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                            <div className="flex items-center gap-2 mb-2">
+                              <CheckCircle className="w-5 h-5 text-green-600" />
+                              <p className="text-sm font-semibold text-green-900">Loan with Account Manager</p>
+                            </div>
+                            <p className="text-xs text-green-700">
+                              Your loan has been assigned to an account manager. They will contact you shortly to complete the process.
+                            </p>
+                          </div>
+
+                          <div className="flex gap-3">
+                            <Button
+                              onClick={() => {
+                                console.log('View Details clicked for:', loan.id);
+                                navigate('/loan-application/kyc-verification', {
+                                  state: { applicationId: loan.id }
+                                });
+                              }}
+                              style={{ backgroundColor: '#0052FF' }}
+                            >
+                              View Details
+                            </Button>
+                            <Button
+                              variant="outline"
+                              onClick={() => navigate('/contact-support')}
+                            >
+                              Contact Support
+                            </Button>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  ) : (
+                    <Card className="p-8 text-center">
+                      <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">No Running Loans</h3>
+                      <p className="text-gray-600 mb-4">You don't have any loans with account manager at the moment.</p>
+                      <p className="text-sm text-gray-500">Check the "Applied Loans" tab to track your applications in progress.</p>
+                    </Card>
+                  )}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="profile">
+                <div className="space-y-6">
+                  {/* Profile Header */}
+                  <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-4 text-white">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center text-xl font-bold">
+                        {userData.name?.charAt(0).toUpperCase() || 'U'}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-blue-100 text-[10px] mb-0.5">Email Address</p>
-                        <p className="font-medium text-white truncate text-xs">{userData.email || 'N/A'}</p>
+                      <div className="flex-1">
+                        <h2 className="text-lg font-bold mb-0.5">{userData.name || 'User'}</h2>
+                        <p className="text-blue-100 text-xs">Member since {formatDate(userData.member_since)}</p>
+                      </div>
+                    </div>
+
+                    {/* User Info Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <div className="bg-white/10 backdrop-blur-sm rounded-lg p-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
+                            <Phone className="w-4 h-4" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-blue-100 text-[10px] mb-0.5">Phone Number</p>
+                            <p className="font-medium text-white truncate text-sm">{userData.phone || 'N/A'}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-white/10 backdrop-blur-sm rounded-lg p-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
+                            <Mail className="w-4 h-4" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-blue-100 text-[10px] mb-0.5">Email Address</p>
+                            <p className="font-medium text-white truncate text-xs">{userData.email || 'N/A'}</p>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
+
+                  {/* Contact Us Section */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Contact Us</h3>
+
+                    <div className="space-y-2">
+                      {/* Send E-mail */}
+                      <button
+                        onClick={() => window.location.href = 'mailto:support@pocketcredit.in'}
+                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                            <Mail className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <span className="text-base font-medium text-gray-900">Send E-mail</span>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+
+                      {/* Help Desk */}
+                      <button
+                        onClick={() => navigate('/contact')}
+                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                            <Headphones className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <span className="text-base font-medium text-gray-900">Help Desk</span>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+
+                      {/* Change Mobile Number */}
+                      <button
+                        onClick={() => navigate('/profile-completion')}
+                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                            <Phone className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <span className="text-base font-medium text-gray-900">Change Mobile Number</span>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+
+                      {/* Change Email ID */}
+                      <button
+                        onClick={() => navigate('/profile-completion')}
+                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                            <Mail className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <span className="text-base font-medium text-gray-900">Change Email ID</span>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* App Section */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">App</h3>
+
+                    <div className="space-y-2">
+                      {/* Rate Us */}
+                      <button
+                        onClick={() => {
+                          // Open app store/play store for rating
+                          const userAgent = navigator.userAgent || navigator.vendor;
+                          if (/android/i.test(userAgent)) {
+                            window.open('https://play.google.com/store/apps/details?id=com.pocketcredit', '_blank');
+                          } else if (/iPad|iPhone|iPod/.test(userAgent)) {
+                            window.open('https://apps.apple.com/app/pocketcredit', '_blank');
+                          }
+                        }}
+                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                            <Star className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <span className="text-base font-medium text-gray-900">Rate Us</span>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+
+                      {/* Share App */}
+                      <button
+                        onClick={() => {
+                          if (navigator.share) {
+                            navigator.share({
+                              title: 'Pocket Credit',
+                              text: 'Check out Pocket Credit - Quick and easy loans!',
+                              url: window.location.origin
+                            }).catch(() => { });
+                          } else {
+                            // Fallback for desktop
+                            navigator.clipboard.writeText(window.location.origin);
+                            alert('App link copied to clipboard!');
+                          }
+                        }}
+                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                            <Share2 className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <span className="text-base font-medium text-gray-900">Share App</span>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+
+                      {/* App Security */}
+                      <button
+                        onClick={() => navigate('/profile-completion')}
+                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                            <ShieldCheck className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <span className="text-base font-medium text-gray-900">App Security</span>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Legal Section */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Legal</h3>
+
+                    <div className="space-y-2">
+                      {/* About Us */}
+                      <button
+                        onClick={() => navigate('/about')}
+                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                            <Info className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <span className="text-base font-medium text-gray-900">About Us</span>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+
+                      {/* Terms & Conditions */}
+                      <button
+                        onClick={() => navigate('/terms-conditions')}
+                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                            <FileText className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <span className="text-base font-medium text-gray-900">Terms & Conditions</span>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+
+                      {/* Privacy Policy */}
+                      <button
+                        onClick={() => navigate('/privacy-policy')}
+                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+                            <ShieldCheck className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <span className="text-base font-medium text-gray-900">Privacy Policy</span>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-
-              {/* Contact Us Section */}
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Contact Us</h3>
-                
-                <div className="space-y-2">
-                  {/* Send E-mail */}
-                  <button
-                    onClick={() => window.location.href = 'mailto:support@pocketcredit.in'}
-                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                        <Mail className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <span className="text-base font-medium text-gray-900">Send E-mail</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                  </button>
-
-                  {/* Help Desk */}
-                  <button
-                    onClick={() => navigate('/contact')}
-                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                        <Headphones className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <span className="text-base font-medium text-gray-900">Help Desk</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                  </button>
-
-                  {/* Change Mobile Number */}
-                  <button
-                    onClick={() => navigate('/profile-completion')}
-                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                        <Phone className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <span className="text-base font-medium text-gray-900">Change Mobile Number</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                  </button>
-
-                  {/* Change Email ID */}
-                  <button
-                    onClick={() => navigate('/profile-completion')}
-                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                        <Mail className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <span className="text-base font-medium text-gray-900">Change Email ID</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                  </button>
-                </div>
-              </div>
-
-              {/* App Section */}
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">App</h3>
-                
-                <div className="space-y-2">
-                  {/* Rate Us */}
-                  <button
-                    onClick={() => {
-                      // Open app store/play store for rating
-                      const userAgent = navigator.userAgent || navigator.vendor;
-                      if (/android/i.test(userAgent)) {
-                        window.open('https://play.google.com/store/apps/details?id=com.pocketcredit', '_blank');
-                      } else if (/iPad|iPhone|iPod/.test(userAgent)) {
-                        window.open('https://apps.apple.com/app/pocketcredit', '_blank');
-                      }
-                    }}
-                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                        <Star className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <span className="text-base font-medium text-gray-900">Rate Us</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                  </button>
-
-                  {/* Share App */}
-                  <button
-                    onClick={() => {
-                      if (navigator.share) {
-                        navigator.share({
-                          title: 'Pocket Credit',
-                          text: 'Check out Pocket Credit - Quick and easy loans!',
-                          url: window.location.origin
-                        }).catch(() => {});
-                      } else {
-                        // Fallback for desktop
-                        navigator.clipboard.writeText(window.location.origin);
-                        alert('App link copied to clipboard!');
-                      }
-                    }}
-                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                        <Share2 className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <span className="text-base font-medium text-gray-900">Share App</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                  </button>
-
-                  {/* App Security */}
-                  <button
-                    onClick={() => navigate('/profile-completion')}
-                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                        <ShieldCheck className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <span className="text-base font-medium text-gray-900">App Security</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Legal Section */}
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Legal</h3>
-                
-                <div className="space-y-2">
-                  {/* About Us */}
-                  <button
-                    onClick={() => navigate('/about')}
-                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                        <Info className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <span className="text-base font-medium text-gray-900">About Us</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                  </button>
-
-                  {/* Terms & Conditions */}
-                  <button
-                    onClick={() => navigate('/terms-conditions')}
-                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                        <FileText className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <span className="text-base font-medium text-gray-900">Terms & Conditions</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                  </button>
-
-                  {/* Privacy Policy */}
-                  <button
-                    onClick={() => navigate('/privacy-policy')}
-                    className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                        <ShieldCheck className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <span className="text-base font-medium text-gray-900">Privacy Policy</span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                  </button>
-                </div>
-              </div>
-            </div>
               </TabsContent>
             </Tabs>
           </div>

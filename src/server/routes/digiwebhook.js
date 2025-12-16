@@ -111,7 +111,7 @@ router.get('/', async (req, res) => {
 
     // Find the KYC verification by transaction ID
     const kycRecords = await executeQuery(
-      `SELECT id, user_id, application_id, verification_data 
+      `SELECT id, user_id, verification_data 
        FROM kyc_verifications 
        WHERE JSON_EXTRACT(verification_data, '$.transactionId') = ?`,
       [txnId]
@@ -119,32 +119,26 @@ router.get('/', async (req, res) => {
 
     if (kycRecords.length === 0) {
       console.error('❌ KYC record not found for txnId:', txnId);
-      return res.redirect(`${process.env.FRONTEND_URL || 'https://pocketcredit.in'}/kyc-failed?reason=record_not_found`);
+      const frontendUrl = process.env.FRONTEND_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://pocketcredit.in');
+      return res.redirect(`${frontendUrl}/kyc-failed?reason=record_not_found`);
     }
 
     const kycRecord = kycRecords[0];
-    console.log('✅ Webhook found KYC Record:', { id: kycRecord.id, user_id: kycRecord.user_id, app_id: kycRecord.application_id });
+    console.log('✅ Webhook found KYC Record:', { id: kycRecord.id, user_id: kycRecord.user_id });
 
-    // Fallback: If application_id is missing, try to find the latest application for this user
-    if (!kycRecord.application_id) {
-      console.warn('⚠️ kycRecord.application_id is missing. Attempting to find latest application for user:', kycRecord.user_id);
-      try {
-        const appCheck = await executeQuery(
-          'SELECT id FROM applications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
-          [kycRecord.user_id]
-        );
-        if (appCheck.length > 0) {
-          kycRecord.application_id = appCheck[0].id;
-          console.log('✨ Recovered application_id from applications table:', kycRecord.application_id);
-
-          // Optional: Heal the datum in kyc_verifications
-          await executeQuery('UPDATE kyc_verifications SET application_id = ? WHERE id = ?', [kycRecord.application_id, kycRecord.id]);
-        } else {
-          console.error('❌ Could not find any application for user:', kycRecord.user_id);
-        }
-      } catch (err) {
-        console.error('❌ Error fetching fallback application:', err);
+    // Find the latest application for this user for redirect purposes
+    let applicationId = null;
+    try {
+      const appCheck = await executeQuery(
+        'SELECT id FROM applications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+        [kycRecord.user_id]
+      );
+      if (appCheck.length > 0) {
+        applicationId = appCheck[0].id;
+        console.log('✨ Found latest application_id for redirect:', applicationId);
       }
+    } catch (err) {
+      console.error('❌ Error fetching application for redirect:', err);
     }
 
     const isSuccess = success === 'true' || success === true;
@@ -193,7 +187,11 @@ router.get('/', async (req, res) => {
       await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', true, null);
 
       // Redirect WITHOUT kycSuccess param - frontend will check DB
-      res.redirect(`${process.env.FRONTEND_URL || 'https://pocketcredit.in'}/loan-application/kyc-check?applicationId=${kycRecord.application_id}`);
+      const frontendUrl = process.env.FRONTEND_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://pocketcredit.in');
+      const redirectUrl = applicationId 
+        ? `${frontendUrl}/loan-application/kyc-check?applicationId=${applicationId}`
+        : `${frontendUrl}/loan-application/kyc-check`;
+      res.redirect(redirectUrl);
     } else {
       // Update KYC status to failed
       await executeQuery(
@@ -210,7 +208,11 @@ router.get('/', async (req, res) => {
       await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', true, null);
 
       // Redirect WITHOUT kycFailed param - frontend will check DB
-      res.redirect(`${process.env.FRONTEND_URL || 'https://pocketcredit.in'}/loan-application/kyc-check?applicationId=${kycRecord.application_id}`);
+      const frontendUrl = process.env.FRONTEND_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://pocketcredit.in');
+      const redirectUrl = applicationId 
+        ? `${frontendUrl}/loan-application/kyc-check?applicationId=${applicationId}`
+        : `${frontendUrl}/loan-application/kyc-check`;
+      res.redirect(redirectUrl);
     }
 
   } catch (error) {
@@ -220,7 +222,8 @@ router.get('/', async (req, res) => {
     // Update webhook log with error
     await logWebhookPayload(req, 'digiwebhook', '/api/digiwebhook', false, processingError);
 
-    res.redirect(`${process.env.FRONTEND_URL || 'https://pocketcredit.in'}/kyc-failed?reason=processing_error`);
+    const frontendUrl = process.env.FRONTEND_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://pocketcredit.in');
+    res.redirect(`${frontendUrl}/kyc-failed?reason=processing_error`);
   }
 });
 
@@ -249,7 +252,7 @@ router.post('/', async (req, res) => {
     await initializeDatabase();
 
     const kycRecords = await executeQuery(
-      `SELECT id, user_id, application_id, verification_data 
+      `SELECT id, user_id, verification_data 
        FROM kyc_verifications 
        WHERE JSON_EXTRACT(verification_data, '$.transactionId') = ?`,
       [txnId]
@@ -261,23 +264,6 @@ router.post('/', async (req, res) => {
     }
 
     const kycRecord = kycRecords[0];
-
-    // Fallback: If application_id is missing, try to find the latest application for this user
-    if (!kycRecord.application_id) {
-      try {
-        const appCheck = await executeQuery(
-          'SELECT id FROM applications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
-          [kycRecord.user_id]
-        );
-        if (appCheck.length > 0) {
-          kycRecord.application_id = appCheck[0].id;
-          // Heal
-          await executeQuery('UPDATE kyc_verifications SET application_id = ? WHERE id = ?', [kycRecord.application_id, kycRecord.id]);
-        }
-      } catch (err) {
-        console.error('❌ Error fetching fallback application (POST):', err);
-      }
-    }
 
     if (isSuccess) {
       await executeQuery(
