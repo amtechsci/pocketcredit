@@ -11,6 +11,35 @@ function getAuthHeader() {
 }
 
 /**
+ * Get authentication token for Digitap/Digilocker APIs
+ * Uses DIGILOCKER_AUTH_TOKEN if available, otherwise constructs from DIGITAP_CLIENT_ID/SECRET
+ * @returns {string|null} - Base64 encoded auth token or null
+ */
+function getEntAuthToken() {
+  // Try DIGILOCKER_AUTH_TOKEN first (same as Digilocker APIs)
+  let authToken = process.env.DIGILOCKER_AUTH_TOKEN;
+  
+  // If not set, try to construct from DIGILOCKER_CLIENT_ID/SECRET
+  if (!authToken && process.env.DIGILOCKER_CLIENT_ID && process.env.DIGILOCKER_CLIENT_SECRET) {
+    const credentials = `${process.env.DIGILOCKER_CLIENT_ID}:${process.env.DIGILOCKER_CLIENT_SECRET}`;
+    authToken = Buffer.from(credentials).toString('base64');
+  }
+  
+  // Fallback to DIGITAP credentials if DIGILOCKER credentials not set
+  if (!authToken && DIGITAP_CLIENT_ID && DIGITAP_CLIENT_SECRET) {
+    const credentials = `${DIGITAP_CLIENT_ID}:${DIGITAP_CLIENT_SECRET}`;
+    authToken = Buffer.from(credentials).toString('base64');
+  }
+  
+  // Development fallback (only if not in production)
+  if (!authToken && process.env.NODE_ENV !== 'production') {
+    authToken = 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=';
+  }
+  
+  return authToken;
+}
+
+/**
  * Generate client reference number for Digitap API
  */
 function generateClientRefNum() {
@@ -154,10 +183,20 @@ async function validatePANDetails(panNumber, clientRefNum = null) {
     }
 
     const refNum = clientRefNum || generateClientRefNum();
-    const PAN_VALIDATION_URL = 'https://svcint.digitap.work/wrap/demo/svc/validation/kyc/v1/pan_details';
+    
+    // Use environment variable for PAN validation URL, with fallback
+    const PAN_VALIDATION_URL = process.env.DIGITAP_PAN_VALIDATION_URL || 
+      'https://svcint.digitap.work/wrap/demo/svc/validation/kyc/v1/pan_details';
 
     console.log(`Calling Digitap PAN validation API for PAN: ${panNumber}`);
     console.log(`Client Ref Num: ${refNum}`);
+    console.log(`PAN Validation URL: ${PAN_VALIDATION_URL}`);
+
+    // Get authentication token (same method as Digilocker APIs)
+    const authToken = getEntAuthToken();
+    if (!authToken) {
+      throw new Error('Authentication token not available. Please configure DIGILOCKER_AUTH_TOKEN or DIGITAP_CLIENT_ID/SECRET');
+    }
 
     const response = await axios.post(
       PAN_VALIDATION_URL,
@@ -169,7 +208,7 @@ async function validatePANDetails(panNumber, clientRefNum = null) {
       },
       {
         headers: {
-          'Authorization': getAuthHeader(),
+          'ent_authorization': authToken,
           'Content-Type': 'application/json'
         },
         timeout: 15000 // 15 seconds
@@ -257,10 +296,31 @@ async function validatePANDetails(panNumber, clientRefNum = null) {
 
     if (error.response) {
       // API responded with error status
-      console.error('PAN validation API error response:', error.response.status, error.response.data);
+      const status = error.response.status;
+      const errorData = error.response.data;
+      console.error('PAN validation API error response:', status, errorData);
+      
+      // Provide more specific error messages
+      if (status === 401) {
+        return {
+          success: false,
+          error: 'Authentication failed. Please check API credentials configuration.',
+          allow_manual: true
+        };
+      }
+      
+      if (status === 400) {
+        const errorMsg = errorData?.error || errorData?.message || 'Invalid request';
+        return {
+          success: false,
+          error: errorMsg,
+          allow_manual: true
+        };
+      }
+      
       return {
         success: false,
-        error: `API error: ${error.response.status}`,
+        error: `API error: ${status} - ${errorData?.error || errorData?.message || 'Unknown error'}`,
         allow_manual: true
       };
     }
