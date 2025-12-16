@@ -180,6 +180,51 @@ export const DigilockerKYCPage: React.FC = () => {
     });
   };
 
+  const handlePanChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Convert to uppercase and remove any non-alphanumeric characters
+    const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+    setPanNumber(value);
+  };
+
+  const handleValidatePAN = async () => {
+    // Validate PAN format: 5 letters, 4 digits, 1 letter
+    const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+    if (!panRegex.test(panNumber)) {
+      toast.error('Please enter a valid PAN number (Format: ABCDE1234F)');
+      return;
+    }
+
+    setValidatingPan(true);
+
+    try {
+      const response = await apiService.validatePAN(panNumber);
+
+      if (response.success || response.status === 'success') {
+        setPanValidated(true);
+        toast.success('PAN validated successfully!');
+        
+        // Wait a moment then proceed to next step
+        setTimeout(() => {
+          if (applicationId) {
+            navigate('/loan-application/employment-details', {
+              state: { applicationId },
+              replace: true
+            });
+          } else {
+            navigate('/dashboard', { replace: true });
+          }
+        }, 1500);
+      } else {
+        toast.error(response.message || 'Failed to validate PAN. Please try again.');
+      }
+    } catch (error: any) {
+      console.error('PAN validation error:', error);
+      toast.error(error.response?.data?.message || 'Failed to validate PAN. Please try again.');
+    } finally {
+      setValidatingPan(false);
+    }
+  };
+
   // Show loading while checking KYC status
   if (checking) {
     return (
