@@ -34,6 +34,7 @@
     "node-cron": "^3.0.2",
     "nodemailer": "^7.0.9",
     "otp-generator": "^4.0.1",
+    "pdf-parse": "^2.4.5",
     "puppeteer": "^24.25.0",
     "redis": "^5.8.2",
     "twilio": "^4.14.0",

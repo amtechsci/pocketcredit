@@ -1335,15 +1335,30 @@ router.get('/bank-data/success', async (req, res) => {
     // Try to extract and save any data from query parameters
     const { request_id, client_ref_num, status, txnId, success } = req.query;
 
+    // Check if this is a cancellation (not an actual failure)
+    const isCancellation = status === 'cancelled' || status === 'Cancelled' || 
+                          success === 'false' || req.query.error === 'true' ||
+                          req.query.cancelled === 'true';
+
     // If we have request_id or client_ref_num, try to update the bank statement record
     if (request_id || client_ref_num) {
       try {
         const updateFields = [];
         const updateValues = [];
 
-        if (status) {
+        // Only update status if it's not a cancellation
+        // For cancellations, keep status as 'InProgress' or 'pending' so user can retry
+        if (status && !isCancellation) {
+          // Don't update to 'failed' if it's a cancellation - keep it as InProgress
+          if (status !== 'failed' && status !== 'Failed' && status !== 'cancelled' && status !== 'Cancelled') {
+            updateFields.push('status = ?');
+            updateValues.push(status);
+          }
+        } else if (isCancellation) {
+          // For cancellations, set status to 'pending' so user can retry (not 'failed')
           updateFields.push('status = ?');
-          updateValues.push(status);
+          updateValues.push('pending');
+          console.log('🔄 User cancelled - setting status to pending (not failed)');
         }
 
         if (request_id) {

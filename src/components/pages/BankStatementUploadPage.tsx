@@ -66,6 +66,7 @@ export const BankStatementUploadPage = () => {
         }
 
         // Check if pending, InProgress, or failed (needs retry)
+        // Note: 'failed' status should only appear for actual failures, not cancellations
         if ((status === 'pending' || status === 'InProgress' || status === 'failed') && digitapUrl) {
           // Check if expired
           if (expiresAt && new Date(expiresAt) < new Date()) {
@@ -75,6 +76,8 @@ export const BankStatementUploadPage = () => {
             setCheckingStatus(false);
           } else {
             // Not expired - show pending/retry message
+            // Only show "failed" message if status is explicitly 'failed' (actual failure)
+            // For 'pending' or 'InProgress', show as pending (could be cancellation)
             setPendingData({ digitapUrl, expiresAt, status });
             setHasPendingUpload(true);
             setCheckingStatus(false);

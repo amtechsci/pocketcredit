@@ -4,6 +4,58 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
 const { uploadKYCDocument } = require('../services/s3Service');
 const axios = require('axios');
+const pdf = require('pdf-parse');
+
+/**
+ * Extract PAN number from PDF text
+ * PAN format: 5 letters, 4 digits, 1 letter (e.g., FPFPM8829N)
+ * @param {string} text - PDF text content
+ * @returns {string|null} - Extracted PAN number or null
+ */
+function extractPANFromText(text) {
+  if (!text || typeof text !== 'string') {
+    return null;
+  }
+
+  // PAN pattern: 5 uppercase letters, 4 digits, 1 uppercase letter
+  // Look for patterns like "Permanent Account Number FPFPM8829N" or just the PAN itself
+  const panPattern = /\b([A-Z]{5}[0-9]{4}[A-Z]{1})\b/g;
+  const matches = text.match(panPattern);
+  
+  if (matches && matches.length > 0) {
+    // Return the first valid PAN found
+    const pan = matches[0].toUpperCase();
+    console.log(`   📄 Extracted PAN from PDF: ${pan}`);
+    return pan;
+  }
+
+  // Alternative: Look for "Permanent Account Number" followed by PAN
+  const panWithLabel = /Permanent\s+Account\s+Number\s+([A-Z]{5}[0-9]{4}[A-Z]{1})/gi;
+  const labelMatch = text.match(panWithLabel);
+  if (labelMatch) {
+    const pan = labelMatch[0].replace(/Permanent\s+Account\s+Number\s+/gi, '').trim().toUpperCase();
+    console.log(`   📄 Extracted PAN from PDF (with label): ${pan}`);
+    return pan;
+  }
+
+  return null;
+}
+
+/**
+ * Extract PAN from PANCR PDF document
+ * @param {Buffer} pdfBuffer - PDF file buffer
+ * @returns {Promise<string|null>} - Extracted PAN number or null
+ */
+async function extractPANFromPDF(pdfBuffer) {
+  try {
+    const data = await pdf(pdfBuffer);
+    const text = data.text;
+    return extractPANFromText(text);
+  } catch (error) {
+    console.error('   ❌ Error extracting PAN from PDF:', error.message);
+    return null;
+  }
+}
 
 /**
  * Helper: Download and Upload Docs to S3
@@ -37,6 +89,48 @@ async function processAndUploadDocs(userId, transactionId, docs) {
       // Download
       const response = await axios.get(url, { responseType: 'arraybuffer', timeout: 30000 });
       const buffer = Buffer.from(response.data);
+
+      // Extract PAN from PANCR PDF documents
+      let extractedPAN = null;
+      if (docType === 'PANCR' && docExt === 'pdf') {
+        console.log(`   🔍 Attempting to extract PAN from ${docType} PDF...`);
+        extractedPAN = await extractPANFromPDF(buffer);
+        
+        if (extractedPAN) {
+          // Validate PAN format
+          const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+          if (panRegex.test(extractedPAN)) {
+            // Update users table with extracted PAN
+            try {
+              await executeQuery(
+                `UPDATE users 
+                 SET pan_number = COALESCE(pan_number, ?),
+                     updated_at = NOW()
+                 WHERE id = ?`,
+                [extractedPAN, userId]
+              );
+              console.log(`   ✅ Saved extracted PAN to users table: ${extractedPAN}`);
+
+              // Also save to verification_records table
+              await executeQuery(
+                `INSERT INTO verification_records (user_id, document_type, document_number, verification_status, created_at, updated_at)
+                 VALUES (?, 'pan', ?, 'pending', NOW(), NOW())
+                 ON DUPLICATE KEY UPDATE
+                   document_number = VALUES(document_number),
+                   updated_at = NOW()`,
+                [userId, extractedPAN]
+              );
+              console.log(`   ✅ Saved PAN to verification_records: ${extractedPAN}`);
+            } catch (dbError) {
+              console.error(`   ❌ Error saving extracted PAN to database: ${dbError.message}`);
+            }
+          } else {
+            console.warn(`   ⚠️ Extracted PAN format invalid: ${extractedPAN}`);
+          }
+        } else {
+          console.log(`   ⚠️ Could not extract PAN from ${docType} PDF`);
+        }
+      }
 
       // Upload
       const result = await uploadKYCDocument(buffer, fileName, mimeType, userId, docType);
@@ -556,12 +650,30 @@ router.get('/check-pan-document/:applicationId', requireAuth, async (req, res) =
     const docs = verificationData.docs || verificationData.digilockerFiles || [];
     const docsArray = Array.isArray(docs) ? docs : [];
 
-    // Check if PAN document exists
-    // PAN documents might be labeled as: 'PAN', 'PAN_CARD', 'PAN_CARD_PDF', etc.
-    const hasPanDocument = docsArray.some((doc) => {
+    // Check if PAN document exists in documents
+    // PAN documents might be labeled as: 'PAN', 'PAN_CARD', 'PAN_CARD_PDF', 'PANCR', etc.
+    let hasPanDocument = docsArray.some((doc) => {
       const docType = (doc.docType || doc.document_type || '').toUpperCase();
-      return docType.includes('PAN') || docType === 'PAN';
+      return docType.includes('PAN') || docType === 'PAN' || docType === 'PANCR';
     });
+
+    // Also check if PAN number was extracted and saved to users table
+    // This handles cases where PAN was extracted from PANCR PDF but document check might fail
+    if (!hasPanDocument) {
+      try {
+        const userPan = await executeQuery(
+          'SELECT pan_number FROM users WHERE id = ? AND pan_number IS NOT NULL AND pan_number != ""',
+          [userId]
+        );
+        if (userPan && userPan.length > 0 && userPan[0].pan_number) {
+          console.log('✅ PAN number found in users table, considering PAN document as available');
+          hasPanDocument = true;
+        }
+      } catch (panCheckError) {
+        console.error('Error checking PAN in users table:', panCheckError);
+        // Continue with document check result
+      }
+    }
 
     res.json({
       success: true,

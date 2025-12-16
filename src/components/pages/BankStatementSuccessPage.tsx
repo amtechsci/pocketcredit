@@ -29,6 +29,22 @@ export const BankStatementSuccessPage = () => {
 
   const checkBankStatementStatus = async () => {
     try {
+      // First, check URL parameters for cancellation/error indicators
+      const urlParams = new URLSearchParams(location.search);
+      const urlError = urlParams.get('error');
+      const urlStatus = urlParams.get('status');
+      const urlSuccess = urlParams.get('success');
+      
+      // Check if user cancelled or there was an error
+      if (urlError === 'true' || urlStatus === 'failed' || urlStatus === 'cancelled' || urlStatus === 'Failure' || urlSuccess === 'false') {
+        setChecking(false);
+        toast.error('Bank statement upload was cancelled or failed. Please try again.');
+        setTimeout(() => {
+          navigate('/loan-application/bank-statement', { replace: true });
+        }, 2000);
+        return;
+      }
+
       const response = await apiService.getUserBankStatementStatus();
       
       if (!response.success || !response.data) {
@@ -37,6 +53,16 @@ export const BankStatementSuccessPage = () => {
       }
 
       const { status, digitapUrl: savedUrl, expiresAt, reportJustFetched, hasReport } = response.data as any;
+      
+      // Check if status indicates failure or cancellation
+      if (status === 'failed' || status === 'cancelled' || status === 'Failure' || status === 'Failed') {
+        setChecking(false);
+        toast.error('Bank statement upload was cancelled or failed. Please try again.');
+        setTimeout(() => {
+          navigate('/loan-application/bank-statement', { replace: true });
+        }, 2000);
+        return;
+      }
       
       // If report was just fetched, show success message
       if (reportJustFetched && hasReport) {
@@ -48,7 +74,7 @@ export const BankStatementSuccessPage = () => {
         // Check if URL expired
         if (expiresAt && new Date(expiresAt) < new Date()) {
           toast.error('Session expired. Please start again.');
-          setTimeout(() => navigate('/bank-statement'), 2000);
+          setTimeout(() => navigate('/loan-application/bank-statement', { replace: true }), 2000);
           return;
         }
 
@@ -109,98 +135,32 @@ export const BankStatementSuccessPage = () => {
           navigate('/link-salary-bank-account');
         }, 1500);
       } else {
-        // Still processing or unknown state
+        // Still processing or unknown state - DON'T redirect to next step
+        // Only redirect if status is explicitly "completed"
         setChecking(false);
-        toast.info('Your bank statement is being processed');
         
-        // Check if e-NACH is already registered
-        try {
-          const enachStatusResponse = await apiService.getEnachStatus();
-          if (enachStatusResponse.success && enachStatusResponse.data?.registered) {
-            // e-NACH already registered, skip to email verification
-            setTimeout(() => {
-              navigate('/email-verification');
-            }, 2000);
-            return;
-          }
-        } catch (enachError) {
-          console.error('Error checking e-NACH status:', enachError);
-          // Continue to e-NACH page if check fails
+        // If status is InProgress or pending, show completion message
+        if (status === 'InProgress' || status === 'pending') {
+          toast.info('Your bank statement upload is in progress. Please complete the process.');
+          // Don't redirect - let user go back to complete
+          return;
         }
         
-        // Get active loan application ID before redirecting
-        try {
-          const applicationsResponse = await apiService.getLoanApplications();
-          const isSuccess = applicationsResponse.success || applicationsResponse.status === 'success';
-          if (isSuccess && applicationsResponse.data?.applications) {
-            const applications = applicationsResponse.data.applications;
-            const activeApplication = applications.find((app: any) => 
-              ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(app.status)
-            );
-            
-            if (activeApplication) {
-              // Redirect with application ID
-              setTimeout(() => {
-                navigate(`/link-salary-bank-account?applicationId=${activeApplication.id}`);
-              }, 2000);
-              return;
-            }
-          }
-        } catch (appError) {
-          console.error('Error fetching loan applications:', appError);
-        }
-        
-        // Fallback: Redirect without application ID (page will fetch it)
+        // For any other unknown status, don't assume success - redirect back to bank statement page
+        toast.warning('Unable to determine bank statement status. Please try again.');
         setTimeout(() => {
-          navigate('/link-salary-bank-account');
+          navigate('/loan-application/bank-statement', { replace: true });
         }, 2000);
       }
     } catch (error) {
       console.error('Error checking status:', error);
       setChecking(false);
-      toast.success('Bank statement submitted! Redirecting...');
       
-      // Check if e-NACH is already registered
-      try {
-        const enachStatusResponse = await apiService.getEnachStatus();
-        if (enachStatusResponse.success && enachStatusResponse.data?.registered) {
-          // e-NACH already registered, skip to email verification
-          setTimeout(() => {
-            navigate('/email-verification');
-          }, 1500);
-          return;
-        }
-      } catch (enachError) {
-        console.error('Error checking e-NACH status:', enachError);
-        // Continue to e-NACH page if check fails
-      }
-      
-      // Get active loan application ID before redirecting
-      try {
-        const applicationsResponse = await apiService.getLoanApplications();
-        const isSuccess = applicationsResponse.success || applicationsResponse.status === 'success';
-        if (isSuccess && applicationsResponse.data?.applications) {
-          const applications = applicationsResponse.data.applications;
-          const activeApplication = applications.find((app: any) => 
-            ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(app.status)
-          );
-          
-          if (activeApplication) {
-            // Redirect with application ID
-            setTimeout(() => {
-              navigate(`/link-salary-bank-account?applicationId=${activeApplication.id}`);
-            }, 1500);
-            return;
-          }
-        }
-      } catch (appError) {
-        console.error('Error fetching loan applications:', appError);
-      }
-      
-      // Fallback: Redirect without application ID (page will fetch it)
+      // On error, don't assume success - redirect back to bank statement page
+      toast.error('Unable to verify bank statement status. Please try again.');
       setTimeout(() => {
-        navigate('/link-salary-bank-account');
-      }, 1500);
+        navigate('/loan-application/bank-statement', { replace: true });
+      }, 2000);
     }
   };
 
