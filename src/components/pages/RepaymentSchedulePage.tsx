@@ -249,28 +249,6 @@ export const RepaymentSchedulePage = () => {
               </div>
             )}
 
-            {/* Loan Details Grid */}
-            <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-200">
-              <div>
-                <p className="text-xs text-gray-500 mb-1">Loan Amount</p>
-                <p className="text-lg font-semibold text-gray-900">
-                  {formatCurrency(calculations.principal || loanData.sanctioned_amount || 0)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 mb-1">Disbursed Amount</p>
-                <p className="text-lg font-semibold text-blue-600">
-                  {formatCurrency(calculations.disbursed_amount || calculations.netDisbursalAmount || 0)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 mb-1">Interest</p>
-                <p className="text-lg font-semibold text-gray-900">
-                  {formatCurrency(calculations.interest || 0)}
-                </p>
-              </div>
-            </div>
-
             {/* Action Buttons */}
             <div className="space-y-3 pt-4 border-t border-gray-200">
               <Button
@@ -310,22 +288,17 @@ export const RepaymentSchedulePage = () => {
                 Repay Now
               </Button>
 
-              <Button
-                variant="outline"
-                className={`w-full h-12 border-2 ${canExtend ? 'border-blue-600 text-blue-600 hover:bg-blue-50' : 'border-gray-200 text-gray-400 cursor-not-allowed'}`}
-                disabled={!canExtend}
-                onClick={() => {
-                  if (canExtend) {
+              {/* Only show extend button when within valid period (5 days before to 15 days after due date) */}
+              {canExtend && (
+                <Button
+                  variant="outline"
+                  className="w-full h-12 border-2 border-blue-600 text-blue-600 hover:bg-blue-50"
+                  onClick={() => {
                     toast.info('Tenure extension feature coming soon');
-                  }
-                }}
-              >
-                Extend your loan tenure
-              </Button>
-              {!canExtend && (
-                <p className="text-xs text-gray-400 text-center">
-                  (Available from 5 days before due date to 15 days after)
-                </p>
+                  }}
+                >
+                  Extend your loan tenure
+                </Button>
               )}
             </div>
           </CardContent>
