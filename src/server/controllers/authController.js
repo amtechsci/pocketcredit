@@ -1,6 +1,7 @@
 const otpGenerator = require('otp-generator');
 const { getRedisClient, set, get, del } = require('../config/redis');
 const { findUserByMobileNumber, findUserById, createUser, updateLastLogin, getProfileSummary } = require('../models/user');
+const { initializeDatabase, executeQuery } = require('../config/database');
 
 /**
  * Auth Controller
@@ -43,9 +44,33 @@ const sendOtp = async (req, res) => {
 
     const stored = await set(otpKey, otpData, 300); // 5 minutes
 
+    // Fallback to database if Redis is not available
     if (!stored) {
-      console.warn('⚠️  Redis not available, OTP stored in memory (not recommended for production)');
-      // In production, you might want to fail here or use an alternative storage
+      console.warn('⚠️  Redis not available, storing OTP in database as fallback');
+      try {
+        await initializeDatabase();
+        
+        // Delete any existing unverified OTPs for this mobile
+        await executeQuery(
+          `DELETE FROM login_otp_verification 
+           WHERE mobile = ? AND verified = 0`,
+          [mobile]
+        );
+        
+        // Store OTP in database with 5-minute expiry
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+        await executeQuery(
+          `INSERT INTO login_otp_verification (mobile, otp, attempts, expires_at, verified) 
+           VALUES (?, ?, 0, ?, 0)`,
+          [mobile, otp, expiresAt]
+        );
+        
+        console.log(`✅ OTP stored in database for ${mobile}`);
+      } catch (dbError) {
+        console.error('❌ Failed to store OTP in database:', dbError);
+        // Log OTP to console as last resort
+        console.log(`📱 OTP for ${mobile}: ${otp} (Valid for 5 minutes) - Redis and DB failed`);
+      }
     }
 
     // Send SMS using your SMS service
@@ -114,9 +139,39 @@ const verifyOtp = async (req, res) => {
       });
     }
 
-    // Retrieve OTP from Redis
+    // Retrieve OTP from Redis first, fallback to database
     const otpKey = `otp:${mobile}`;
-    const otpData = await get(otpKey);
+    let otpData = await get(otpKey);
+    let fromDatabase = false;
+
+    // If not in Redis, check database
+    if (!otpData) {
+      try {
+        await initializeDatabase();
+        
+        const otpRecords = await executeQuery(
+          `SELECT * FROM login_otp_verification 
+           WHERE mobile = ? AND verified = 0 AND expires_at > NOW()
+           ORDER BY created_at DESC LIMIT 1`,
+          [mobile]
+        );
+
+        if (otpRecords && otpRecords.length > 0) {
+          const record = otpRecords[0];
+          otpData = {
+            otp: record.otp,
+            mobile: record.mobile,
+            attempts: record.attempts || 0,
+            timestamp: new Date(record.created_at).getTime(),
+            id: record.id // Store DB ID for updates
+          };
+          fromDatabase = true;
+          console.log(`📥 OTP retrieved from database for ${mobile}`);
+        }
+      } catch (dbError) {
+        console.error('Error retrieving OTP from database:', dbError);
+      }
+    }
 
     if (!otpData) {
       return res.status(400).json({
@@ -132,15 +187,29 @@ const verifyOtp = async (req, res) => {
       
       // If too many attempts, delete the OTP
       if (otpData.attempts >= 3) {
-        await del(otpKey);
+        if (fromDatabase) {
+          await executeQuery(
+            `DELETE FROM login_otp_verification WHERE id = ?`,
+            [otpData.id]
+          );
+        } else {
+          await del(otpKey);
+        }
         return res.status(400).json({
           status: 'error',
           message: 'Too many incorrect attempts. Please request a new OTP.'
         });
       }
       
-      // Update attempts in Redis
-      await set(otpKey, otpData, 300);
+      // Update attempts
+      if (fromDatabase) {
+        await executeQuery(
+          `UPDATE login_otp_verification SET attempts = ? WHERE id = ?`,
+          [otpData.attempts, otpData.id]
+        );
+      } else {
+        await set(otpKey, otpData, 300);
+      }
       
       return res.status(400).json({
         status: 'error',
@@ -148,8 +217,15 @@ const verifyOtp = async (req, res) => {
       });
     }
 
-    // OTP is valid, delete it from Redis
-    await del(otpKey);
+    // OTP is valid, delete it
+    if (fromDatabase) {
+      await executeQuery(
+        `UPDATE login_otp_verification SET verified = 1 WHERE id = ?`,
+        [otpData.id]
+      );
+    } else {
+      await del(otpKey);
+    }
 
     // Check if user exists
     let user = await findUserByMobileNumber(mobile);

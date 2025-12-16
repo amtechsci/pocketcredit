@@ -1214,6 +1214,32 @@ class ApiService {
   /**
    * Get KFS (Key Facts Statement) for user's loan
    */
+  /**
+   * Initiate ClickWrap e-signature for loan agreement
+   */
+  async initiateClickWrap(applicationId: number, htmlContent: string): Promise<ApiResponse<{
+    entTransactionId: string;
+    docTransactionId: string;
+    previewUrl: string;
+  }>> {
+    return this.request('POST', '/clickwrap/initiate', {
+      applicationId,
+      htmlContent
+    });
+  }
+
+  /**
+   * Get signed document URL
+   */
+  async getSignedDocument(applicationId: number): Promise<ApiResponse<{
+    previewUrl: string;
+    signed: boolean;
+  }>> {
+    return this.request('POST', '/clickwrap/get-signed-doc', {
+      applicationId
+    });
+  }
+
   async getKFS(loanId: number): Promise<ApiResponse<any>> {
     return this.request('GET', `/kfs/user/${loanId}`);
   }

@@ -136,15 +136,37 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
     console.log('🔐 Generating Digilocker KYC URL:', { uid, mobile: mobile_number });
 
     // Call Digilocker API to generate KYC URL
+    // Production: https://svc.digitap.ai/wrap/api/ent/v1/kyc/generate-url
+    // UAT/Demo: https://svcint.digitap.work/wrap/demo/api/ent/v1/kyc/generate-url
+    const digilockerApiUrl = process.env.DIGILOCKER_API_URL || 
+      (process.env.NODE_ENV === 'production' 
+        ? 'https://svc.digitap.ai/wrap/api/ent/v1/kyc/generate-url'
+        : 'https://svcint.digitap.work/wrap/demo/api/ent/v1/kyc/generate-url');
+    
+    // Get auth token from env or construct from client_id:client_secret
+    let authToken = process.env.DIGILOCKER_AUTH_TOKEN;
+    if (!authToken && process.env.DIGILOCKER_CLIENT_ID && process.env.DIGILOCKER_CLIENT_SECRET) {
+      const credentials = `${process.env.DIGILOCKER_CLIENT_ID}:${process.env.DIGILOCKER_CLIENT_SECRET}`;
+      authToken = Buffer.from(credentials).toString('base64');
+    }
+    // Fallback to test token only in development
+    if (!authToken && process.env.NODE_ENV !== 'production') {
+      authToken = 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=';
+    }
+    
+    if (!authToken) {
+      throw new Error('DIGILOCKER_AUTH_TOKEN or DIGILOCKER_CLIENT_ID/SECRET must be configured');
+    }
+
     const digilockerResponse = await axios.post(
-      process.env.DIGILOCKER_API_URL || 'https://svcint.digitap.work/wrap/demo/api/ent/v1/kyc/generate-url',
+      digilockerApiUrl,
       digilockerRequest,
       {
         headers: {
           // Per docs: base64(client_id:client_secret)
-          'ent_authorization': process.env.DIGILOCKER_AUTH_TOKEN || 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=',
+          'ent_authorization': authToken,
           // Backward compatibility if gateway expects Authorization
-          'Authorization': process.env.DIGILOCKER_AUTH_TOKEN || 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=',
+          'Authorization': authToken,
           'Content-Type': 'application/json'
         }
       }
@@ -306,14 +328,32 @@ router.post('/fetch-kyc-data', requireAuth, async (req, res) => {
     console.log('📥 Fetching KYC data from Digilocker for txnId:', transaction_id);
 
     // Call Digilocker API to fetch actual KYC data
+    // Production: https://svc.digitap.ai/wrap/api/ent/v1/kyc/fetch-data
+    // UAT/Demo: https://svcint.digitap.work/wrap/demo/api/ent/v1/kyc/fetch-data
+    const fetchApiUrl = process.env.DIGILOCKER_FETCH_API_URL || 
+      (process.env.NODE_ENV === 'production'
+        ? 'https://svc.digitap.ai/wrap/api/ent/v1/kyc/fetch-data'
+        : 'https://svcint.digitap.work/wrap/demo/api/ent/v1/kyc/fetch-data');
+    
+    // Get auth token (same logic as generate-kyc-url)
+    let authToken = process.env.DIGILOCKER_AUTH_TOKEN;
+    if (!authToken && process.env.DIGILOCKER_CLIENT_ID && process.env.DIGILOCKER_CLIENT_SECRET) {
+      const credentials = `${process.env.DIGILOCKER_CLIENT_ID}:${process.env.DIGILOCKER_CLIENT_SECRET}`;
+      authToken = Buffer.from(credentials).toString('base64');
+    }
+    if (!authToken && process.env.NODE_ENV !== 'production') {
+      authToken = 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=';
+    }
+
     const digilockerResponse = await axios.post(
-      process.env.DIGILOCKER_FETCH_API_URL || 'https://svcint.digitap.work/wrap/demo/api/ent/v1/kyc/fetch-data',
+      fetchApiUrl,
       {
         transactionId: transaction_id
       },
       {
         headers: {
-          'Authorization': process.env.DIGILOCKER_AUTH_TOKEN || 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=',
+          'Authorization': authToken,
+          'ent_authorization': authToken,
           'Content-Type': 'application/json'
         }
       }
@@ -380,12 +420,27 @@ router.get('/get-details/:transactionId', requireAuth, async (req, res) => {
   }
   try {
     await initializeDatabase();
-    // Demo/UAT environment by default
-    const apiUrl = process.env.DIGILOCKER_GET_DETAILS_URL || 'https://svcint.digitap.work/wrap/demo/api/ent/v1/kyc/get-digilocker-details';
+    // Production: https://svc.digitap.ai/wrap/api/ent/v1/kyc/get-digilocker-details
+    // UAT/Demo: https://svcint.digitap.work/wrap/demo/api/ent/v1/kyc/get-digilocker-details
+    const apiUrl = process.env.DIGILOCKER_GET_DETAILS_URL || 
+      (process.env.NODE_ENV === 'production'
+        ? 'https://svc.digitap.ai/wrap/api/ent/v1/kyc/get-digilocker-details'
+        : 'https://svcint.digitap.work/wrap/demo/api/ent/v1/kyc/get-digilocker-details');
+    
+    // Get auth token
+    let authToken = process.env.DIGILOCKER_AUTH_TOKEN;
+    if (!authToken && process.env.DIGILOCKER_CLIENT_ID && process.env.DIGILOCKER_CLIENT_SECRET) {
+      const credentials = `${process.env.DIGILOCKER_CLIENT_ID}:${process.env.DIGILOCKER_CLIENT_SECRET}`;
+      authToken = Buffer.from(credentials).toString('base64');
+    }
+    if (!authToken && process.env.NODE_ENV !== 'production') {
+      authToken = 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=';
+    }
+    
     const apiResp = await axios.post(
       apiUrl,
       { transactionId },
-      { headers: { 'ent_authorization': process.env.DIGILOCKER_AUTH_TOKEN || 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=', 'Content-Type': 'application/json' } }
+      { headers: { 'ent_authorization': authToken, 'Content-Type': 'application/json' } }
     );
     if (!apiResp.data || apiResp.data.code !== '200') {
       return res.status(400).json({ success: false, message: apiResp.data?.msg || 'Failed to fetch details' });
@@ -417,12 +472,27 @@ router.get('/list-docs/:transactionId', requireAuth, async (req, res) => {
   }
   try {
     await initializeDatabase();
-    // Demo/UAT environment by default
-    const apiUrl = process.env.DIGILOCKER_LIST_DOCS_URL || 'https://svcint.digitap.work/wrap/demo/api/ent/v1/digilocker/list-docs';
+    // Production: https://svc.digitap.ai/wrap/api/ent/v1/digilocker/list-docs
+    // UAT/Demo: https://svcint.digitap.work/wrap/demo/api/ent/v1/digilocker/list-docs
+    const apiUrl = process.env.DIGILOCKER_LIST_DOCS_URL || 
+      (process.env.NODE_ENV === 'production'
+        ? 'https://svc.digitap.ai/wrap/api/ent/v1/digilocker/list-docs'
+        : 'https://svcint.digitap.work/wrap/demo/api/ent/v1/digilocker/list-docs');
+    
+    // Get auth token
+    let authToken = process.env.DIGILOCKER_AUTH_TOKEN;
+    if (!authToken && process.env.DIGILOCKER_CLIENT_ID && process.env.DIGILOCKER_CLIENT_SECRET) {
+      const credentials = `${process.env.DIGILOCKER_CLIENT_ID}:${process.env.DIGILOCKER_CLIENT_SECRET}`;
+      authToken = Buffer.from(credentials).toString('base64');
+    }
+    if (!authToken && process.env.NODE_ENV !== 'production') {
+      authToken = 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=';
+    }
+    
     const apiResp = await axios.post(
       apiUrl,
       { transactionId },
-      { headers: { 'ent_authorization': process.env.DIGILOCKER_AUTH_TOKEN || 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=', 'Content-Type': 'application/json' } }
+      { headers: { 'ent_authorization': authToken, 'Content-Type': 'application/json' } }
     );
     if (!apiResp.data || apiResp.data.code !== '200') {
       return res.status(400).json({ success: false, message: apiResp.data?.msg || 'Failed to list docs' });

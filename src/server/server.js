@@ -228,6 +228,12 @@ const enachWebhookRoutes = require('./routes/enachWebhooks');
 app.use('/api/enach', enachRoutes);
 app.use('/api/enach', enachWebhookRoutes);  // Webhooks on /api/enach/webhook
 
+// ClickWrap (e-Signature) routes
+const clickWrapRoutes = require('./routes/clickWrap');
+const clickWrapWebhookRoutes = require('./routes/clickWrapWebhooks');
+app.use('/api/clickwrap', clickWrapRoutes);
+app.use('/api/clickwrap', clickWrapWebhookRoutes);  // Webhooks on /api/clickwrap/webhook
+
 // Payment Gateway routes (One-time payments)
 const paymentRoutes = require('./routes/payment');
 app.use('/api/payment', paymentRoutes);

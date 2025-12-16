@@ -349,11 +349,7 @@ export const PostDisbursalFlowPage = () => {
             )}
 
             {currentStep === 6 && (
-              <ConfirmationStep
-                applicationId={applicationId}
-                onComplete={() => { }}
-                saving={saving}
-              />
+              <ConfirmationStep />
             )}
 
             {/* Fallback if currentStep is not set or invalid */}
@@ -451,7 +447,7 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
       const response = await apiService.createEnachSubscription(applicationId);
 
       if (response.success && response.data) {
-        const { authorization_url, subscription_id, message } = response.data;
+        const { authorization_url, subscription_id } = response.data;
 
         if (authorization_url) {
           toast.success('Redirecting to eNACH authorization...');
@@ -463,7 +459,7 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
           window.location.href = authorization_url;
         } else {
           // For eNACH, mandate link is sent via SMS/Email
-          toast.success(message || 'eNACH mandate link sent to your mobile and email');
+          toast.success('eNACH mandate link sent to your mobile and email');
 
           // Show success message and mark as pending
           setError(null);
@@ -825,12 +821,135 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
 
 // Step 5: Agreement Sign
 const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => {
+  const [initiating, setInitiating] = useState(false);
+  const [entTransactionId, setEntTransactionId] = useState<string | null>(null);
+
+  // Load Digitap ClickWrap SDK
+  useEffect(() => {
+    const script = document.createElement('script');
+    const isProduction = window.location.hostname !== 'localhost';
+    script.src = isProduction
+      ? 'https://sdk.digitap.ai/clickwrap/scripts/digitap_clickwrap.js'
+      : 'https://sdksb.digitap.work/clickwrap/scripts/digitap_clickwrap.js';
+    script.async = true;
+    document.head.appendChild(script);
+
+    return () => {
+      // Cleanup script on unmount
+      const existingScript = document.querySelector(`script[src*="digitap_clickwrap"]`);
+      if (existingScript) {
+        existingScript.remove();
+      }
+    };
+  }, []);
+
   const handleSign = async () => {
-    // Mock e-signature - will be replaced with Cashfree Wrap API
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    toast.success('Loan agreement signed successfully');
-    onComplete();
+    try {
+      setInitiating(true);
+
+      // Get the loan agreement HTML content
+      const agreementElement = document.querySelector('.loan-agreement-content') || 
+                                document.querySelector('[class*="loan-agreement"]') ||
+                                document.querySelector('[class*="SharedLoanAgreement"]');
+      
+      if (!agreementElement) {
+        toast.error('Loan agreement content not found. Please refresh the page.');
+        return;
+      }
+
+      // Get full HTML including styles
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="UTF-8">
+            <style>
+              ${Array.from(document.styleSheets)
+                .map(sheet => {
+                  try {
+                    return Array.from(sheet.cssRules)
+                      .map(rule => rule.cssText)
+                      .join('\n');
+                  } catch (e) {
+                    return '';
+                  }
+                })
+                .join('\n')}
+            </style>
+          </head>
+          <body>
+            ${agreementElement.outerHTML}
+          </body>
+        </html>
+      `;
+
+      // Initiate ClickWrap
+      const response = await apiService.initiateClickWrap(applicationId, htmlContent);
+
+      if (!response.success) {
+        throw new Error(response.message || 'Failed to initiate e-signature');
+      }
+
+      const txnId = response.data?.entTransactionId;
+      if (!txnId) {
+        throw new Error('Transaction ID not received from server');
+      }
+      setEntTransactionId(txnId);
+
+      // Check if Digitap SDK is loaded
+      if (typeof (window as any).digitapClickwrap === 'undefined') {
+        toast.error('Digitap SDK is loading. Please wait a moment and try again.');
+        setTimeout(() => handleSign(), 2000);
+        return;
+      }
+
+      // Launch Digitap ClickWrap SDK
+      const isProduction = window.location.hostname !== 'localhost';
+      const successUrl = `${window.location.origin}/post-disbursal?applicationId=${applicationId}&signed=true`;
+      const errorUrl = `${window.location.origin}/post-disbursal?applicationId=${applicationId}&signed=false`;
+
+      const params = {
+        environment: isProduction ? 'PRODUCTION' : 'UAT',
+        transaction_id: txnId,
+        logo: `${window.location.origin}/logo.png`, // Update with your logo URL
+        redirect_url: successUrl,
+        error_url: errorUrl,
+        theme: {}
+      };
+
+      console.log('🚀 Launching Digitap ClickWrap SDK with params:', params);
+
+      // Launch Digitap ClickWrap SDK
+      // SDK will handle the OTP flow and redirect
+      // The redirect URLs will handle completion
+      new (window as any).digitapClickwrap(params);
+
+    } catch (error: any) {
+      console.error('Error initiating ClickWrap:', error);
+      toast.error(error.message || 'Failed to initiate e-signature');
+    } finally {
+      setInitiating(false);
+    }
   };
+
+  // Check if user is returning from signing (URL params)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const signed = urlParams.get('signed');
+    
+    if (signed === 'true') {
+      toast.success('Loan agreement signed successfully!');
+      onComplete();
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (signed === 'false') {
+      const errorCode = urlParams.get('error_code');
+      const errorMsg = urlParams.get('errorMsg');
+      toast.error(`Signing failed: ${errorMsg || errorCode || 'Unknown error'}`);
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [onComplete]);
 
   return (
     <div className="space-y-6">
@@ -838,12 +957,24 @@ const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => 
         <PenTool className="w-16 h-16 text-blue-600 mx-auto mb-4" />
         <h2 className="text-2xl font-bold mb-2">Loan Agreement</h2>
         <p className="text-gray-600">
-          Review and e-sign your loan agreement
+          Review and e-sign your loan agreement using OTP verification
         </p>
       </div>
 
-      <div className="border rounded-lg p-4 max-h-[600px] overflow-y-auto">
+      <div className="border rounded-lg p-4 max-h-[600px] overflow-y-auto" id="loan-agreement-content">
         <UserLoanAgreementDocument loanId={applicationId} />
+      </div>
+
+      <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg">
+        <p className="text-sm text-gray-700">
+          <strong>E-Signature Process:</strong>
+        </p>
+        <ul className="text-sm text-gray-600 mt-2 list-disc list-inside space-y-1">
+          <li>Click "E-Sign Agreement" to start the signing process</li>
+          <li>You will receive an OTP on your registered mobile number</li>
+          <li>Enter the OTP to verify and sign the document</li>
+          <li>The signed document will be stored securely</li>
+        </ul>
       </div>
 
       <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded-lg">
@@ -855,11 +986,11 @@ const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => 
       <div className="flex justify-end gap-4">
         <Button
           onClick={handleSign}
-          disabled={saving}
+          disabled={saving || initiating}
           className="min-w-[120px]"
         >
-          {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-          E-Sign Agreement
+          {(saving || initiating) ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+          {initiating ? 'Initiating...' : 'E-Sign Agreement'}
         </Button>
       </div>
     </div>
@@ -867,7 +998,7 @@ const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => 
 };
 
 // Step 6: Confirmation
-const ConfirmationStep = ({ applicationId, onComplete, saving }: StepProps) => {
+const ConfirmationStep = () => {
   return (
     <div className="space-y-6 text-center">
       <CheckCircle className="w-20 h-20 text-green-500 mx-auto" />
