@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import { adminApiService } from '../../services/adminApi';
+import { toast } from 'sonner';
 
 
 
@@ -1586,6 +1587,32 @@ export function UserProfileDetail() {
 
 
 
+  const [refetchingKYC, setRefetchingKYC] = useState(false);
+
+  const handleRefetchKYC = async () => {
+    if (!params.userId) return;
+    
+    setRefetchingKYC(true);
+    try {
+      const response = await adminApiService.refetchKYCData(params.userId);
+      if (response.status === 'success') {
+        toast.success(`KYC data refetched successfully! ${response.data?.documentsProcessed || 0} documents processed.`);
+        // Refresh user profile to show updated data
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success' && profileResponse.data) {
+          setUserData(profileResponse.data);
+        }
+      } else {
+        toast.error(response.message || 'Failed to refetch KYC data');
+      }
+    } catch (error: any) {
+      console.error('Error refetching KYC:', error);
+      toast.error(error.message || 'Failed to refetch KYC data');
+    } finally {
+      setRefetchingKYC(false);
+    }
+  };
+
   const renderKYCTab = () => {
     const kycData = getUserData('kycVerification');
     const kycDocs = getUserData('kycDocuments', []);
@@ -1601,6 +1628,7 @@ export function UserProfileDetail() {
 
     const verificationData = getVerificationData();
     const isVerified = ['verified', 'completed', 'success'].includes(kycData?.status?.toLowerCase());
+    const hasTransactionId = kycData?.verification_data?.transactionId;
 
     return (
       <div className="space-y-6">
@@ -1608,10 +1636,22 @@ export function UserProfileDetail() {
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-semibold text-gray-900">KYC Verification Details</h3>
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${isVerified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-              }`}>
-              {kycData?.status?.toUpperCase() || 'NOT VERIFIED'}
-            </span>
+            <div className="flex items-center gap-3">
+              {hasTransactionId && (
+                <button
+                  onClick={handleRefetchKYC}
+                  disabled={refetchingKYC}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw className={`w-4 h-4 ${refetchingKYC ? 'animate-spin' : ''}`} />
+                  {refetchingKYC ? 'Refetching...' : 'Refetch KYC Data'}
+                </button>
+              )}
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${isVerified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                }`}>
+                {kycData?.status?.toUpperCase() || 'NOT VERIFIED'}
+              </span>
+            </div>
           </div>
 
           {!kycData ? (

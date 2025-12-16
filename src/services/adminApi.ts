@@ -200,6 +200,10 @@ class AdminApiService {
     return this.request<UserDetailData>('GET', `/user-profile/${userId}`);
   }
 
+  async refetchKYCData(userId: string): Promise<ApiResponse<any>> {
+    return this.request('POST', `/user-profile/${userId}/refetch-kyc`);
+  }
+
   // Loan Management APIs
   async getLoans(page: number = 1, limit: number = 20, status?: string, search?: string): Promise<ApiResponse<any>> {
     return this.request('GET', '/loans', undefined, {

@@ -517,4 +517,5 @@ router.get('/list-docs/:transactionId', requireAuth, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.processAndUploadDocs = processAndUploadDocs;
 
