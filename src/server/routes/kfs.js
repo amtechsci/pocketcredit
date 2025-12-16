@@ -144,15 +144,38 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       salary_date: userSalaryDate
     };
 
-    // KFS should show the original planned loan terms, not actual elapsed days
-    // Use plan's repayment days calculation (could be fixed days or salary-based)
+    // Check if we should use actual exhausted days (for repayment schedule) or planned days (for KFS/Agreement)
+    const useActualDays = req.query.useActualDays === 'true' || req.query.useActualDays === true;
+    
+    // Calculate actual exhausted days from disbursement date to today (only if requested)
+    let actualExhaustedDays = null;
+    if (useActualDays && loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)) {
+      const disbursedDate = new Date(loan.disbursed_at);
+      const currentDate = new Date();
+      // Set both dates to midnight for accurate day calculation
+      disbursedDate.setHours(0, 0, 0, 0);
+      currentDate.setHours(0, 0, 0, 0);
+      const diffTime = Math.abs(currentDate.getTime() - disbursedDate.getTime());
+      actualExhaustedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      // Ensure at least 1 day if loan was disbursed today
+      if (actualExhaustedDays === 0) {
+        actualExhaustedDays = 1;
+      }
+      console.log(`📅 Using actual exhausted days: ${actualExhaustedDays} (from ${disbursedDate.toISOString().split('T')[0]} to ${currentDate.toISOString().split('T')[0]})`);
+    } else {
+      console.log(`📅 Using planned repayment days (for KFS/Agreement documents)`);
+    }
+
+    // KFS should show the original planned loan terms for documents, but actual days for repayment schedule
+    // Use plan's repayment days calculation (could be fixed days or salary-based) unless useActualDays is true
     const calculationOptions = {
       calculationDate: loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)
         ? new Date(loan.disbursed_at)  // Use disbursed date for calculation
-        : new Date()  // Use today for pending loans
+        : new Date(),  // Use today for pending loans
+      customDays: actualExhaustedDays  // Only override with actual exhausted days if useActualDays=true
     };
 
-    // Calculate loan values using plan days (not actual elapsed days)
+    // Calculate loan values using actual exhausted days (not plan days)
     const loanValues = calculateCompleteLoanValues(loanData, planData, userData, calculationOptions);
 
     // Parse fees breakdown if it's a JSON string

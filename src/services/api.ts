@@ -1254,8 +1254,9 @@ class ApiService {
     });
   }
 
-  async getKFS(loanId: number): Promise<ApiResponse<any>> {
-    return this.request('GET', `/kfs/user/${loanId}`);
+  async getKFS(loanId: number, useActualDays: boolean = false): Promise<ApiResponse<any>> {
+    const queryParam = useActualDays ? '?useActualDays=true' : '';
+    return this.request('GET', `/kfs/user/${loanId}${queryParam}`);
   }
 
   /**

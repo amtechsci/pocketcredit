@@ -75,7 +75,8 @@ export const RepaymentSchedulePage = () => {
       setError(null);
 
       // Fetch KFS data which contains all loan calculation details
-      const kfsResponse = await apiService.getKFS(loanId);
+      // Use useActualDays=true for repayment schedule to calculate interest based on actual exhausted days
+      const kfsResponse = await apiService.getKFS(loanId, true);
       if (kfsResponse && (kfsResponse.success || kfsResponse.status === 'success') && kfsResponse.data) {
         setKfsData(kfsResponse.data);
         setLoanData(kfsResponse.data.loan);
@@ -169,19 +170,24 @@ export const RepaymentSchedulePage = () => {
     );
   }
 
-  const repayment = kfsData.repayment || {};
   const calculations = kfsData.calculations || {};
-  const interest = kfsData.interest || {};
-  const fees = kfsData.fees || {};
-  const borrower = kfsData.borrower || {};
 
   // Calculate derived values
   const disbursedDate = loanData.disbursed_at ? new Date(loanData.disbursed_at) : new Date();
   const currentDate = new Date(); // Use current date
 
-  // Exhausted Days Calculation
-  const diffTime = Math.abs(currentDate.getTime() - disbursedDate.getTime());
-  const exhaustedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  // Exhausted Days Calculation - match backend calculation exactly
+  // Set both dates to midnight for accurate day calculation
+  const disbursedDateMidnight = new Date(disbursedDate);
+  disbursedDateMidnight.setHours(0, 0, 0, 0);
+  const currentDateMidnight = new Date(currentDate);
+  currentDateMidnight.setHours(0, 0, 0, 0);
+  const diffTime = Math.abs(currentDateMidnight.getTime() - disbursedDateMidnight.getTime());
+  let exhaustedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  // Ensure at least 1 day if loan was disbursed today
+  if (exhaustedDays === 0) {
+    exhaustedDays = 1;
+  }
 
   // Determine Due Date
   // Logic: Disbursement Date + Loan Term
@@ -212,7 +218,6 @@ export const RepaymentSchedulePage = () => {
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-bold mb-1">Repayment Screen</h2>
                 <p className="text-blue-100 text-sm">Loan ID: {loanData.loan_id || loanData.application_number || 'N/A'}</p>
               </div>
               <div className="text-right">
@@ -360,48 +365,6 @@ export const RepaymentSchedulePage = () => {
           </CardContent>
         </Card>
 
-        {/* Loan Breakdown Card */}
-        <Card className="bg-white shadow-lg rounded-xl mb-6">
-          <CardContent className="p-6">
-            <h3 className="text-xl font-semibold mb-4 text-gray-900">Loan Breakdown</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-gray-600">Principal Amount</span>
-                <span className="font-semibold text-gray-900">
-                  {formatCurrency(calculations.principal || 0)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                <span className="text-gray-600">Interest</span>
-                <span className="font-semibold text-gray-900">
-                  {formatCurrency(calculations.interest || 0)}
-                </span>
-              </div>
-              {fees.processing_fee > 0 && (
-                <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                  <span className="text-gray-600">Processing Fee</span>
-                  <span className="font-semibold text-gray-900">
-                    {formatCurrency(fees.processing_fee || 0)}
-                  </span>
-                </div>
-              )}
-              {fees.gst > 0 && (
-                <div className="flex justify-between items-center py-2 border-b border-gray-100">
-                  <span className="text-gray-600">GST</span>
-                  <span className="font-semibold text-gray-900">
-                    {formatCurrency(fees.gst || 0)}
-                  </span>
-                </div>
-              )}
-              <div className="flex justify-between items-center py-3 border-t-2 border-gray-300 mt-2">
-                <span className="text-lg font-semibold text-gray-900">Total Repayable</span>
-                <span className="text-xl font-bold text-blue-600">
-                  {formatCurrency(calculations.total_repayable || 0)}
-                </span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
         {/* Important Bullet Points */}
         <Card className="bg-blue-50 border-blue-100 shadow-sm rounded-xl">
