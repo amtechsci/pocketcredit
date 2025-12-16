@@ -200,12 +200,16 @@ export const RepaymentSchedulePage = () => {
   const daysDelayed = isDefaulted ? Math.ceil((currentDate.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
   // Tenure extension logic: D-5 to D+15
-  const dMinus5 = new Date(dueDate);
-  dMinus5.setDate(dMinus5.getDate() - 5);
-  const dPlus15 = new Date(dueDate);
-  dPlus15.setDate(dPlus15.getDate() + 15);
-
-  const canExtend = currentDate >= dMinus5 && currentDate <= dPlus15;
+  // TODO: Uncomment when tenure extension feature is ready
+  // Normalize due date to midnight for accurate day-based comparison
+  // (currentDateMidnight already calculated above for exhausted days)
+  // const dueDateMidnight = new Date(dueDate);
+  // dueDateMidnight.setHours(0, 0, 0, 0);
+  // const dMinus5 = new Date(dueDateMidnight);
+  // dMinus5.setDate(dMinus5.getDate() - 5);
+  // const dPlus15 = new Date(dueDateMidnight);
+  // dPlus15.setDate(dPlus15.getDate() + 15);
+  // const canExtend = currentDateMidnight >= dMinus5 && currentDateMidnight <= dPlus15;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 pb-12">
@@ -288,7 +292,8 @@ export const RepaymentSchedulePage = () => {
                 Repay Now
               </Button>
 
-              {/* Only show extend button when within valid period (5 days before to 15 days after due date) */}
+              {/* Extend button - hidden until feature is ready */}
+              {/* TODO: Uncomment when tenure extension feature is ready
               {canExtend && (
                 <Button
                   variant="outline"
@@ -300,6 +305,7 @@ export const RepaymentSchedulePage = () => {
                   Extend your loan tenure
                 </Button>
               )}
+              */}
             </div>
           </CardContent>
         </Card>
