@@ -10,14 +10,37 @@ const {
 } = require('../services/digitapClickWrapService');
 const pdfService = require('../services/pdfService');
 
+// Debug route to check if route is reachable
+router.post('/initiate/debug', (req, res) => {
+  console.log('🔍 Debug route hit');
+  console.log('   Headers:', Object.keys(req.headers));
+  console.log('   Authorization header:', req.headers['authorization'] || req.headers['Authorization']);
+  console.log('   Body:', req.body);
+  res.json({
+    success: true,
+    message: 'Debug route reached',
+    hasAuthHeader: !!(req.headers['authorization'] || req.headers['Authorization']),
+    headers: Object.keys(req.headers)
+  });
+});
+
 /**
  * POST /api/clickwrap/initiate
  * Initiate ClickWrap transaction and get upload URL
  */
 router.post('/initiate', requireAuth, async (req, res) => {
   try {
+    console.log('✅ ClickWrap initiate route reached, userId:', req.userId);
     await initializeDatabase();
     const userId = req.userId;
+    
+    if (!userId) {
+      console.error('❌ userId is missing after requireAuth middleware');
+      return res.status(401).json({
+        success: false,
+        message: 'User ID not found in request'
+      });
+    }
     const { applicationId } = req.body;
 
     if (!applicationId) {

@@ -368,16 +368,27 @@ app.get('/api/health', (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
+  console.error('Error handler caught error:', err);
+  console.error('Error stack:', err.stack);
+  console.error('Request path:', req.path);
+  console.error('Request method:', req.method);
+
+  // Don't send response if it's already been sent
+  if (res.headersSent) {
+    console.error('Response already sent, skipping error handler');
+    return next(err);
+  }
 
   if (err.code === 'LIMIT_FILE_SIZE') {
     return res.status(400).json({
+      success: false,
       status: 'error',
       message: 'File size too large. Maximum size is 10MB.'
     });
   }
 
   res.status(500).json({
+    success: false,
     status: 'error',
     message: process.env.NODE_ENV === 'production'
       ? 'Internal server error'

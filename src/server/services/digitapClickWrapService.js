@@ -1,10 +1,20 @@
 const axios = require('axios');
 
 // Digitap ClickWrap API configuration
-const DIGITAP_BASE_URL = process.env.DIGITAP_BASE_URL || 'https://apidemo.digitap.work';
+// Use production if explicitly set, otherwise default to UAT
+const useProduction = process.env.DIGITAP_USE_PRODUCTION === 'true';
+const DIGITAP_BASE_URL = process.env.DIGITAP_BASE_URL || 
+  (useProduction ? 'https://api.digitap.ai' : 'https://apidemo.digitap.work');
 const DIGITAP_CLIENT_ID = process.env.DIGITAP_CLIENT_ID;
 const DIGITAP_CLIENT_SECRET = process.env.DIGITAP_CLIENT_SECRET;
 const DIGITAP_CLICKWRAP_DOC_CLASS_ID = process.env.DIGITAP_CLICKWRAP_DOC_CLASS_ID || 'EI1OTPxxxxx';
+
+// Log configuration on startup
+console.log('🔧 Digitap ClickWrap Configuration:');
+console.log('   Base URL:', DIGITAP_BASE_URL);
+console.log('   Client ID:', DIGITAP_CLIENT_ID ? 'Set (' + DIGITAP_CLIENT_ID.substring(0, 10) + '...)' : 'Missing');
+console.log('   Client Secret:', DIGITAP_CLIENT_SECRET ? 'Set' : 'Missing');
+console.log('   Doc Class ID:', DIGITAP_CLICKWRAP_DOC_CLASS_ID);
 
 // API Endpoints
 const ENDPOINTS = {
@@ -25,9 +35,21 @@ function getBaseUrl() {
  * Format: Base64(client_id:client_secret)
  */
 function getAuthHeader() {
+  if (!DIGITAP_CLIENT_ID || !DIGITAP_CLIENT_SECRET) {
+    console.error('❌ Missing Digitap credentials!');
+    console.error('   DIGITAP_CLIENT_ID:', DIGITAP_CLIENT_ID ? 'Set' : 'Missing');
+    console.error('   DIGITAP_CLIENT_SECRET:', DIGITAP_CLIENT_SECRET ? 'Set' : 'Missing');
+    throw new Error('Digitap API credentials (DIGITAP_CLIENT_ID and DIGITAP_CLIENT_SECRET) are required');
+  }
   const credentials = `${DIGITAP_CLIENT_ID}:${DIGITAP_CLIENT_SECRET}`;
   const base64Credentials = Buffer.from(credentials).toString('base64');
-  return `Basic ${base64Credentials}`;
+  const authHeader = `Basic ${base64Credentials}`;
+  console.log('🔑 Digitap auth header created');
+  console.log('   Client ID length:', DIGITAP_CLIENT_ID.length);
+  console.log('   Client Secret length:', DIGITAP_CLIENT_SECRET.length);
+  console.log('   Auth header length:', authHeader.length);
+  console.log('   Auth header preview:', authHeader.substring(0, 30) + '...');
+  return authHeader;
 }
 
 /**
@@ -69,12 +91,15 @@ async function initiateClickWrap(params) {
     };
 
     const apiUrl = `${getBaseUrl()}${ENDPOINTS.INITIATE}`;
+    const authHeader = getAuthHeader();
     console.log('📤 Initiating Digitap ClickWrap:', apiUrl);
     console.log('📋 Request body:', JSON.stringify(requestBody, null, 2));
+    console.log('🔑 Auth header created:', authHeader ? 'Yes (length: ' + authHeader.length + ')' : 'No');
+    console.log('🔑 Auth header preview:', authHeader ? authHeader.substring(0, 30) + '...' : 'None');
 
     const response = await axios.post(apiUrl, requestBody, {
       headers: {
-        'ent_authorization': getAuthHeader(),
+        'ent_authorization': authHeader,
         'content-type': 'application/json'
       },
       timeout: 30000

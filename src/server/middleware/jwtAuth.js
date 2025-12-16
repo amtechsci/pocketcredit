@@ -10,21 +10,39 @@ const JWT_SECRET = process.env.JWT_SECRET || 'pocket-credit-secret-key-2025';
 const requireAuth = async (req, res, next) => {
   try {
     // Get JWT token from Authorization header (case-insensitive)
+    // Express lowercases headers, so check lowercase first
     const authHeader = req.headers['authorization'] || req.headers['Authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const token = authHeader && typeof authHeader === 'string' ? authHeader.split(' ')[1] : null; // Bearer TOKEN
 
     if (!token) {
       console.log('❌ No token found in request headers');
-      console.log('   Authorization header:', authHeader);
       console.log('   Request method:', req.method);
       console.log('   Request path:', req.path);
       console.log('   Request URL:', req.url);
-      console.log('   All headers:', Object.keys(req.headers));
-      console.log('   Headers object:', JSON.stringify(req.headers, null, 2));
-      return res.status(401).json({
-        success: false,
-        message: 'Missing Authentication Token'
-      });
+      console.log('   Request originalUrl:', req.originalUrl);
+      console.log('   Authorization header (raw):', authHeader);
+      console.log('   Authorization header type:', typeof authHeader);
+      console.log('   All header keys:', Object.keys(req.headers));
+      // Check for token in different possible locations
+      const allHeaders = req.headers;
+      console.log('   Checking all headers for authorization...');
+      for (const key in allHeaders) {
+        if (key.toLowerCase() === 'authorization') {
+          console.log(`   Found authorization header with key: "${key}", value: "${allHeaders[key]?.substring(0, 20)}..."`);
+        }
+      }
+      // Don't log full headers object in production to avoid sensitive data
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('   Headers object:', JSON.stringify(req.headers, null, 2));
+      }
+      // Ensure response is sent and prevent further processing
+      if (!res.headersSent) {
+        res.status(401).json({
+          success: false,
+          message: 'Missing Authentication Token'
+        });
+      }
+      return; // Explicit return to prevent further execution
     }
 
     // Verify JWT token
@@ -40,14 +58,25 @@ const requireAuth = async (req, res, next) => {
     }
 
     // Get user from database to ensure user still exists and is active
-    const user = await findUserById(decoded.id);
+    let user;
+    try {
+      user = await findUserById(decoded.id);
+    } catch (dbError) {
+      console.error('❌ Database error while fetching user:', dbError);
+      res.status(500).json({
+        success: false,
+        message: 'Database error during authentication'
+      });
+      return;
+    }
     
     if (!user) {
       console.log('❌ User not found for ID:', decoded.id);
-      return res.status(401).json({
+      res.status(401).json({
         success: false,
         message: 'User not found'
       });
+      return;
     }
 
     // Allow 'active' and 'on_hold' users to authenticate
@@ -68,10 +97,14 @@ const requireAuth = async (req, res, next) => {
 
   } catch (error) {
     console.error('JWT Authentication error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Authentication failed'
-    });
+    console.error('Error stack:', error.stack);
+    // Only send response if it hasn't been sent yet
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        message: 'Authentication failed: ' + (error.message || 'Unknown error')
+      });
+    }
   }
 };
 
