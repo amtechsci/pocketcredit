@@ -3178,10 +3178,34 @@ export function UserProfileDetail() {
                       const calculation = loanCalculations[loanId];
                       const isLoading = calculationsLoading[loanId];
 
-                      // Parse plan snapshot to get plan code
+                      // Get plan code and plan ID from multiple sources
                       let planCode = 'N/A';
                       let planId = null;
-                      if (loan.plan_snapshot) {
+                      
+                      // Priority 1: Use plan_code from API response (from JOIN with loan_plans table)
+                      if (loan.plan_code) {
+                        planCode = loan.plan_code;
+                        planId = loan.loan_plan_id || null;
+                      }
+                      // Priority 2: Check loan_plan_id directly
+                      else if (loan.loan_plan_id) {
+                        planId = loan.loan_plan_id;
+                        // Try to get plan code from plan_snapshot
+                        if (loan.plan_snapshot) {
+                          try {
+                            const planData = typeof loan.plan_snapshot === 'string' ? JSON.parse(loan.plan_snapshot) : loan.plan_snapshot;
+                            planCode = planData.plan_code || `Plan #${planId}`;
+                            planId = planData.plan_id || planId;
+                          } catch (e) {
+                            planCode = `Plan #${planId}`;
+                          }
+                        } else {
+                          // No plan_snapshot but has loan_plan_id
+                          planCode = `Plan #${planId}`;
+                        }
+                      }
+                      // Priority 3: Fallback to plan_snapshot if loan_plan_id not set
+                      else if (loan.plan_snapshot) {
                         try {
                           const planData = typeof loan.plan_snapshot === 'string' ? JSON.parse(loan.plan_snapshot) : loan.plan_snapshot;
                           planCode = planData.plan_code || 'N/A';

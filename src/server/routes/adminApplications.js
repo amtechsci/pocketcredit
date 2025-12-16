@@ -53,6 +53,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
         la.disbursed_at as disbursedDate,
         la.created_at as applicationDate,
         la.updated_at as updatedAt,
+        la.loan_plan_id,
+        la.plan_snapshot,
         la.processing_fee,
         la.processing_fee_percent,
         la.fees_breakdown,
@@ -81,11 +83,14 @@ router.get('/', authenticateAdmin, async (req, res) => {
         COALESCE(a.state, '') as state,
         COALESCE(a.pincode, '') as pincode,
         COALESCE(a.address_line1, '') as address_line1,
-        COALESCE(a.address_line2, '') as address_line2
+        COALESCE(a.address_line2, '') as address_line2,
+        COALESCE(lp.plan_code, '') as plan_code,
+        COALESCE(lp.plan_name, '') as plan_name
       FROM loan_applications la
       LEFT JOIN users u ON la.user_id = u.id
       LEFT JOIN employment_details ed ON u.id = ed.user_id
       LEFT JOIN addresses a ON u.id = a.user_id AND a.is_primary = 1
+      LEFT JOIN loan_plans lp ON la.loan_plan_id = lp.id
     `;
 
     let whereConditions = [];
@@ -224,7 +229,12 @@ router.get('/', authenticateAdmin, async (req, res) => {
         feesBreakdown: feesBreakdown,
         disbursalAmount: app.disbursal_amount ? parseFloat(app.disbursal_amount) : undefined,
         totalInterest: app.total_interest ? parseFloat(app.total_interest) : undefined,
-        totalRepayable: app.total_repayable ? parseFloat(app.total_repayable) : undefined
+        totalRepayable: app.total_repayable ? parseFloat(app.total_repayable) : undefined,
+        // Loan plan information
+        loan_plan_id: app.loan_plan_id || null,
+        plan_code: app.plan_code || null,
+        plan_name: app.plan_name || null,
+        plan_snapshot: app.plan_snapshot || null
       };
     });
 
@@ -567,12 +577,12 @@ router.put('/:applicationId/loan-plan', authenticateAdmin, async (req, res) => {
       }))
     };
 
-    // Update loan application with plan snapshot
+    // Update loan application with plan snapshot AND loan_plan_id
     await executeQuery(
       `UPDATE loan_applications 
-       SET plan_snapshot = ?, updated_at = NOW() 
+       SET loan_plan_id = ?, plan_snapshot = ?, updated_at = NOW() 
        WHERE id = ?`,
-      [JSON.stringify(planSnapshot), applicationId]
+      [plan_id, JSON.stringify(planSnapshot), applicationId]
     );
 
     res.json({

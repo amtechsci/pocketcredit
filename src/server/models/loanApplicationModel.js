@@ -86,6 +86,75 @@ const createApplication = async (userId, applicationData) => {
       }
     }
 
+    // If we have a planId but plan_snapshot is incomplete or missing, fetch full plan details
+    let finalPlanSnapshot = plan_snapshot;
+    let finalPlanCode = plan_code;
+    
+    if (planId && (!plan_snapshot || !plan_snapshot.plan_code || !plan_snapshot.fees)) {
+      try {
+        const { executeQuery } = require('../config/database');
+        console.log(`📋 Fetching full plan details for plan ID: ${planId}`);
+        
+        // Fetch plan details
+        const plans = await executeQuery(
+          'SELECT * FROM loan_plans WHERE id = ? AND is_active = 1',
+          [planId]
+        );
+        
+        if (plans && plans.length > 0) {
+          const plan = plans[0];
+          
+          // Fetch plan fees
+          const planFees = await executeQuery(
+            `SELECT 
+              lpf.fee_percent,
+              ft.fee_name,
+              ft.application_method,
+              ft.description
+             FROM loan_plan_fees lpf
+             INNER JOIN fee_types ft ON lpf.fee_type_id = ft.id
+             WHERE lpf.loan_plan_id = ? AND ft.is_active = 1
+             ORDER BY ft.fee_name ASC`,
+            [planId]
+          );
+          
+          // Create complete plan snapshot (same format as admin assignment)
+          finalPlanSnapshot = {
+            plan_id: plan.id,
+            plan_name: plan.plan_name,
+            plan_code: plan.plan_code,
+            plan_type: plan.plan_type,
+            repayment_days: plan.repayment_days,
+            total_duration_days: plan.total_duration_days,
+            interest_percent_per_day: parseFloat(plan.interest_percent_per_day || 0.001),
+            calculate_by_salary_date: plan.calculate_by_salary_date === 1 || plan.calculate_by_salary_date === true,
+            emi_count: plan.emi_count,
+            emi_frequency: plan.emi_frequency,
+            allow_extension: plan.allow_extension === 1 || plan.allow_extension === true,
+            extension_show_from_days: plan.extension_show_from_days,
+            extension_show_till_days: plan.extension_show_till_days,
+            fees: planFees.map(pf => ({
+              fee_name: pf.fee_name,
+              fee_percent: parseFloat(pf.fee_percent),
+              application_method: pf.application_method
+            }))
+          };
+          
+          // Also set plan_code if not provided
+          if (!finalPlanCode) {
+            finalPlanCode = plan.plan_code;
+          }
+          
+          console.log(`✅ Created complete plan snapshot for plan: ${plan.plan_code}`);
+        } else {
+          console.warn(`⚠️ Plan ID ${planId} not found or inactive. Using provided plan_snapshot.`);
+        }
+      } catch (snapshotError) {
+        console.error('Error creating plan snapshot:', snapshotError);
+        // Continue with provided plan_snapshot or null
+      }
+    }
+
     const query = `
       INSERT INTO loan_applications (
         user_id, application_number, loan_amount, loan_purpose,
@@ -120,8 +189,8 @@ const createApplication = async (userId, applicationData) => {
       loan_amount,
       loan_purpose,
       planId,
-      plan_code || null,
-      plan_snapshot ? JSON.stringify(plan_snapshot) : null,
+      finalPlanCode || null,
+      finalPlanSnapshot ? JSON.stringify(finalPlanSnapshot) : null,
       processing_fee || null,
       processing_fee_percent || null,
       feesBreakdownJson,
