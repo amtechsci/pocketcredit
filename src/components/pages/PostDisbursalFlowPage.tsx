@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   CheckCircle,
@@ -823,6 +823,8 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
 const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => {
   const [initiating, setInitiating] = useState(false);
   const [entTransactionId, setEntTransactionId] = useState<string | null>(null);
+  const [agreementLoaded, setAgreementLoaded] = useState(false);
+  const agreementContainerRef = useRef<HTMLDivElement>(null);
 
   // Load Digitap ClickWrap SDK
   useEffect(() => {
@@ -843,17 +845,38 @@ const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => 
     };
   }, []);
 
+  // Handle agreement loaded callback
+  const handleAgreementLoaded = () => {
+    setAgreementLoaded(true);
+  };
+
   const handleSign = async () => {
     try {
       setInitiating(true);
 
-      // Get the loan agreement HTML content
-      const agreementElement = document.querySelector('.loan-agreement-content') || 
-                                document.querySelector('[class*="loan-agreement"]') ||
-                                document.querySelector('[class*="SharedLoanAgreement"]');
+      // Get the loan agreement HTML content from the container
+      const container = agreementContainerRef.current;
+      if (!container) {
+        toast.error('Loan agreement container not found. Please refresh the page.');
+        setInitiating(false);
+        return;
+      }
+
+      // Get the actual agreement document (the .bg-white div from SharedLoanAgreementDocument)
+      // This is the root element of the agreement content
+      const agreementElement = container.querySelector('.bg-white');
       
       if (!agreementElement) {
-        toast.error('Loan agreement content not found. Please refresh the page.');
+        toast.error('Loan agreement content not loaded yet. Please wait a moment and try again.');
+        setInitiating(false);
+        return;
+      }
+
+      // Verify the content has actual text (not just loading/error states)
+      const textContent = agreementElement.textContent?.trim() || '';
+      if (textContent.length < 100 || textContent.includes('Loading Loan Agreement') || textContent.includes('not found')) {
+        toast.error('Loan agreement content is not ready. Please wait a moment and try again.');
+        setInitiating(false);
         return;
       }
 
@@ -961,8 +984,15 @@ const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => 
         </p>
       </div>
 
-      <div className="border rounded-lg p-4 max-h-[600px] overflow-y-auto" id="loan-agreement-content">
-        <UserLoanAgreementDocument loanId={applicationId} />
+      <div 
+        ref={agreementContainerRef}
+        className="border rounded-lg p-4 max-h-[600px] overflow-y-auto" 
+        id="loan-agreement-content"
+      >
+        <UserLoanAgreementDocument 
+          loanId={applicationId} 
+          onLoaded={handleAgreementLoaded}
+        />
       </div>
 
       <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg">
@@ -984,9 +1014,15 @@ const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => 
       </div>
 
       <div className="flex justify-end gap-4">
+        {!agreementLoaded && (
+          <p className="text-sm text-gray-500 mr-auto flex items-center">
+            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+            Loading agreement...
+          </p>
+        )}
         <Button
           onClick={handleSign}
-          disabled={saving || initiating}
+          disabled={saving || initiating || !agreementLoaded}
           className="min-w-[120px]"
         >
           {(saving || initiating) ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}

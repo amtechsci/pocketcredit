@@ -20,9 +20,10 @@ interface LoanAgreementData {
 
 interface UserLoanAgreementDocumentProps {
   loanId: number;
+  onLoaded?: () => void;
 }
 
-export function UserLoanAgreementDocument({ loanId }: UserLoanAgreementDocumentProps) {
+export function UserLoanAgreementDocument({ loanId, onLoaded }: UserLoanAgreementDocumentProps) {
   const [agreementData, setAgreementData] = useState<LoanAgreementData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,9 +37,14 @@ export function UserLoanAgreementDocument({ loanId }: UserLoanAgreementDocumentP
   const fetchAgreementData = async () => {
     try {
       setLoading(true);
+      setError(null);
       const response = await apiService.getKFS(loanId);
       if (response.success && response.data) {
         setAgreementData(response.data);
+        // Notify parent that agreement is loaded
+        if (onLoaded) {
+          onLoaded();
+        }
       } else {
         setError('Failed to load Loan Agreement data');
       }
