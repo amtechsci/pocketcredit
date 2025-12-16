@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const axios = require('axios');
 const { executeQuery, initializeDatabase } = require('../config/database');
 
 /**
@@ -161,9 +162,89 @@ router.get('/', async (req, res) => {
           );
         }
       }
-      // TODO: Fetch actual KYC data from Digilocker
-      // Call Digilocker API to get user details using transactionId
-      // For now, we'll add a placeholder
+      
+      // Fetch actual KYC data from Digilocker using transactionId
+      try {
+        console.log('📥 Fetching KYC data from Digilocker for txnId:', txnId);
+        
+        // Call Digilocker API to fetch actual KYC data
+        // Production: https://api.digitap.ai/ent/v1/kyc/fetch-data
+        // UAT/Demo: https://apidemo.digitap.work/ent/v1/kyc/fetch-data
+        const useProduction = process.env.DIGILOCKER_USE_PRODUCTION === 'true';
+        const fetchApiUrl = process.env.DIGILOCKER_FETCH_API_URL || 
+          (useProduction
+            ? 'https://api.digitap.ai/ent/v1/kyc/fetch-data'
+            : 'https://apidemo.digitap.work/ent/v1/kyc/fetch-data');
+        
+        // Get auth token
+        let authToken = process.env.DIGILOCKER_AUTH_TOKEN;
+        if (!authToken && process.env.DIGILOCKER_CLIENT_ID && process.env.DIGILOCKER_CLIENT_SECRET) {
+          const credentials = `${process.env.DIGILOCKER_CLIENT_ID}:${process.env.DIGILOCKER_CLIENT_SECRET}`;
+          authToken = Buffer.from(credentials).toString('base64');
+        }
+        // Fallback to DIGITAP credentials if DIGILOCKER credentials not set
+        if (!authToken && process.env.DIGITAP_CLIENT_ID && process.env.DIGITAP_CLIENT_SECRET) {
+          const credentials = `${process.env.DIGITAP_CLIENT_ID}:${process.env.DIGITAP_CLIENT_SECRET}`;
+          authToken = Buffer.from(credentials).toString('base64');
+        }
+        if (!authToken && process.env.NODE_ENV !== 'production') {
+          authToken = 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=';
+        }
+
+        console.log('🔗 Calling Digilocker fetch API:', fetchApiUrl);
+        console.log('🔑 Using auth token:', authToken ? 'Yes' : 'No');
+
+        const digilockerResponse = await axios.post(
+          fetchApiUrl,
+          {
+            transactionId: txnId
+          },
+          {
+            headers: {
+              'Authorization': authToken,
+              'ent_authorization': authToken,
+              'Content-Type': 'application/json'
+            },
+            timeout: 30000 // 30 second timeout
+          }
+        );
+
+        console.log('✅ Digilocker KYC Data Response Status:', digilockerResponse.status);
+        console.log('✅ Digilocker KYC Data Response Code:', digilockerResponse.data?.code);
+
+        if (digilockerResponse.data && digilockerResponse.data.code === "200") {
+          const kycData = digilockerResponse.data.model || digilockerResponse.data.data;
+          
+          console.log('📊 KYC Data fetched successfully. Keys:', Object.keys(kycData || {}));
+
+          // Update kyc_verifications table with full KYC data
+          await executeQuery(
+            `UPDATE kyc_verifications 
+             SET verification_data = JSON_SET(
+               COALESCE(verification_data, '{}'),
+               '$.kycData', ?
+             ),
+             updated_at = NOW()
+             WHERE id = ?`,
+            [JSON.stringify(kycData), kycRecord.id]
+          );
+
+          console.log('✅ KYC data saved to database for verification ID:', kycRecord.id);
+        } else {
+          console.warn('⚠️ Digilocker API returned non-200 code:', digilockerResponse.data?.code, digilockerResponse.data?.msg);
+        }
+      } catch (fetchError) {
+        console.error('❌ Error fetching KYC data from Digilocker:', fetchError.message);
+        if (fetchError.response) {
+          console.error('❌ Digilocker API Error Response:', {
+            status: fetchError.response.status,
+            statusText: fetchError.response.statusText,
+            data: fetchError.response.data
+          });
+        }
+        // Don't fail the webhook if fetch fails - KYC is still verified
+        // The data can be fetched later via the /fetch-kyc-data endpoint
+      }
 
       // Update KYC status to verified
       await executeQuery(
@@ -266,6 +347,76 @@ router.post('/', async (req, res) => {
     const kycRecord = kycRecords[0];
 
     if (isSuccess) {
+      // Fetch actual KYC data from Digilocker using transactionId
+      try {
+        console.log('📥 Fetching KYC data from Digilocker for txnId (POST):', txnId);
+        
+        // Call Digilocker API to fetch actual KYC data
+        const useProduction = process.env.DIGILOCKER_USE_PRODUCTION === 'true';
+        const fetchApiUrl = process.env.DIGILOCKER_FETCH_API_URL || 
+          (useProduction
+            ? 'https://api.digitap.ai/ent/v1/kyc/fetch-data'
+            : 'https://apidemo.digitap.work/ent/v1/kyc/fetch-data');
+        
+        // Get auth token
+        let authToken = process.env.DIGILOCKER_AUTH_TOKEN;
+        if (!authToken && process.env.DIGILOCKER_CLIENT_ID && process.env.DIGILOCKER_CLIENT_SECRET) {
+          const credentials = `${process.env.DIGILOCKER_CLIENT_ID}:${process.env.DIGILOCKER_CLIENT_SECRET}`;
+          authToken = Buffer.from(credentials).toString('base64');
+        }
+        // Fallback to DIGITAP credentials if DIGILOCKER credentials not set
+        if (!authToken && process.env.DIGITAP_CLIENT_ID && process.env.DIGITAP_CLIENT_SECRET) {
+          const credentials = `${process.env.DIGITAP_CLIENT_ID}:${process.env.DIGITAP_CLIENT_SECRET}`;
+          authToken = Buffer.from(credentials).toString('base64');
+        }
+        if (!authToken && process.env.NODE_ENV !== 'production') {
+          authToken = 'MjcxMDg3NTA6UlRwYzRpVjJUQnFNdFhKRWR6a1BhRG5CRDVZTk9BRkI=';
+        }
+
+        const digilockerResponse = await axios.post(
+          fetchApiUrl,
+          {
+            transactionId: txnId
+          },
+          {
+            headers: {
+              'Authorization': authToken,
+              'ent_authorization': authToken,
+              'Content-Type': 'application/json'
+            },
+            timeout: 30000
+          }
+        );
+
+        if (digilockerResponse.data && digilockerResponse.data.code === "200") {
+          const kycData = digilockerResponse.data.model || digilockerResponse.data.data;
+          
+          // Update kyc_verifications table with full KYC data
+          await executeQuery(
+            `UPDATE kyc_verifications 
+             SET verification_data = JSON_SET(
+               COALESCE(verification_data, '{}'),
+               '$.kycData', ?
+             ),
+             updated_at = NOW()
+             WHERE id = ?`,
+            [JSON.stringify(kycData), kycRecord.id]
+          );
+
+          console.log('✅ KYC data saved to database for verification ID (POST):', kycRecord.id);
+        }
+      } catch (fetchError) {
+        console.error('❌ Error fetching KYC data from Digilocker (POST):', fetchError.message);
+        if (fetchError.response) {
+          console.error('❌ Digilocker API Error Response:', {
+            status: fetchError.response.status,
+            statusText: fetchError.response.statusText,
+            data: fetchError.response.data
+          });
+        }
+        // Don't fail the webhook if fetch fails
+      }
+
       await executeQuery(
         `UPDATE kyc_verifications 
          SET kyc_status = 'verified', 
