@@ -69,6 +69,7 @@ export function UserProfileDetail() {
   const [expandedLoanDocuments, setExpandedLoanDocuments] = useState<{ [loanId: number]: boolean }>({});
   const [error, setError] = useState<string | null>(null);
   const [downloadingExcel, setDownloadingExcel] = useState(false);
+  const [refetchingKYC, setRefetchingKYC] = useState(false);
 
   // Form state for modals
   const [basicInfoForm, setBasicInfoForm] = useState({
@@ -1584,10 +1585,6 @@ export function UserProfileDetail() {
     { id: 'login-data', label: 'Login Data', icon: Clock },
     { id: 'accounts', label: 'Accounts', icon: Wallet },
   ];
-
-
-
-  const [refetchingKYC, setRefetchingKYC] = useState(false);
 
   const handleRefetchKYC = async () => {
     if (!params.userId) return;
