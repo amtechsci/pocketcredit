@@ -343,17 +343,33 @@ router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, 
       let digilockerPhotoBase64 = null;
       let digilockerPhotoUrl = null;
 
+      // Parse kycData.kycData if it's a JSON string
+      let parsedKycData = null;
+      if (kycData.kycData) {
+        if (typeof kycData.kycData === 'string') {
+          try {
+            parsedKycData = JSON.parse(kycData.kycData);
+            console.log('✅ Parsed kycData.kycData from JSON string');
+          } catch (e) {
+            console.error('❌ Error parsing kycData.kycData:', e);
+            parsedKycData = null;
+          }
+        } else {
+          parsedKycData = kycData.kycData;
+        }
+      }
+
       // Check for base64 image first (most common from Aadhaar KYC)
-      if (kycData.kycData && kycData.kycData.image) {
-        digilockerPhotoBase64 = kycData.kycData.image;
+      if (parsedKycData && parsedKycData.image) {
+        digilockerPhotoBase64 = parsedKycData.image;
         console.log(`📸 Found Digilocker photo as base64 string (${digilockerPhotoBase64.length} chars)`);
       }
 
       // If no base64 image, look for photo URLs
       if (!digilockerPhotoBase64) {
         // Check various possible locations for photo URL
-        if (kycData.kycData) {
-          const kyc = kycData.kycData;
+        if (parsedKycData) {
+          const kyc = parsedKycData;
 
           // Look for photo in documents array
           if (kyc.digilockerFiles && Array.isArray(kyc.digilockerFiles)) {
@@ -396,8 +412,16 @@ router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, 
       if (!digilockerPhotoBase64 && !digilockerPhotoUrl) {
         console.warn('⚠️ No Digilocker photo found in KYC data');
         console.log('KYC Data keys:', Object.keys(kycData));
-        if (kycData.kycData) {
-          console.log('kycData.kycData keys:', Object.keys(kycData.kycData));
+        if (parsedKycData) {
+          console.log('parsedKycData keys:', Object.keys(parsedKycData));
+          console.log('parsedKycData has image?', !!parsedKycData.image);
+        } else if (kycData.kycData) {
+          console.log('kycData.kycData type:', typeof kycData.kycData);
+          if (typeof kycData.kycData === 'string') {
+            console.log('kycData.kycData is a JSON string (needs parsing)');
+          } else {
+            console.log('kycData.kycData keys:', Object.keys(kycData.kycData));
+          }
         }
 
         return res.json({
