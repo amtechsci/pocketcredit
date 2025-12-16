@@ -66,28 +66,42 @@ export const LinkSalaryBankAccountPage = () => {
         // First, check if user has an active/pending loan application
         try {
           const applicationsResponse = await apiService.getLoanApplications();
-          if (applicationsResponse.success && applicationsResponse.data?.applications) {
+          console.log('📋 Loan applications response:', {
+            hasSuccess: !!applicationsResponse.success,
+            status: applicationsResponse.status,
+            hasData: !!applicationsResponse.data,
+            hasApplications: !!applicationsResponse.data?.applications,
+            applicationsCount: applicationsResponse.data?.applications?.length || 0
+          });
+          
+          // Check for both 'success' property and 'status: success' (API uses status)
+          const isSuccess = applicationsResponse.success || applicationsResponse.status === 'success';
+          if (isSuccess && applicationsResponse.data?.applications) {
             const applications = applicationsResponse.data.applications;
+            console.log('📋 Applications found:', applications.map((app: any) => ({ id: app.id, status: app.status })));
+            
             const activeApplication = applications.find((app: any) => 
               ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(app.status)
             );
             
             if (!activeApplication) {
-              console.log('No active loan application found, redirecting to dashboard');
+              console.log('⚠️ No active loan application found. Applications:', applications.map((app: any) => app.status));
               toast.info('No active loan application found. Redirecting to dashboard...');
               setTimeout(() => navigate('/dashboard', { replace: true }), 1500);
               return;
             }
+            
+            console.log('✅ Active application found:', { id: activeApplication.id, status: activeApplication.status });
           } else {
             // No applications at all, redirect to dashboard
-            console.log('No loan applications found, redirecting to dashboard');
+            console.log('⚠️ No loan applications found in response. Response:', applicationsResponse);
             toast.info('No loan application found. Redirecting to dashboard...');
             setTimeout(() => navigate('/dashboard', { replace: true }), 1500);
             return;
           }
         } catch (appError) {
-          console.error('Error checking loan applications:', appError);
-          // Continue with other checks even if this fails
+          console.error('❌ Error checking loan applications:', appError);
+          // Continue with other checks even if this fails - don't block the flow
         }
 
         // Method 1: Check if email is already verified
