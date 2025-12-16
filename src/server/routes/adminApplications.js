@@ -658,6 +658,7 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       followUpApplications: statusCounts['follow_up'] || 0,
       rejectedApplications: statusCounts['rejected'] || 0,
       disbursalApplications: statusCounts['disbursal'] || 0,
+      readyForDisbursementApplications: statusCounts['ready_for_disbursement'] || 0,
       accountManagerApplications: statusCounts['account_manager'] || 0,
       clearedApplications: statusCounts['cleared'] || 0,
       newApplications: statusCounts['submitted'] || 0, // New applications are typically submitted

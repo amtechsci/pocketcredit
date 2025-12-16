@@ -822,28 +822,7 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
 // Step 5: Agreement Sign
 const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => {
   const [initiating, setInitiating] = useState(false);
-  const [entTransactionId, setEntTransactionId] = useState<string | null>(null);
   const [agreementLoaded, setAgreementLoaded] = useState(false);
-  const agreementContainerRef = useRef<HTMLDivElement>(null);
-
-  // Load Digitap ClickWrap SDK
-  useEffect(() => {
-    const script = document.createElement('script');
-    const isProduction = window.location.hostname !== 'localhost';
-    script.src = isProduction
-      ? 'https://sdk.digitap.ai/clickwrap/scripts/digitap_clickwrap.js'
-      : 'https://sdksb.digitap.work/clickwrap/scripts/digitap_clickwrap.js';
-    script.async = true;
-    document.head.appendChild(script);
-
-    return () => {
-      // Cleanup script on unmount
-      const existingScript = document.querySelector(`script[src*="digitap_clickwrap"]`);
-      if (existingScript) {
-        existingScript.remove();
-      }
-    };
-  }, []);
 
   // Handle agreement loaded callback
   const handleAgreementLoaded = () => {
@@ -854,125 +833,27 @@ const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => 
     try {
       setInitiating(true);
 
-      // Get the loan agreement HTML content from the container
-      const container = agreementContainerRef.current;
-      if (!container) {
-        toast.error('Loan agreement container not found. Please refresh the page.');
-        setInitiating(false);
-        return;
+      // Skip actual e-sign API for now - just mark as complete
+      // Update agreement as signed and set status to ready_for_disbursement
+      const response = await apiService.updatePostDisbursalProgress(applicationId, {
+        agreement_signed: true
+      });
+
+      if (response.success) {
+        toast.success('Loan agreement marked as complete!');
+        onComplete();
+      } else {
+        throw new Error(response.message || 'Failed to mark agreement as complete');
       }
-
-      // Get the actual agreement document (the .bg-white div from SharedLoanAgreementDocument)
-      // This is the root element of the agreement content
-      const agreementElement = container.querySelector('.bg-white');
-      
-      if (!agreementElement) {
-        toast.error('Loan agreement content not loaded yet. Please wait a moment and try again.');
-        setInitiating(false);
-        return;
-      }
-
-      // Verify the content has actual text (not just loading/error states)
-      const textContent = agreementElement.textContent?.trim() || '';
-      if (textContent.length < 100 || textContent.includes('Loading Loan Agreement') || textContent.includes('not found')) {
-        toast.error('Loan agreement content is not ready. Please wait a moment and try again.');
-        setInitiating(false);
-        return;
-      }
-
-      // Get full HTML including styles
-      const htmlContent = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="UTF-8">
-            <style>
-              ${Array.from(document.styleSheets)
-                .map(sheet => {
-                  try {
-                    return Array.from(sheet.cssRules)
-                      .map(rule => rule.cssText)
-                      .join('\n');
-                  } catch (e) {
-                    return '';
-                  }
-                })
-                .join('\n')}
-            </style>
-          </head>
-          <body>
-            ${agreementElement.outerHTML}
-          </body>
-        </html>
-      `;
-
-      // Initiate ClickWrap
-      const response = await apiService.initiateClickWrap(applicationId, htmlContent);
-
-      if (!response.success) {
-        throw new Error(response.message || 'Failed to initiate e-signature');
-      }
-
-      const txnId = response.data?.entTransactionId;
-      if (!txnId) {
-        throw new Error('Transaction ID not received from server');
-      }
-      setEntTransactionId(txnId);
-
-      // Check if Digitap SDK is loaded
-      if (typeof (window as any).digitapClickwrap === 'undefined') {
-        toast.error('Digitap SDK is loading. Please wait a moment and try again.');
-        setTimeout(() => handleSign(), 2000);
-        return;
-      }
-
-      // Launch Digitap ClickWrap SDK
-      const isProduction = window.location.hostname !== 'localhost';
-      const successUrl = `${window.location.origin}/post-disbursal?applicationId=${applicationId}&signed=true`;
-      const errorUrl = `${window.location.origin}/post-disbursal?applicationId=${applicationId}&signed=false`;
-
-      const params = {
-        environment: isProduction ? 'PRODUCTION' : 'UAT',
-        transaction_id: txnId,
-        logo: `${window.location.origin}/logo.png`, // Update with your logo URL
-        redirect_url: successUrl,
-        error_url: errorUrl,
-        theme: {}
-      };
-
-      console.log('🚀 Launching Digitap ClickWrap SDK with params:', params);
-
-      // Launch Digitap ClickWrap SDK
-      // SDK will handle the OTP flow and redirect
-      // The redirect URLs will handle completion
-      new (window as any).digitapClickwrap(params);
 
     } catch (error: any) {
-      console.error('Error initiating ClickWrap:', error);
-      toast.error(error.message || 'Failed to initiate e-signature');
+      console.error('Error marking agreement as complete:', error);
+      toast.error(error.message || 'Failed to mark agreement as complete');
     } finally {
       setInitiating(false);
     }
   };
 
-  // Check if user is returning from signing (URL params)
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const signed = urlParams.get('signed');
-    
-    if (signed === 'true') {
-      toast.success('Loan agreement signed successfully!');
-      onComplete();
-      // Clean URL
-      window.history.replaceState({}, '', window.location.pathname);
-    } else if (signed === 'false') {
-      const errorCode = urlParams.get('error_code');
-      const errorMsg = urlParams.get('errorMsg');
-      toast.error(`Signing failed: ${errorMsg || errorCode || 'Unknown error'}`);
-      // Clean URL
-      window.history.replaceState({}, '', window.location.pathname);
-    }
-  }, [onComplete]);
 
   return (
     <div className="space-y-6">
@@ -980,12 +861,11 @@ const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => 
         <PenTool className="w-16 h-16 text-blue-600 mx-auto mb-4" />
         <h2 className="text-2xl font-bold mb-2">Loan Agreement</h2>
         <p className="text-gray-600">
-          Review and e-sign your loan agreement using OTP verification
+          Review and confirm your loan agreement
         </p>
       </div>
 
       <div 
-        ref={agreementContainerRef}
         className="border rounded-lg p-4 max-h-[600px] overflow-y-auto" 
         id="loan-agreement-content"
       >
@@ -997,13 +877,12 @@ const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => 
 
       <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg">
         <p className="text-sm text-gray-700">
-          <strong>E-Signature Process:</strong>
+          <strong>Agreement Confirmation:</strong>
         </p>
         <ul className="text-sm text-gray-600 mt-2 list-disc list-inside space-y-1">
-          <li>Click "E-Sign Agreement" to start the signing process</li>
-          <li>You will receive an OTP on your registered mobile number</li>
-          <li>Enter the OTP to verify and sign the document</li>
-          <li>The signed document will be stored securely</li>
+          <li>Please review the loan agreement carefully</li>
+          <li>Click "Confirm Agreement" to proceed</li>
+          <li>Your application will be marked as ready for disbursement</li>
         </ul>
       </div>
 
@@ -1026,7 +905,7 @@ const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => 
           className="min-w-[120px]"
         >
           {(saving || initiating) ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-          {initiating ? 'Initiating...' : 'E-Sign Agreement'}
+          {initiating ? 'Processing...' : 'Confirm Agreement'}
         </Button>
       </div>
     </div>

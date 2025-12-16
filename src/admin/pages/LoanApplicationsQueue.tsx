@@ -224,6 +224,7 @@ export function LoanApplicationsQueue() {
     under_review: 'bg-yellow-100 text-yellow-800',
     follow_up: 'bg-green-100 text-green-800',
     disbursal: 'bg-teal-100 text-teal-800',
+    ready_for_disbursement: 'bg-indigo-100 text-indigo-800',
     account_manager: 'bg-purple-100 text-purple-800',
     cleared: 'bg-gray-100 text-gray-800',
     rejected: 'bg-red-100 text-red-800',
@@ -238,6 +239,7 @@ export function LoanApplicationsQueue() {
       under_review: 'Under Review',
       follow_up: 'Follow Up',
       disbursal: 'Disbursal',
+      ready_for_disbursement: 'Ready for Disbursement',
       account_manager: 'Account Manager',
       cleared: 'Cleared',
       rejected: 'Rejected',
@@ -502,6 +504,16 @@ export function LoanApplicationsQueue() {
               }`}
             >
               Disbursal <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'disbursal' ? 'bg-teal-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.disbursalApplications || 0}</span>
+            </button>
+            <button
+              onClick={() => handleStatusFilter('ready_for_disbursement')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                statusFilter === 'ready_for_disbursement'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+              }`}
+            >
+              Ready for Disbursement <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'ready_for_disbursement' ? 'bg-indigo-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.readyForDisbursementApplications || 0}</span>
             </button>
             <button
               onClick={() => handleStatusFilter('account_manager')}

@@ -199,6 +199,12 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
     if (agreement_signed !== undefined && existingColumns.includes('agreement_signed')) {
       updates.push('agreement_signed = ?');
       params.push(agreement_signed ? 1 : 0);
+      
+      // If agreement is being signed, also update status to ready_for_disbursement
+      if (agreement_signed) {
+        updates.push('status = ?');
+        params.push('ready_for_disbursement');
+      }
     }
     if (current_step !== undefined && existingColumns.includes('post_disbursal_step')) {
       updates.push('post_disbursal_step = ?');
