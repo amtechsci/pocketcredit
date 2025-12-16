@@ -130,7 +130,7 @@ router.get('/', async (req, res) => {
     let applicationId = null;
     try {
       const appCheck = await executeQuery(
-        'SELECT id FROM applications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+        'SELECT id FROM loan_applications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
         [kycRecord.user_id]
       );
       if (appCheck.length > 0) {
