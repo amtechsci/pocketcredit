@@ -14,6 +14,8 @@ const { authenticateToken } = require('../middleware/auth');
  * Create a payment order for loan repayment
  */
 router.post('/create-order', authenticateToken, async (req, res) => {
+    let orderId = null; // Initialize to avoid scope issues in error handling
+    
     try {
         const userId = req.user.id;
         const { loanId, amount } = req.body;
@@ -45,10 +47,50 @@ router.post('/create-order', authenticateToken, async (req, res) => {
             });
         }
 
+        // Validate loan has required fields
+        if (!loan.application_number) {
+            return res.status(400).json({
+                success: false,
+                message: 'Loan application number is missing. Please contact support.'
+            });
+        }
+
         // Generate unique order ID
-        const orderId = `LOAN_${loan.application_number}_${Date.now()}`;
+        orderId = `LOAN_${loan.application_number}_${Date.now()}`;
 
         // Create payment order in database
+        // First, ensure the table exists (create if it doesn't)
+        try {
+            await executeQuery(`
+                CREATE TABLE IF NOT EXISTS payment_orders (
+                    id INT NOT NULL AUTO_INCREMENT,
+                    order_id VARCHAR(255) NOT NULL,
+                    loan_id INT NOT NULL,
+                    user_id INT NOT NULL,
+                    amount DECIMAL(12, 2) NOT NULL,
+                    status ENUM('PENDING', 'PAID', 'FAILED', 'CANCELLED', 'EXPIRED') DEFAULT 'PENDING',
+                    payment_session_id VARCHAR(255) DEFAULT NULL,
+                    cashfree_response JSON DEFAULT NULL,
+                    webhook_data JSON DEFAULT NULL,
+                    payment_method VARCHAR(50) DEFAULT NULL,
+                    transaction_id VARCHAR(255) DEFAULT NULL,
+                    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY unique_order_id (order_id),
+                    KEY idx_loan_id (loan_id),
+                    KEY idx_user_id (user_id),
+                    KEY idx_status (status)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            `);
+        } catch (tableError) {
+            // Table might already exist, continue
+            if (!tableError.message.includes('already exists')) {
+                console.warn('[Payment] Table creation warning:', tableError.message);
+            }
+        }
+
+        // Insert payment order
         await executeQuery(
             `INSERT INTO payment_orders (
         order_id, loan_id, user_id, amount, status, created_at
@@ -123,10 +165,22 @@ router.post('/create-order', authenticateToken, async (req, res) => {
 
     } catch (error) {
         console.error('❌ Error creating payment order:', error);
+        console.error('Error stack:', error.stack);
+        
+        // Provide more helpful error messages
+        let errorMessage = 'Internal server error';
+        if (error.message && error.message.includes('orderId')) {
+            errorMessage = 'Failed to process payment order. Please try again.';
+        } else if (error.message && (error.message.includes('doesn\'t exist') || error.message.includes('Unknown table'))) {
+            errorMessage = 'Payment system is not properly configured. Please contact support.';
+        } else {
+            errorMessage = error.message || 'Internal server error';
+        }
+        
         res.status(500).json({
             success: false,
-            message: 'Internal server error',
-            error: error.message
+            message: errorMessage,
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 });
