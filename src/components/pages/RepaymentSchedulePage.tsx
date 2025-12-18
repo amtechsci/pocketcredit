@@ -12,6 +12,8 @@ import { DashboardHeader } from '../DashboardHeader';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
 import { toast } from 'sonner';
+// @ts-ignore - Cashfree SDK doesn't have TypeScript definitions
+import { load } from '@cashfreepayments/cashfree-js';
 
 export const RepaymentSchedulePage = () => {
   const navigate = useNavigate();
@@ -278,11 +280,47 @@ export const RepaymentSchedulePage = () => {
                     // Create payment order
                     const response = await apiService.createPaymentOrder(loanId, amount);
 
-                    if (response.success && response.data?.checkoutUrl) {
-                      toast.success('Redirecting to payment gateway...');
+                    if (response.success && response.data?.paymentSessionId) {
+                      console.log('💳 Payment order created:', {
+                        orderId: response.data.orderId,
+                        paymentSessionId: response.data.paymentSessionId
+                      });
+                      
+                      toast.success('Opening payment gateway...');
 
-                      // Redirect to Cashfree checkout
-                      window.location.href = response.data.checkoutUrl;
+                      try {
+                        // Determine environment based on the checkout URL or use sandbox by default
+                        // Check if we're using production or sandbox
+                        const isProduction = response.data.checkoutUrl?.includes('payments.cashfree.com') && 
+                                           !response.data.checkoutUrl?.includes('payments-test');
+                        
+                        // Load Cashfree SDK
+                        const cashfree = await load({ 
+                          mode: isProduction ? "production" : "sandbox"
+                        });
+
+                        if (cashfree) {
+                          console.log('✅ Cashfree SDK loaded, opening checkout...');
+                          
+                          // Open Cashfree checkout using the SDK (recommended method)
+                          cashfree.checkout({
+                            paymentSessionId: response.data.paymentSessionId
+                          });
+                        } else {
+                          throw new Error('Failed to load Cashfree SDK');
+                        }
+                      } catch (sdkError: any) {
+                        console.error('Cashfree SDK error:', sdkError);
+                        toast.error('Failed to open payment gateway. Please try again.');
+                        
+                        // Fallback: Try direct URL redirect as backup
+                        if (response.data.checkoutUrl) {
+                          console.log('🔄 Falling back to direct URL redirect');
+                          window.location.href = response.data.checkoutUrl;
+                        } else {
+                          throw new Error('No payment session available');
+                        }
+                      }
                     } else {
                       toast.error(response.message || 'Failed to create payment order');
                     }

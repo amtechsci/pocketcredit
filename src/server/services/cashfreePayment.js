@@ -208,12 +208,12 @@ class CashfreePaymentService {
             throw new Error('No payment_session_id, payment_link, or payment_url found in order response');
         }
         
-        // For Cashfree API v2023-08-01, the checkout URL format is:
-        // Production: https://payments.cashfree.com/forms/{payment_session_id}
-        // Sandbox: https://payments-test.cashfree.com/forms/{payment_session_id}
+        // For Cashfree API v2023-08-01, the correct checkout URL format is:
+        // Production: https://payments.cashfree.com/checkout/{payment_session_id}
+        // Sandbox: https://payments-test.cashfree.com/checkout/{payment_session_id}
         // 
-        // However, if the session was created with a different environment,
-        // we need to match the environment used for order creation
+        // NOTE: The path is /checkout/ NOT /forms/
+        // The /forms/ path is for static form names, not session IDs
         
         // Determine checkout domain based on API base URL
         let checkoutDomain;
@@ -223,12 +223,14 @@ class CashfreePaymentService {
             checkoutDomain = 'https://payments-test.cashfree.com';
         }
         
-        const checkoutUrl = `${checkoutDomain}/forms/${paymentSessionId}`;
+        // Use /checkout/ path for payment_session_id (not /forms/)
+        const checkoutUrl = `${checkoutDomain}/checkout/${paymentSessionId}`;
         console.log('[CashfreePayment] Constructed checkout URL:', {
             checkoutUrl,
             isProduction: this.isProduction,
             baseURL: this.baseURL,
-            sessionId: paymentSessionId.substring(0, 20) + '...'
+            sessionId: paymentSessionId.substring(0, 20) + '...',
+            path: '/checkout/ (correct for session IDs)'
         });
         
         return checkoutUrl;

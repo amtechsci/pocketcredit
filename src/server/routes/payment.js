@@ -187,13 +187,49 @@ router.post('/create-order', authenticateToken, async (req, res) => {
             });
         }
 
-        // Update order with payment_session_id
+        // Extract and clean payment_session_id
+        let paymentSessionId = orderResult.data.payment_session_id;
+        if (!paymentSessionId) {
+            console.error('[Payment] No payment_session_id in Cashfree response');
+            return res.status(500).json({
+                success: false,
+                message: 'Payment gateway did not return a valid session. Please try again.',
+                error: 'Missing payment_session_id in response'
+            });
+        }
+
+        // Clean the session ID - remove any trailing garbage (like "paymentpayment")
+        // Session IDs should start with "session_" and be alphanumeric with dashes/underscores
+        const cleanSessionId = paymentSessionId
+            .trim()
+            .split(/\s+/)[0]  // Take first part if there are spaces
+            .replace(/[^a-zA-Z0-9_\-]/g, '') // Remove any invalid characters
+            .replace(/paymentpayment$/i, ''); // Remove trailing "paymentpayment" if present
+        
+        console.log('[Payment] Payment session ID processing:', {
+            original: paymentSessionId.substring(0, 50) + '...',
+            originalLength: paymentSessionId.length,
+            cleaned: cleanSessionId.substring(0, 50) + '...',
+            cleanedLength: cleanSessionId.length,
+            isValid: cleanSessionId.startsWith('session_')
+        });
+
+        if (!cleanSessionId.startsWith('session_')) {
+            console.error('[Payment] Invalid session ID format after cleaning');
+            return res.status(500).json({
+                success: false,
+                message: 'Invalid payment session received. Please try again.',
+                error: 'Session ID does not start with "session_"'
+            });
+        }
+
+        // Update order with cleaned payment_session_id
         await executeQuery(
             `UPDATE payment_orders 
        SET payment_session_id = ?, cashfree_response = ? 
        WHERE order_id = ?`,
             [
-                orderResult.data.payment_session_id,
+                cleanSessionId,
                 JSON.stringify(orderResult.data),
                 orderId
             ]
@@ -201,16 +237,41 @@ router.post('/create-order', authenticateToken, async (req, res) => {
 
         console.log('🔍 Debug - Full Cashfree response:', JSON.stringify(orderResult.data, null, 2));
         console.log('🔍 Debug - Response keys:', Object.keys(orderResult.data || {}));
-        console.log('🔍 Debug - Session ID from response:', orderResult.data.payment_session_id);
+        console.log('🔍 Debug - Session ID from response (original):', paymentSessionId);
+        console.log('🔍 Debug - Session ID (cleaned):', cleanSessionId);
         console.log('🔍 Debug - Payment link from response:', orderResult.data.payment_link);
         console.log('🔍 Debug - Payment URL from response:', orderResult.data.payment_url);
         console.log('🔍 Debug - Order status:', orderResult.data.order_status);
 
-        // Get checkout URL - pass full response to handle payment_link if available
+        // Create a clean response object with cleaned session ID
+        const cleanOrderResponse = {
+            ...orderResult.data,
+            payment_session_id: cleanSessionId
+        };
+
+        // Get checkout URL - pass clean response to handle payment_link if available
         let checkoutUrl;
         try {
-            checkoutUrl = cashfreePayment.getCheckoutUrl(orderResult.data);
+            checkoutUrl = cashfreePayment.getCheckoutUrl(cleanOrderResponse);
             console.log('🔍 Debug - Generated checkout URL:', checkoutUrl);
+            
+            // Verify URL format
+            if (!checkoutUrl || !checkoutUrl.startsWith('http')) {
+                throw new Error(`Invalid checkout URL format: ${checkoutUrl}`);
+            }
+            
+            // Verify environment match
+            const isSandboxSession = checkoutUrl.includes('payments-test.cashfree.com');
+            const isProductionSession = checkoutUrl.includes('payments.cashfree.com');
+            const isSandboxAPI = cashfreePayment.baseURL.includes('sandbox');
+            
+            if (isSandboxAPI && !isSandboxSession) {
+                console.warn('[Payment] WARNING: Sandbox API but production checkout URL detected');
+            }
+            if (!isSandboxAPI && !isProductionSession) {
+                console.warn('[Payment] WARNING: Production API but sandbox checkout URL detected');
+            }
+            
         } catch (urlError) {
             console.error('[Payment] Failed to generate checkout URL:', urlError);
             return res.status(500).json({
@@ -220,13 +281,17 @@ router.post('/create-order', authenticateToken, async (req, res) => {
             });
         }
 
-        console.log('✅ Payment order created:', { orderId, checkoutUrl });
+        console.log('✅ Payment order created:', { 
+            orderId, 
+            checkoutUrl,
+            environment: cashfreePayment.isProduction ? 'PRODUCTION' : 'SANDBOX'
+        });
 
         res.json({
             success: true,
             data: {
                 orderId,
-                paymentSessionId: orderResult.data.payment_session_id,
+                paymentSessionId: cleanSessionId, // Use cleaned session ID
                 checkoutUrl
             }
         });
