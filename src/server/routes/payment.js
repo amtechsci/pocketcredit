@@ -28,11 +28,13 @@ router.post('/create-order', authenticateToken, async (req, res) => {
             });
         }
 
-        // Fetch loan details
+        // Fetch loan details with all email fields (similar to eNACH implementation)
         const [loan] = await executeQuery(
             `SELECT la.*, 
                     CONCAT(u.first_name, ' ', u.last_name) as name,
                     u.email, 
+                    u.personal_email,
+                    u.official_email,
                     u.phone 
              FROM loan_applications la 
              JOIN users u ON la.user_id = u.id 
@@ -49,14 +51,34 @@ router.post('/create-order', authenticateToken, async (req, res) => {
 
         // Validate loan has required fields
         if (!loan.application_number) {
+            console.error('[Payment] Loan missing application_number:', { loanId, userId });
             return res.status(400).json({
                 success: false,
                 message: 'Loan application number is missing. Please contact support.'
             });
         }
 
+        // Get email - use personal_email, official_email, or email (in that priority order)
+        const customerEmail = loan.personal_email || loan.official_email || loan.email;
+        
+        // Validate customer details
+        if (!customerEmail) {
+            console.error('[Payment] Loan missing customer email:', { 
+                loanId, 
+                userId,
+                hasEmail: !!loan.email,
+                hasPersonalEmail: !!loan.personal_email,
+                hasOfficialEmail: !!loan.official_email
+            });
+            return res.status(400).json({
+                success: false,
+                message: 'Customer email is required for payment processing. Please update your email in profile settings.'
+            });
+        }
+
         // Generate unique order ID
         orderId = `LOAN_${loan.application_number}_${Date.now()}`;
+        console.log(`[Payment] Generated order ID: ${orderId} for loan ${loanId}`);
 
         // Create payment order in database
         // First, ensure the table exists (create if it doesn't)
@@ -91,12 +113,34 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         }
 
         // Insert payment order
-        await executeQuery(
-            `INSERT INTO payment_orders (
-        order_id, loan_id, user_id, amount, status, created_at
-      ) VALUES (?, ?, ?, ?, 'PENDING', NOW())`,
-            [orderId, loanId, userId, amount]
-        );
+        try {
+            await executeQuery(
+                `INSERT INTO payment_orders (
+            order_id, loan_id, user_id, amount, status, created_at
+          ) VALUES (?, ?, ?, ?, 'PENDING', NOW())`,
+                [orderId, loanId, userId, amount]
+            );
+            console.log(`[Payment] Payment order created in DB: ${orderId}`);
+        } catch (insertError) {
+            console.error('[Payment] Failed to insert payment order:', insertError);
+            // If it's a duplicate key error, that's okay - order already exists
+            if (insertError.message && insertError.message.includes('Duplicate entry')) {
+                console.log(`[Payment] Order ${orderId} already exists, continuing...`);
+            } else {
+                throw insertError; // Re-throw if it's a different error
+            }
+        }
+
+        // Validate Cashfree service is configured
+        // Check environment variables directly since service properties might not be exposed
+        if (!process.env.CASHFREE_CLIENT_ID || !process.env.CASHFREE_CLIENT_SECRET) {
+            console.error('[Payment] Cashfree credentials not configured in environment');
+            return res.status(503).json({
+                success: false,
+                message: 'Payment gateway is not configured. Please contact support.',
+                error: 'CASHFREE_CLIENT_ID or CASHFREE_CLIENT_SECRET not set'
+            });
+        }
 
         // Create Cashfree order
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -104,12 +148,22 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         const returnUrl = `${frontendUrl}/payment/return?orderId=${orderId}`;
         const notifyUrl = `${backendUrl}/api/payment/webhook`;
 
+        console.log(`[Payment] Creating Cashfree order:`, {
+            orderId,
+            amount,
+            customerEmail: customerEmail,
+            customerPhone: loan.phone || 'N/A',
+            returnUrl,
+            notifyUrl,
+            cashfreeBaseURL: cashfreePayment.baseURL
+        });
+
         const orderResult = await cashfreePayment.createOrder({
             orderId,
             amount,
-            customerName: loan.name,
-            customerEmail: loan.email,
-            customerPhone: loan.phone,
+            customerName: loan.name || 'Customer',
+            customerEmail: customerEmail, // Use the resolved email
+            customerPhone: loan.phone || '9999999999', // Default phone if missing
             returnUrl,
             notifyUrl
         });
@@ -145,13 +199,27 @@ router.post('/create-order', authenticateToken, async (req, res) => {
             ]
         );
 
-        console.log('🔍 Debug - orderResult.data:', orderResult.data);
+        console.log('🔍 Debug - Full Cashfree response:', JSON.stringify(orderResult.data, null, 2));
+        console.log('🔍 Debug - Response keys:', Object.keys(orderResult.data || {}));
         console.log('🔍 Debug - Session ID from response:', orderResult.data.payment_session_id);
+        console.log('🔍 Debug - Payment link from response:', orderResult.data.payment_link);
+        console.log('🔍 Debug - Payment URL from response:', orderResult.data.payment_url);
+        console.log('🔍 Debug - Order status:', orderResult.data.order_status);
 
-        // Get checkout URL
-        const checkoutUrl = cashfreePayment.getCheckoutUrl(orderResult.data.payment_session_id);
+        // Get checkout URL - pass full response to handle payment_link if available
+        let checkoutUrl;
+        try {
+            checkoutUrl = cashfreePayment.getCheckoutUrl(orderResult.data);
+            console.log('🔍 Debug - Generated checkout URL:', checkoutUrl);
+        } catch (urlError) {
+            console.error('[Payment] Failed to generate checkout URL:', urlError);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to generate payment URL. Please try again.',
+                error: urlError.message
+            });
+        }
 
-        console.log('🔍 Debug - Generated checkout URL:', checkoutUrl);
         console.log('✅ Payment order created:', { orderId, checkoutUrl });
 
         res.json({
@@ -165,22 +233,43 @@ router.post('/create-order', authenticateToken, async (req, res) => {
 
     } catch (error) {
         console.error('❌ Error creating payment order:', error);
+        console.error('Error message:', error.message);
         console.error('Error stack:', error.stack);
+        console.error('Order ID at error:', orderId);
         
         // Provide more helpful error messages
         let errorMessage = 'Internal server error';
-        if (error.message && error.message.includes('orderId')) {
-            errorMessage = 'Failed to process payment order. Please try again.';
-        } else if (error.message && (error.message.includes('doesn\'t exist') || error.message.includes('Unknown table'))) {
-            errorMessage = 'Payment system is not properly configured. Please contact support.';
-        } else {
-            errorMessage = error.message || 'Internal server error';
+        let statusCode = 500;
+        
+        if (error.message) {
+            if (error.message.includes('orderId')) {
+                errorMessage = 'Failed to process payment order. Please try again.';
+            } else if (error.message.includes('doesn\'t exist') || error.message.includes('Unknown table')) {
+                errorMessage = 'Payment system is not properly configured. Please contact support.';
+            } else if (error.message.includes('ECONNREFUSED') || error.message.includes('ETIMEDOUT')) {
+                errorMessage = 'Payment gateway is temporarily unavailable. Please try again later.';
+                statusCode = 503;
+            } else if (error.message.includes('authentication') || error.message.includes('credentials')) {
+                errorMessage = 'Payment gateway authentication failed. Please contact support.';
+                statusCode = 503;
+            } else {
+                errorMessage = error.message;
+            }
         }
         
-        res.status(500).json({
+        // Always log full error details for debugging
+        console.error('[Payment] Full error details:', {
+            message: error.message,
+            code: error.code,
+            orderId: orderId,
+            loanId: req.body?.loanId,
+            amount: req.body?.amount
+        });
+        
+        res.status(statusCode).json({
             success: false,
             message: errorMessage,
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            error: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'production' ? error.message : undefined
         });
     }
 });

@@ -103,7 +103,9 @@ class CashfreePaymentService {
 
             console.log(`[CashfreePayment] Order created successfully: ${orderId}`, {
                 payment_session_id: response.data.payment_session_id,
-                order_status: response.data.order_status
+                payment_link: response.data.payment_link,
+                order_status: response.data.order_status,
+                full_response_keys: Object.keys(response.data)
             });
 
             return {
@@ -184,16 +186,52 @@ class CashfreePaymentService {
 
     /**
      * Get payment checkout URL
-     * @param {string} paymentSessionId - Session ID from order creation
+     * @param {Object} orderResponse - Full order response from Cashfree
      * @returns {string} - Checkout URL
      */
-    getCheckoutUrl(paymentSessionId) {
-        // Cashfree hosted checkout URL
-        if (this.isProduction) {
-            return `https://payments.cashfree.com/forms/${paymentSessionId}`;
-        } else {
-            return `https://payments-test.cashfree.com/forms/${paymentSessionId}`;
+    getCheckoutUrl(orderResponse) {
+        // Cashfree may return payment_link directly in the response (preferred)
+        if (orderResponse.payment_link) {
+            console.log('[CashfreePayment] Using payment_link from response');
+            return orderResponse.payment_link;
         }
+        
+        // Check for payment_url (alternative field name)
+        if (orderResponse.payment_url) {
+            console.log('[CashfreePayment] Using payment_url from response');
+            return orderResponse.payment_url;
+        }
+        
+        // Otherwise, construct URL from payment_session_id
+        const paymentSessionId = orderResponse.payment_session_id;
+        if (!paymentSessionId) {
+            throw new Error('No payment_session_id, payment_link, or payment_url found in order response');
+        }
+        
+        // For Cashfree API v2023-08-01, the checkout URL format is:
+        // Production: https://payments.cashfree.com/forms/{payment_session_id}
+        // Sandbox: https://payments-test.cashfree.com/forms/{payment_session_id}
+        // 
+        // However, if the session was created with a different environment,
+        // we need to match the environment used for order creation
+        
+        // Determine checkout domain based on API base URL
+        let checkoutDomain;
+        if (this.isProduction) {
+            checkoutDomain = 'https://payments.cashfree.com';
+        } else {
+            checkoutDomain = 'https://payments-test.cashfree.com';
+        }
+        
+        const checkoutUrl = `${checkoutDomain}/forms/${paymentSessionId}`;
+        console.log('[CashfreePayment] Constructed checkout URL:', {
+            checkoutUrl,
+            isProduction: this.isProduction,
+            baseURL: this.baseURL,
+            sessionId: paymentSessionId.substring(0, 20) + '...'
+        });
+        
+        return checkoutUrl;
     }
 }
 
