@@ -1501,12 +1501,19 @@ export function UserProfileDetail() {
     isMobileVerified: true
   };
 
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amount: number | string | null | undefined) => {
+    if (amount === null || amount === undefined || amount === '' || isNaN(Number(amount))) {
+      return '₹0';
+    }
+    const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+    if (isNaN(numAmount) || numAmount < 0) {
+      return '₹0';
+    }
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: 'INR',
       maximumFractionDigits: 0
-    }).format(amount);
+    }).format(numAmount);
   };
 
   const formatDate = (dateString: string) => {
@@ -1849,381 +1856,224 @@ export function UserProfileDetail() {
     );
   };
 
-  const renderPersonalTab = () => (
-    <div className="space-y-6">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
-        <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-              <User className="w-4 h-4 text-blue-600" />
-            </div>
-            <span className="text-xs font-medium text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded-full">
-              {getUserData('personalInfo.age')}Y
-            </span>
+  const renderPersonalTab = () => {
+    const allAddresses = userData?.allAddresses || [];
+    const allReferences = userData?.references || [];
+    const allEmployment = userData?.allEmployment || [];
+    const latestEmployment = allEmployment[0] || {};
+
+    return (
+      <div className="space-y-4">
+        {/* Compact Summary Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+            <div className="text-xs font-medium text-gray-500 mb-1">Age</div>
+            <div className="text-sm font-semibold text-gray-900">{getUserData('personalInfo.age')}Y</div>
           </div>
-          <h3 className="text-xs font-medium text-gray-600 mb-1">Personal Profile</h3>
-          <p className="text-sm font-semibold text-gray-900 mb-1">{getUserData('personalInfo.gender')} • {getUserData('personalInfo.maritalStatus')}</p>
-          <p className="text-xs text-gray-500">Member since {formatDate(getUserData('registeredDate'))}</p>
+          <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+            <div className="text-xs font-medium text-gray-500 mb-1">Gender</div>
+            <div className="text-sm font-semibold text-gray-900">{getUserData('personalInfo.gender')}</div>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+            <div className="text-xs font-medium text-gray-500 mb-1">PAN</div>
+            <div className="text-sm font-semibold text-gray-900">{userData?.panNumber || 'N/A'}</div>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+            <div className="text-xs font-medium text-gray-500 mb-1">Mobile</div>
+            <div className="text-sm font-semibold text-gray-900">{getUserData('mobile')}</div>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+            <div className="text-xs font-medium text-gray-500 mb-1">Alt Mobile</div>
+            <div className="text-sm font-semibold text-gray-900">{userData?.alternateMobile || 'N/A'}</div>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+            <div className="text-xs font-medium text-gray-500 mb-1">Email</div>
+            <div className="text-sm font-semibold text-gray-900 truncate">{getUserData('email')}</div>
+          </div>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
-              <Phone className="w-4 h-4 text-green-600" />
-            </div>
-            <span className="text-xs font-medium text-green-600 bg-green-100 px-1.5 py-0.5 rounded-full">
-              VERIFIED
-            </span>
-          </div>
-          <h3 className="text-xs font-medium text-gray-600 mb-1">Contact Info</h3>
-          <p className="text-sm font-semibold text-gray-900 mb-1">{getUserData('mobile')}</p>
-          <p className="text-xs text-gray-500">{getUserData('email')}</p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
-              <MapPin className="w-4 h-4 text-purple-600" />
-            </div>
-            <span className="text-xs font-medium text-purple-600 bg-purple-100 px-1.5 py-0.5 rounded-full">
-              {getUserData('personalInfo.yearsAtCurrentAddress')}Y
-            </span>
-          </div>
-          <h3 className="text-xs font-medium text-gray-600 mb-1">Address</h3>
-          <p className="text-sm font-semibold text-gray-900 mb-1">{getUserData('personalInfo.city')}, {getUserData('personalInfo.state')}</p>
-          <p className="text-xs text-gray-500">{getUserData('personalInfo.residenceType')}</p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-8 h-8 bg-orange-100 rounded-lg flex items-center justify-center">
-              <Briefcase className="w-4 h-4 text-orange-600" />
-            </div>
-            <span className="text-xs font-medium text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded-full">
-              {getUserData('personalInfo.totalExperience')}
-            </span>
-          </div>
-          <h3 className="text-xs font-medium text-gray-600 mb-1">Employment</h3>
-          <p className="text-sm font-semibold text-gray-900 mb-1">{getUserData('personalInfo.employment')}</p>
-          <p className="text-xs text-gray-500">{formatCurrency(getUserData('personalInfo.monthlyIncome'))}/month</p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center">
-              <FileText className="w-4 h-4 text-indigo-600" />
-            </div>
-            <span className="text-xs font-medium text-indigo-600 bg-indigo-100 px-1.5 py-0.5 rounded-full">
-              {getArray('documents').filter(doc => doc.status === 'verified').length}/{getArray('documents').length}
-            </span>
-          </div>
-          <h3 className="text-xs font-medium text-gray-600 mb-1">Documents</h3>
-          <p className="text-sm font-semibold text-gray-900 mb-1">{getArray('documents').length} Uploaded</p>
-          <p className="text-xs text-gray-500">{getArray('documents').filter(doc => doc.status === 'verified').length} Verified</p>
-        </div>
-      </div>
-
-      {/* Detailed Information Sections */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Basic Information */}
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Basic Information</h3>
-            {canEditUsers && (
-              <button
-                onClick={() => setShowBasicInfoModal(true)}
-                className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
-              >
-                <Edit className="w-4 h-4" />
-                Edit
-              </button>
-            )}
-          </div>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+        {/* Basic Information & Contact - Compact Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* Basic Information */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <User className="w-4 h-4" />
+              Basic Information
+            </h3>
+            <div className="space-y-2 text-sm">
               <div>
-                <label className="text-sm font-medium text-gray-500">Full Name</label>
-                <p className="text-gray-900 font-medium">{getUserData('name')}</p>
+                <span className="text-gray-500">Name:</span>
+                <span className="ml-2 font-medium text-gray-900">{getUserData('name')}</span>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-500">Customer ID</label>
-                <p className="text-gray-900 font-mono">{getUserData('clid')}</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-500">Date of Birth</label>
-                <p className="text-gray-900">{formatDate(getUserData('personalInfo.dateOfBirth'))}</p>
+                <span className="text-gray-500">DOB:</span>
+                <span className="ml-2 text-gray-900">{formatDate(getUserData('dateOfBirth'))}</span>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-500">Age</label>
-                <p className="text-gray-900">{getUserData('personalInfo.age')} years</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-500">Gender</label>
-                <p className="text-gray-900">{getUserData('personalInfo.gender')}</p>
+                <span className="text-gray-500">Marital Status:</span>
+                <span className="ml-2 text-gray-900">{getUserData('personalInfo.maritalStatus')}</span>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-500">Marital Status</label>
-                <p className="text-gray-900">{getUserData('personalInfo.maritalStatus')}</p>
+                <span className="text-gray-500">Education:</span>
+                <span className="ml-2 text-gray-900">{latestEmployment.education || getUserData('personalInfo.education') || 'N/A'}</span>
               </div>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-500">Education</label>
-              <p className="text-gray-900">{getUserData('personalInfo.education')}</p>
             </div>
           </div>
-        </div>
 
-        {/* Contact Information */}
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Contact Information</h3>
-            {canEditUsers && (
-              <button
-                onClick={() => setShowContactModal(true)}
-                className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
-              >
-                <Edit className="w-4 h-4" />
-                Edit
-              </button>
-            )}
-          </div>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-500">Primary Mobile</label>
-              <div className="flex items-center gap-2">
-                <p className="text-gray-900">{getUserData('mobile')}</p>
-                <button className="text-blue-600 hover:text-blue-800">
-                  <Phone className="w-4 h-4" />
-                </button>
+          {/* Contact Information */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <Phone className="w-4 h-4" />
+              Contact Information
+            </h3>
+            <div className="space-y-2 text-sm">
+              <div>
+                <span className="text-gray-500">Primary:</span>
+                <span className="ml-2 font-medium text-gray-900">{getUserData('mobile')}</span>
               </div>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-500">Alternate Mobile</label>
-              <div className="flex items-center gap-2">
-                <p className="text-gray-900">{getUserData('alternatePhone')}</p>
-                <button className="text-blue-600 hover:text-blue-800">
-                  <Phone className="w-4 h-4" />
-                </button>
+              <div>
+                <span className="text-gray-500">Alternate:</span>
+                <span className="ml-2 text-gray-900">{userData?.alternateMobile || 'N/A'}</span>
               </div>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-500">Email Address</label>
-              <div className="flex items-center gap-2">
-                <p className="text-gray-900">{getUserData('email')}</p>
-                <button className="text-blue-600 hover:text-blue-800">
-                  <Mail className="w-4 h-4" />
-                </button>
+              <div>
+                <span className="text-gray-500">Email:</span>
+                <span className="ml-2 text-gray-900 truncate">{getUserData('email') && getUserData('email') !== 'N/A' ? getUserData('email') : 'N/A'}</span>
               </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Loan Plan Information */}
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Loan Plan</h3>
-            {canEditUsers && (
-              <button
-                onClick={() => {
-                  setSelectedLoanPlanId(userLoanPlan?.id || null);
-                  setShowLoanPlanModal(true);
-                }}
-                className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
-              >
-                <Edit className="w-4 h-4" />
-                {userLoanPlan ? 'Change Plan' : 'Assign Plan'}
-              </button>
-            )}
-          </div>
-          <div className="space-y-4">
-            {userLoanPlan ? (
-              <>
+              <div>
+                <span className="text-gray-500">Company Email:</span>
+                <span className="ml-2 text-gray-900 truncate">{userData?.companyEmail && userData.companyEmail !== 'N/A' ? userData.companyEmail : 'N/A'}</span>
+              </div>
+              {userData?.companyName && userData.companyName !== 'N/A' && (
                 <div>
-                  <label className="text-sm font-medium text-gray-500">Plan Name</label>
-                  <p className="text-gray-900 font-semibold">{userLoanPlan.plan_name}</p>
+                  <span className="text-gray-500">Company:</span>
+                  <span className="ml-2 text-gray-900">{userData.companyName}</span>
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500">Plan Code</label>
-                  <p className="text-gray-900">{userLoanPlan.plan_code}</p>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium text-gray-500">Plan Type</label>
-                    <p className="text-gray-900">{userLoanPlan.plan_type === 'single' ? 'Single Payment' : 'Multi-EMI'}</p>
-                  </div>
-                  {userLoanPlan.plan_type === 'single' ? (
-                    <div>
-                      <label className="text-sm font-medium text-gray-500">Duration</label>
-                      <p className="text-gray-900">{userLoanPlan.repayment_days} days</p>
-                    </div>
-                  ) : (
-                    <div>
-                      <label className="text-sm font-medium text-gray-500">EMI Count</label>
-                      <p className="text-gray-900">{userLoanPlan.emi_count}</p>
-                    </div>
-                  )}
-                </div>
-                {userLoanPlan.is_default && (
-                  <div className="bg-yellow-50 border border-yellow-200 rounded p-2">
-                    <p className="text-xs text-yellow-800">This is the default system plan</p>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="text-center py-4">
-                <p className="text-gray-500 text-sm">No loan plan assigned</p>
-                <p className="text-gray-400 text-xs mt-1">User will use system default plan</p>
+              )}
+            </div>
+          </div>
+
+          {/* Employment Information */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <Briefcase className="w-4 h-4" />
+              Employment
+            </h3>
+            <div className="space-y-2 text-sm">
+              <div>
+                <span className="text-gray-500">Type:</span>
+                <span className="ml-2 text-gray-900">{latestEmployment.employment_type || 'N/A'}</span>
               </div>
-            )}
+              <div>
+                <span className="text-gray-500">Company:</span>
+                <span className="ml-2 text-gray-900">{latestEmployment.company_name || 'N/A'}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Designation:</span>
+                <span className="ml-2 text-gray-900">{latestEmployment.designation || 'N/A'}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Industry:</span>
+                <span className="ml-2 text-gray-900">{latestEmployment.industry || 'N/A'}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Department:</span>
+                <span className="ml-2 text-gray-900">{latestEmployment.department || 'N/A'}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Experience:</span>
+                <span className="ml-2 text-gray-900">{latestEmployment.work_experience_years || 'N/A'} years</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Income:</span>
+                <span className="ml-2 font-semibold text-green-600">
+                  {(() => {
+                    const income = getUserData('personalInfo.monthlyIncome');
+                    return income && income > 0 ? formatCurrency(income) : 'N/A';
+                  })()}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Family Information */}
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Family Information</h3>
-          {canEditUsers && (
-            <button
-              onClick={() => alert('Family information edit modal')}
-              className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
-            >
-              <Edit className="w-4 h-4" />
-              Edit
-            </button>
+        {/* Addresses - Compact Cards */}
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+            <MapPin className="w-4 h-4" />
+            Addresses ({allAddresses.length})
+          </h3>
+          {allAddresses.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {allAddresses.map((addr: any, idx: number) => (
+                <div key={addr.id || idx} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                  <div className="flex items-start justify-between mb-2">
+                    <span className="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
+                      {addr.is_primary ? 'Primary' : addr.source || 'Address'}
+                    </span>
+                    {addr.source && (
+                      <span className="text-xs text-gray-500">{addr.source}</span>
+                    )}
+                  </div>
+                  <div className="text-xs space-y-1 text-gray-700">
+                    {addr.address_line1 && <div>{addr.address_line1}</div>}
+                    {addr.address_line2 && <div>{addr.address_line2}</div>}
+                    <div>
+                      {[addr.city, addr.state, addr.pincode].filter(Boolean).join(', ')}
+                    </div>
+                    {addr.country && addr.country !== 'India' && <div>{addr.country}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">No addresses found</p>
           )}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <div>
-            <label className="text-sm font-medium text-gray-500">Father's Name</label>
-            <p className="text-gray-900">{getUserData('personalInfo.fatherName')}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-500">Mother's Name</label>
-            <p className="text-gray-900">{getUserData('personalInfo.motherName')}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-500">Spouse Name</label>
-            <p className="text-gray-900">{getUserData('personalInfo.spouseName')}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-500">Number of Dependents</label>
-            <p className="text-gray-900">{getUserData('personalInfo.numberOfDependents')} family members</p>
-          </div>
-        </div>
-      </div>
 
-      {/* Address & Employment in Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Address Information */}
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Address Information</h3>
-            {canEditUsers && (
-              <button
-                onClick={() => setShowAddressModal(true)}
-                className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
-              >
-                <Edit className="w-4 h-4" />
-                Edit
-              </button>
-            )}
-          </div>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-500">Current Address</label>
-              <p className="text-gray-900">{getUserData('personalInfo.address')}</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-500">City</label>
-                <p className="text-gray-900">{getUserData('personalInfo.city')}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">State</label>
-                <p className="text-gray-900">{getUserData('personalInfo.state')}</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-500">Pincode</label>
-                <p className="text-gray-900">{getUserData('personalInfo.pincode')}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">Landmark</label>
-                <p className="text-gray-900">{getUserData('personalInfo.landmark')}</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-500">Residence Type</label>
-                <p className="text-gray-900">{getUserData('personalInfo.residenceType')}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">Years at Address</label>
-                <p className="text-gray-900">{getUserData('personalInfo.yearsAtCurrentAddress')} years</p>
-              </div>
-            </div>
-          </div>
-        </div>
 
-        {/* Employment Information */}
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Employment Information</h3>
-            {canEditUsers && (
-              <button
-                onClick={() => setShowEmploymentModal(true)}
-                className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
-              >
-                <Edit className="w-4 h-4" />
-                Edit
-              </button>
-            )}
-          </div>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-500">Designation</label>
-              <p className="text-gray-900">{getUserData('personalInfo.employment')}</p>
+        {/* Loan Plan - Compact */}
+        {userLoanPlan && (
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <CreditCard className="w-4 h-4" />
+                Loan Plan
+              </h3>
+              {canEditUsers && (
+                <button
+                  onClick={() => {
+                    setSelectedLoanPlanId(userLoanPlan?.id || null);
+                    setShowLoanPlanModal(true);
+                  }}
+                  className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Edit
+                </button>
+              )}
             </div>
-            <div>
-              <label className="text-sm font-medium text-gray-500">Company</label>
-              <p className="text-gray-900">{getUserData('personalInfo.company')}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-500">Company Address</label>
-              <p className="text-gray-900">{getUserData('personalInfo.companyAddress')}</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
               <div>
-                <label className="text-sm font-medium text-gray-500">Current Experience</label>
-                <p className="text-gray-900">{getUserData('personalInfo.workExperience')}</p>
+                <span className="text-gray-500">Plan:</span>
+                <span className="ml-2 font-medium text-gray-900">{userLoanPlan.plan_name}</span>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-500">Total Experience</label>
-                <p className="text-gray-900">{getUserData('personalInfo.totalExperience')}</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-500">Monthly Income</label>
-                <p className="text-gray-900 font-semibold text-green-600">{formatCurrency(getUserData('personalInfo.monthlyIncome'))}</p>
+                <span className="text-gray-500">Code:</span>
+                <span className="ml-2 text-gray-900">{userLoanPlan.plan_code}</span>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-500">Other Income</label>
-                <p className="text-gray-900">{formatCurrency(getUserData('personalInfo.otherIncome'))}</p>
+                <span className="text-gray-500">Type:</span>
+                <span className="ml-2 text-gray-900">{userLoanPlan.plan_type === 'single' ? 'Single' : 'Multi-EMI'}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Duration:</span>
+                <span className="ml-2 text-gray-900">{userLoanPlan.repayment_days || userLoanPlan.emi_count || 'N/A'}</span>
               </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
-    </div>
-  );
+    );
+  };
 
   // Documents Tab
   const renderDocumentsTab = () => {
@@ -2549,130 +2399,169 @@ export function UserProfileDetail() {
   );
 
   // Reference Tab
-  const renderReferenceTab = () => (
-    <div className="space-y-6">
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Reference Details</h3>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowAddReferenceModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Add Reference
-            </button>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600">
-                {getArray('references').filter(ref => ref.verificationStatus === 'verified').length} of {getArray('references').length} verified
-              </span>
-              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+  const renderReferenceTab = () => {
+    const allReferences = userData?.references || [];
+    
+    const handleVerifyReference = async (referenceId: number) => {
+      if (!confirm('Are you sure you want to verify this reference?')) {
+        return;
+      }
+
+      try {
+        const response = await adminApiService.updateReferenceStatus(
+          params.userId!,
+          referenceId.toString(),
+          'verified'
+        );
+
+        if (response.status === 'success') {
+          toast.success('Reference verified successfully!');
+          // Refresh user data
+          const profileResponse = await adminApiService.getUserProfile(params.userId!);
+          if (profileResponse.status === 'success') {
+            setUserData(profileResponse.data);
+          }
+        } else {
+          toast.error(response.message || 'Failed to verify reference');
+        }
+      } catch (error: any) {
+        console.error('Error verifying reference:', error);
+        toast.error(error.message || 'Failed to verify reference');
+      }
+    };
+
+    const handleRejectReference = async (referenceId: number) => {
+      const reason = prompt('Please provide a reason for rejection:');
+      if (!reason) return;
+
+      try {
+        const response = await adminApiService.updateReferenceStatus(
+          params.userId!,
+          referenceId.toString(),
+          'rejected',
+          undefined,
+          reason
+        );
+
+        if (response.status === 'success') {
+          toast.success('Reference rejected successfully!');
+          // Refresh user data
+          const profileResponse = await adminApiService.getUserProfile(params.userId!);
+          if (profileResponse.status === 'success') {
+            setUserData(profileResponse.data);
+          }
+        } else {
+          toast.error(response.message || 'Failed to reject reference');
+        }
+      } catch (error: any) {
+        console.error('Error rejecting reference:', error);
+        toast.error(error.message || 'Failed to reject reference');
+      }
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900">Reference Details</h3>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">
+                  {allReferences.filter((ref: any) => ref.status === 'verified').length} of {allReferences.length} verified
+                </span>
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="space-y-4">
-          {getArray('references').map((ref, index) => (
-            <div key={index} className="border border-gray-200 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="font-medium text-gray-900">{ref.name}</h4>
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${ref.verificationStatus === 'verified' ? 'bg-green-100 text-green-800' :
-                  ref.verificationStatus === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                    ref.verificationStatus === 'rejected' ? 'bg-red-100 text-red-800' :
-                      'bg-gray-100 text-gray-800'
-                  }`}>
-                  {ref.verificationStatus}
-                </span>
-              </div>
+          {allReferences.length > 0 ? (
+            <div className="space-y-4">
+              {allReferences.map((ref: any, index: number) => (
+                <div key={ref.id || index} className="border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-medium text-gray-900">{ref.name || 'N/A'}</h4>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      ref.status === 'verified' ? 'bg-green-100 text-green-800' :
+                      ref.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                      'bg-yellow-100 text-yellow-800'
+                    }`}>
+                      {ref.status || 'pending'}
+                    </span>
+                  </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-4">
-                <div>
-                  <span className="text-gray-600">Relationship:</span> {ref.relationship}
-                </div>
-                <div>
-                  <span className="text-gray-600">Phone:</span> {ref.phone}
-                </div>
-                <div>
-                  <span className="text-gray-600">Email:</span> {ref.email}
-                </div>
-                <div>
-                  <span className="text-gray-600">Address:</span> {ref.address}
-                </div>
-              </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-4">
+                    <div>
+                      <span className="text-gray-600">Relationship:</span> {ref.relation || 'N/A'}
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Phone:</span> {ref.phone || 'N/A'}
+                    </div>
+                  </div>
 
-              {/* Admin Actions for Reference */}
-              <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-                <div className="flex items-center gap-2">
-                  <button className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm px-3 py-1.5 border border-blue-200 rounded-md hover:bg-blue-50">
-                    <Phone className="w-4 h-4" />
-                    Call
-                  </button>
-                  <button className="flex items-center gap-1 text-green-600 hover:text-green-800 text-sm px-3 py-1.5 border border-green-200 rounded-md hover:bg-green-50">
-                    <Mail className="w-4 h-4" />
-                    Email
-                  </button>
-                </div>
+                  {/* Admin Actions for Reference */}
+                  <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+                    <div className="flex items-center gap-2">
+                      <a 
+                        href={`tel:${ref.phone}`}
+                        className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm px-3 py-1.5 border border-blue-200 rounded-md hover:bg-blue-50"
+                      >
+                        <Phone className="w-4 h-4" />
+                        Call
+                      </a>
+                    </div>
 
-                <div className="flex items-center gap-2">
-                  {ref.verificationStatus !== 'verified' && (
-                    <>
-                      <button className="flex items-center gap-1 text-green-600 hover:text-green-800 text-sm px-3 py-1.5 bg-green-50 border border-green-200 rounded-md hover:bg-green-100">
+                    <div className="flex items-center gap-2">
+                      {ref.status !== 'verified' && (
+                        <button
+                          onClick={() => handleVerifyReference(ref.id)}
+                          className="flex items-center gap-1 text-green-600 hover:text-green-800 text-sm px-3 py-1.5 bg-green-50 border border-green-200 rounded-md hover:bg-green-100"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                          Verify
+                        </button>
+                      )}
+                      {ref.status !== 'rejected' && (
+                        <button
+                          onClick={() => handleRejectReference(ref.id)}
+                          className="flex items-center gap-1 text-red-600 hover:text-red-800 text-sm px-3 py-1.5 bg-red-50 border border-red-200 rounded-md hover:bg-red-100"
+                        >
+                          <XCircle className="w-4 h-4" />
+                          Reject
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Verification Status Messages */}
+                  {ref.status === 'verified' && (
+                    <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <div className="flex items-center gap-2 text-sm text-green-700">
                         <CheckCircle className="w-4 h-4" />
-                        Verify
-                      </button>
-                      <button className="flex items-center gap-1 text-red-600 hover:text-red-800 text-sm px-3 py-1.5 bg-red-50 border border-red-200 rounded-md hover:bg-red-100">
+                        <span>Verified by Admin{ref.updated_at ? ` on ${formatDate(ref.updated_at)}` : ''}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {ref.status === 'rejected' && (
+                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <div className="flex items-center gap-2 text-sm text-red-700">
                         <XCircle className="w-4 h-4" />
-                        Reject
-                      </button>
-                    </>
-                  )}
-                  <button className="flex items-center gap-1 text-gray-600 hover:text-gray-800 text-sm px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-md hover:bg-gray-100">
-                    <MessageSquare className="w-4 h-4" />
-                    Note
-                  </button>
-                </div>
-              </div>
-
-              {/* Verification Status Messages */}
-              {ref.verificationStatus === 'verified' && (
-                <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-                  <div className="flex items-center gap-2 text-sm text-green-700">
-                    <CheckCircle className="w-4 h-4" />
-                    <span>Verified by Admin on {ref.verifiedDate || '2025-01-15'}</span>
-                  </div>
-                  {ref.feedback && (
-                    <p className="text-sm text-green-600 mt-2">{ref.feedback}</p>
+                        <span>Rejected{ref.updated_at ? ` on ${formatDate(ref.updated_at)}` : ''}</span>
+                      </div>
+                    </div>
                   )}
                 </div>
-              )}
-
-              {ref.verificationStatus === 'rejected' && (
-                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <div className="flex items-center gap-2 text-sm text-red-700">
-                    <XCircle className="w-4 h-4" />
-                    <span>Rejected on {ref.rejectedDate || '2025-01-15'}</span>
-                  </div>
-                  {ref.rejectionReason && (
-                    <p className="text-sm text-red-600 mt-2">Reason: {ref.rejectionReason}</p>
-                  )}
-                </div>
-              )}
-
-              {ref.verificationStatus === 'pending' && ref.feedback && (
-                <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <div className="flex items-center gap-2 text-sm text-yellow-700">
-                    <Clock className="w-4 h-4" />
-                    <span>Pending verification - Last contacted: {ref.contactedDate || '2025-01-15'}</span>
-                  </div>
-                  <p className="text-sm text-yellow-600 mt-2">{ref.feedback}</p>
-                </div>
-              )}
+              ))}
             </div>
-          ))}
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              <p>No references found</p>
+            </div>
+          )}
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Login Data Tab
   const renderLoginDataTab = () => (

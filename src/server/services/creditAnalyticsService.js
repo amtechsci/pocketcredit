@@ -9,12 +9,20 @@ class CreditAnalyticsService {
     this.apiUrl = process.env.CREDIT_ANALYTICS_API_URL || 'https://apidemo.digitap.work/credit_analytics/request';
     this.clientId = process.env.DIGITAP_CLIENT_ID;
     this.clientSecret = process.env.DIGITAP_CLIENT_SECRET;
+    
+    // Validate required configuration
+    if (!this.clientId || !this.clientSecret) {
+      console.warn('⚠️  DIGITAP_CLIENT_ID or DIGITAP_CLIENT_SECRET not configured. Credit check may fail.');
+    }
   }
 
   /**
    * Generate Authorization header (Base64 encoded client_id:client_secret)
    */
   getAuthHeader() {
+    if (!this.clientId || !this.clientSecret) {
+      throw new Error('DIGITAP_CLIENT_ID and DIGITAP_CLIENT_SECRET must be configured for credit checks');
+    }
     const credentials = `${this.clientId}:${this.clientSecret}`;
     const base64Credentials = Buffer.from(credentials).toString('base64');
     return `Basic ${base64Credentials}`;
@@ -202,8 +210,32 @@ class CreditAnalyticsService {
    * Validate if user is eligible based on credit report
    */
   validateEligibility(apiResponse) {
-    const creditScore = this.parseCreditScore(apiResponse);
-    const negativeIndicators = this.checkNegativeIndicators(apiResponse);
+    if (!apiResponse) {
+      throw new Error('API response is required for eligibility validation');
+    }
+
+    let creditScore;
+    let negativeIndicators;
+
+    try {
+      creditScore = this.parseCreditScore(apiResponse);
+    } catch (error) {
+      console.error('Error parsing credit score:', error);
+      creditScore = null;
+    }
+
+    try {
+      negativeIndicators = this.checkNegativeIndicators(apiResponse);
+    } catch (error) {
+      console.error('Error checking negative indicators:', error);
+      negativeIndicators = {
+        hasSettlements: false,
+        hasWriteOffs: false,
+        hasSuitFiles: false,
+        hasWilfulDefault: false,
+        details: []
+      };
+    }
 
     const validation = {
       isEligible: true,

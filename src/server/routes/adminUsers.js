@@ -552,46 +552,86 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
     // Request credit report from Experian
     const clientRefNum = `PC${userId}_${Date.now()}`;
 
-    const creditReportResponse = await creditAnalyticsService.requestCreditReport({
-      client_ref_num: clientRefNum,
-      mobile_no: userData.phone,
-      first_name: userData.first_name || 'User',
-      last_name: userData.last_name || '',
-      date_of_birth: userData.date_of_birth, // YYYY-MM-DD
-      email: userData.email || `user${userId}@pocketcredit.in`,
+    console.log('🔍 Requesting credit report for user:', userId);
+    console.log('📋 User data:', {
+      phone: userData.phone,
       pan: userData.pan_number,
-      device_ip: req.ip || '192.168.1.1'
+      dob: userData.date_of_birth,
+      email: userData.email
     });
 
+    let creditReportResponse;
+    try {
+      creditReportResponse = await creditAnalyticsService.requestCreditReport({
+        client_ref_num: clientRefNum,
+        mobile_no: userData.phone,
+        first_name: userData.first_name || 'User',
+        last_name: userData.last_name || '',
+        date_of_birth: userData.date_of_birth, // YYYY-MM-DD
+        email: userData.email || `user${userId}@pocketcredit.in`,
+        pan: userData.pan_number,
+        device_ip: req.ip || '192.168.1.1'
+      });
+      
+      console.log('✅ Credit report received:', {
+        result_code: creditReportResponse?.result_code,
+        request_id: creditReportResponse?.request_id
+      });
+    } catch (apiError) {
+      console.error('❌ Credit report API error:', apiError.message);
+      throw new Error(`Failed to request credit report: ${apiError.message}`);
+    }
+
+    if (!creditReportResponse) {
+      throw new Error('Credit report API returned empty response');
+    }
+
     // Validate eligibility
-    const validation = creditAnalyticsService.validateEligibility(creditReportResponse);
+    let validation;
+    try {
+      validation = creditAnalyticsService.validateEligibility(creditReportResponse);
+      console.log('✅ Eligibility validation completed:', {
+        isEligible: validation.isEligible,
+        creditScore: validation.creditScore
+      });
+    } catch (validationError) {
+      console.error('❌ Eligibility validation error:', validationError.message);
+      throw new Error(`Failed to validate eligibility: ${validationError.message}`);
+    }
 
     // Save credit check to database
-    await executeQuery(
-      `INSERT INTO credit_checks (
-        user_id, request_id, client_ref_num, 
-        credit_score, result_code, api_message, 
-        is_eligible, rejection_reasons,
-        has_settlements, has_writeoffs, has_suit_files, has_wilful_default,
-        negative_indicators, full_report
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        userId,
-        creditReportResponse.request_id,
-        clientRefNum,
-        validation.creditScore,
-        creditReportResponse.result_code,
-        creditReportResponse.message,
-        validation.isEligible,
-        validation.reasons.length > 0 ? JSON.stringify(validation.reasons) : null,
-        validation.negativeIndicators.hasSettlements,
-        validation.negativeIndicators.hasWriteOffs,
-        validation.negativeIndicators.hasSuitFiles,
-        validation.negativeIndicators.hasWilfulDefault,
-        JSON.stringify(validation.negativeIndicators),
-        JSON.stringify(creditReportResponse)
-      ]
-    );
+    try {
+      await executeQuery(
+        `INSERT INTO credit_checks (
+          user_id, request_id, client_ref_num, 
+          credit_score, result_code, api_message, 
+          is_eligible, rejection_reasons,
+          has_settlements, has_writeoffs, has_suit_files, has_wilful_default,
+          negative_indicators, full_report, checked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          userId,
+          creditReportResponse.request_id || null,
+          clientRefNum,
+          validation.creditScore || null,
+          creditReportResponse.result_code || null,
+          creditReportResponse.message || null,
+          validation.isEligible ? 1 : 0,
+          validation.reasons.length > 0 ? JSON.stringify(validation.reasons) : null,
+          validation.negativeIndicators.hasSettlements ? 1 : 0,
+          validation.negativeIndicators.hasWriteOffs ? 1 : 0,
+          validation.negativeIndicators.hasSuitFiles ? 1 : 0,
+          validation.negativeIndicators.hasWilfulDefault ? 1 : 0,
+          JSON.stringify(validation.negativeIndicators),
+          JSON.stringify(creditReportResponse)
+        ]
+      );
+      console.log('✅ Credit check saved to database');
+    } catch (dbError) {
+      console.error('❌ Database error saving credit check:', dbError.message);
+      // Continue even if database save fails, but log the error
+      console.error('Database error details:', dbError);
+    }
 
     // If not eligible, update user profile to on_hold
     if (!validation.isEligible) {
@@ -621,11 +661,32 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
     });
 
   } catch (error) {
-    console.error('Admin perform credit check error:', error);
+    console.error('❌ Admin perform credit check error:', error);
+    console.error('Error stack:', error.stack);
+    console.error('Error details:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+      code: error.code
+    });
+    
+    // Provide more detailed error message
+    let errorMessage = 'Failed to perform credit check';
+    if (error.message) {
+      errorMessage += `: ${error.message}`;
+    }
+    if (error.response?.data?.message) {
+      errorMessage += ` (${error.response.data.message})`;
+    }
+    
     res.status(500).json({
       status: 'error',
-      message: 'Failed to perform credit check',
-      error: error.message
+      message: errorMessage,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      details: process.env.NODE_ENV === 'development' ? {
+        stack: error.stack,
+        response: error.response?.data
+      } : undefined
     });
   }
 });

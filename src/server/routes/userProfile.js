@@ -12,14 +12,15 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     await initializeDatabase();
     const { userId } = req.params;
 
-    // Get user basic info from MySQL
+    // Get user basic info from MySQL (including PAN, alternate_mobile, company_name, company_email)
     const users = await executeQuery(`
       SELECT 
         id, first_name, last_name, email, phone, 
         date_of_birth, gender, marital_status, kyc_completed, 
         email_verified, phone_verified, status, profile_completion_step, 
         profile_completed, eligibility_status, eligibility_reason, 
-        eligibility_retry_date, selected_loan_plan_id, created_at, updated_at, last_login_at
+        eligibility_retry_date, selected_loan_plan_id, created_at, updated_at, last_login_at,
+        pan_number, alternate_mobile, company_name, company_email, salary_date
       FROM users 
       WHERE id = ?
     `, [userId]);
@@ -62,17 +63,38 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
 
     console.log('📋 Found applications:', applications ? applications.length : 0);
 
-    // Get additional user data from related tables
+    // Get ALL addresses (not just primary) - ordered by is_primary DESC, then created_at DESC
     const addresses = await executeQuery(`
-      SELECT * FROM addresses WHERE user_id = ? AND is_primary = 1 LIMIT 1
+      SELECT * FROM addresses 
+      WHERE user_id = ? 
+      ORDER BY is_primary DESC, created_at DESC
     `, [userId]);
 
+    // Get ALL employment details (latest first) - also get income_range from users table
     const employment = await executeQuery(`
       SELECT ed.*, u.income_range 
       FROM employment_details ed
       LEFT JOIN users u ON ed.user_id = u.id
       WHERE ed.user_id = ? 
-      LIMIT 1
+      ORDER BY ed.id DESC
+    `, [userId]);
+
+    // Try to get income_range from users table if not in employment
+    let incomeRange = (employment && employment[0])?.income_range;
+    if (!incomeRange) {
+      const userIncomeRange = await executeQuery(
+        'SELECT income_range FROM users WHERE id = ?',
+        [userId]
+      );
+      incomeRange = userIncomeRange[0]?.income_range || null;
+    }
+
+    // Get ALL references for this user
+    const references = await executeQuery(`
+      SELECT id, user_id, name, phone, relation, status, admin_id, created_at, updated_at 
+      FROM \`references\` 
+      WHERE user_id = ? 
+      ORDER BY created_at ASC
     `, [userId]);
 
     // Calculate age from date_of_birth
@@ -92,16 +114,23 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     const getMonthlyIncomeFromRange = (range) => {
       if (!range) return 0;
       const rangeMap = {
+        // Old format
         '1k-20k': 10000,
         '20k-30k': 25000,
         '30k-40k': 35000,
-        'above-40k': 50000
+        'above-40k': 50000,
+        // New format from loan_limit_tiers
+        '0-15000': 7500,
+        '15000-30000': 22500,
+        '30000-50000': 40000,
+        '50000-75000': 62500,
+        '75000-100000': 87500,
+        '100000+': 125000
       };
       return rangeMap[range] || 0;
     };
 
     // Derive risk category and member level from available data
-    const incomeRange = (employment && employment[0])?.income_range;
     const monthlyIncomeValue = getMonthlyIncomeFromRange(incomeRange);
     let riskCategory = 'N/A';
     if (monthlyIncomeValue > 0) {
@@ -255,7 +284,11 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       email: user.email || 'N/A',
       mobile: user.phone || 'N/A',
       dateOfBirth: user.date_of_birth ? new Date(user.date_of_birth).toLocaleDateString('en-IN') : 'N/A',
-      panNumber: 'N/A', // This field doesn't exist in users table yet
+      panNumber: user.pan_number || 'N/A',
+      alternateMobile: user.alternate_mobile || 'N/A',
+      companyName: user.company_name || 'N/A',
+      companyEmail: user.company_email || 'N/A',
+      salaryDate: user.salary_date || null,
       kycStatus: user.kyc_completed ? 'completed' : 'pending',
       isEmailVerified: user.email_verified ? true : false,
       isMobileVerified: user.phone_verified ? true : false,
@@ -277,29 +310,33 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         age: calculateAge(user.date_of_birth),
         gender: user.gender || 'N/A',
         maritalStatus: user.marital_status || 'N/A',
-        fatherName: 'N/A', // These fields don't exist in users table yet
-        motherName: 'N/A',
-        spouseName: 'N/A',
+        // Primary address (first one, which should be is_primary = 1)
         address: (addresses && addresses[0])?.address_line1 || 'N/A',
+        addressLine2: (addresses && addresses[0])?.address_line2 || 'N/A',
         city: (addresses && addresses[0])?.city || 'N/A',
         state: (addresses && addresses[0])?.state || 'N/A',
         pincode: (addresses && addresses[0])?.pincode || 'N/A',
-        education: 'N/A', // This field doesn't exist yet
+        country: (addresses && addresses[0])?.country || 'India',
+        // Employment details (latest)
+        education: (employment && employment[0])?.education || 'N/A',
         employment: (employment && employment[0])?.employment_type || 'N/A',
         company: (employment && employment[0])?.company_name || 'N/A',
+        industry: (employment && employment[0])?.industry || 'N/A',
+        department: (employment && employment[0])?.department || 'N/A',
         monthlyIncome: monthlyIncomeValue,
         workExperience: (employment && employment[0])?.work_experience_years || 'N/A',
         designation: (employment && employment[0])?.designation || 'N/A',
-        yearsAtCurrentAddress: 'N/A', // This would need to be calculated
-        residenceType: 'N/A', // This field doesn't exist yet
-        totalExperience: (employment && employment[0])?.work_experience_years || 'N/A',
-        otherIncome: 0 // This field doesn't exist yet
+        totalExperience: (employment && employment[0])?.work_experience_years || 'N/A'
       },
+      // All addresses (not just primary)
+      allAddresses: addresses || [],
+      // All employment records
+      allEmployment: employment || [],
       // Default values for data not yet in MySQL
       documents: [],
       bankDetails: bankDetails,
       bankInfo: bankInfo, // Added for frontend compatibility
-      references: [],
+      references: references || [],
       transactions: [],
       followUps: [],
       notes: [],
@@ -653,6 +690,48 @@ router.post('/:userId/reference-details', authenticateAdmin, async (req, res) =>
     res.status(500).json({
       status: 'error',
       message: 'Failed to add reference details'
+    });
+  }
+});
+
+// Update reference status (Admin only)
+router.put('/:userId/references/:referenceId', authenticateAdmin, async (req, res) => {
+  try {
+    console.log('👥 Updating reference status:', req.params.referenceId);
+    await initializeDatabase();
+    const { userId, referenceId } = req.params;
+    const { verificationStatus, feedback, rejectionReason } = req.body;
+
+    if (!verificationStatus || !['pending', 'verified', 'rejected'].includes(verificationStatus)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid status. Must be pending, verified, or rejected'
+      });
+    }
+
+    // Get admin ID from request (if available)
+    const adminId = req.admin?.id || null;
+
+    // Update reference status
+    await executeQuery(
+      `UPDATE \`references\` 
+       SET status = ?, admin_id = ?, updated_at = NOW() 
+       WHERE id = ? AND user_id = ?`,
+      [verificationStatus, adminId, referenceId, userId]
+    );
+
+    console.log('✅ Reference status updated successfully');
+    res.json({
+      status: 'success',
+      message: 'Reference status updated successfully',
+      data: { referenceId, status: verificationStatus }
+    });
+
+  } catch (error) {
+    console.error('Update reference status error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update reference status'
     });
   }
 });
