@@ -14,14 +14,25 @@ class CashfreePaymentService {
         this.clientSecret = process.env.CASHFREE_CLIENT_SECRET;
         
         // Use CASHFREE_API_BASE for consistency with eNACH implementation
-        this.baseURL = process.env.CASHFREE_API_BASE || 'https://sandbox.cashfree.com/pg';
+        // IMPORTANT: Set CASHFREE_API_BASE in .env file
+        // Production: https://api.cashfree.com/pg
+        // Sandbox: https://sandbox.cashfree.com/pg
+        this.baseURL = process.env.CASHFREE_API_BASE || 'https://api.cashfree.com/pg';
         this.apiVersion = process.env.CASHFREE_API_VERSION || '2023-08-01';
         this.frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
         this.nodeEnv = process.env.NODE_ENV || 'development';
         
         // Detect if we're using production API
+        // Production: https://api.cashfree.com/pg
+        // Sandbox: https://sandbox.cashfree.com/pg
         this.isProduction = this.baseURL.includes('api.cashfree.com') && 
                            !this.baseURL.includes('sandbox');
+        
+        // Log environment for debugging
+        if (!this.isProduction && this.nodeEnv === 'production') {
+            console.warn('⚠️  WARNING: Using sandbox API in production environment!');
+            console.warn('   Set CASHFREE_API_BASE=https://api.cashfree.com/pg for production');
+        }
 
         // Validate configuration
         if (!this.clientId || !this.clientSecret) {
@@ -59,9 +70,11 @@ class CashfreePaymentService {
      * @returns {Promise<Object>} - Order creation response
      */
     async createOrder(orderData) {
+        // Extract orderId first for error handling
+        const orderId = orderData?.orderId;
+        
         try {
             const {
-                orderId,
                 amount,
                 customerName,
                 customerEmail,
@@ -69,6 +82,11 @@ class CashfreePaymentService {
                 returnUrl,
                 notifyUrl
             } = orderData;
+
+            // Validate required fields
+            if (!orderId) {
+                throw new Error('orderId is required in orderData');
+            }
 
             const payload = {
                 order_id: orderId,

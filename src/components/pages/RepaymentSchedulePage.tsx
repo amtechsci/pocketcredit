@@ -289,12 +289,19 @@ export const RepaymentSchedulePage = () => {
                       toast.success('Opening payment gateway...');
 
                       try {
-                        // Determine environment based on the checkout URL or use sandbox by default
-                        // Check if we're using production or sandbox
+                        // Determine environment based on the checkout URL
+                        // Production: payments.cashfree.com (without -test)
+                        // Sandbox: payments-test.cashfree.com
                         const isProduction = response.data.checkoutUrl?.includes('payments.cashfree.com') && 
                                            !response.data.checkoutUrl?.includes('payments-test');
                         
-                        // Load Cashfree SDK
+                        console.log('🔧 Cashfree SDK environment:', {
+                          checkoutUrl: response.data.checkoutUrl?.substring(0, 50) + '...',
+                          isProduction,
+                          mode: isProduction ? 'production' : 'sandbox'
+                        });
+                        
+                        // Load Cashfree SDK with correct environment
                         const cashfree = await load({ 
                           mode: isProduction ? "production" : "sandbox"
                         });
