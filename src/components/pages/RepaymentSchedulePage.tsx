@@ -192,12 +192,15 @@ export const RepaymentSchedulePage = () => {
   // Determine Due Date
   // Logic: Disbursement Date + Loan Term
   const termDays = loanData.loan_term_days || 30; // Default or fetch from backend
-  const dueDate = new Date(disbursedDate);
+  const dueDate = new Date(disbursedDateMidnight); // Use midnight-normalized date
   dueDate.setDate(dueDate.getDate() + termDays);
+  // Ensure due date is also at midnight for accurate comparison
+  dueDate.setHours(0, 0, 0, 0);
 
-  // Check default status
-  const isDefaulted = currentDate > dueDate;
-  const daysDelayed = isDefaulted ? Math.ceil((currentDate.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+  // Check default status - compare dates normalized to midnight
+  // Loan is defaulted only if current date (at midnight) is AFTER due date (at midnight)
+  const isDefaulted = currentDateMidnight > dueDate;
+  const daysDelayed = isDefaulted ? Math.ceil((currentDateMidnight.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
   // Tenure extension logic: D-5 to D+15
   // TODO: Uncomment when tenure extension feature is ready

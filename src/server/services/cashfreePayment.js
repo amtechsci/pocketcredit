@@ -1,33 +1,56 @@
 /**
  * Cashfree Payment Gateway Service
  * Handles one-time loan repayment transactions
+ * 
+ * Uses the same environment configuration as eNACH subscriptions
  */
 
 const axios = require('axios');
+const { v4: uuidv4 } = require('uuid');
 
 class CashfreePaymentService {
     constructor() {
         this.clientId = process.env.CASHFREE_CLIENT_ID;
         this.clientSecret = process.env.CASHFREE_CLIENT_SECRET;
-        this.environment = process.env.CASHFREE_ENV || 'sandbox'; // 'sandbox' or 'production'
-
-        this.baseURL = this.environment === 'production'
-            ? 'https://api.cashfree.com/pg'
-            : 'https://sandbox.cashfree.com/pg';
-
+        
+        // Use CASHFREE_API_BASE for consistency with eNACH implementation
+        this.baseURL = process.env.CASHFREE_API_BASE || 'https://sandbox.cashfree.com/pg';
         this.apiVersion = process.env.CASHFREE_API_VERSION || '2023-08-01';
+        this.frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        this.nodeEnv = process.env.NODE_ENV || 'development';
+        
+        // Detect if we're using production API
+        this.isProduction = this.baseURL.includes('api.cashfree.com') && 
+                           !this.baseURL.includes('sandbox');
+
+        // Validate configuration
+        if (!this.clientId || !this.clientSecret) {
+            console.warn('⚠️  WARNING: Cashfree payment credentials not configured');
+            if (this.nodeEnv === 'production') {
+                console.error('❌ ERROR: Cashfree credentials are required in production!');
+            }
+        } else {
+            console.log(`[CashfreePayment] Initialized - Environment: ${this.isProduction ? 'PRODUCTION' : 'SANDBOX'}`);
+        }
     }
 
     /**
      * Get common headers for Cashfree API
      */
-    getHeaders() {
-        return {
+    getHeaders(idempotencyKey = null) {
+        const headers = {
             'x-client-id': this.clientId,
             'x-client-secret': this.clientSecret,
             'x-api-version': this.apiVersion,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'x-request-id': uuidv4()
         };
+        
+        if (idempotencyKey) {
+            headers['x-idempotency-key'] = idempotencyKey;
+        }
+        
+        return headers;
     }
 
     /**
@@ -64,17 +87,24 @@ class CashfreePaymentService {
                 order_note: `Loan Repayment - ${orderId}`
             };
 
-            console.log('💳 Creating Cashfree order:', { orderId, amount });
+            console.log(`[CashfreePayment] Creating order: ${orderId}`, {
+                amount,
+                environment: this.isProduction ? 'PRODUCTION' : 'SANDBOX'
+            });
 
             const response = await axios.post(
                 `${this.baseURL}/orders`,
                 payload,
-                { headers: this.getHeaders() }
+                { 
+                    headers: this.getHeaders(orderId), // Use orderId as idempotency key
+                    timeout: 30000 // 30 second timeout
+                }
             );
 
-            console.log('✅ Cashfree order created successfully!');
-            console.log('📦 Full Response:', JSON.stringify(response.data, null, 2));
-            console.log('🔑 Payment Session ID:', response.data.payment_session_id);
+            console.log(`[CashfreePayment] Order created successfully: ${orderId}`, {
+                payment_session_id: response.data.payment_session_id,
+                order_status: response.data.order_status
+            });
 
             return {
                 success: true,
@@ -82,11 +112,24 @@ class CashfreePaymentService {
             };
 
         } catch (error) {
-            console.error('❌ Cashfree order creation failed:', error.response?.data || error.message);
+            console.error(`[CashfreePayment] Order creation failed: ${orderId}`, {
+                error: error.response?.data || error.message,
+                status: error.response?.status
+            });
+
+            // Provide more helpful error messages
+            let errorMessage = error.response?.data?.message || error.message;
+            
+            if (error.response?.status === 401 || error.response?.status === 403) {
+                errorMessage = 'Payment gateway authentication failed. Please contact support.';
+            } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+                errorMessage = 'Payment gateway is temporarily unavailable. Please try again later.';
+            }
 
             return {
                 success: false,
-                error: error.response?.data?.message || error.message
+                error: errorMessage,
+                statusCode: error.response?.status
             };
         }
     }
@@ -146,7 +189,7 @@ class CashfreePaymentService {
      */
     getCheckoutUrl(paymentSessionId) {
         // Cashfree hosted checkout URL
-        if (this.environment === 'production') {
+        if (this.isProduction) {
             return `https://payments.cashfree.com/forms/${paymentSessionId}`;
         } else {
             return `https://payments-test.cashfree.com/forms/${paymentSessionId}`;

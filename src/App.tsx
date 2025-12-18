@@ -36,6 +36,7 @@ import { AdditionalInformationPage } from './components/pages/AdditionalInformat
 import { ApplicationUnderReviewPage } from './components/pages/ApplicationUnderReviewPage';
 import { PostDisbursalFlowPage } from './components/pages/PostDisbursalFlowPage';
 import { RepaymentSchedulePage } from './components/pages/RepaymentSchedulePage';
+import { PaymentReturnPage } from './components/pages/PaymentReturnPage';
 import { AccountAggregatorFlow } from './components/pages/AccountAggregatorFlow';
 import { ApplicationFlow } from './components/ApplicationFlow';
 import { CreditScorePage } from './components/pages/CreditScorePage';
@@ -414,6 +415,16 @@ function AppContent() {
           isAuthenticated ? (
             <DashboardLayout>
               <RepaymentSchedulePage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+
+        <Route path="/payment/return" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <PaymentReturnPage />
             </DashboardLayout>
           ) : (
             <Navigate to="/auth" replace />

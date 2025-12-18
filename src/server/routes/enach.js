@@ -10,16 +10,44 @@ const CASHFREE_API_BASE = process.env.CASHFREE_API_BASE || 'https://sandbox.cash
 const CASHFREE_CLIENT_ID = process.env.CASHFREE_CLIENT_ID;
 const CASHFREE_CLIENT_SECRET = process.env.CASHFREE_CLIENT_SECRET;
 const CASHFREE_API_VERSION = process.env.CASHFREE_API_VERSION || '2025-01-01';
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+// Detect if we're using production API
+const IS_PRODUCTION = CASHFREE_API_BASE.includes('api.cashfree.com') && 
+                      !CASHFREE_API_BASE.includes('sandbox');
+
+// Validate configuration on startup
+if (!CASHFREE_CLIENT_ID || !CASHFREE_CLIENT_SECRET) {
+    console.warn('⚠️  WARNING: Cashfree credentials not configured. eNACH features will not work.');
+    if (NODE_ENV === 'production') {
+        console.error('❌ ERROR: Cashfree credentials are required in production!');
+    }
+}
+
+// Log environment on startup
+console.log(`[eNACH] Environment: ${NODE_ENV}`);
+console.log(`[eNACH] API Base: ${CASHFREE_API_BASE}`);
+console.log(`[eNACH] Production Mode: ${IS_PRODUCTION ? '✅ YES' : '❌ NO (Sandbox)'}`);
 
 // Helper to create Cashfree headers
-const getCashfreeHeaders = () => ({
-    'Content-Type': 'application/json',
-    'x-api-version': CASHFREE_API_VERSION,
-    'x-client-id': CASHFREE_CLIENT_ID,
-    'x-client-secret': CASHFREE_CLIENT_SECRET,
-    'x-request-id': uuidv4(),
-    'x-idempotency-key': uuidv4(),
-});
+const getCashfreeHeaders = (idempotencyKey = null) => {
+    const headers = {
+        'Content-Type': 'application/json',
+        'x-api-version': CASHFREE_API_VERSION,
+        'x-client-id': CASHFREE_CLIENT_ID,
+        'x-client-secret': CASHFREE_CLIENT_SECRET,
+        'x-request-id': uuidv4(),
+    };
+    
+    if (idempotencyKey) {
+        headers['x-idempotency-key'] = idempotencyKey;
+    } else {
+        headers['x-idempotency-key'] = uuidv4();
+    }
+    
+    return headers;
+};
 
 /**
  * POST /api/enach/create-subscription
@@ -27,6 +55,15 @@ const getCashfreeHeaders = () => ({
  */
 router.post('/create-subscription', authenticateToken, async (req, res) => {
     try {
+        // Validate Cashfree configuration
+        if (!CASHFREE_CLIENT_ID || !CASHFREE_CLIENT_SECRET) {
+            return res.status(500).json({
+                success: false,
+                message: 'eNACH service is not configured. Please contact support.',
+                error: 'CASHFREE_CLIENT_ID or CASHFREE_CLIENT_SECRET not set'
+            });
+        }
+
         await initializeDatabase();
         const userId = req.user.id;
         const { applicationId } = req.body;
@@ -113,16 +150,63 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         };
 
         let planResponse;
+        let planCreated = false;
         try {
             planResponse = await axios.post(
-                `${CASHFREE_API_BASE}/plans`,  // Correct endpoint: /plans not /subscriptions/plans
+                `${CASHFREE_API_BASE}/plans`,
                 planPayload,
-                { headers: getCashfreeHeaders() }
+                { headers: getCashfreeHeaders(planId) } // Use plan_id as idempotency key
             );
-            console.log('Plan created:', planResponse.data);
+            console.log(`[eNACH] Plan created: ${planId}`, {
+                cf_plan_id: planResponse.data.cf_plan_id,
+                status: planResponse.data.plan_status
+            });
+            planCreated = true;
+            
+            // Store plan in database
+            try {
+                await executeQuery(`
+                    INSERT INTO enach_plans 
+                    (plan_id, cf_plan_id, plan_name, plan_type, plan_currency, 
+                     plan_recurring_amount, plan_max_amount, plan_max_cycles, 
+                     plan_intervals, plan_interval_type, plan_note, plan_status, 
+                     loan_application_id, cashfree_response, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                    ON DUPLICATE KEY UPDATE
+                        cf_plan_id = VALUES(cf_plan_id),
+                        plan_status = VALUES(plan_status),
+                        cashfree_response = VALUES(cashfree_response),
+                        updated_at = NOW()
+                `, [
+                    planId,
+                    planResponse.data.cf_plan_id || null,
+                    planPayload.plan_name,
+                    planPayload.plan_type,
+                    planPayload.plan_currency,
+                    planPayload.plan_recurring_amount,
+                    planPayload.plan_max_amount,
+                    planPayload.plan_max_cycles,
+                    planPayload.plan_intervals,
+                    planPayload.plan_interval_type,
+                    planPayload.plan_note,
+                    planResponse.data.plan_status || 'ACTIVE',
+                    applicationId,
+                    JSON.stringify(planResponse.data)
+                ]);
+            } catch (dbError) {
+                console.warn('[eNACH] Failed to store plan in database:', dbError.message);
+                // Continue - not critical
+            }
         } catch (planError) {
-            console.error('Error creating plan:', planError.response?.data || planError.message);
-            // Continue with subscription creation even if plan already exists
+            // If plan already exists, that's fine - continue
+            if (planError.response?.status === 400 && 
+                (planError.response?.data?.message?.includes('already exists') ||
+                 planError.response?.data?.message?.includes('Plan already created'))) {
+                console.log(`[eNACH] Plan ${planId} already exists, continuing...`);
+            } else {
+                console.error('[eNACH] Error creating plan:', planError.response?.data || planError.message);
+                // Continue with subscription creation even if plan creation fails
+            }
         }
 
         // Step 2: Create Subscription
@@ -151,21 +235,29 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 }
             ],
             subscription_meta: {
-                return_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/post-disbursal?applicationId=${applicationId}&enach=complete`,
+                return_url: `${FRONTEND_URL}/post-disbursal?applicationId=${applicationId}&enach=complete`,
                 notification_channel: ['EMAIL', 'SMS']
             }
             // Don't include authorization_details - Cashfree adds it automatically
         };
 
-        console.log('Creating subscription with payload:', JSON.stringify(subscriptionPayload, null, 2));
+        console.log(`[eNACH] Creating subscription for application ${applicationId}`, {
+            subscription_id: subscriptionId,
+            plan_id: planId,
+            environment: IS_PRODUCTION ? 'PRODUCTION' : 'SANDBOX'
+        });
 
         const subscriptionResponse = await axios.post(
             `${CASHFREE_API_BASE}/subscriptions`,
             subscriptionPayload,
-            { headers: getCashfreeHeaders() }
+            { headers: getCashfreeHeaders(subscriptionId) } // Use subscription_id as idempotency key
         );
 
-        console.log('Subscription created:', subscriptionResponse.data);
+        console.log(`[eNACH] Subscription created: ${subscriptionId}`, {
+            cf_subscription_id: subscriptionResponse.data.cf_subscription_id,
+            status: subscriptionResponse.data.subscription_status,
+            environment: IS_PRODUCTION ? 'PRODUCTION' : 'SANDBOX'
+        });
 
         // For eNACH, there's no hosted checkout page
         // The mandate setup happens via bank's own flow
@@ -191,6 +283,13 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
       (user_id, loan_application_id, subscription_id, cf_subscription_id, plan_id, status, 
        subscription_session_id, cashfree_response, authorization_url, initialized_at, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+      ON DUPLICATE KEY UPDATE
+        cf_subscription_id = VALUES(cf_subscription_id),
+        subscription_session_id = VALUES(subscription_session_id),
+        status = VALUES(status),
+        cashfree_response = VALUES(cashfree_response),
+        authorization_url = VALUES(authorization_url),
+        updated_at = NOW()
     `;
 
         await executeQuery(insertQuery, [
@@ -199,7 +298,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             subscriptionId,
             subscriptionResponse.data.cf_subscription_id || null,
             planId,
-            'INITIALIZED',
+            subscriptionResponse.data.subscription_status || 'INITIALIZED',
             subscriptionResponse.data.subscription_session_id || null,
             JSON.stringify(subscriptionResponse.data),
             authorizationUrl
@@ -221,10 +320,15 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error creating eNACH subscription:', error.response?.data || error.message);
+        console.error('[eNACH] Error creating subscription:', {
+            error: error.response?.data || error.message,
+            status: error.response?.status,
+            subscription_id: subscriptionId || 'N/A'
+        });
 
         // Provide more helpful error messages
         let errorMessage = 'Failed to create eNACH subscription';
+        let statusCode = 500;
 
         if (error.response?.data?.message) {
             const cashfreeError = error.response.data.message;
@@ -234,17 +338,27 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 errorMessage = 'The bank account details are not supported by the payment gateway. Please use a different bank account (HDFC, ICICI, SBI, Axis, etc.) or contact support.';
             } else if (cashfreeError.includes('IFSC')) {
                 errorMessage = 'Invalid IFSC code. Please verify your bank details.';
+            } else if (cashfreeError.includes('authentication') || cashfreeError.includes('credentials')) {
+                errorMessage = 'Payment gateway authentication failed. Please contact support.';
+                statusCode = 503; // Service unavailable
+            } else if (error.response.status === 401 || error.response.status === 403) {
+                errorMessage = 'Payment gateway authentication failed. Please contact support.';
+                statusCode = 503;
             } else {
                 errorMessage = cashfreeError;
             }
+        } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+            errorMessage = 'Payment gateway is temporarily unavailable. Please try again later.';
+            statusCode = 503;
         }
 
-        res.status(500).json({
+        res.status(statusCode).json({
             success: false,
             message: errorMessage,
             error: error.response?.data?.message || error.message,
-            debug: process.env.NODE_ENV === 'development' ? {
-                bank_code_sent: error.config?.data ? JSON.parse(error.config.data).customer_details?.customer_bank_code : 'N/A'
+            debug: NODE_ENV === 'development' ? {
+                bank_code_sent: error.config?.data ? JSON.parse(error.config.data).customer_details?.customer_bank_code : 'N/A',
+                environment: IS_PRODUCTION ? 'PRODUCTION' : 'SANDBOX'
             } : undefined
         });
     }
@@ -328,6 +442,61 @@ router.get('/subscription/:applicationId', authenticateToken, async (req, res) =
         res.status(500).json({
             success: false,
             message: 'Failed to fetch subscription'
+        });
+    }
+});
+
+/**
+ * GET /api/enach/health
+ * Health check endpoint for eNACH service
+ */
+router.get('/health', async (req, res) => {
+    try {
+        const health = {
+            service: 'eNACH',
+            status: 'ok',
+            environment: NODE_ENV,
+            production: IS_PRODUCTION,
+            api_base: CASHFREE_API_BASE,
+            configured: !!(CASHFREE_CLIENT_ID && CASHFREE_CLIENT_SECRET),
+            timestamp: new Date().toISOString()
+        };
+
+        // Test database connection
+        try {
+            await initializeDatabase();
+            health.database = 'connected';
+        } catch (dbError) {
+            health.database = 'error';
+            health.database_error = dbError.message;
+        }
+
+        // Test if tables exist
+        try {
+            const tables = await executeQuery(`
+                SELECT TABLE_NAME 
+                FROM INFORMATION_SCHEMA.TABLES 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME IN ('enach_plans', 'enach_subscriptions', 'enach_webhook_events')
+            `);
+            health.tables = {
+                enach_plans: tables.some(t => t.TABLE_NAME === 'enach_plans'),
+                enach_subscriptions: tables.some(t => t.TABLE_NAME === 'enach_subscriptions'),
+                enach_webhook_events: tables.some(t => t.TABLE_NAME === 'enach_webhook_events')
+            };
+        } catch (tableError) {
+            health.tables = 'error';
+            health.tables_error = tableError.message;
+        }
+
+        const statusCode = health.configured && health.database === 'connected' ? 200 : 503;
+        res.status(statusCode).json(health);
+    } catch (error) {
+        res.status(503).json({
+            service: 'eNACH',
+            status: 'error',
+            error: error.message,
+            timestamp: new Date().toISOString()
         });
     }
 });

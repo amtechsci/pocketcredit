@@ -57,8 +57,10 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         );
 
         // Create Cashfree order
-        const returnUrl = `${process.env.APP_URL}/payment/return`;
-        const notifyUrl = `${process.env.APP_URL}/api/payment/webhook`;
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        const backendUrl = process.env.BACKEND_URL || process.env.APP_URL || 'http://localhost:3001';
+        const returnUrl = `${frontendUrl}/payment/return?orderId=${orderId}`;
+        const notifyUrl = `${backendUrl}/api/payment/webhook`;
 
         const orderResult = await cashfreePayment.createOrder({
             orderId,
@@ -71,9 +73,20 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         });
 
         if (!orderResult.success) {
-            return res.status(500).json({
+            console.error('[Payment] Cashfree order creation failed:', orderResult.error);
+            
+            // Update order status to FAILED
+            await executeQuery(
+                `UPDATE payment_orders 
+           SET status = 'FAILED', updated_at = NOW() 
+           WHERE order_id = ?`,
+                [orderId]
+            );
+            
+            const statusCode = orderResult.statusCode || 500;
+            return res.status(statusCode).json({
                 success: false,
-                message: 'Failed to create payment order',
+                message: orderResult.error || 'Failed to create payment order',
                 error: orderResult.error
             });
         }

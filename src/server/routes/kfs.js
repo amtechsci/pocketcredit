@@ -3,7 +3,7 @@ const router = express.Router();
 const { authenticateAdmin } = require('../middleware/auth');
 const { requireAuth } = require('../middleware/jwtAuth');
 const { initializeDatabase, executeQuery } = require('../config/database');
-const { calculateLoanValues, calculateTotalDays, calculateCompleteLoanValues } = require('../utils/loanCalculations');
+const { calculateLoanValues, calculateTotalDays, calculateCompleteLoanValues, calculateInterestDays } = require('../utils/loanCalculations');
 const pdfService = require('../services/pdfService');
 const emailService = require('../services/emailService');
 
@@ -166,6 +166,14 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       console.log(`📅 Using planned repayment days (for KFS/Agreement documents)`);
     }
 
+    // Calculate PLANNED loan term days (for due date calculation) - always use planned term, not exhausted days
+    // This should be calculated from the disbursement date (or today if not disbursed) using the plan
+    const plannedTermCalculationDate = loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)
+      ? new Date(loan.disbursed_at)  // Use disbursed date for planned term calculation
+      : new Date();  // Use today for pending loans
+    const plannedTermResult = calculateInterestDays(planData, userData, plannedTermCalculationDate);
+    const plannedTermDays = plannedTermResult.days;
+
     // KFS should show the original planned loan terms for documents, but actual days for repayment schedule
     // Use plan's repayment days calculation (could be fixed days or salary-based) unless useActualDays is true
     const calculationOptions = {
@@ -175,7 +183,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       customDays: actualExhaustedDays  // Only override with actual exhausted days if useActualDays=true
     };
 
-    // Calculate loan values using actual exhausted days (not plan days)
+    // Calculate loan values using actual exhausted days (not plan days) for interest calculation
     const loanValues = calculateCompleteLoanValues(loanData, planData, userData, calculationOptions);
 
     // Parse fees breakdown if it's a JSON string
@@ -238,8 +246,8 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         principal_amount: loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0,
         disbursal_amount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
         disbursed_at: loan.disbursed_at || null,
-        loan_term_days: loanValues.interest?.days || loan.loan_term_days || loanPlan.tenure_days || loanPlan.repayment_days || loanPlan.total_duration_days || 0,
-        loan_term_months: Math.ceil((loanValues.interest?.days || loan.loan_term_days || loanPlan.tenure_days || loanPlan.repayment_days || loanPlan.total_duration_days || 0) / 30),
+        loan_term_days: plannedTermDays || loan.loan_term_days || loanPlan.tenure_days || loanPlan.repayment_days || loanPlan.total_duration_days || 0,
+        loan_term_months: Math.ceil((plannedTermDays || loan.loan_term_days || loanPlan.tenure_days || loanPlan.repayment_days || loanPlan.total_duration_days || 0) / 30),
         interest_rate: loan.interest_rate || loanPlan.base_interest_rate || 0,
         repayment_frequency: loanPlan.repayment_frequency || 'Monthly'
       },
@@ -543,6 +551,13 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       ? new Date(loan.disbursed_at)
       : new Date();
 
+    // Calculate PLANNED loan term days (for due date and loan_term_days) - always use planned term
+    const plannedTermCalculationDate = loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)
+      ? new Date(loan.disbursed_at)  // Use disbursed date for planned term calculation
+      : new Date();  // Use today for pending loans
+    const plannedTermResult = calculateInterestDays(planData, userData, plannedTermCalculationDate);
+    const plannedTermDays = plannedTermResult.days;
+
     // Use centralized calculation function
     let calculations;
     try {
@@ -570,14 +585,17 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     const totalCharges = processingFee + gst + calculations.totals.repayableFee + interest;
     const apr = days > 0 ? ((totalCharges / principal) / days) * 36500 : 0;
 
-    // Generate due date from repayment date or calculate
+    // Generate due date from repayment date or calculate using PLANNED term days
     let dueDate;
     if (calculations.interest.repayment_date) {
       dueDate = new Date(calculations.interest.repayment_date);
     } else {
-      const today = new Date();
-      dueDate = new Date(today);
-      dueDate.setDate(today.getDate() + days);
+      // Use disbursed date (or today if not disbursed) + planned term days
+      const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+      baseDate.setHours(0, 0, 0, 0);
+      dueDate = new Date(baseDate);
+      dueDate.setDate(dueDate.getDate() + plannedTermDays);
+      dueDate.setHours(0, 0, 0, 0);
     }
 
     // Prepare KFS data
@@ -602,7 +620,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         type: loan.loan_purpose || 'Personal Loan',
         sanctioned_amount: principal,
         disbursed_amount: disbAmount,
-        loan_term_days: days,
+        loan_term_days: plannedTermDays,
         status: loan.status,
         created_at: loan.created_at,
         applied_date: loan.created_at,

@@ -16,22 +16,34 @@ const router = express.Router();
 const crypto = require('crypto');
 const { executeQuery, initializeDatabase } = require('../config/database');
 
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const CASHFREE_WEBHOOK_SECRET = process.env.CASHFREE_WEBHOOK_SECRET;
+
 // Webhook signature verification (if Cashfree provides it)
 function verifyWebhookSignature(payload, signature, secret) {
     if (!secret || !signature) {
-        console.warn('[Webhook] Signature verification skipped - no secret configured');
-        return true; // Skip if not configured
+        if (NODE_ENV === 'production') {
+            console.warn('[Webhook] WARNING: Signature verification skipped in production - webhook secret not configured');
+        } else {
+            console.warn('[Webhook] Signature verification skipped - no secret configured');
+        }
+        return true; // Skip if not configured (but warn in production)
     }
 
-    const computed = crypto
-        .createHmac('sha256', secret)
-        .update(JSON.stringify(payload))
-        .digest('hex');
+    try {
+        const computed = crypto
+            .createHmac('sha256', secret)
+            .update(JSON.stringify(payload))
+            .digest('hex');
 
-    return crypto.timingSafeEqual(
-        Buffer.from(signature),
-        Buffer.from(computed)
-    );
+        return crypto.timingSafeEqual(
+            Buffer.from(signature),
+            Buffer.from(computed)
+        );
+    } catch (error) {
+        console.error('[Webhook] Signature verification error:', error);
+        return false;
+    }
 }
 
 /**
@@ -40,10 +52,25 @@ function verifyWebhookSignature(payload, signature, secret) {
  */
 router.post('/webhook', express.json(), async (req, res) => {
     const requestId = req.headers['x-request-id'] || `webhook_${Date.now()}`;
+    const signature = req.headers['x-cashfree-signature'] || req.headers['x-webhook-signature'];
+
+    // Verify webhook signature if secret is configured
+    if (CASHFREE_WEBHOOK_SECRET && signature) {
+        const isValid = verifyWebhookSignature(req.body, signature, CASHFREE_WEBHOOK_SECRET);
+        if (!isValid) {
+            console.error(`[Webhook ${requestId}] Invalid signature - rejecting webhook`);
+            return res.status(401).json({
+                status: 'error',
+                message: 'Invalid webhook signature',
+                requestId
+            });
+        }
+    }
 
     console.log(`[Webhook ${requestId}] Received event:`, {
         type: req.body.type,
-        subscriptionId: req.body.data?.subscription?.subscription_id
+        subscriptionId: req.body.data?.subscription?.subscription_id,
+        environment: NODE_ENV
     });
 
     try {
@@ -75,14 +102,14 @@ router.post('/webhook', express.json(), async (req, res) => {
             `INSERT INTO enach_webhook_events 
        (event_id, event_type, subscription_id, cf_subscription_id, payload, signature, received_at) 
        VALUES (?, ?, ?, ?, ?, ?, NOW())
-       ON DUPLICATE KEY UPDATE payload = VALUES(payload), signature = VALUES(signature)`,
+       ON DUPLICATE KEY UPDATE payload = VALUES(payload), signature = VALUES(signature), received_at = VALUES(received_at)`,
             [
                 eventId,
                 eventType,
                 eventData?.subscription?.subscription_id || null,
                 eventData?.subscription?.cf_subscription_id || null,
                 JSON.stringify(req.body),
-                req.headers['x-webhook-signature'] || null
+                signature || null
             ]
         );
 

@@ -15,9 +15,16 @@ class CashfreeSubscriptionsService {
         this.clientId = process.env.CASHFREE_CLIENT_ID;
         this.clientSecret = process.env.CASHFREE_CLIENT_SECRET;
         this.apiVersion = process.env.CASHFREE_API_VERSION || '2025-01-01';
+        this.isProduction = this.apiBase.includes('api.cashfree.com') && 
+                           !this.apiBase.includes('sandbox');
 
         if (!this.clientId || !this.clientSecret) {
-            throw new Error('CASHFREE_CLIENT_ID and CASHFREE_CLIENT_SECRET must be set');
+            console.warn('⚠️  Cashfree credentials not configured');
+            if (process.env.NODE_ENV === 'production') {
+                throw new Error('CASHFREE_CLIENT_ID and CASHFREE_CLIENT_SECRET must be set in production');
+            }
+        } else {
+            console.log(`[CashfreeService] Initialized - Environment: ${this.isProduction ? 'PRODUCTION' : 'SANDBOX'}`);
         }
 
         // Axios instance with defaults
