@@ -281,33 +281,60 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         }
 
         // If still no URL and we have a subscription_session_id, try to fetch authorization URL
+        // Try multiple API endpoints to get the authorization URL
         if (!authorizationUrl && subscriptionResponse.data.subscription_session_id) {
-            try {
-                console.log(`[eNACH] Fetching authorization URL for session: ${subscriptionResponse.data.subscription_session_id}`);
-                const authResponse = await axios.get(
-                    `${CASHFREE_API_BASE}/subscriptions/${subscriptionId}/authorization`,
-                    { headers: getCashfreeHeaders() }
-                );
-                
-                if (authResponse.data?.authorization_url) {
-                    authorizationUrl = authResponse.data.authorization_url;
-                    console.log(`[eNACH] Retrieved authorization URL from separate API call`);
+            const sessionId = subscriptionResponse.data.subscription_session_id;
+            const cfSubscriptionId = subscriptionResponse.data.cf_subscription_id;
+            
+            // Try endpoint 1: Get authorization details using subscription ID
+            if (cfSubscriptionId) {
+                try {
+                    console.log(`[eNACH] Fetching authorization URL for subscription: ${cfSubscriptionId}`);
+                    const authResponse = await axios.get(
+                        `${CASHFREE_API_BASE}/subscriptions/${cfSubscriptionId}/authorization`,
+                        { headers: getCashfreeHeaders() }
+                    );
+                    
+                    if (authResponse.data?.authorization_url) {
+                        authorizationUrl = authResponse.data.authorization_url;
+                        console.log(`[eNACH] Retrieved authorization URL from API: ${authorizationUrl}`);
+                    }
+                } catch (authError) {
+                    console.warn('[eNACH] Could not fetch authorization URL from subscription endpoint:', authError.response?.data || authError.message);
                 }
-            } catch (authError) {
-                console.warn('[eNACH] Could not fetch authorization URL separately:', authError.response?.data || authError.message);
+            }
+            
+            // Try endpoint 2: Get authorization details using our subscription ID
+            if (!authorizationUrl) {
+                try {
+                    console.log(`[eNACH] Fetching authorization URL using subscription ID: ${subscriptionId}`);
+                    const authResponse = await axios.get(
+                        `${CASHFREE_API_BASE}/subscriptions/${subscriptionId}/authorization`,
+                        { headers: getCashfreeHeaders() }
+                    );
+                    
+                    if (authResponse.data?.authorization_url) {
+                        authorizationUrl = authResponse.data.authorization_url;
+                        console.log(`[eNACH] Retrieved authorization URL from API: ${authorizationUrl}`);
+                    }
+                } catch (authError) {
+                    console.warn('[eNACH] Could not fetch authorization URL from subscription ID endpoint:', authError.response?.data || authError.message);
+                }
             }
         }
 
         // If still no URL, construct it using subscription_session_id if available
         if (!authorizationUrl && subscriptionResponse.data.subscription_session_id) {
-            // Construct authorization URL based on Cashfree's pattern
-            // Production: https://www.cashfree.com/subscriptions/authorize/{session_id}
-            // Sandbox: https://sandbox.cashfree.com/subscriptions/authorize/{session_id}
-            const baseUrl = IS_PRODUCTION 
-                ? 'https://www.cashfree.com/subscriptions/authorize'
-                : 'https://sandbox.cashfree.com/subscriptions/authorize';
-            authorizationUrl = `${baseUrl}/${subscriptionResponse.data.subscription_session_id}`;
-            console.log(`[eNACH] Constructed authorization URL: ${authorizationUrl}`);
+            // For eNACH subscriptions, use the checkout URL format with subscription_session_id
+            // This is the correct format for Cashfree subscription authorization
+            // Production: https://payments.cashfree.com/checkout/subscription?subscription_session_id={session_id}
+            // Sandbox: https://payments-test.cashfree.com/checkout/subscription?subscription_session_id={session_id}
+            const checkoutDomain = IS_PRODUCTION 
+                ? 'https://payments.cashfree.com'
+                : 'https://payments-test.cashfree.com';
+            const sessionId = subscriptionResponse.data.subscription_session_id;
+            authorizationUrl = `${checkoutDomain}/checkout/subscription?subscription_session_id=${encodeURIComponent(sessionId)}`;
+            console.log(`[eNACH] Constructed authorization URL using checkout format: ${authorizationUrl}`);
         }
 
         if (!authorizationUrl) {
