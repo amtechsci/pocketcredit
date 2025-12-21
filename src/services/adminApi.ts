@@ -1037,8 +1037,6 @@ class AdminApiService {
       principalAmount: data.principalAmount || data.loan_amount
     });
   }
-    return response.data;
-  }
 
   async calculateLoanPreview(data: { loan_amount: number; processing_fee_percent: number; interest_percent_per_day: number; days: number }): Promise<ApiResponse<any>> {
     const response = await axios.post('/api/loan-calculations/calculate', data, {

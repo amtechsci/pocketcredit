@@ -7921,5 +7921,3 @@ export function UserProfileDetail() {
     </div>
   );
 }
-}
-}
