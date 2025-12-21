@@ -20,7 +20,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         email_verified, phone_verified, status, profile_completion_step, 
         profile_completed, eligibility_status, eligibility_reason, 
         eligibility_retry_date, selected_loan_plan_id, created_at, updated_at, last_login_at,
-        pan_number, alternate_mobile, company_name, company_email, salary_date
+        pan_number, alternate_mobile, company_name, company_email, salary_date,
+        personal_email, official_email
       FROM users 
       WHERE id = ?
     `, [userId]);
@@ -277,11 +278,17 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       };
     }
 
+    // Generate customer unique ID (CLID) - format: PC + user ID
+    const clid = `PC${String(user.id).padStart(5, '0')}`;
+
     // Transform user data to match frontend expectations
     const userProfile = {
       id: user.id,
+      clid: clid,
       name: `${user.first_name} ${user.last_name || ''}`.trim(),
-      email: user.email || 'N/A',
+      email: user.email || user.personal_email || user.official_email || 'N/A',
+      personalEmail: user.personal_email || null,
+      officialEmail: user.official_email || null,
       mobile: user.phone || 'N/A',
       dateOfBirth: user.date_of_birth ? new Date(user.date_of_birth).toLocaleDateString('en-IN') : 'N/A',
       panNumber: user.pan_number || 'N/A',
@@ -341,7 +348,12 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       followUps: [],
       notes: [],
       smsHistory: [],
-      loginHistory: [],
+      loginHistory: user.last_login_at ? [{
+        time: new Date(user.last_login_at).toLocaleString('en-IN'),
+        ip: 'N/A',
+        device: 'N/A',
+        location: 'N/A'
+      }] : [],
       bankStatement: bankStatement,
       kycVerification: kycData,
       kycDocuments: kycDocuments,
@@ -361,9 +373,14 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         const totalInterest = emi * app.tenure_months - app.loan_amount;
         const totalAmount = app.loan_amount + processingFee + gst + totalInterest;
 
+        // Generate shorter loan ID format: PLL + 4 digits (last 4 digits of application number or ID)
+        const loanIdDigits = app.application_number ? app.application_number.slice(-4) : String(app.id).padStart(4, '0').slice(-4);
+        const shortLoanId = `PLL${loanIdDigits}`;
+
         return {
           id: app.id,
           loanId: app.application_number,
+          shortLoanId: shortLoanId,
           amount: app.loan_amount,
           principalAmount: app.loan_amount,
           type: app.loan_purpose || 'Personal Loan',
@@ -640,6 +657,84 @@ router.put('/:userId/bank-details/:bankId', authenticateAdmin, async (req, res) 
     res.status(500).json({
       status: 'error',
       message: 'Failed to update bank details status'
+    });
+  }
+});
+
+// Update bank details (edit)
+router.put('/:userId/bank-details/:bankId/edit', authenticateAdmin, async (req, res) => {
+  try {
+    console.log('🏦 Updating bank details:', req.params.bankId);
+    await initializeDatabase();
+    const { userId, bankId } = req.params;
+    const { bankName, accountNumber, ifscCode, accountHolderName, branchName, accountType } = req.body;
+
+    // Verify bank detail belongs to user
+    const existing = await executeQuery(
+      'SELECT id FROM bank_details WHERE id = ? AND user_id = ?',
+      [bankId, userId]
+    );
+
+    if (!existing || existing.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Bank detail not found'
+      });
+    }
+
+    const updates = [];
+    const values = [];
+
+    if (bankName) {
+      updates.push('bank_name = ?');
+      values.push(bankName);
+    }
+    if (accountNumber) {
+      updates.push('account_number = ?');
+      values.push(accountNumber);
+    }
+    if (ifscCode) {
+      updates.push('ifsc_code = ?');
+      values.push(ifscCode.toUpperCase());
+    }
+    if (accountHolderName) {
+      updates.push('account_holder_name = ?');
+      values.push(accountHolderName);
+    }
+    if (branchName !== undefined) {
+      updates.push('branch_name = ?');
+      values.push(branchName);
+    }
+    if (accountType) {
+      updates.push('account_type = ?');
+      values.push(accountType);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'No fields to update provided'
+      });
+    }
+
+    values.push(bankId, userId);
+
+    await executeQuery(
+      `UPDATE bank_details SET ${updates.join(', ')}, updated_at = NOW() WHERE id = ? AND user_id = ?`,
+      values
+    );
+
+    console.log('✅ Bank details updated successfully');
+    res.json({
+      status: 'success',
+      message: 'Bank details updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Update bank details error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update bank details'
     });
   }
 });

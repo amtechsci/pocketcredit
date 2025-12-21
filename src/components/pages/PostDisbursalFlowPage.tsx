@@ -421,11 +421,19 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
       const response = await apiService.getEnachSubscription(applicationId);
       if (response.success && response.data) {
         setExistingSubscription(response.data);
+        const subscription = response.data;
 
         // If subscription is already active, auto-complete this step
-        if (response.data.status === 'ACTIVE' || response.data.status === 'AUTHENTICATED') {
+        if (subscription.status === 'ACTIVE' || subscription.status === 'AUTHENTICATED' || 
+            subscription.mandate_status === 'APPROVED') {
+          console.log('✅ eNACH mandate already authorized');
           toast.success('eNACH mandate already authorized');
           onComplete();
+        } else if (subscription.authorization_url && 
+                   (subscription.status === 'INITIALIZED' || subscription.status === 'PENDING')) {
+          // If there's a pending subscription with authorization URL, user might need to complete it
+          console.log('ℹ️ Existing pending eNACH subscription found');
+          // Don't auto-redirect - let user click the button to continue
         }
       }
     } catch (err) {
@@ -449,29 +457,20 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
       if (response.success && response.data) {
         const { authorization_url, subscription_id } = response.data;
 
-        if (authorization_url) {
-          toast.success('Redirecting to eNACH authorization...');
-
-          // Store subscription ID in session for when user returns
-          sessionStorage.setItem('enach_subscription_id', subscription_id);
-
-          // Redirect to Cashfree authorization page
-          window.location.href = authorization_url;
-        } else {
-          // For eNACH, mandate link is sent via SMS/Email
-          toast.success('eNACH mandate link sent to your mobile and email');
-
-          // Show success message and mark as pending
-          setError(null);
-
-          // Auto-complete after showing message
-          setTimeout(() => {
-            toast.info('Please check your SMS/Email and authorize the eNACH mandate', {
-              duration: 5000
-            });
-            onComplete();
-          }, 2000);
+        if (!authorization_url) {
+          throw new Error('Authorization URL not received. Please try again.');
         }
+
+        // Store subscription ID and application ID in session for when user returns
+        sessionStorage.setItem('enach_subscription_id', subscription_id);
+        sessionStorage.setItem('enach_application_id', applicationId.toString());
+        sessionStorage.setItem('enach_return_url', window.location.href);
+
+        toast.success('Redirecting to eNACH authorization...');
+
+        // Redirect to Cashfree authorization page (dashboard-based flow)
+        // User will complete mandate there and return via return_url
+        window.location.href = authorization_url;
       } else {
         throw new Error(response.message || 'Failed to create eNACH subscription');
       }
@@ -479,47 +478,104 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
       console.error('Error creating eNACH subscription:', err);
       setError(err.message || 'Failed to create eNACH subscription. Please try again.');
       toast.error(err.message || 'Failed to create eNACH subscription');
-    } finally {
       setLoading(false);
     }
+    // Note: Don't set loading to false here since we're redirecting
   };
 
-  // Check if returning from authorization
+  // Check if returning from authorization (dashboard redirect)
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const enachComplete = urlParams.get('enach');
-    const subscriptionId = sessionStorage.getItem('enach_subscription_id');
+    const subscriptionIdParam = urlParams.get('subscription_id');
+    const subscriptionId = subscriptionIdParam || sessionStorage.getItem('enach_subscription_id');
+    const savedApplicationId = sessionStorage.getItem('enach_application_id');
 
+    // Only process if we're returning from eNACH authorization
     if (enachComplete === 'complete' && subscriptionId) {
-      // User returned from authorization - check status
-      checkAuthorizationStatus(subscriptionId);
-      // Clean up
-      sessionStorage.removeItem('enach_subscription_id');
-      // Remove query param
-      window.history.replaceState({}, '', window.location.pathname + `?applicationId=${applicationId}`);
-    }
-  }, []);
+      console.log('🔄 User returned from eNACH authorization, checking status...');
+      setLoading(true);
+      
+      // Verify application ID matches
+      if (savedApplicationId && savedApplicationId !== applicationId.toString()) {
+        console.warn('Application ID mismatch, using saved ID');
+      }
 
-  const checkAuthorizationStatus = async (subscriptionId: string) => {
+      // Check authorization status with polling
+      checkAuthorizationStatusWithPolling(subscriptionId);
+      
+      // Clean up session storage
+      sessionStorage.removeItem('enach_subscription_id');
+      sessionStorage.removeItem('enach_application_id');
+      sessionStorage.removeItem('enach_return_url');
+      
+      // Remove query params
+      const newUrl = window.location.pathname + `?applicationId=${applicationId}`;
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, [applicationId]);
+
+  const checkAuthorizationStatusWithPolling = async (subscriptionId: string, attempt: number = 1, maxAttempts: number = 10) => {
     try {
+      console.log(`[eNACH] Checking status (attempt ${attempt}/${maxAttempts})...`);
       const response = await apiService.getEnachSubscriptionStatus(subscriptionId);
 
       if (response.success && response.data) {
         const status = response.data.subscription_status;
+        const mandateStatus = response.data.mandate_status;
 
-        if (status === 'ACTIVE' || status === 'AUTHENTICATED') {
+        console.log(`[eNACH] Current status: ${status}, Mandate: ${mandateStatus}`);
+
+        // Success states - mandate is authorized
+        if (status === 'ACTIVE' || status === 'AUTHENTICATED' || mandateStatus === 'APPROVED') {
           toast.success('eNACH mandate authorized successfully!');
+          setLoading(false);
+          // Proceed to next step only after successful authorization
           onComplete();
-        } else if (status === 'INITIALIZED' || status === 'PENDING') {
-          toast.info('eNACH authorization is pending. Please wait for bank verification.');
-          // Optionally poll for status updates
-        } else {
-          toast.error('eNACH authorization failed. Please try again.');
+          return;
         }
+
+        // Failed states
+        if (status === 'CANCELLED' || status === 'FAILED' || mandateStatus === 'REJECTED') {
+          toast.error('eNACH authorization failed. Please try again.');
+          setLoading(false);
+          setError('eNACH mandate authorization was rejected. Please try again.');
+          return;
+        }
+
+        // Still pending - poll again if within limit
+        if ((status === 'INITIALIZED' || status === 'PENDING' || !mandateStatus) && attempt < maxAttempts) {
+          // Wait 2 seconds before next check
+          setTimeout(() => {
+            checkAuthorizationStatusWithPolling(subscriptionId, attempt + 1, maxAttempts);
+          }, 2000);
+          return;
+        }
+
+        // Max attempts reached but still pending
+        if (attempt >= maxAttempts) {
+          toast.warning('eNACH authorization is taking longer than expected. We will notify you once it is confirmed.');
+          setLoading(false);
+          // Don't auto-complete - wait for webhook to update status
+          // User can manually check status later
+        }
+      } else {
+        throw new Error(response.message || 'Failed to fetch subscription status');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error checking authorization status:', err);
-      toast.error('Failed to verify eNACH authorization status');
+      
+      // Retry if it's a network error and we haven't exceeded max attempts
+      if (attempt < maxAttempts && (err.message?.includes('network') || err.message?.includes('timeout'))) {
+        setTimeout(() => {
+          checkAuthorizationStatusWithPolling(subscriptionId, attempt + 1, maxAttempts);
+        }, 2000);
+        return;
+      }
+
+      toast.error('Failed to verify eNACH authorization status. Please refresh the page.');
+      setLoading(false);
+      setError('Unable to verify authorization status. Please contact support if the issue persists.');
     }
   };
 

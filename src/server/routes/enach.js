@@ -210,6 +210,8 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         }
 
         // Step 2: Create Subscription
+        // For dashboard-based eNACH flow, we include authorization_details
+        // to force redirect instead of SMS
         const subscriptionPayload = {
             subscription_id: subscriptionId,
             customer_details: {
@@ -235,10 +237,14 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 }
             ],
             subscription_meta: {
-                return_url: `${FRONTEND_URL}/post-disbursal?applicationId=${applicationId}&enach=complete`,
+                return_url: `${FRONTEND_URL}/post-disbursal?applicationId=${applicationId}&enach=complete&subscription_id=${subscriptionId}`,
                 notification_channel: ['EMAIL', 'SMS']
+            },
+            // Add authorization_details to force dashboard-based redirect flow
+            authorization_details: {
+                auth_mode: 'ONLINE',
+                action: 'authorize'
             }
-            // Don't include authorization_details - Cashfree adds it automatically
         };
 
         console.log(`[eNACH] Creating subscription for application ${applicationId}`, {
@@ -256,26 +262,64 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         console.log(`[eNACH] Subscription created: ${subscriptionId}`, {
             cf_subscription_id: subscriptionResponse.data.cf_subscription_id,
             status: subscriptionResponse.data.subscription_status,
-            environment: IS_PRODUCTION ? 'PRODUCTION' : 'SANDBOX'
+            environment: IS_PRODUCTION ? 'PRODUCTION' : 'SANDBOX',
+            full_response: JSON.stringify(subscriptionResponse.data, null, 2)
         });
 
-        // For eNACH, there's no hosted checkout page
-        // The mandate setup happens via bank's own flow
-        // Cashfree will send mandate link to customer via SMS/Email
-
-        // Check if Cashfree provided an authorization URL
+        // Extract authorization URL from response (dashboard-based flow)
         let authorizationUrl = null;
 
+        // Check multiple possible locations for authorization URL
         if (subscriptionResponse.data.authorization_details?.authorization_url) {
             authorizationUrl = subscriptionResponse.data.authorization_details.authorization_url;
         } else if (subscriptionResponse.data.authorization_url) {
             authorizationUrl = subscriptionResponse.data.authorization_url;
-        } else {
-            // For eNACH, no immediate redirect URL
-            // Customer will receive mandate link via SMS/Email from bank
-            console.log('[eNACH] No authorization URL - mandate will be sent via SMS/Email');
-            authorizationUrl = null;
+        } else if (subscriptionResponse.data.auth_link) {
+            authorizationUrl = subscriptionResponse.data.auth_link;
+        } else if (subscriptionResponse.data.authorization_link) {
+            authorizationUrl = subscriptionResponse.data.authorization_link;
         }
+
+        // If still no URL and we have a subscription_session_id, try to fetch authorization URL
+        if (!authorizationUrl && subscriptionResponse.data.subscription_session_id) {
+            try {
+                console.log(`[eNACH] Fetching authorization URL for session: ${subscriptionResponse.data.subscription_session_id}`);
+                const authResponse = await axios.get(
+                    `${CASHFREE_API_BASE}/subscriptions/${subscriptionId}/authorization`,
+                    { headers: getCashfreeHeaders() }
+                );
+                
+                if (authResponse.data?.authorization_url) {
+                    authorizationUrl = authResponse.data.authorization_url;
+                    console.log(`[eNACH] Retrieved authorization URL from separate API call`);
+                }
+            } catch (authError) {
+                console.warn('[eNACH] Could not fetch authorization URL separately:', authError.response?.data || authError.message);
+            }
+        }
+
+        // If still no URL, construct it using subscription_session_id if available
+        if (!authorizationUrl && subscriptionResponse.data.subscription_session_id) {
+            // Construct authorization URL based on Cashfree's pattern
+            // Production: https://www.cashfree.com/subscriptions/authorize/{session_id}
+            // Sandbox: https://sandbox.cashfree.com/subscriptions/authorize/{session_id}
+            const baseUrl = IS_PRODUCTION 
+                ? 'https://www.cashfree.com/subscriptions/authorize'
+                : 'https://sandbox.cashfree.com/subscriptions/authorize';
+            authorizationUrl = `${baseUrl}/${subscriptionResponse.data.subscription_session_id}`;
+            console.log(`[eNACH] Constructed authorization URL: ${authorizationUrl}`);
+        }
+
+        if (!authorizationUrl) {
+            console.error('[eNACH] No authorization URL available - cannot proceed with dashboard flow');
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to generate eNACH authorization URL. Please try again or contact support.',
+                error: 'No authorization URL in response'
+            });
+        }
+
+        console.log(`[eNACH] Authorization URL: ${authorizationUrl}`);
 
         // Store subscription details in database
         const insertQuery = `
@@ -304,7 +348,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             authorizationUrl
         ]);
 
-        // Return response to frontend
+        // Return response to frontend - always include authorization_url for redirect
         res.json({
             success: true,
             data: {
@@ -313,9 +357,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 authorization_url: authorizationUrl,
                 subscription_status: subscriptionResponse.data.subscription_status,
                 subscription_session_id: subscriptionResponse.data.subscription_session_id,
-                message: authorizationUrl
-                    ? 'Redirecting to authorization page...'
-                    : 'eNACH mandate link will be sent to your registered mobile number and email. Please check and authorize the mandate.'
+                message: 'Redirecting to eNACH authorization page...'
             }
         });
 

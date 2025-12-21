@@ -263,6 +263,10 @@ class AdminApiService {
     return this.request('PUT', `/user-profile/${userId}/bank-details/${bankId}`, { verificationStatus, rejectionReason });
   }
 
+  async updateBankDetails(userId: string, bankId: string, bankData: any): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/user-profile/${userId}/bank-details/${bankId}/edit`, bankData);
+  }
+
   // References Management
   async getUserReferences(userId: string): Promise<ApiResponse<any>> {
     return this.request('GET', `/user-profile/${userId}/references`);

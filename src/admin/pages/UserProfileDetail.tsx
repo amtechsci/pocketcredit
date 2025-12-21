@@ -48,6 +48,8 @@ export function UserProfileDetail() {
   const [showEmploymentModal, setShowEmploymentModal] = useState(false);
   const [documentType, setDocumentType] = useState('');
   const [showAddBankModal, setShowAddBankModal] = useState(false);
+  const [showEditBankModal, setShowEditBankModal] = useState(false);
+  const [editingBankId, setEditingBankId] = useState<string | null>(null);
   const [showAddReferenceModal, setShowAddReferenceModal] = useState(false);
   const [showUploadNewModal, setShowUploadNewModal] = useState(false);
   const [showAddTransactionModal, setShowAddTransactionModal] = useState(false);
@@ -925,12 +927,57 @@ export function UserProfileDetail() {
         alert('Bank details added successfully!');
         setShowAddBankModal(false);
         setBankDetailsForm({ bankName: '', accountNumber: '', ifscCode: '', accountHolderName: '', branchName: '' });
+        // Refresh user data
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success' && profileResponse.data) {
+          setUserData(profileResponse.data);
+        }
       } else {
         alert('Failed to add bank details');
       }
     } catch (error) {
       console.error('Error adding bank details:', error);
       alert('Error adding bank details');
+    }
+  };
+
+  const handleEditBankDetails = () => {
+    const bankId = getUserData('bankInfo.id') || getUserData('bankDetails.0.id');
+    if (!bankId) {
+      alert('Bank details ID not found');
+      return;
+    }
+    setEditingBankId(bankId.toString());
+    setBankDetailsForm({
+      bankName: getUserData('bankInfo.bankName') || '',
+      accountNumber: getUserData('bankInfo.accountNumber') || '',
+      ifscCode: getUserData('bankInfo.ifscCode') || '',
+      accountHolderName: getUserData('bankInfo.accountHolderName') || getUserData('name') || '',
+      branchName: getUserData('bankInfo.branchName') || ''
+    });
+    setShowEditBankModal(true);
+  };
+
+  const handleUpdateBankDetails = async () => {
+    if (!editingBankId) return;
+    try {
+      const response = await adminApiService.updateBankDetails(params.userId!, editingBankId, bankDetailsForm);
+      if (response.status === 'success') {
+        alert('Bank details updated successfully!');
+        setShowEditBankModal(false);
+        setEditingBankId(null);
+        setBankDetailsForm({ bankName: '', accountNumber: '', ifscCode: '', accountHolderName: '', branchName: '' });
+        // Refresh user data
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success' && profileResponse.data) {
+          setUserData(profileResponse.data);
+        }
+      } else {
+        alert(response.message || 'Failed to update bank details');
+      }
+    } catch (error) {
+      console.error('Error updating bank details:', error);
+      alert('Error updating bank details');
     }
   };
 
@@ -1937,8 +1984,20 @@ export function UserProfileDetail() {
               </div>
               <div>
                 <span className="text-gray-500">Email:</span>
-                <span className="ml-2 text-gray-900 truncate">{getUserData('email') && getUserData('email') !== 'N/A' ? getUserData('email') : 'N/A'}</span>
+                <span className="ml-2 text-gray-900 truncate">{getUserData('email') && getUserData('email') !== 'N/A' ? getUserData('email') : (userData?.personalEmail || userData?.officialEmail || 'N/A')}</span>
               </div>
+              {userData?.personalEmail && (
+                <div>
+                  <span className="text-gray-500">Personal Email:</span>
+                  <span className="ml-2 text-gray-900 truncate">{userData.personalEmail}</span>
+                </div>
+              )}
+              {userData?.officialEmail && (
+                <div>
+                  <span className="text-gray-500">Official Email:</span>
+                  <span className="ml-2 text-gray-900 truncate">{userData.officialEmail}</span>
+                </div>
+              )}
               <div>
                 <span className="text-gray-500">Company Email:</span>
                 <span className="ml-2 text-gray-900 truncate">{userData?.companyEmail && userData.companyEmail !== 'N/A' ? userData.companyEmail : 'N/A'}</span>
@@ -1981,7 +2040,21 @@ export function UserProfileDetail() {
               </div>
               <div>
                 <span className="text-gray-500">Experience:</span>
-                <span className="ml-2 text-gray-900">{latestEmployment.work_experience_years || 'N/A'} years</span>
+                <span className="ml-2 text-gray-900">{latestEmployment.work_experience_years || getUserData('personalInfo.workExperience') || getUserData('personalInfo.totalExperience') || 'N/A'} {latestEmployment.work_experience_years || getUserData('personalInfo.workExperience') ? 'years' : ''}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Salary Date:</span>
+                <span className="ml-2 text-gray-900">
+                  {userData?.salaryDate 
+                    ? `${userData.salaryDate}${(() => {
+                        const day = Number(userData.salaryDate);
+                        if (day === 1 || day === 21 || day === 31) return 'st';
+                        if (day === 2 || day === 22) return 'nd';
+                        if (day === 3 || day === 23) return 'rd';
+                        return 'th';
+                      })()}` 
+                    : 'N/A'}
+                </span>
               </div>
               <div>
                 <span className="text-gray-500">Income:</span>
@@ -2263,6 +2336,15 @@ export function UserProfileDetail() {
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900">Bank Account Details</h3>
           <div className="flex items-center gap-3">
+            {getUserData('bankInfo.id') && (
+              <button
+                onClick={handleEditBankDetails}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                <Edit className="w-4 h-4" />
+                Edit Bank Details
+              </button>
+            )}
             <button
               onClick={() => setShowAddBankModal(true)}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -3100,8 +3182,8 @@ export function UserProfileDetail() {
                         }
                       }
 
-                      // Generate shorter loan ID (last 8 characters)
-                      const shortLoanId = loan.loanId ? `CLL${loan.loanId.slice(-8)}` : `CLL${loan.id || 'N/A'}`;
+                      // Use shortLoanId from backend, or generate fallback
+                      const shortLoanId = loan.shortLoanId || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
 
                       // Fetch calculation if not loaded yet
                       if (loanId && !calculation && !isLoading) {
@@ -6057,8 +6139,7 @@ export function UserProfileDetail() {
                   type="submit"
                   onClick={(e) => {
                     e.preventDefault();
-                    alert('Bank details added successfully!');
-                    setShowAddBankModal(false);
+                    handleBankDetailsSubmit();
                   }}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
                 >
@@ -6066,7 +6147,122 @@ export function UserProfileDetail() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowAddBankModal(false)}
+                  onClick={() => {
+                    setShowAddBankModal(false);
+                    setBankDetailsForm({ bankName: '', accountNumber: '', ifscCode: '', accountHolderName: '', branchName: '' });
+                  }}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Bank Details Modal */}
+      {showEditBankModal && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-lg font-semibold text-gray-900">Edit Bank Details</h4>
+              <button
+                onClick={() => {
+                  setShowEditBankModal(false);
+                  setEditingBankId(null);
+                  setBankDetailsForm({ bankName: '', accountNumber: '', ifscCode: '', accountHolderName: '', branchName: '' });
+                }}
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form className="space-y-4">
+              {/* Bank Name */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Bank Name *</label>
+                <input
+                  type="text"
+                  value={bankDetailsForm.bankName}
+                  onChange={(e) => setBankDetailsForm({ ...bankDetailsForm, bankName: e.target.value })}
+                  placeholder="Enter bank name"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              {/* Account Number */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Account Number *</label>
+                <input
+                  type="text"
+                  value={bankDetailsForm.accountNumber}
+                  onChange={(e) => setBankDetailsForm({ ...bankDetailsForm, accountNumber: e.target.value })}
+                  placeholder="Enter account number"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              {/* IFSC Code */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">IFSC Code *</label>
+                <input
+                  type="text"
+                  value={bankDetailsForm.ifscCode}
+                  onChange={(e) => setBankDetailsForm({ ...bankDetailsForm, ifscCode: e.target.value.toUpperCase() })}
+                  placeholder="Enter IFSC code"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              {/* Account Holder Name */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Account Holder Name *</label>
+                <input
+                  type="text"
+                  value={bankDetailsForm.accountHolderName}
+                  onChange={(e) => setBankDetailsForm({ ...bankDetailsForm, accountHolderName: e.target.value })}
+                  placeholder="Enter account holder name"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              {/* Branch Name */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Branch Name</label>
+                <input
+                  type="text"
+                  value={bankDetailsForm.branchName}
+                  onChange={(e) => setBankDetailsForm({ ...bankDetailsForm, branchName: e.target.value })}
+                  placeholder="Enter branch name"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="submit"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleUpdateBankDetails();
+                  }}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                >
+                  Update Bank Details
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditBankModal(false);
+                    setEditingBankId(null);
+                    setBankDetailsForm({ bankName: '', accountNumber: '', ifscCode: '', accountHolderName: '', branchName: '' });
+                  }}
                   className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
                 >
                   Cancel
@@ -7359,9 +7555,14 @@ export function UserProfileDetail() {
               <User className="w-8 h-8 text-gray-600" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-gray-900">{getUserData('name')}</h1>
+              <h1 className="text-xl font-bold text-gray-900">
+                {getUserData('name')}
+                {getUserData('clid') && (
+                  <span className="ml-2 text-sm font-normal text-gray-500">({getUserData('clid')})</span>
+                )}
+              </h1>
               <div className="flex items-center gap-4 text-sm text-gray-600">
-                <span>CLID: {getUserData('clid')}</span>
+                {getUserData('clid') && <span>CLID: {getUserData('clid')}</span>}
                 <span className="flex items-center gap-1">
                   <Phone className="w-3 h-3" />
                   {getUserData('mobile')}
