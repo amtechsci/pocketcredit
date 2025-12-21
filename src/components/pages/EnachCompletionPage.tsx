@@ -113,15 +113,21 @@ export const EnachCompletionPage = () => {
         console.log(`[eNACH Status Check] Status: ${subscriptionStatus}, Mandate: ${mandateStatus}, Attempt: ${pollAttempts + 1}`);
 
         // Check if mandate is approved/active
+        // BANK_APPROVAL_PENDING means user approved, waiting for bank (24 hours) - allow progression
         if (
           subscriptionStatus === 'ACTIVE' ||
           subscriptionStatus === 'AUTHENTICATED' ||
+          subscriptionStatus === 'BANK_APPROVAL_PENDING' ||
           mandateStatus === 'APPROVED' ||
           mandateStatus === 'SUCCESS'
         ) {
           // Success! Stop polling and redirect
           setPolling(false);
-          toast.success('✅ eNACH mandate approved! Redirecting...');
+          if (subscriptionStatus === 'BANK_APPROVAL_PENDING') {
+            toast.success('✅ eNACH mandate approved! Waiting for bank confirmation (24 hours). Redirecting...');
+          } else {
+            toast.success('✅ eNACH mandate approved! Redirecting...');
+          }
           
           // Store success in session
           sessionStorage.setItem('enach_completed', 'true');

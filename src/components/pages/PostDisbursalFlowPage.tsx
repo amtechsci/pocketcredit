@@ -423,11 +423,17 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
         setExistingSubscription(response.data);
         const subscription = response.data;
 
-        // If subscription is already active, auto-complete this step
+        // If subscription is already active or bank approval pending, auto-complete this step
+        // BANK_APPROVAL_PENDING means user has approved, waiting for bank (24 hours)
         if (subscription.status === 'ACTIVE' || subscription.status === 'AUTHENTICATED' || 
+            subscription.status === 'BANK_APPROVAL_PENDING' ||
             subscription.mandate_status === 'APPROVED') {
-          console.log('✅ eNACH mandate already authorized');
-          toast.success('eNACH mandate already authorized');
+          console.log('✅ eNACH mandate already authorized or pending bank approval');
+          if (subscription.status === 'BANK_APPROVAL_PENDING') {
+            toast.success('eNACH mandate approved! Waiting for bank confirmation (24 hours).');
+          } else {
+            toast.success('eNACH mandate already authorized');
+          }
           onComplete();
         } else if (subscription.authorization_url && 
                    (subscription.status === 'INITIALIZED' || subscription.status === 'PENDING')) {
@@ -534,10 +540,16 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
         console.log(`[eNACH] Current status: ${status}, Mandate: ${mandateStatus}`);
 
         // Success states - mandate is authorized
-        if (status === 'ACTIVE' || status === 'AUTHENTICATED' || mandateStatus === 'APPROVED') {
-          toast.success('eNACH mandate authorized successfully!');
+        // BANK_APPROVAL_PENDING means user approved, waiting for bank (24 hours) - allow progression
+        if (status === 'ACTIVE' || status === 'AUTHENTICATED' || status === 'BANK_APPROVAL_PENDING' || 
+            mandateStatus === 'APPROVED') {
+          if (status === 'BANK_APPROVAL_PENDING') {
+            toast.success('eNACH mandate approved! Waiting for bank confirmation (24 hours). You can proceed to the next step.');
+          } else {
+            toast.success('eNACH mandate authorized successfully!');
+          }
           setLoading(false);
-          // Proceed to next step only after successful authorization
+          // Proceed to next step - user has approved, bank approval is pending
           onComplete();
           return;
         }
@@ -698,6 +710,7 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
               <p className="text-xs text-blue-700 mt-1">
                 {existingSubscription.status === 'INITIALIZED' && 'Authorization pending - Click below to continue'}
                 {existingSubscription.status === 'PENDING' && 'Waiting for bank verification'}
+                {existingSubscription.status === 'BANK_APPROVAL_PENDING' && 'Mandate approved - Waiting for bank confirmation (24 hours). You can proceed to next step.'}
                 {existingSubscription.status === 'ACTIVE' && 'Mandate is active'}
               </p>
             </div>
@@ -829,6 +842,7 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
           {(loading || saving) ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
           {loading ? 'Creating Mandate...' : 'Proceed to e-NACH Registration'}
         </Button>
+        
       </div>
     </div>
   );

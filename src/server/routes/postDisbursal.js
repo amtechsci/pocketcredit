@@ -172,6 +172,56 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
       });
     }
 
+    // SECURITY: Validate eNACH completion before allowing enach_done to be set to true
+    if (enach_done === true && existingColumns.includes('enach_done')) {
+      // Check if there's an active eNACH subscription for this loan application
+      try {
+        const enachCheck = await executeQuery(
+          `SELECT subscription_id, status, mandate_status 
+           FROM enach_subscriptions 
+           WHERE loan_application_id = ? 
+             AND (status IN ('ACTIVE', 'BANK_APPROVAL_PENDING', 'AUTHENTICATED') 
+                  OR mandate_status IN ('APPROVED', 'ACTIVE'))
+           ORDER BY created_at DESC 
+           LIMIT 1`,
+          [applicationId]
+        );
+
+        if (!enachCheck || enachCheck.length === 0) {
+          return res.status(403).json({
+            success: false,
+            message: 'Cannot mark eNACH as done: No active eNACH subscription found. Please complete eNACH registration first.',
+            error: 'SECURITY: eNACH bypass attempt prevented'
+          });
+        }
+
+        const subscription = enachCheck[0];
+        console.log(`[Security] Validating eNACH completion for app ${applicationId}:`, {
+          subscription_id: subscription.subscription_id,
+          status: subscription.status,
+          mandate_status: subscription.mandate_status
+        });
+
+        // Additional validation: Ensure subscription is actually active/approved
+        if (!['ACTIVE', 'BANK_APPROVAL_PENDING', 'AUTHENTICATED'].includes(subscription.status) &&
+            !['APPROVED', 'ACTIVE'].includes(subscription.mandate_status)) {
+          return res.status(403).json({
+            success: false,
+            message: 'Cannot mark eNACH as done: eNACH subscription is not active or approved.',
+            error: 'SECURITY: Invalid eNACH status'
+          });
+        }
+      } catch (enachError) {
+        console.error('[Security] Error validating eNACH:', enachError);
+        // If table doesn't exist or query fails, reject the request for security
+        return res.status(403).json({
+          success: false,
+          message: 'Cannot mark eNACH as done: Unable to verify eNACH status.',
+          error: 'SECURITY: eNACH validation failed'
+        });
+      }
+    }
+
     // Build update query dynamically, only for columns that exist
     const updates = [];
     const params = [];

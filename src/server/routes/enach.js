@@ -168,28 +168,68 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         let planResponse;
         let planCreated = false;
         try {
+            console.log(`[eNACH] Creating plan with payload:`, JSON.stringify(planPayload, null, 2));
             planResponse = await axios.post(
                 `${CASHFREE_API_BASE}/plans`,
                 planPayload,
                 { headers: getCashfreeHeaders(planId) } // Use plan_id as idempotency key
             );
-            console.log(`[eNACH] Plan created: ${planId}`, {
+            console.log(`[eNACH] Plan created successfully: ${planId}`, {
                 cf_plan_id: planResponse.data.cf_plan_id,
-                status: planResponse.data.plan_status
+                plan_type: planResponse.data.plan_type,
+                plan_max_amount: planResponse.data.plan_max_amount,
+                plan_max_cycles: planResponse.data.plan_max_cycles,
+                status: planResponse.data.plan_status,
+                full_response: JSON.stringify(planResponse.data, null, 2)
             });
+            
+            // Verify the plan was created with correct type
+            if (planResponse.data.plan_type !== 'ON_DEMAND') {
+                console.error(`[eNACH] ⚠️ WARNING: Plan created with wrong type! Expected ON_DEMAND, got ${planResponse.data.plan_type}`);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Plan creation failed: Wrong plan type returned by Cashfree',
+                    error: `Expected ON_DEMAND, got ${planResponse.data.plan_type}`
+                });
+            }
+            
             planCreated = true;
             
             // Plan is stored in Cashfree, no need to store locally
         } catch (planError) {
-            // If plan already exists, that's fine - continue
+            // If plan already exists, that's a problem - we need a unique plan
             if (planError.response?.status === 400 && 
                 (planError.response?.data?.message?.includes('already exists') ||
                  planError.response?.data?.message?.includes('Plan already created'))) {
-                console.log(`[eNACH] Plan ${planId} already exists, continuing...`);
+                console.error(`[eNACH] ❌ Plan ${planId} already exists! This should not happen with timestamp-based IDs.`);
+                console.error(`[eNACH] Error details:`, planError.response?.data);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Plan creation failed: Plan ID already exists',
+                    error: 'Please try again. If the issue persists, contact support.'
+                });
             } else {
-                console.error('[eNACH] Error creating plan:', planError.response?.data || planError.message);
-                // Continue with subscription creation even if plan creation fails
+                console.error('[eNACH] ❌ Error creating plan:', {
+                    status: planError.response?.status,
+                    data: planError.response?.data,
+                    message: planError.message,
+                    payload: JSON.stringify(planPayload, null, 2)
+                });
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to create payment plan. Please try again.',
+                    error: planError.response?.data?.message || planError.message
+                });
             }
+        }
+
+        // Ensure plan was created successfully before proceeding
+        if (!planCreated || !planResponse) {
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to create payment plan. Cannot proceed with subscription creation.',
+                error: 'Plan creation did not complete successfully'
+            });
         }
 
         // Step 2: Create Subscription
@@ -207,8 +247,16 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 customer_bank_code: bank.ifsc_code.substring(0, 4),
                 customer_bank_account_type: (bank.account_type || 'SAVINGS').toUpperCase()
             },
+            // For ON_DEMAND plans, we can pass plan_id OR inline plan details
+            // Passing plan_id is preferred if plan already exists (which it should)
+            // But we also include inline details as fallback to ensure correct plan type
             plan_details: {
-                plan_id: planId
+                plan_id: planId,
+                // Inline plan details as fallback (Cashfree will use plan_id if it exists)
+                plan_type: 'ON_DEMAND',
+                plan_max_amount: planMaxAmount,
+                plan_max_cycles: 0,
+                plan_currency: 'INR'
             },
             subscription_payment_method: 'ENACH',  // Must be uppercase
             split_schemes: [
