@@ -47,6 +47,30 @@ function verifyWebhookSignature(payload, signature, secret) {
 }
 
 /**
+ * GET /api/enach/webhook
+ * Test endpoint to verify webhook route is accessible
+ */
+router.get('/webhook', async (req, res) => {
+    res.json({
+        status: 'ok',
+        message: 'eNACH webhook endpoint is accessible',
+        method: 'GET',
+        timestamp: new Date().toISOString()
+    });
+});
+
+/**
+ * OPTIONS /api/enach/webhook
+ * Handle CORS preflight requests
+ */
+router.options('/webhook', (req, res) => {
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, x-cashfree-signature, x-request-id, x-cashfree-event-id');
+    res.sendStatus(200);
+});
+
+/**
  * POST /api/enach/webhook
  * Cashfree webhook endpoint
  */

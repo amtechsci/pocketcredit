@@ -239,10 +239,11 @@ app.use('/api/kfs', kfsRoutes);
 app.use('/api/post-disbursal', postDisbursalRoutes);
 
 // eNACH Subscription routes
-const enachRoutes = require('./routes/enach');
+// IMPORTANT: Register webhook routes FIRST to ensure they match before other routes
 const enachWebhookRoutes = require('./routes/enachWebhooks');
+const enachRoutes = require('./routes/enach');
+app.use('/api/enach', enachWebhookRoutes);  // Webhooks on /api/enach/webhook - must be first!
 app.use('/api/enach', enachRoutes);
-app.use('/api/enach', enachWebhookRoutes);  // Webhooks on /api/enach/webhook
 
 // ClickWrap (e-Signature) routes
 const clickWrapRoutes = require('./routes/clickWrap');
