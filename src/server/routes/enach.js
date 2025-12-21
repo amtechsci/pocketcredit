@@ -167,11 +167,11 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             try {
                 await executeQuery(`
                     INSERT INTO enach_plans 
-                    (plan_id, plan_name, plan_type, plan_currency, 
+                    (plan_id, plan_name, plan_type, 
                      plan_recurring_amount, plan_max_amount, plan_max_cycles, 
                      plan_intervals, plan_interval_type, plan_note, plan_status, 
                      loan_application_id, cashfree_response, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
                     ON DUPLICATE KEY UPDATE
                         plan_status = VALUES(plan_status),
                         cashfree_response = VALUES(cashfree_response),
@@ -180,7 +180,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                     planId,
                     planPayload.plan_name,
                     planPayload.plan_type,
-                    planPayload.plan_currency,
                     planPayload.plan_recurring_amount,
                     planPayload.plan_max_amount,
                     planPayload.plan_max_cycles,
@@ -279,30 +278,36 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         // According to Cashfree docs, authorization_url is in authorization_details or directly in response
         let authorizationUrl = null;
 
-        // Priority 1: Check authorization_details.payment_method.enach.authorization_url
+        // According to Cashfree docs, auth_link is in authorization_details.auth_link
+        // Priority 1: Check authorization_details.auth_link (most common location per Cashfree docs)
+        if (subscriptionResponse.data.authorization_details?.auth_link) {
+            authorizationUrl = subscriptionResponse.data.authorization_details.auth_link;
+            console.log(`[eNACH] Found authorization URL in authorization_details.auth_link: ${authorizationUrl}`);
+        }
+        // Priority 2: Check authorization_details.payment_method.enach.authorization_url
         // For eNACH, Cashfree may nest the URL in payment_method.enach
-        if (subscriptionResponse.data.authorization_details?.payment_method?.enach?.authorization_url) {
+        else if (subscriptionResponse.data.authorization_details?.payment_method?.enach?.authorization_url) {
             authorizationUrl = subscriptionResponse.data.authorization_details.payment_method.enach.authorization_url;
             console.log(`[eNACH] Found authorization URL in authorization_details.payment_method.enach: ${authorizationUrl}`);
         }
-        // Priority 2: Check authorization_details.authorization_url (direct)
+        // Priority 3: Check authorization_details.authorization_url (direct)
         else if (subscriptionResponse.data.authorization_details?.authorization_url) {
             authorizationUrl = subscriptionResponse.data.authorization_details.authorization_url;
-            console.log(`[eNACH] Found authorization URL in authorization_details: ${authorizationUrl}`);
+            console.log(`[eNACH] Found authorization URL in authorization_details.authorization_url: ${authorizationUrl}`);
         } 
-        // Priority 3: Check direct authorization_url field
+        // Priority 4: Check direct authorization_url field in response root
         else if (subscriptionResponse.data.authorization_url) {
             authorizationUrl = subscriptionResponse.data.authorization_url;
             console.log(`[eNACH] Found authorization URL in response root: ${authorizationUrl}`);
         } 
-        // Priority 4: Check alternative field names
+        // Priority 5: Check alternative field names in response root
         else if (subscriptionResponse.data.auth_link) {
             authorizationUrl = subscriptionResponse.data.auth_link;
-            console.log(`[eNACH] Found authorization URL in auth_link: ${authorizationUrl}`);
+            console.log(`[eNACH] Found authorization URL in response root auth_link: ${authorizationUrl}`);
         } 
         else if (subscriptionResponse.data.authorization_link) {
             authorizationUrl = subscriptionResponse.data.authorization_link;
-            console.log(`[eNACH] Found authorization URL in authorization_link: ${authorizationUrl}`);
+            console.log(`[eNACH] Found authorization URL in response root authorization_link: ${authorizationUrl}`);
         }
         
         // Log what we found (or didn't find) for debugging
@@ -310,12 +315,16 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             console.log(`[eNACH] No authorization URL found in response. Checking response structure...`);
             console.log(`[eNACH] Response has authorization_details: ${!!subscriptionResponse.data.authorization_details}`);
             if (subscriptionResponse.data.authorization_details) {
-                console.log(`[eNACH] authorization_details keys:`, Object.keys(subscriptionResponse.data.authorization_details));
+                const authDetails = subscriptionResponse.data.authorization_details;
+                console.log(`[eNACH] authorization_details keys:`, Object.keys(authDetails));
+                console.log(`[eNACH] authorization_details.auth_link:`, authDetails.auth_link);
+                console.log(`[eNACH] authorization_details.authorization_url:`, authDetails.authorization_url);
                 // Check if payment_method exists
-                if (subscriptionResponse.data.authorization_details.payment_method) {
-                    console.log(`[eNACH] payment_method keys:`, Object.keys(subscriptionResponse.data.authorization_details.payment_method));
-                    if (subscriptionResponse.data.authorization_details.payment_method.enach) {
-                        console.log(`[eNACH] payment_method.enach keys:`, Object.keys(subscriptionResponse.data.authorization_details.payment_method.enach));
+                if (authDetails.payment_method) {
+                    console.log(`[eNACH] payment_method keys:`, Object.keys(authDetails.payment_method));
+                    if (authDetails.payment_method.enach) {
+                        console.log(`[eNACH] payment_method.enach keys:`, Object.keys(authDetails.payment_method.enach));
+                        console.log(`[eNACH] payment_method.enach.authorization_url:`, authDetails.payment_method.enach.authorization_url);
                     }
                 }
             }
@@ -378,9 +387,13 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 ? 'https://payments.cashfree.com'
                 : 'https://payments-test.cashfree.com';
             
-            // Correct format: https://payments.cashfree.com/subscriptions/checkout/{subscription_session_id}
-            authorizationUrl = `${checkoutDomain}/subscriptions/checkout/${sessionId}`;
-            console.log(`[eNACH] Constructed subscription checkout URL: ${authorizationUrl}`);
+            // IMPORTANT: DO NOT use raw subscription_session_id - it will result in 404
+            // Cashfree requires an encoded/encrypted token that is only sent via SMS/Email
+            // The raw session ID (like "sub_session_...") does NOT work in checkout URL
+            // We cannot construct a valid URL without the encoded token from SMS
+            console.warn(`[eNACH] Cannot construct checkout URL - raw subscription_session_id will not work`);
+            console.warn(`[eNACH] Cashfree only provides encoded checkout token via SMS/Email`);
+            // Do NOT set authorizationUrl - let it remain null so frontend handles SMS flow
         }
         
         if (!authorizationUrl) {
