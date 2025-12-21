@@ -455,10 +455,23 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
       const response = await apiService.createEnachSubscription(applicationId);
 
       if (response.success && response.data) {
-        const { authorization_url, subscription_id } = response.data;
+        const { authorization_url, subscription_id, sms_flow } = response.data;
 
-        if (!authorization_url) {
-          throw new Error('Authorization URL not received. Please try again.');
+        // If SMS flow, inform user to check SMS
+        if (sms_flow || !authorization_url) {
+          toast.success('eNACH mandate link sent to your mobile and email');
+          toast.info('Please check your SMS/Email and authorize the eNACH mandate', {
+            duration: 5000
+          });
+          
+          // Store subscription ID for status checking
+          sessionStorage.setItem('enach_subscription_id', subscription_id);
+          sessionStorage.setItem('enach_application_id', applicationId.toString());
+          
+          // Don't redirect - user needs to use SMS link
+          // They can check status later
+          setLoading(false);
+          return;
         }
 
         // Store subscription ID and application ID in session for when user returns

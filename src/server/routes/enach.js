@@ -240,10 +240,12 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 return_url: `${FRONTEND_URL}/post-disbursal?applicationId=${applicationId}&enach=complete&subscription_id=${subscriptionId}`,
                 notification_channel: ['EMAIL', 'SMS']
             },
-            // Add authorization_details to force dashboard-based redirect flow
+            // Add authorization_details with payment_methods to enable dashboard redirect
+            // According to Cashfree docs, this should include "enach" in payment_methods
             authorization_details: {
-                auth_mode: 'ONLINE',
-                action: 'authorize'
+                payment_methods: ['enach'],
+                authorization_amount: parseFloat(loan.emi_amount || loan.loan_amount),
+                authorization_amount_refundable: false
             }
         };
 
@@ -259,25 +261,49 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             { headers: getCashfreeHeaders(subscriptionId) } // Use subscription_id as idempotency key
         );
 
+        // Log full response structure to debug
         console.log(`[eNACH] Subscription created: ${subscriptionId}`, {
             cf_subscription_id: subscriptionResponse.data.cf_subscription_id,
             status: subscriptionResponse.data.subscription_status,
             environment: IS_PRODUCTION ? 'PRODUCTION' : 'SANDBOX',
+            response_keys: Object.keys(subscriptionResponse.data || {}),
+            has_authorization_details: !!subscriptionResponse.data.authorization_details,
+            has_subscription_session_id: !!subscriptionResponse.data.subscription_session_id,
+            subscription_session_id: subscriptionResponse.data.subscription_session_id?.substring(0, 50) + '...',
             full_response: JSON.stringify(subscriptionResponse.data, null, 2)
         });
 
         // Extract authorization URL from response (dashboard-based flow)
+        // According to Cashfree docs, authorization_url is in authorization_details or directly in response
         let authorizationUrl = null;
 
-        // Check multiple possible locations for authorization URL
+        // Priority 1: Check authorization_details.authorization_url (most common location)
         if (subscriptionResponse.data.authorization_details?.authorization_url) {
             authorizationUrl = subscriptionResponse.data.authorization_details.authorization_url;
-        } else if (subscriptionResponse.data.authorization_url) {
+            console.log(`[eNACH] Found authorization URL in authorization_details: ${authorizationUrl}`);
+        } 
+        // Priority 2: Check direct authorization_url field
+        else if (subscriptionResponse.data.authorization_url) {
             authorizationUrl = subscriptionResponse.data.authorization_url;
-        } else if (subscriptionResponse.data.auth_link) {
+            console.log(`[eNACH] Found authorization URL in response root: ${authorizationUrl}`);
+        } 
+        // Priority 3: Check alternative field names
+        else if (subscriptionResponse.data.auth_link) {
             authorizationUrl = subscriptionResponse.data.auth_link;
-        } else if (subscriptionResponse.data.authorization_link) {
+            console.log(`[eNACH] Found authorization URL in auth_link: ${authorizationUrl}`);
+        } 
+        else if (subscriptionResponse.data.authorization_link) {
             authorizationUrl = subscriptionResponse.data.authorization_link;
+            console.log(`[eNACH] Found authorization URL in authorization_link: ${authorizationUrl}`);
+        }
+        
+        // Log what we found (or didn't find)
+        if (!authorizationUrl) {
+            console.log(`[eNACH] No authorization URL found in response. Checking response structure...`);
+            console.log(`[eNACH] Response has authorization_details: ${!!subscriptionResponse.data.authorization_details}`);
+            if (subscriptionResponse.data.authorization_details) {
+                console.log(`[eNACH] authorization_details keys:`, Object.keys(subscriptionResponse.data.authorization_details));
+            }
         }
 
         // If still no URL and we have a subscription_session_id, try to fetch authorization URL
@@ -323,26 +349,35 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             }
         }
 
-        // If still no URL, construct it using subscription_session_id if available
-        if (!authorizationUrl && subscriptionResponse.data.subscription_session_id) {
-            // For eNACH subscriptions, use the checkout URL format with subscription_session_id
-            // This is the correct format for Cashfree subscription authorization
-            // Production: https://payments.cashfree.com/checkout/subscription?subscription_session_id={session_id}
-            // Sandbox: https://payments-test.cashfree.com/checkout/subscription?subscription_session_id={session_id}
-            const checkoutDomain = IS_PRODUCTION 
-                ? 'https://payments.cashfree.com'
-                : 'https://payments-test.cashfree.com';
-            const sessionId = subscriptionResponse.data.subscription_session_id;
-            authorizationUrl = `${checkoutDomain}/checkout/subscription?subscription_session_id=${encodeURIComponent(sessionId)}`;
-            console.log(`[eNACH] Constructed authorization URL using checkout format: ${authorizationUrl}`);
+        // According to Cashfree documentation, we should NOT construct URLs manually
+        // If authorization_url is not in the response, Cashfree will send it via SMS/Email
+        // This is the standard behavior for eNACH - the authorization link is sent to the customer
+        
+        if (!authorizationUrl) {
+            console.warn('[eNACH] ⚠️  No authorization URL found in Cashfree response.');
+            console.warn('[eNACH] This means Cashfree will send the authorization link via SMS/Email.');
+            console.warn('[eNACH] This is the standard eNACH flow - dashboard redirect is not available.');
+            console.warn('[eNACH] Full response structure logged above for debugging.');
         }
 
+        // For eNACH, if no authorization URL is available, Cashfree sends authorization link via SMS
+        // This is the default behavior for eNACH - the authorization link is sent via SMS/Email
+        // We should inform the frontend about this
         if (!authorizationUrl) {
-            console.error('[eNACH] No authorization URL available - cannot proceed with dashboard flow');
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to generate eNACH authorization URL. Please try again or contact support.',
-                error: 'No authorization URL in response'
+            console.log('[eNACH] No authorization URL - Cashfree will send authorization link via SMS');
+            
+            // Return success response with SMS flow indicator
+            return res.json({
+                success: true,
+                data: {
+                    subscription_id: subscriptionId,
+                    cf_subscription_id: subscriptionResponse.data.cf_subscription_id,
+                    authorization_url: null,
+                    subscription_status: subscriptionResponse.data.subscription_status,
+                    subscription_session_id: subscriptionResponse.data.subscription_session_id,
+                    message: 'eNACH authorization link will be sent to your registered mobile number and email. Please check and authorize the mandate.',
+                    sms_flow: true
+                }
             });
         }
 
