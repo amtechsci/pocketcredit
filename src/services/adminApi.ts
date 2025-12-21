@@ -1151,6 +1151,10 @@ class AdminApiService {
     });
     return response.data;
   }
+
+  async search(query: string): Promise<ApiResponse<any>> {
+    return this.request('GET', `/search?q=${encodeURIComponent(query)}`);
+  }
 }
 
 // Export singleton instance

@@ -250,8 +250,14 @@ router.get('/', authenticateAdmin, async (req, res) => {
         }
       }
       
+      // Generate shorter loan ID format: PLL + 4 digits (last 4 digits of application number or ID)
+      const loanIdDigits = app.applicationNumber ? app.applicationNumber.slice(-4) : String(app.id).padStart(4, '0').slice(-4);
+      const shortLoanId = `PLL${loanIdDigits}`;
+
       return {
         id: app.applicationNumber || app.id,
+        loanId: app.applicationNumber, // Full application number for reference
+        shortLoanId: shortLoanId, // Short format: PLL + 4 digits
         userId: app.userId,
         loanAmount: parseFloat(app.loanAmount) || 0,
         loanType: app.loanType?.toLowerCase() || 'personal',

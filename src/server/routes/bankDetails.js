@@ -10,7 +10,7 @@ const router = express.Router();
 
 /**
  * GET /api/bank-details/enach-status
- * Check if user has e-NACH registration
+ * Check if user has e-NACH subscription (using Cashfree subscriptions)
  * NOTE: This route must be placed BEFORE /user/:userId to avoid route conflicts
  */
 router.get('/enach-status', requireAuth, async (req, res) => {
@@ -20,10 +20,15 @@ router.get('/enach-status', requireAuth, async (req, res) => {
     const userId = req.userId;
 
     try {
+      // Check for active eNACH subscriptions using the new Cashfree system
       const existingEnach = await executeQuery(
-        `SELECT id, status, bank_detail_id, created_at 
-         FROM enach_registrations 
-         WHERE user_id = ? 
+        `SELECT es.subscription_id, es.cf_subscription_id, es.status, es.mandate_status, 
+                es.loan_application_id, es.created_at, es.authorized_at
+         FROM enach_subscriptions es
+         INNER JOIN loan_applications la ON es.loan_application_id = la.id
+         WHERE la.user_id = ? 
+           AND es.status IN ('ACTIVE', 'BANK_APPROVAL_PENDING', 'INITIALIZED')
+         ORDER BY es.created_at DESC
          LIMIT 1`,
         [userId]
       );
@@ -532,135 +537,17 @@ router.post('/choose', requireAuth, async (req, res) => {
 
 /**
  * POST /api/bank-details/register-enach
- * Register selected bank account for e-NACH (one-time per user, first loan application)
+ * DEPRECATED: This endpoint is no longer used.
+ * e-NACH registration is now handled through Cashfree subscriptions via /api/enach/create-subscription
+ * This endpoint is kept for backward compatibility but returns an error.
  */
 router.post('/register-enach', requireAuth, async (req, res) => {
-  try {
-    await initializeDatabase();
-    const userId = req.userId;
-
-    const { bank_detail_id } = req.body;
-
-    // Validation
-    if (!bank_detail_id) {
-      return res.status(400).json({
-        success: false,
-        message: 'Bank detail ID is required'
-      });
-    }
-
-    // Check if enach_registrations table exists
-    try {
-      // Check if user already has an e-NACH registration
-      const existingEnach = await executeQuery(
-        `SELECT id FROM enach_registrations WHERE user_id = ?`,
-        [userId]
-      );
-
-      if (existingEnach && existingEnach.length > 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'e-NACH registration already exists for this user'
-        });
-      }
-    } catch (tableError) {
-      // If table doesn't exist, log warning but continue (table will be created by migration)
-      if (tableError.message && tableError.message.includes("doesn't exist")) {
-        console.warn('⚠️  enach_registrations table does not exist. Please run the migration script.');
-        return res.status(500).json({
-          success: false,
-          message: 'e-NACH registration system is not set up. Please contact support.'
-        });
-      }
-      throw tableError;
-    }
-
-    // Get bank details
-    const bankDetails = await executeQuery(
-      `SELECT id, account_number, ifsc_code, bank_name, account_holder_name, account_type 
-       FROM bank_details 
-       WHERE id = ? AND user_id = ?`,
-      [bank_detail_id, userId]
-    );
-
-    if (!bankDetails || bankDetails.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Bank detail not found or does not belong to you'
-      });
-    }
-
-    const bank = bankDetails[0];
-
-    // Get or create the first loan application
-    let applicationId = null;
-    const applications = await executeQuery(
-      `SELECT id FROM loan_applications 
-       WHERE user_id = ? 
-       ORDER BY created_at ASC LIMIT 1`,
-      [userId]
-    );
-
-    if (applications && applications.length > 0) {
-      applicationId = applications[0].id;
-    } else {
-      // Create a new loan application if none exists
-      const timestamp = Date.now();
-      const random = Math.floor(Math.random() * 1000);
-      const application_number = `PC${timestamp}${random}`;
-
-      const result = await executeQuery(
-        `INSERT INTO loan_applications 
-         (user_id, application_number, status, created_at, updated_at)
-         VALUES (?, ?, 'under_review', NOW(), NOW())`,
-        [userId, application_number]
-      );
-      applicationId = result.insertId;
-    }
-
-    // Register e-NACH (status will be 'pending' until API is integrated)
-    const enachResult = await executeQuery(
-      `INSERT INTO enach_registrations 
-       (user_id, application_id, bank_detail_id, account_number, ifsc_code, bank_name, account_holder_name, account_type, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW(), NOW())`,
-      [
-        userId,
-        applicationId,
-        bank_detail_id,
-        bank.account_number,
-        bank.ifsc_code,
-        bank.bank_name,
-        bank.account_holder_name || null,
-        bank.account_type || null
-      ]
-    );
-
-    // Mark this bank detail as primary/salary account
-    await executeQuery(
-      `UPDATE bank_details 
-       SET is_primary = TRUE, updated_at = NOW() 
-       WHERE id = ?`,
-      [bank_detail_id]
-    );
-
-    res.json({
-      success: true,
-      message: 'Bank account registered for e-NACH successfully',
-      data: {
-        enach_id: enachResult.insertId,
-        bank_detail_id: bank_detail_id,
-        application_id: applicationId
-      }
-    });
-
-  } catch (error) {
-    console.error('Register e-NACH error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to register bank account for e-NACH',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
+  res.status(410).json({
+    success: false,
+    message: 'This endpoint is deprecated. Please use the Cashfree eNACH subscription flow instead.',
+    deprecated: true,
+    newEndpoint: '/api/enach/create-subscription'
+  });
 });
 
 module.exports = router;

@@ -12,6 +12,7 @@ const CASHFREE_CLIENT_SECRET = process.env.CASHFREE_CLIENT_SECRET;
 const CASHFREE_API_VERSION = process.env.CASHFREE_API_VERSION || '2025-01-01';
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const BACKEND_URL = process.env.BACKEND_URL || process.env.FRONTEND_URL || 'http://localhost:3002';
 
 // Detect if we're using production API
 const IS_PRODUCTION = CASHFREE_API_BASE.includes('api.cashfree.com') && 
@@ -163,36 +164,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             });
             planCreated = true;
             
-            // Store plan in database
-            try {
-                await executeQuery(`
-                    INSERT INTO enach_plans 
-                    (plan_id, plan_name, plan_type, 
-                     plan_recurring_amount, plan_max_amount, plan_max_cycles, 
-                     plan_intervals, plan_interval_type, plan_status, 
-                     loan_application_id, cashfree_response, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-                    ON DUPLICATE KEY UPDATE
-                        plan_status = VALUES(plan_status),
-                        cashfree_response = VALUES(cashfree_response),
-                        updated_at = NOW()
-                `, [
-                    planId,
-                    planPayload.plan_name,
-                    planPayload.plan_type,
-                    planPayload.plan_recurring_amount,
-                    planPayload.plan_max_amount,
-                    planPayload.plan_max_cycles,
-                    planPayload.plan_intervals,
-                    planPayload.plan_interval_type,
-                    planResponse.data.plan_status || 'ACTIVE',
-                    applicationId,
-                    JSON.stringify(planResponse.data)
-                ]);
-            } catch (dbError) {
-                console.warn('[eNACH] Failed to store plan in database:', dbError.message);
-                // Continue - not critical
-            }
+            // Plan is stored in Cashfree, no need to store locally
         } catch (planError) {
             // If plan already exists, that's fine - continue
             if (planError.response?.status === 400 && 
@@ -233,7 +205,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 }
             ],
             subscription_meta: {
-                return_url: `${FRONTEND_URL}/post-disbursal?applicationId=${applicationId}&enach=complete&subscription_id=${subscriptionId}`,
+                return_url: `${BACKEND_URL}/api/enach/callback?applicationId=${applicationId}&subscription_id=${subscriptionId}`,
                 notification_channel: ['EMAIL', 'SMS']
             },
             // Add authorization_details with payment_methods to enable dashboard redirect
@@ -623,10 +595,9 @@ router.get('/health', async (req, res) => {
                 SELECT TABLE_NAME 
                 FROM INFORMATION_SCHEMA.TABLES 
                 WHERE TABLE_SCHEMA = DATABASE() 
-                AND TABLE_NAME IN ('enach_plans', 'enach_subscriptions', 'enach_webhook_events')
+                AND TABLE_NAME IN ('enach_subscriptions', 'enach_webhook_events')
             `);
             health.tables = {
-                enach_plans: tables.some(t => t.TABLE_NAME === 'enach_plans'),
                 enach_subscriptions: tables.some(t => t.TABLE_NAME === 'enach_subscriptions'),
                 enach_webhook_events: tables.some(t => t.TABLE_NAME === 'enach_webhook_events')
             };

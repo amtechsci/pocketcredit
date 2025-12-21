@@ -1989,13 +1989,59 @@ export function UserProfileDetail() {
             </h3>
             <div className="space-y-2 text-sm">
               <div>
-                <span className="text-gray-500">Name:</span>
+                <span className="text-gray-500">Name (User Entered):</span>
                 <span className="ml-2 font-medium text-gray-900">{getUserData('name')}</span>
               </div>
+              {(() => {
+                const userInfoRecords = userData?.userInfoRecords || [];
+                const aadharInfo = userInfoRecords.find((r: any) => r.source === 'digilocker');
+                const panInfo = userInfoRecords.find((r: any) => r.source === 'pan_api');
+                return (
+                  <>
+                    {aadharInfo?.name && (
+                      <div>
+                        <span className="text-gray-500">Name (Aadhar):</span>
+                        <span className="ml-2 text-gray-900">{aadharInfo.name}</span>
+                        <span className="ml-2 text-xs text-blue-600">(Digilocker)</span>
+                      </div>
+                    )}
+                    {panInfo?.name && (
+                      <div>
+                        <span className="text-gray-500">Name (PAN):</span>
+                        <span className="ml-2 text-gray-900">{panInfo.name}</span>
+                        <span className="ml-2 text-xs text-blue-600">(PAN API)</span>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
               <div>
-                <span className="text-gray-500">DOB:</span>
+                <span className="text-gray-500">DOB (User Entered):</span>
                 <span className="ml-2 text-gray-900">{formatDate(getUserData('dateOfBirth'))}</span>
               </div>
+              {(() => {
+                const userInfoRecords = userData?.userInfoRecords || [];
+                const aadharInfo = userInfoRecords.find((r: any) => r.source === 'digilocker');
+                const panInfo = userInfoRecords.find((r: any) => r.source === 'pan_api');
+                return (
+                  <>
+                    {aadharInfo?.dob && (
+                      <div>
+                        <span className="text-gray-500">DOB (Aadhar):</span>
+                        <span className="ml-2 text-gray-900">{formatDate(aadharInfo.dob)}</span>
+                        <span className="ml-2 text-xs text-blue-600">(Digilocker)</span>
+                      </div>
+                    )}
+                    {panInfo?.dob && (
+                      <div>
+                        <span className="text-gray-500">DOB (PAN):</span>
+                        <span className="ml-2 text-gray-900">{formatDate(panInfo.dob)}</span>
+                        <span className="ml-2 text-xs text-blue-600">(PAN API)</span>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
               <div>
                 <span className="text-gray-500">Marital Status:</span>
                 <span className="ml-2 text-gray-900">{getUserData('personalInfo.maritalStatus')}</span>
@@ -2124,7 +2170,12 @@ export function UserProfileDetail() {
               </div>
               <div>
                 <span className="text-gray-500">Experience:</span>
-                <span className="ml-2 text-gray-900">{latestEmployment.work_experience_years || getUserData('personalInfo.workExperience') || getUserData('personalInfo.totalExperience') || 'N/A'} {latestEmployment.work_experience_years || getUserData('personalInfo.workExperience') ? 'years' : ''}</span>
+                <span className="ml-2 text-gray-900">
+                  {(() => {
+                    const exp = latestEmployment.work_experience_years || getUserData('personalInfo.workExperience') || getUserData('personalInfo.totalExperience') || userData?.allEmployment?.[0]?.work_experience_years;
+                    return exp && exp !== 'N/A' ? `${exp} years` : 'N/A';
+                  })()}
+                </span>
               </div>
               <div>
                 <span className="text-gray-500">Salary Date:</span>
@@ -2144,7 +2195,7 @@ export function UserProfileDetail() {
                 <span className="text-gray-500">Income:</span>
                 <span className="ml-2 font-semibold text-green-600">
                   {(() => {
-                    const income = getUserData('personalInfo.monthlyIncome');
+                    const income = getUserData('personalInfo.monthlyIncome') || userData?.monthlyIncome || userData?.allEmployment?.[0]?.monthly_salary_old || latestEmployment.monthly_salary_old;
                     return income && income > 0 ? formatCurrency(income) : 'N/A';
                   })()}
                 </span>
@@ -4428,7 +4479,20 @@ export function UserProfileDetail() {
     const currentApplication = reportData.Current_Application || {};
 
     // Get credit score from report if not in database
-    const displayScore = credit_score || reportData.SCORE?.BureauScore || 'N/A';
+    // Check multiple sources for credit score
+    let displayScore = credit_score;
+    if (!displayScore || displayScore === 'N/A' || displayScore === null) {
+      displayScore = reportData.SCORE?.BureauScore;
+    }
+    if (!displayScore || displayScore === 'N/A' || displayScore === null) {
+      displayScore = reportData?.BureauScore;
+    }
+    if (!displayScore || displayScore === 'N/A' || displayScore === null) {
+      displayScore = userData?.experianScore;
+    }
+    if (!displayScore || displayScore === 'N/A' || displayScore === null) {
+      displayScore = 'N/A';
+    }
 
     // Extract PAN from report if not in userData
     const panNumber = userData?.panNumber || userData?.pan_number || userData?.pan || currentApplication.CreditReportInquiry?.InquiryPurpose || '-';

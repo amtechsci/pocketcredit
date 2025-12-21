@@ -253,6 +253,41 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       console.error('Error fetching KYC documents:', e);
     }
 
+    // Fetch user_info from multiple sources (for multi-source of truth)
+    let userInfoRecords = [];
+    try {
+      const userInfoQuery = `
+        SELECT id, name, dob, source, additional_details, created_at
+        FROM user_info
+        WHERE user_id = ?
+        ORDER BY source, created_at DESC
+      `;
+      const userInfoResults = await executeQuery(userInfoQuery, [userId]);
+      
+      userInfoRecords = userInfoResults.map(record => {
+        let additionalDetails = {};
+        if (record.additional_details) {
+          try {
+            additionalDetails = typeof record.additional_details === 'string' 
+              ? JSON.parse(record.additional_details) 
+              : record.additional_details;
+          } catch (e) {
+            console.error('Error parsing additional_details:', e);
+          }
+        }
+        return {
+          id: record.id,
+          name: record.name,
+          dob: record.dob,
+          source: record.source,
+          additionalDetails: additionalDetails,
+          createdAt: record.created_at
+        };
+      });
+    } catch (e) {
+      console.error('Error fetching user_info records:', e);
+    }
+
     // Fetch Bank Details
     let bankDetails = [];
     try {
@@ -403,6 +438,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       bankStatement: bankStatement,
       kycVerification: kycData,
       kycDocuments: kycDocuments,
+      userInfoRecords: userInfoRecords, // Multi-source of truth data
       loans: applications.map(app => {
         // Calculate EMI if we have the required data
         const calculateEMI = (principal, rate, tenure) => {
