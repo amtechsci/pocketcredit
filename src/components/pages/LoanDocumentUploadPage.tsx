@@ -92,6 +92,40 @@ export const LoanDocumentUploadPage = () => {
                     console.log(`✅ Found uploaded document: ${doc.document_name}`);
                   });
                   setUploadedDocuments(uploadedDocsMap);
+                  
+                  // Check if all required documents are uploaded
+                  const allUploaded = documents.every((doc: string) => {
+                    // Normalize document names for comparison
+                    const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const normalizedDoc = normalize(doc);
+                    
+                    // Check if document exists in uploaded docs (flexible matching)
+                    const uploaded = Object.keys(uploadedDocsMap).some(uploadedDoc => {
+                      const normalizedUploaded = normalize(uploadedDoc);
+                      // Check for exact match, contains match, or partial match
+                      return normalizedDoc === normalizedUploaded ||
+                             normalizedDoc.includes(normalizedUploaded) ||
+                             normalizedUploaded.includes(normalizedDoc) ||
+                             // Special cases for common document name variations
+                             (normalizedDoc.includes('aadhar') && normalizedUploaded.includes('aadhaar')) ||
+                             (normalizedDoc.includes('aadhaar') && normalizedUploaded.includes('aadhar')) ||
+                             (normalizedDoc.includes('pan') && normalizedUploaded.includes('pan'));
+                    });
+                    return uploaded;
+                  });
+                  
+                  if (allUploaded && documents.length > 0) {
+                    // All documents uploaded, redirect to application pending page
+                    console.log('✅ All required documents are uploaded, redirecting...');
+                    toast.success('All required documents have been uploaded!');
+                    setTimeout(() => {
+                      navigate('/application-under-review', { 
+                        state: { applicationId: appId } 
+                      });
+                    }, 1500);
+                    setLoading(false);
+                    return;
+                  }
                 } else {
                   console.log('⚠️ No documents found or invalid response format');
                 }
@@ -128,6 +162,45 @@ export const LoanDocumentUploadPage = () => {
             console.log(`✅ Found uploaded document: ${doc.document_name}`);
           });
           setUploadedDocuments(uploadedDocsMap);
+          
+          // Check if all required documents are uploaded (fallback check)
+          const defaultDocs = [
+            'Last 3 month bank statement up to date',
+            'Latest one month pay slip/salary slip',
+            'Aadhar front side',
+            'Aadhar back side',
+            'PAN card'
+          ];
+          
+          const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+          
+          const allUploaded = defaultDocs.every((doc: string) => {
+            const normalizedDoc = normalize(doc);
+            // Check if document exists in uploaded docs (flexible matching)
+            const uploaded = Object.keys(uploadedDocsMap).some(uploadedDoc => {
+              const normalizedUploaded = normalize(uploadedDoc);
+              return normalizedDoc === normalizedUploaded ||
+                     normalizedDoc.includes(normalizedUploaded) ||
+                     normalizedUploaded.includes(normalizedDoc) ||
+                     (normalizedDoc.includes('aadhar') && normalizedUploaded.includes('aadhaar')) ||
+                     (normalizedDoc.includes('aadhaar') && normalizedUploaded.includes('aadhar')) ||
+                     (normalizedDoc.includes('pan') && normalizedUploaded.includes('pan'));
+            });
+            return uploaded;
+          });
+          
+          if (allUploaded && requiredDocuments.length === defaultDocs.length) {
+            // All documents uploaded, redirect to application pending page
+            console.log('✅ All required documents are uploaded (fallback), redirecting...');
+            toast.success('All required documents have been uploaded!');
+            setTimeout(() => {
+              navigate('/application-under-review', { 
+                state: { applicationId: appId } 
+              });
+            }, 1500);
+            setLoading(false);
+            return;
+          }
         } else {
           console.log('⚠️ No documents found or invalid response format (fallback)');
         }
