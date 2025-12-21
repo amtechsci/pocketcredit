@@ -530,6 +530,7 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
 // Update loan application amount (principal amount)
 router.put('/:applicationId/amount', authenticateAdmin, async (req, res) => {
   try {
+    console.log('💰 Update loan amount request received:', req.params.applicationId, req.body);
     await initializeDatabase();
     const { applicationId } = req.params;
     const { loan_amount, principalAmount } = req.body;
