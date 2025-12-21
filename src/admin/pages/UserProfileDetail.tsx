@@ -2279,6 +2279,69 @@ export function UserProfileDetail() {
             </div>
           </div>
         )}
+
+        {/* Login History */}
+        {userData?.loginHistory && userData.loginHistory.length > 0 && (
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <Clock className="w-4 h-4" />
+              Login History ({userData.loginHistory.length})
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Login Time</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">IP Address</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Browser</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Device</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">OS</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {userData.loginHistory.slice(0, 10).map((login: any, index: number) => (
+                    <tr key={index} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 whitespace-nowrap text-gray-900">
+                        {login.login_time ? new Date(login.login_time).toLocaleString('en-IN') : 'N/A'}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-gray-900 font-mono text-xs">
+                        {login.ip_address || 'N/A'}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-gray-900">
+                        {login.browser_name || 'Unknown'}
+                        {login.browser_version && ` ${login.browser_version}`}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-gray-900 capitalize">
+                        {login.device_type || 'Unknown'}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-gray-900">
+                        {login.os_name || 'Unknown'}
+                        {login.os_version && ` ${login.os_version}`}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-gray-900">
+                        {login.location_city && login.location_country 
+                          ? `${login.location_city}, ${login.location_country}`
+                          : login.location_country || 'N/A'}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          login.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                        }`}>
+                          {login.success ? 'Success' : 'Failed'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {userData.loginHistory.length > 10 && (
+              <p className="text-xs text-gray-500 mt-2">Showing latest 10 logins. Total: {userData.loginHistory.length}</p>
+            )}
+          </div>
+        )}
       </div>
     );
   };
@@ -2286,9 +2349,87 @@ export function UserProfileDetail() {
   // Documents Tab
   const renderDocumentsTab = () => {
     const documents = getUserData('documents');
+    const bankStatements = userData?.bankStatementRecords || [];
     console.log('Documents data:', documents);
+    console.log('Bank statements:', bankStatements);
     return (
       <div className="space-y-6">
+        {/* Bank Statements Section */}
+        {bankStatements.length > 0 && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Bank Statements</h3>
+            <div className="space-y-3">
+              {bankStatements.map((stmt: any, index: number) => (
+                <div key={index} className="border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-blue-600" />
+                      <div>
+                        <h4 className="font-medium text-gray-900">
+                          Bank Statement {index + 1}
+                          {stmt.bank_name && ` - ${stmt.bank_name}`}
+                        </h4>
+                        <p className="text-xs text-gray-500">
+                          Uploaded: {stmt.created_at ? new Date(stmt.created_at).toLocaleString('en-IN') : 'N/A'}
+                        </p>
+                      </div>
+                    </div>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      stmt.status === 'completed' ? 'bg-green-100 text-green-800' :
+                      stmt.status === 'processing' ? 'bg-yellow-100 text-yellow-800' :
+                      stmt.status === 'failed' ? 'bg-red-100 text-red-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {stmt.status || 'Unknown'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mt-3">
+                    <div>
+                      <span className="text-gray-500">Method:</span>
+                      <span className="ml-2 text-gray-900 capitalize">{stmt.upload_method || 'N/A'}</span>
+                    </div>
+                    {stmt.file_name && (
+                      <div>
+                        <span className="text-gray-500">File:</span>
+                        <span className="ml-2 text-gray-900 truncate">{stmt.file_name}</span>
+                      </div>
+                    )}
+                    {stmt.file_size && (
+                      <div>
+                        <span className="text-gray-500">Size:</span>
+                        <span className="ml-2 text-gray-900">{(stmt.file_size / 1024 / 1024).toFixed(2)} MB</span>
+                      </div>
+                    )}
+                    {stmt.txn_id && (
+                      <div>
+                        <span className="text-gray-500">Txn ID:</span>
+                        <span className="ml-2 text-gray-900 font-mono text-xs">{stmt.txn_id}</span>
+                      </div>
+                    )}
+                  </div>
+                  {stmt.has_report_data && (
+                    <div className="mt-2 pt-2 border-t border-gray-100">
+                      <span className="text-xs text-green-600">✓ Report data available</span>
+                    </div>
+                  )}
+                  {stmt.file_path && (
+                    <div className="mt-2">
+                      <a 
+                        href={stmt.file_path} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-600 hover:text-blue-800"
+                      >
+                        View File →
+                      </a>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Upload Document Section */}
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">

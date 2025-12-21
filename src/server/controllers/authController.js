@@ -3,6 +3,15 @@ const { getRedisClient, set, get, del } = require('../config/redis');
 const { findUserByMobileNumber, findUserById, createUser, updateLastLogin, getProfileSummary } = require('../models/user');
 const { initializeDatabase, executeQuery } = require('../config/database');
 
+// Try to load loginDataParser, but don't fail if it doesn't exist
+let extractLoginData = null;
+try {
+  const loginDataParser = require('../utils/loginDataParser');
+  extractLoginData = loginDataParser.extractLoginData;
+} catch (e) {
+  console.warn('⚠️  loginDataParser not available, login history will be skipped:', e.message);
+}
+
 /**
  * Auth Controller
  * Handles authentication business logic including OTP generation and verification
@@ -242,6 +251,52 @@ const verifyOtp = async (req, res) => {
       // Update last login for existing user
       await updateLastLogin(user.id);
       console.log(`✅ User login: ${mobile}`);
+    }
+
+    // Extract and save login data (only if extractLoginData is available and table exists)
+    if (extractLoginData) {
+      try {
+        await initializeDatabase();
+        const loginData = await extractLoginData(req);
+        
+        // Check if table exists before inserting
+        const tableCheck = await executeQuery(`
+          SELECT COUNT(*) as count 
+          FROM information_schema.tables 
+          WHERE table_schema = DATABASE() 
+          AND table_name = 'user_login_history'
+        `);
+        
+        if (tableCheck && tableCheck[0] && tableCheck[0].count > 0) {
+          await executeQuery(`
+            INSERT INTO user_login_history 
+            (user_id, ip_address, user_agent, browser_name, browser_version, device_type, os_name, os_version, 
+             location_country, location_city, location_region, latitude, longitude, login_time, success)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
+          `, [
+            user.id,
+            loginData.ip_address,
+            loginData.user_agent,
+            loginData.browser_name,
+            loginData.browser_version,
+            loginData.device_type,
+            loginData.os_name,
+            loginData.os_version,
+            loginData.location_country,
+            loginData.location_city,
+            loginData.location_region,
+            loginData.latitude,
+            loginData.longitude,
+            true
+          ]);
+          console.log(`✅ Login history saved for user ${user.id}`);
+        } else {
+          console.log('⚠️  user_login_history table does not exist yet, skipping login history');
+        }
+      } catch (loginHistoryError) {
+        console.error('Error saving login history (non-critical):', loginHistoryError.message);
+        // Don't fail login if history save fails
+      }
     }
 
     // Generate JWT token (like admin authentication)

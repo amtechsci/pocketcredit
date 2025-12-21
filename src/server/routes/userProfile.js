@@ -181,21 +181,39 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     // Fetch bank statement report
     let bankStatement = null;
     let txnId = null;
+    let bankStatementRecords = [];
     try {
       const bankStmtResults = await executeQuery(
-        'SELECT report_data, txn_id FROM user_bank_statements WHERE user_id = ? AND status = "completed" ORDER BY created_at DESC LIMIT 1',
+        'SELECT id, report_data, txn_id, status, upload_method, file_path, file_name, file_size, bank_name, created_at, updated_at FROM user_bank_statements WHERE user_id = ? ORDER BY created_at DESC',
         [userId]
       );
-      if (bankStmtResults.length > 0 && bankStmtResults[0].report_data) {
-        // Handle case where report_data might already be an object (if mysql driver parses JSON)
-        bankStatement = typeof bankStmtResults[0].report_data === 'string'
-          ? JSON.parse(bankStmtResults[0].report_data)
-          : bankStmtResults[0].report_data;
-        // Include txn_id for Excel download
-        txnId = bankStmtResults[0].txn_id;
-        if (bankStatement && txnId) {
-          bankStatement.txn_id = txnId;
+      if (bankStmtResults.length > 0) {
+        // Get the latest completed one for bankStatement (backward compatibility)
+        const completed = bankStmtResults.find(r => r.status === 'completed');
+        if (completed && completed.report_data) {
+          bankStatement = typeof completed.report_data === 'string'
+            ? JSON.parse(completed.report_data)
+            : completed.report_data;
+          txnId = completed.txn_id;
+          if (bankStatement && txnId) {
+            bankStatement.txn_id = txnId;
+          }
         }
+        
+        // Store all bank statement records
+        bankStatementRecords = bankStmtResults.map(record => ({
+          id: record.id,
+          txn_id: record.txn_id,
+          status: record.status,
+          upload_method: record.upload_method || 'unknown',
+          file_path: record.file_path,
+          file_name: record.file_name,
+          file_size: record.file_size,
+          bank_name: record.bank_name,
+          created_at: record.created_at,
+          updated_at: record.updated_at,
+          has_report_data: !!record.report_data
+        }));
       }
     } catch (e) {
       console.error('Error fetching bank statement:', e);
@@ -286,6 +304,25 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       });
     } catch (e) {
       console.error('Error fetching user_info records:', e);
+    }
+
+    // Fetch user login history
+    let loginHistory = [];
+    try {
+      const loginHistoryQuery = `
+        SELECT 
+          id, ip_address, user_agent, browser_name, browser_version, device_type, 
+          os_name, os_version, location_country, location_city, location_region, 
+          latitude, longitude, login_time, success, failure_reason, created_at
+        FROM user_login_history
+        WHERE user_id = ?
+        ORDER BY login_time DESC
+        LIMIT 50
+      `;
+      const loginHistoryResults = await executeQuery(loginHistoryQuery, [userId]);
+      loginHistory = loginHistoryResults || [];
+    } catch (e) {
+      console.error('Error fetching login history:', e);
     }
 
     // Fetch Bank Details
@@ -436,9 +473,11 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         location: 'N/A'
       }] : [],
       bankStatement: bankStatement,
+      bankStatementRecords: bankStatementRecords, // All bank statement records
       kycVerification: kycData,
       kycDocuments: kycDocuments,
       userInfoRecords: userInfoRecords, // Multi-source of truth data
+      loginHistory: loginHistory, // User login history
       loans: applications.map(app => {
         // Calculate EMI if we have the required data
         const calculateEMI = (principal, rate, tenure) => {
