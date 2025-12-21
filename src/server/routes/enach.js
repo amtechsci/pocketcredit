@@ -76,7 +76,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             });
         }
 
-        // Fetch loan application details with all email fields
+        // Fetch loan application details with all email fields and salary
         const loanQuery = `
       SELECT 
         la.*,
@@ -85,7 +85,8 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         u.email,
         u.personal_email,
         u.official_email,
-        u.phone
+        u.phone,
+        u.monthly_net_income
       FROM loan_applications la
       JOIN users u ON la.user_id = u.id
       WHERE la.id = ? AND la.user_id = ?
@@ -112,6 +113,18 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             });
         }
 
+        // Get monthly salary for plan_max_amount calculation (60% of salary)
+        const monthlySalary = parseFloat(loan.monthly_net_income) || 0;
+        if (!monthlySalary || monthlySalary <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Monthly salary is required. Please update your employment details with salary information.'
+            });
+        }
+
+        // Calculate 60% of salary for plan_max_amount
+        const planMaxAmount = Math.round(monthlySalary * 0.6);
+
         // Fetch primary bank details
         const bankQuery = `
       SELECT * FROM bank_details
@@ -136,18 +149,20 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         const planId = `plan_loan_${applicationId}_${Date.now()}`;
         const subscriptionId = `sub_loan_${applicationId}_${Date.now()}`;
 
-        // Step 1: Create Plan (if needed - you might want to use a pre-created plan)
+        // Step 1: Create Plan - ON_DEMAND type (merchant triggers charges manually)
+        // For ON_DEMAND plans:
+        // - plan_recurring_amount is not required (set to 0 or omit)
+        // - plan_max_amount is 60% of monthly salary
+        // - plan_max_cycles is 0 for unlimited (or very high number)
+        // - plan_intervals and plan_interval_type are not required
         const planPayload = {
             plan_id: planId,
             plan_name: `Loan Repayment Plan - ${loan.application_number}`,
-            plan_type: 'PERIODIC',
+            plan_type: 'ON_DEMAND',
             plan_currency: 'INR',
-            plan_recurring_amount: parseFloat(loan.emi_amount || loan.loan_amount),
-            plan_max_amount: parseFloat(loan.emi_amount || loan.loan_amount),
-            plan_max_cycles: parseInt(loan.tenure_months) || 12,
-            plan_intervals: 1,
-            plan_interval_type: 'MONTH',
-            plan_note: `Monthly EMI payment for loan ${loan.application_number}`
+            plan_max_amount: planMaxAmount,
+            plan_max_cycles: 0, // 0 means unlimited cycles
+            plan_note: `On-demand payment plan for loan ${loan.application_number}. Maximum amount: ₹${planMaxAmount.toLocaleString('en-IN')} (60% of monthly salary)`
         };
 
         let planResponse;
@@ -210,10 +225,12 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             },
             // Add authorization_details with payment_methods to enable dashboard redirect
             // According to Cashfree docs, this should include "enach" in payment_methods
+            // Add authorization_details with payment_methods to enable dashboard redirect
+            // According to Cashfree docs, for ENACH, authorization_amount is always 0
             authorization_details: {
                 payment_methods: ['enach'],
-                authorization_amount: parseFloat(loan.emi_amount || loan.loan_amount),
-                authorization_amount_refundable: false
+                authorization_amount: 0, // For ENACH, authorization_amount is always 0 as per Cashfree docs
+                authorization_amount_refund: false
             }
         };
 
@@ -312,7 +329,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 const authPaymentResponse = await axios.post(
                     `${CASHFREE_API_BASE}/subscriptions/${cfSubscriptionId}/authorize`,
                     {
-                        authorization_amount: parseFloat(loan.emi_amount || loan.loan_amount)
+                        authorization_amount: 0 // For ENACH, authorization_amount is always 0
                     },
                     { headers: getCashfreeHeaders() }
                 );
