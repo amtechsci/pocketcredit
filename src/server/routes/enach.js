@@ -167,19 +167,17 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             try {
                 await executeQuery(`
                     INSERT INTO enach_plans 
-                    (plan_id, cf_plan_id, plan_name, plan_type, plan_currency, 
+                    (plan_id, plan_name, plan_type, plan_currency, 
                      plan_recurring_amount, plan_max_amount, plan_max_cycles, 
                      plan_intervals, plan_interval_type, plan_note, plan_status, 
                      loan_application_id, cashfree_response, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
                     ON DUPLICATE KEY UPDATE
-                        cf_plan_id = VALUES(cf_plan_id),
                         plan_status = VALUES(plan_status),
                         cashfree_response = VALUES(cashfree_response),
                         updated_at = NOW()
                 `, [
                     planId,
-                    planResponse.data.cf_plan_id || null,
                     planPayload.plan_name,
                     planPayload.plan_type,
                     planPayload.plan_currency,
@@ -269,7 +267,11 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             response_keys: Object.keys(subscriptionResponse.data || {}),
             has_authorization_details: !!subscriptionResponse.data.authorization_details,
             has_subscription_session_id: !!subscriptionResponse.data.subscription_session_id,
+            has_checkout_url: !!subscriptionResponse.data.checkout_url,
+            has_subscription_checkout_url: !!subscriptionResponse.data.subscription_checkout_url,
             subscription_session_id: subscriptionResponse.data.subscription_session_id?.substring(0, 50) + '...',
+            checkout_url: subscriptionResponse.data.checkout_url,
+            subscription_checkout_url: subscriptionResponse.data.subscription_checkout_url,
             full_response: JSON.stringify(subscriptionResponse.data, null, 2)
         });
 
@@ -356,18 +358,29 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             }
         }
 
-        // If still no URL, try constructing checkout URL using subscription_session_id
-        // Based on Cashfree patterns, subscriptions might use different URL formats
-        if (!authorizationUrl && subscriptionResponse.data.subscription_session_id) {
+        // If still no URL, check for checkout_url or construct using subscription_session_id
+        // Check for direct checkout_url in response
+        if (!authorizationUrl && subscriptionResponse.data.checkout_url) {
+            authorizationUrl = subscriptionResponse.data.checkout_url;
+            console.log(`[eNACH] Found checkout_url in response: ${authorizationUrl}`);
+        }
+        // Check for subscription_checkout_url
+        else if (!authorizationUrl && subscriptionResponse.data.subscription_checkout_url) {
+            authorizationUrl = subscriptionResponse.data.subscription_checkout_url;
+            console.log(`[eNACH] Found subscription_checkout_url in response: ${authorizationUrl}`);
+        }
+        // If still no URL, construct subscription checkout URL
+        // Correct format: https://payments.cashfree.com/subscriptions/checkout/{subscription_session_id}
+        // Note: The session_id might need to be encoded, but we'll try the raw value first
+        else if (!authorizationUrl && subscriptionResponse.data.subscription_session_id) {
             const sessionId = subscriptionResponse.data.subscription_session_id;
             const checkoutDomain = IS_PRODUCTION 
                 ? 'https://payments.cashfree.com'
                 : 'https://payments-test.cashfree.com';
             
-            // Try Format 1: /checkout/subscription/{session_id} (path-based)
-            authorizationUrl = `${checkoutDomain}/checkout/subscription/${sessionId}`;
-            console.log(`[eNACH] Constructed subscription checkout URL (format 1 - path): ${authorizationUrl}`);
-            console.log(`[eNACH] If this gives 404, Cashfree may not support dashboard redirect for eNACH`);
+            // Correct format: https://payments.cashfree.com/subscriptions/checkout/{subscription_session_id}
+            authorizationUrl = `${checkoutDomain}/subscriptions/checkout/${sessionId}`;
+            console.log(`[eNACH] Constructed subscription checkout URL: ${authorizationUrl}`);
         }
         
         if (!authorizationUrl) {
