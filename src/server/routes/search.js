@@ -133,24 +133,6 @@ router.get('/', authenticateAdmin, async (req, res) => {
       console.error('Error in loan search:', error);
     }
 
-        for (const result of results) {
-          if (!seenUserIds.has(result.user_id)) {
-            seenUserIds.add(result.user_id);
-            allResults.push(result);
-          } else {
-            // If user already exists, update found_in to include multiple sources
-            const existing = allResults.find(r => r.user_id === result.user_id);
-            if (existing && !existing.found_in.includes(result.found_in)) {
-              existing.found_in += `, ${result.found_in}`;
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error executing search query:', error);
-        // Continue with other queries even if one fails
-      }
-    }
-
     // Format results
     const formattedResults = allResults.map(result => ({
       userId: result.user_id,
