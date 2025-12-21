@@ -374,6 +374,43 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             console.warn('[eNACH] Full response structure logged above for debugging.');
         }
 
+        console.log(`[eNACH] Authorization URL: ${authorizationUrl || 'null (SMS flow)'}`);
+
+        // Store subscription details in database (ALWAYS save, regardless of authorization URL)
+        // This is critical for webhook matching - we need subscription_id in database
+        const insertQuery = `
+      INSERT INTO enach_subscriptions 
+      (user_id, loan_application_id, subscription_id, cf_subscription_id, plan_id, status, 
+       subscription_session_id, cashfree_response, authorization_url, initialized_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+      ON DUPLICATE KEY UPDATE
+        cf_subscription_id = VALUES(cf_subscription_id),
+        subscription_session_id = VALUES(subscription_session_id),
+        status = VALUES(status),
+        cashfree_response = VALUES(cashfree_response),
+        authorization_url = VALUES(authorization_url),
+        updated_at = NOW()
+    `;
+
+        try {
+            await executeQuery(insertQuery, [
+                userId,
+                applicationId,
+                subscriptionId,
+                subscriptionResponse.data.cf_subscription_id || null,
+                planId,
+                subscriptionResponse.data.subscription_status || 'INITIALIZED',
+                subscriptionResponse.data.subscription_session_id || null,
+                JSON.stringify(subscriptionResponse.data),
+                authorizationUrl || null
+            ]);
+            console.log(`[eNACH] ✅ Subscription saved to database: ${subscriptionId}`);
+        } catch (dbError) {
+            console.error('[eNACH] ❌ Error saving subscription to database:', dbError);
+            // Continue anyway - don't fail the request if DB save fails
+            // But log it so we can fix the issue
+        }
+
         // For eNACH, if no authorization URL is available, Cashfree sends authorization link via SMS
         // This is the default behavior for eNACH - the authorization link is sent via SMS/Email
         // We should inform the frontend about this
@@ -394,35 +431,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 }
             });
         }
-
-        console.log(`[eNACH] Authorization URL: ${authorizationUrl}`);
-
-        // Store subscription details in database
-        const insertQuery = `
-      INSERT INTO enach_subscriptions 
-      (user_id, loan_application_id, subscription_id, cf_subscription_id, plan_id, status, 
-       subscription_session_id, cashfree_response, authorization_url, initialized_at, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-      ON DUPLICATE KEY UPDATE
-        cf_subscription_id = VALUES(cf_subscription_id),
-        subscription_session_id = VALUES(subscription_session_id),
-        status = VALUES(status),
-        cashfree_response = VALUES(cashfree_response),
-        authorization_url = VALUES(authorization_url),
-        updated_at = NOW()
-    `;
-
-        await executeQuery(insertQuery, [
-            userId,
-            applicationId,
-            subscriptionId,
-            subscriptionResponse.data.cf_subscription_id || null,
-            planId,
-            subscriptionResponse.data.subscription_status || 'INITIALIZED',
-            subscriptionResponse.data.subscription_session_id || null,
-            JSON.stringify(subscriptionResponse.data),
-            authorizationUrl
-        ]);
 
         // Return response to frontend - always include authorization_url for redirect
         res.json({

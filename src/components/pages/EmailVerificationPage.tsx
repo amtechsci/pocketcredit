@@ -127,7 +127,7 @@ export const EmailVerificationPage = () => {
       
       if (response.success) {
         setPersonalOtpSent(true);
-        setPersonalTimer(600); // 10 minutes
+        setPersonalTimer(30); // 30 seconds
         toast.success('OTP sent to your personal email. Please check your inbox and spam folder.');
       } else {
         toast.error(response.message || 'Failed to send OTP');
@@ -183,7 +183,7 @@ export const EmailVerificationPage = () => {
       
       if (response.success) {
         setOfficialOtpSent(true);
-        setOfficialTimer(600); // 10 minutes
+        setOfficialTimer(30); // 30 seconds
         toast.success('OTP sent to your official email. Please check your inbox and spam folder.');
       } else {
         toast.error(response.message || 'Failed to send OTP');

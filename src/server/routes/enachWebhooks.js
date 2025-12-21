@@ -72,14 +72,26 @@ async function logWebhookPayload(req, webhookType, endpoint, processed = false, 
         const ipAddress = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || null;
         const userAgent = req.headers['user-agent'] || null;
 
-        // Store raw payload as string
-        const rawPayload = JSON.stringify({
-            method: req.method,
-            url: req.url,
-            headers: headers,
-            query: req.query,
-            body: req.body
-        }, null, 2);
+        // Store raw payload as string (handle circular references and large payloads)
+        let rawPayload = null;
+        try {
+            rawPayload = JSON.stringify({
+                method: req.method,
+                url: req.url,
+                headers: headers,
+                query: req.query,
+                body: req.body
+            }, null, 2);
+        } catch (jsonError) {
+            // If JSON.stringify fails (circular reference or too large), store a summary
+            rawPayload = JSON.stringify({
+                method: req.method,
+                url: req.url,
+                error: 'Could not serialize full payload',
+                bodySize: req.body ? JSON.stringify(req.body).length : 0
+            });
+            console.warn(`[Webhook] Could not serialize full payload:`, jsonError.message);
+        }
 
         await executeQuery(
             `INSERT INTO webhook_logs 
@@ -147,75 +159,104 @@ router.options('/webhook', async (req, res) => {
  */
 router.post('/webhook', express.json(), async (req, res) => {
     const requestId = req.headers['x-request-id'] || `webhook_${Date.now()}`;
-    const signature = req.headers['x-cashfree-signature'] || req.headers['x-webhook-signature'];
-    const eventId = req.headers['x-cashfree-event-id'] || null;
+    
+    try {
+        const signature = req.headers['x-cashfree-signature'] || req.headers['x-webhook-signature'];
+        const eventId = req.headers['x-cashfree-event-id'] || null;
 
-    console.log(`[Webhook ${requestId}] Received webhook:`, {
-        method: req.method,
-        headers: {
-            'content-type': req.headers['content-type'],
-            'x-request-id': req.headers['x-request-id'],
-            'x-cashfree-event-id': req.headers['x-cashfree-event-id'],
-            'x-cashfree-signature': req.headers['x-cashfree-signature'] ? 'present' : 'missing'
-        },
-        bodyKeys: req.body ? Object.keys(req.body) : [],
-        bodyType: req.body?.type || 'unknown',
-        hasData: !!req.body?.data
-    });
+        console.log(`[Webhook ${requestId}] Received webhook:`, {
+            method: req.method,
+            headers: {
+                'content-type': req.headers['content-type'],
+                'x-request-id': req.headers['x-request-id'],
+                'x-cashfree-event-id': req.headers['x-cashfree-event-id'],
+                'x-cashfree-signature': req.headers['x-cashfree-signature'] ? 'present' : 'missing'
+            },
+            bodyKeys: req.body ? Object.keys(req.body) : [],
+            bodyType: req.body?.type || 'unknown',
+            hasData: !!req.body?.data
+        });
 
-    // Log POST request to webhook_logs BEFORE processing
-    let processingError = null;
-    let processed = false;
+        // Handle test/ping webhooks from Cashfree
+        // Cashfree may send test webhooks during configuration
+        if (!req.body || Object.keys(req.body).length === 0 || req.body.type === 'ping' || req.body.type === 'test') {
+            console.log(`[Webhook ${requestId}] Test/ping webhook received, responding OK`);
+            try {
+                await logWebhookPayload(req, 'enach_webhook', '/api/enach/webhook', true, null);
+            } catch (logError) {
+                console.error(`[Webhook ${requestId}] Error logging test webhook:`, logError);
+            }
+            
+            return res.status(200).json({
+                status: 'ok',
+                message: 'Webhook endpoint is active and receiving requests',
+                requestId,
+                timestamp: new Date().toISOString()
+            });
+        }
 
-    // Handle test/ping webhooks from Cashfree
-    // Cashfree may send test webhooks during configuration
-    if (!req.body || Object.keys(req.body).length === 0 || req.body.type === 'ping' || req.body.type === 'test') {
-        console.log(`[Webhook ${requestId}] Test/ping webhook received, responding OK`);
-        processed = true;
-        await logWebhookPayload(req, 'enach_webhook', '/api/enach/webhook', processed, null);
-        
-        return res.status(200).json({
-            status: 'ok',
-            message: 'Webhook endpoint is active and receiving requests',
+        // Verify webhook signature if secret is configured (skip for test webhooks)
+        // NOTE: Even if signature verification fails, we still process the webhook
+        // because Cashfree might send valid webhooks with different signature formats
+        // or signature calculation might differ between environments
+        if (CASHFREE_WEBHOOK_SECRET && signature && req.body.type !== 'test') {
+            const isValid = verifyWebhookSignature(req.body, signature, CASHFREE_WEBHOOK_SECRET);
+            if (!isValid) {
+                console.warn(`[Webhook ${requestId}] ⚠️  Signature verification failed, but continuing to process webhook`);
+                console.warn(`[Webhook ${requestId}] This might be due to signature format differences. Processing anyway.`);
+                // Don't reject - continue processing but log the warning
+                // The webhook will still be logged and processed
+            } else {
+                console.log(`[Webhook ${requestId}] ✅ Signature verified successfully`);
+            }
+        }
+
+        // Log webhook to webhook_logs (initially as not processed, will update after async processing)
+        try {
+            await logWebhookPayload(req, 'enach_webhook', '/api/enach/webhook', false, null);
+        } catch (logError) {
+            console.error(`[Webhook ${requestId}] Error logging webhook (continuing anyway):`, logError);
+            // Continue processing even if logging fails
+        }
+
+        // Always respond with 200 immediately to acknowledge receipt
+        // Process webhook asynchronously after responding
+        res.status(200).json({
+            status: 'received',
+            message: 'Webhook received and processing',
             requestId,
             timestamp: new Date().toISOString()
         });
-    }
 
-    // Verify webhook signature if secret is configured (skip for test webhooks)
-    // NOTE: Even if signature verification fails, we still process the webhook
-    // because Cashfree might send valid webhooks with different signature formats
-    // or signature calculation might differ between environments
-    if (CASHFREE_WEBHOOK_SECRET && signature && req.body.type !== 'test') {
-        const isValid = verifyWebhookSignature(req.body, signature, CASHFREE_WEBHOOK_SECRET);
-        if (!isValid) {
-            console.warn(`[Webhook ${requestId}] ⚠️  Signature verification failed, but continuing to process webhook`);
-            console.warn(`[Webhook ${requestId}] This might be due to signature format differences. Processing anyway.`);
-            // Don't reject - continue processing but log the warning
-            // The webhook will still be logged and processed
-        } else {
-            console.log(`[Webhook ${requestId}] ✅ Signature verified successfully`);
+        // Process webhook asynchronously (don't block response)
+        processWebhookAsync(req.body, requestId, eventId, signature, req).catch(error => {
+            console.error(`[Webhook ${requestId}] Async processing error:`, error);
+            // Update webhook_logs with error
+            logWebhookPayload(req, 'enach_webhook', '/api/enach/webhook', false, error.message).catch(() => {});
+        });
+    } catch (error) {
+        console.error(`[Webhook ${requestId}] Fatal error in webhook handler:`, error);
+        console.error(`[Webhook ${requestId}] Error stack:`, error.stack);
+        
+        // Try to log the error
+        try {
+            await logWebhookPayload(req, 'enach_webhook', '/api/enach/webhook', false, error.message);
+        } catch (logError) {
+            console.error(`[Webhook ${requestId}] Could not log error:`, logError);
+        }
+        
+        // Always return 200 to Cashfree to prevent retries
+        // But log the error for debugging
+        if (!res.headersSent) {
+            res.status(200).json({
+                success: false,
+                status: 'error',
+                message: 'Internal server error',
+                requestId,
+                timestamp: new Date().toISOString()
+            });
         }
     }
-
-    // Log webhook to webhook_logs (initially as not processed, will update after async processing)
-    await logWebhookPayload(req, 'enach_webhook', '/api/enach/webhook', false, null);
-
-    // Always respond with 200 immediately to acknowledge receipt
-    // Process webhook asynchronously after responding
-    res.status(200).json({
-        status: 'received',
-        message: 'Webhook received and processing',
-        requestId,
-        timestamp: new Date().toISOString()
-    });
-
-    // Process webhook asynchronously (don't block response)
-    processWebhookAsync(req.body, requestId, eventId, signature, req).catch(error => {
-        console.error(`[Webhook ${requestId}] Async processing error:`, error);
-        // Update webhook_logs with error
-        logWebhookPayload(req, 'enach_webhook', '/api/enach/webhook', false, error.message).catch(() => {});
-    });
 });
 
 /**
@@ -616,36 +657,59 @@ async function handleSubscriptionStatusChanged(eventData, requestId) {
 router.get('/callback', async (req, res) => {
     const requestId = `callback_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     
-    console.log(`[eNACH Callback ${requestId}] GET callback received:`, {
-        query: req.query,
-        headers: {
-            'user-agent': req.headers['user-agent'],
-            'referer': req.headers['referer']
+    try {
+        console.log(`[eNACH Callback ${requestId}] GET callback received:`, {
+            query: req.query,
+            headers: {
+                'user-agent': req.headers['user-agent'],
+                'referer': req.headers['referer']
+            }
+        });
+
+        // Log to webhook_logs (don't let logging errors break the redirect)
+        try {
+            await logWebhookPayload(req, 'enach_callback', '/api/enach/callback', true, null);
+        } catch (logError) {
+            console.error(`[eNACH Callback ${requestId}] Error logging callback:`, logError);
+            // Continue anyway - logging failure shouldn't break redirect
         }
-    });
 
-    // Log to webhook_logs
-    await logWebhookPayload(req, 'enach_callback', '/api/enach/callback', true, null);
+        // Extract parameters
+        const applicationId = req.query.applicationId;
+        const subscriptionId = req.query.subscription_id || req.query.subscriptionId;
+        const status = req.query.status || req.query.subscription_status;
+        const error = req.query.error || req.query.error_message;
 
-    // Extract parameters
-    const applicationId = req.query.applicationId;
-    const subscriptionId = req.query.subscription_id || req.query.subscriptionId;
-    const status = req.query.status || req.query.subscription_status;
-    const error = req.query.error || req.query.error_message;
+        // Redirect to frontend with all parameters
+        const frontendUrl = process.env.FRONTEND_URL || 'https://pocketcredit.in';
+        const redirectUrl = new URL('/post-disbursal', frontendUrl);
+        
+        if (applicationId) redirectUrl.searchParams.set('applicationId', applicationId);
+        if (subscriptionId) redirectUrl.searchParams.set('subscription_id', subscriptionId);
+        redirectUrl.searchParams.set('enach', 'complete');
+        if (status) redirectUrl.searchParams.set('status', status);
+        if (error) redirectUrl.searchParams.set('error', error);
 
-    // Redirect to frontend with all parameters
-    const frontendUrl = process.env.FRONTEND_URL || 'https://pocketcredit.in';
-    const redirectUrl = new URL('/post-disbursal', frontendUrl);
-    
-    if (applicationId) redirectUrl.searchParams.set('applicationId', applicationId);
-    if (subscriptionId) redirectUrl.searchParams.set('subscription_id', subscriptionId);
-    redirectUrl.searchParams.set('enach', 'complete');
-    if (status) redirectUrl.searchParams.set('status', status);
-    if (error) redirectUrl.searchParams.set('error', error);
-
-    console.log(`[eNACH Callback ${requestId}] Redirecting to frontend: ${redirectUrl.toString()}`);
-    
-    res.redirect(redirectUrl.toString());
+        console.log(`[eNACH Callback ${requestId}] Redirecting to frontend: ${redirectUrl.toString()}`);
+        
+        res.redirect(redirectUrl.toString());
+    } catch (error) {
+        console.error(`[eNACH Callback ${requestId}] Fatal error in callback handler:`, error);
+        console.error(`[eNACH Callback ${requestId}] Error stack:`, error.stack);
+        
+        // Try to redirect anyway, or show error page
+        const frontendUrl = process.env.FRONTEND_URL || 'https://pocketcredit.in';
+        const redirectUrl = new URL('/post-disbursal', frontendUrl);
+        
+        if (req.query.applicationId) redirectUrl.searchParams.set('applicationId', req.query.applicationId);
+        if (req.query.subscription_id) redirectUrl.searchParams.set('subscription_id', req.query.subscription_id);
+        redirectUrl.searchParams.set('enach', 'complete');
+        redirectUrl.searchParams.set('error', 'callback_error');
+        
+        if (!res.headersSent) {
+            res.redirect(redirectUrl.toString());
+        }
+    }
 });
 
 /**
@@ -656,36 +720,71 @@ router.get('/callback', async (req, res) => {
 router.post('/callback', express.json(), express.urlencoded({ extended: true }), async (req, res) => {
     const requestId = `callback_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     
-    console.log(`[eNACH Callback ${requestId}] POST callback received:`, {
-        body: req.body,
-        headers: {
-            'content-type': req.headers['content-type'],
-            'user-agent': req.headers['user-agent']
+    try {
+        console.log(`[eNACH Callback ${requestId}] POST callback received:`, {
+            body: req.body,
+            headers: {
+                'content-type': req.headers['content-type'],
+                'user-agent': req.headers['user-agent']
+            }
+        });
+
+        // Log to webhook_logs (don't let logging errors break the redirect)
+        try {
+            await logWebhookPayload(req, 'enach_callback', '/api/enach/callback', true, null);
+        } catch (logError) {
+            console.error(`[eNACH Callback ${requestId}] Error logging callback:`, logError);
+            // Continue anyway - logging failure shouldn't break redirect
         }
-    });
 
-    // Log to webhook_logs
-    await logWebhookPayload(req, 'enach_callback', '/api/enach/callback', true, null);
+        // Extract parameters from body or query
+        const applicationId = req.body.applicationId || req.query.applicationId;
+        const subscriptionId = req.body.subscription_id || req.body.subscriptionId || req.query.subscription_id;
+        const status = req.body.status || req.body.subscription_status || req.query.status;
+        const error = req.body.error || req.body.error_message || req.query.error;
 
-    // Extract parameters from body or query
-    const applicationId = req.body.applicationId || req.query.applicationId;
-    const subscriptionId = req.body.subscription_id || req.body.subscriptionId || req.query.subscription_id;
-    const status = req.body.status || req.body.subscription_status || req.query.status;
-    const error = req.body.error || req.body.error_message || req.query.error;
+        // Redirect to frontend with all parameters
+        const frontendUrl = process.env.FRONTEND_URL || 'https://pocketcredit.in';
+        const redirectUrl = new URL('/post-disbursal', frontendUrl);
+        
+        if (applicationId) redirectUrl.searchParams.set('applicationId', applicationId);
+        if (subscriptionId) redirectUrl.searchParams.set('subscription_id', subscriptionId);
+        redirectUrl.searchParams.set('enach', 'complete');
+        if (status) redirectUrl.searchParams.set('status', status);
+        if (error) redirectUrl.searchParams.set('error', error);
 
-    // Redirect to frontend with all parameters
-    const frontendUrl = process.env.FRONTEND_URL || 'https://pocketcredit.in';
-    const redirectUrl = new URL('/post-disbursal', frontendUrl);
-    
-    if (applicationId) redirectUrl.searchParams.set('applicationId', applicationId);
-    if (subscriptionId) redirectUrl.searchParams.set('subscription_id', subscriptionId);
-    redirectUrl.searchParams.set('enach', 'complete');
-    if (status) redirectUrl.searchParams.set('status', status);
-    if (error) redirectUrl.searchParams.set('error', error);
-
-    console.log(`[eNACH Callback ${requestId}] Redirecting to frontend: ${redirectUrl.toString()}`);
-    
-    res.redirect(redirectUrl.toString());
+        console.log(`[eNACH Callback ${requestId}] Redirecting to frontend: ${redirectUrl.toString()}`);
+        
+        res.redirect(redirectUrl.toString());
+    } catch (error) {
+        console.error(`[eNACH Callback ${requestId}] Fatal error in callback handler:`, error);
+        console.error(`[eNACH Callback ${requestId}] Error stack:`, error.stack);
+        
+        // Try to redirect anyway, or show error page
+        const frontendUrl = process.env.FRONTEND_URL || 'https://pocketcredit.in';
+        const redirectUrl = new URL('/post-disbursal', frontendUrl);
+        
+        if (req.body?.applicationId || req.query?.applicationId) {
+            redirectUrl.searchParams.set('applicationId', req.body?.applicationId || req.query?.applicationId);
+        }
+        if (req.body?.subscription_id || req.query?.subscription_id) {
+            redirectUrl.searchParams.set('subscription_id', req.body?.subscription_id || req.query?.subscription_id);
+        }
+        redirectUrl.searchParams.set('enach', 'complete');
+        redirectUrl.searchParams.set('error', 'callback_error');
+        
+        if (!res.headersSent) {
+            res.redirect(redirectUrl.toString());
+        } else {
+            // If headers already sent, try to send JSON error
+            res.status(500).json({
+                success: false,
+                status: 'error',
+                message: 'Internal server error',
+                requestId
+            });
+        }
+    }
 });
 
 module.exports = router;
