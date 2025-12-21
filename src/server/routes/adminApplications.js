@@ -527,6 +527,53 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
   }
 });
 
+// Update loan application amount (principal amount)
+router.put('/:applicationId/amount', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { applicationId } = req.params;
+    const { loan_amount, principalAmount } = req.body;
+
+    const amount = loan_amount || principalAmount;
+
+    if (!amount || isNaN(parseFloat(amount))) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid loan amount is required'
+      });
+    }
+
+    // Check if application exists
+    const applicationResult = await executeQuery('SELECT id, user_id FROM loan_applications WHERE id = ?', [applicationId]);
+    if (applicationResult.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Application not found'
+      });
+    }
+
+    // Update loan amount
+    await executeQuery(
+      'UPDATE loan_applications SET loan_amount = ?, updated_at = NOW() WHERE id = ?',
+      [parseFloat(amount), applicationId]
+    );
+
+    console.log('✅ Loan amount updated successfully');
+    res.json({
+      status: 'success',
+      message: 'Loan amount updated successfully',
+      data: { applicationId, loan_amount: parseFloat(amount) }
+    });
+
+  } catch (error) {
+    console.error('Update loan amount error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update loan amount'
+    });
+  }
+});
+
 // Assign application to manager
 router.put('/:applicationId/assign', authenticateAdmin, validate(schemas.assignApplication), async (req, res) => {
   try {

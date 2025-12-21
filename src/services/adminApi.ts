@@ -246,6 +246,16 @@ class AdminApiService {
     return this.request('POST', `/user-profile/${userId}/documents`, documentData);
   }
 
+  async uploadUserDocument(userId: string, formData: FormData): Promise<ApiResponse<any>> {
+    const response = await axios.post(`/api/user-profile/${userId}/documents/upload`, formData, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`,
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+    return response.data;
+  }
+
   async updateDocumentStatus(userId: string, documentId: string, status: string, rejectionReason?: string): Promise<ApiResponse<any>> {
     return this.request('PUT', `/user-profile/${userId}/documents/${documentId}`, { status, rejectionReason });
   }
@@ -453,9 +463,11 @@ class AdminApiService {
   }
 
   async updateUserContactInfo(userId: string, data: {
-    email: string;
-    phone: string;
+    email?: string;
+    phone?: string;
     alternatePhone?: string;
+    personalEmail?: string;
+    officialEmail?: string;
   }): Promise<ApiResponse<any>> {
     return this.request('PUT', `/user-profile/${userId}/contact-info`, data);
   }
@@ -474,11 +486,19 @@ class AdminApiService {
     return this.request('PUT', `/user-profile/${userId}/loan-plan`, { plan_id: planId });
   }
 
+  async updateUserLoanLimit(userId: string, loanLimit: number): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/user-profile/${userId}/loan-limit`, { loanLimit });
+  }
+
   async updateUserEmploymentInfo(userId: string, data: {
-    company: string;
-    designation: string;
-    monthlyIncome: number;
-    workExperience: number;
+    company?: string;
+    companyName?: string;
+    designation?: string;
+    industry?: string;
+    department?: string;
+    monthlyIncome?: number | null;
+    income?: number | null;
+    workExperience?: number | null;
   }): Promise<ApiResponse<any>> {
     return this.request('PUT', `/user-profile/${userId}/employment-info`, data);
   }
@@ -1008,6 +1028,15 @@ class AdminApiService {
         'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
       }
     });
+    return response.data;
+  }
+
+  async updateLoanAmount(applicationId: string, data: { loan_amount?: number; principalAmount?: number }): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/applications/${applicationId}/amount`, {
+      loan_amount: data.loan_amount || data.principalAmount,
+      principalAmount: data.principalAmount || data.loan_amount
+    });
+  }
     return response.data;
   }
 

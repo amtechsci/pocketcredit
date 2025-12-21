@@ -245,6 +245,12 @@ const enachRoutes = require('./routes/enach');
 app.use('/api/enach', enachWebhookRoutes);  // Webhooks on /api/enach/webhook - must be first!
 app.use('/api/enach', enachRoutes);
 
+// Cashfree Payout routes (loan disbursement)
+const payoutRoutes = require('./routes/payout');
+const payoutWebhookRoutes = require('./routes/payoutWebhooks');
+app.use('/api/payout', payoutWebhookRoutes);  // Webhooks on /api/payout/webhook - must be first!
+app.use('/api/payout', payoutRoutes);
+
 // ClickWrap (e-Signature) routes
 const clickWrapRoutes = require('./routes/clickWrap');
 const clickWrapWebhookRoutes = require('./routes/clickWrapWebhooks');

@@ -47,6 +47,9 @@ export function UserProfileDetail() {
   const [showAddressModal, setShowAddressModal] = useState(false);
   const [showEmploymentModal, setShowEmploymentModal] = useState(false);
   const [documentType, setDocumentType] = useState('');
+  const [documentTitle, setDocumentTitle] = useState('');
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentDescription, setDocumentDescription] = useState('');
   const [showAddBankModal, setShowAddBankModal] = useState(false);
   const [showEditBankModal, setShowEditBankModal] = useState(false);
   const [editingBankId, setEditingBankId] = useState<string | null>(null);
@@ -83,7 +86,9 @@ export function UserProfileDetail() {
   const [contactInfoForm, setContactInfoForm] = useState({
     email: '',
     phone: '',
-    alternatePhone: ''
+    alternatePhone: '',
+    personalEmail: '',
+    officialEmail: ''
   });
   const [addressInfoForm, setAddressInfoForm] = useState({
     address: '',
@@ -94,8 +99,12 @@ export function UserProfileDetail() {
   });
   const [employmentInfoForm, setEmploymentInfoForm] = useState({
     company: '',
+    companyName: '',
     designation: '',
+    industry: '',
+    department: '',
     monthlyIncome: '',
+    income: '',
     workExperience: ''
   });
   const [bankDetailsForm, setBankDetailsForm] = useState({
@@ -717,7 +726,9 @@ export function UserProfileDetail() {
       setContactInfoForm({
         email: userData.email || '',
         phone: userData.mobile || '',
-        alternatePhone: ''
+        alternatePhone: userData.alternateMobile || '',
+        personalEmail: userData.personalEmail || '',
+        officialEmail: userData.officialEmail || ''
       });
     }
   }, [userData, showContactModal]);
@@ -830,18 +841,47 @@ export function UserProfileDetail() {
     }
   };
 
+  const handleUpdateLoanLimit = async (newLimit: number) => {
+    try {
+      const response = await adminApiService.updateUserLoanLimit(params.userId!, newLimit);
+      if (response.status === 'success') {
+        alert('Loan limit updated successfully!');
+        // Refresh user data
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success' && profileResponse.data) {
+          setUserData(profileResponse.data);
+        }
+      } else {
+        alert(response.message || 'Failed to update loan limit');
+      }
+    } catch (error) {
+      console.error('Error updating loan limit:', error);
+      alert('Error updating loan limit');
+    }
+  };
+
   const handleEmploymentInfoSubmit = async () => {
     try {
       const response = await adminApiService.updateUserEmploymentInfo(params.userId!, {
-        ...employmentInfoForm,
-        monthlyIncome: parseFloat(employmentInfoForm.monthlyIncome),
-        workExperience: parseFloat(employmentInfoForm.workExperience)
+        company: employmentInfoForm.company || employmentInfoForm.companyName,
+        companyName: employmentInfoForm.companyName || employmentInfoForm.company,
+        designation: employmentInfoForm.designation,
+        industry: employmentInfoForm.industry,
+        department: employmentInfoForm.department,
+        monthlyIncome: employmentInfoForm.monthlyIncome ? parseFloat(employmentInfoForm.monthlyIncome) : null,
+        income: employmentInfoForm.income ? parseFloat(employmentInfoForm.income) : (employmentInfoForm.monthlyIncome ? parseFloat(employmentInfoForm.monthlyIncome) : null),
+        workExperience: employmentInfoForm.workExperience ? parseFloat(employmentInfoForm.workExperience) : null
       });
       if (response.status === 'success') {
         alert('Employment information updated successfully!');
         setShowEmploymentModal(false);
+        // Refresh user data
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success' && profileResponse.data) {
+          setUserData(profileResponse.data);
+        }
       } else {
-        alert('Failed to update employment information');
+        alert(response.message || 'Failed to update employment information');
       }
     } catch (error) {
       console.error('Error updating employment info:', error);
@@ -1969,10 +2009,30 @@ export function UserProfileDetail() {
 
           {/* Contact Information */}
           <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-              <Phone className="w-4 h-4" />
-              Contact Information
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <Phone className="w-4 h-4" />
+                Contact Information
+              </h3>
+              {canEditUsers && (
+                <button
+                  onClick={() => {
+                    setContactInfoForm({
+                      email: getUserData('email') || '',
+                      phone: getUserData('mobile') || '',
+                      alternatePhone: userData?.alternateMobile || '',
+                      personalEmail: userData?.personalEmail || '',
+                      officialEmail: userData?.officialEmail || ''
+                    });
+                    setShowContactModal(true);
+                  }}
+                  className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  <Edit className="w-3 h-3 inline mr-1" />
+                  Edit
+                </button>
+              )}
+            </div>
             <div className="space-y-2 text-sm">
               <div>
                 <span className="text-gray-500">Primary:</span>
@@ -2013,10 +2073,34 @@ export function UserProfileDetail() {
 
           {/* Employment Information */}
           <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-              <Briefcase className="w-4 h-4" />
-              Employment
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <Briefcase className="w-4 h-4" />
+                Employment
+              </h3>
+              {canEditUsers && (
+                <button
+                  onClick={() => {
+                    const latestEmployment = userData?.allEmployment?.[0] || {};
+                    setEmploymentInfoForm({
+                      company: latestEmployment.company_name || userData?.companyName || '',
+                      companyName: latestEmployment.company_name || userData?.companyName || '',
+                      designation: latestEmployment.designation || '',
+                      industry: latestEmployment.industry || '',
+                      department: latestEmployment.department || '',
+                      monthlyIncome: userData?.personalInfo?.monthlyIncome?.toString() || '',
+                      income: userData?.personalInfo?.monthlyIncome?.toString() || '',
+                      workExperience: latestEmployment.work_experience_years?.toString() || ''
+                    });
+                    setShowEmploymentModal(true);
+                  }}
+                  className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  <Edit className="w-3 h-3 inline mr-1" />
+                  Edit
+                </button>
+              )}
+            </div>
             <div className="space-y-2 text-sm">
               <div>
                 <span className="text-gray-500">Type:</span>
@@ -3083,24 +3167,47 @@ export function UserProfileDetail() {
 
     const handleSave = async (loanId: number) => {
       try {
-        // Call API to save the edited values
+        // Update loan amount if principal amount was changed
+        if (editValues.principalAmount !== undefined) {
+          const loan = appliedLoans.find((l: any) => (l.id || l.loanId) === loanId);
+          const currentAmount = loan?.principalAmount || loan?.amount || 0;
+          if (parseFloat(editValues.principalAmount) !== currentAmount) {
+            // Update loan amount via API
+            const amountResponse: any = await adminApiService.updateLoanAmount(loanId.toString(), {
+              loan_amount: parseFloat(editValues.principalAmount),
+              principalAmount: parseFloat(editValues.principalAmount)
+            });
+            if (!amountResponse.success && amountResponse.status !== 'success') {
+              alert('Failed to update loan amount: ' + (amountResponse.message || 'Unknown error'));
+              return;
+            }
+          }
+        }
+
+        // Call API to save the edited values (processing fee and interest)
         const response: any = await adminApiService.updateLoanCalculation(loanId, {
-          processing_fee_percent: parseFloat(editValues.pfPercent),
-          interest_percent_per_day: parseFloat(editValues.intPercent)
+          processing_fee_percent: editValues.pfPercent ? parseFloat(editValues.pfPercent) : undefined,
+          interest_percent_per_day: editValues.intPercent ? parseFloat(editValues.intPercent) : undefined
         });
 
         if (response.success || response.status === 'success') {
-          console.log('Loan calculation updated successfully:', response);
+          console.log('Loan updated successfully:', response);
           // Refresh the user data to show updated values
           const profileResponse = await adminApiService.getUserProfile(params.userId!);
           if (profileResponse.status === 'success') {
             setUserData(profileResponse.data);
+            // Clear loan calculations cache to force recalculation
+            setLoanCalculations(prev => {
+              const updated = { ...prev };
+              delete updated[loanId];
+              return updated;
+            });
           }
           setEditingLoan(null);
-          alert('Loan calculation updated successfully!');
+          alert('Loan updated successfully!');
         } else {
-          console.error('Failed to update loan calculation:', response.message);
-          alert('Failed to update loan calculation: ' + response.message);
+          console.error('Failed to update loan:', response.message);
+          alert('Failed to update loan: ' + response.message);
         }
       } catch (error: any) {
         console.error('Error saving loan:', error);
@@ -3198,9 +3305,46 @@ export function UserProfileDetail() {
                               {shortLoanId}
                             </td>
 
-                            {/* Principal Amount */}
+                            {/* Principal Amount - Editable */}
                             <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                              {calculation ? calculation.principal.toFixed(2) : isLoading ? '...' : 'N/A'}
+                              {editingLoan === loanId ? (
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="number"
+                                    value={editValues.principalAmount || loan.principalAmount || loan.amount || 0}
+                                    onChange={(e) => setEditValues({ ...editValues, principalAmount: e.target.value })}
+                                    className="w-24 px-2 py-1 border border-gray-300 rounded text-sm"
+                                    placeholder="Amount"
+                                  />
+                                  <button
+                                    onClick={() => handleSave(loanId)}
+                                    className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                                    title="Save changes"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingLoan(null)}
+                                    className="text-xs px-2 py-1 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                                    title="Cancel"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <span>{calculation ? formatCurrency(calculation.principal) : isLoading ? '...' : formatCurrency(loan.principalAmount || loan.amount || 0)}</span>
+                                  {canEditUsers && (
+                                    <button
+                                      onClick={() => handleEdit(loan)}
+                                      className="text-blue-600 hover:text-blue-800"
+                                      title="Edit principal amount"
+                                    >
+                                      <Edit className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
                             </td>
 
                             {/* Loan Plan - Clickable/Editable */}
@@ -5645,6 +5789,26 @@ export function UserProfileDetail() {
                   placeholder="Enter email address"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Personal Email</label>
+                <input
+                  type="email"
+                  value={contactInfoForm.personalEmail}
+                  onChange={(e) => setContactInfoForm({ ...contactInfoForm, personalEmail: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter personal email"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Official Email</label>
+                <input
+                  type="email"
+                  value={contactInfoForm.officialEmail}
+                  onChange={(e) => setContactInfoForm({ ...contactInfoForm, officialEmail: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter official email"
+                />
+              </div>
               <div className="flex gap-3 pt-4">
                 <button
                   onClick={handleContactInfoSubmit}
@@ -5779,22 +5943,85 @@ export function UserProfileDetail() {
               </button>
             </div>
             <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Company Name *</label>
+                <input
+                  type="text"
+                  value={employmentInfoForm.companyName || employmentInfoForm.company}
+                  onChange={(e) => setEmploymentInfoForm({ ...employmentInfoForm, companyName: e.target.value, company: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter company name"
+                />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Designation</label>
                   <input
                     type="text"
-                    defaultValue={getUserData('personalInfo.employment')}
+                    value={employmentInfoForm.designation}
+                    onChange={(e) => setEmploymentInfoForm({ ...employmentInfoForm, designation: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter designation"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Industry</label>
                   <input
                     type="text"
-                    defaultValue={getUserData('personalInfo.company')}
+                    value={employmentInfoForm.industry}
+                    onChange={(e) => setEmploymentInfoForm({ ...employmentInfoForm, industry: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter industry"
                   />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                <input
+                  type="text"
+                  value={employmentInfoForm.department}
+                  onChange={(e) => setEmploymentInfoForm({ ...employmentInfoForm, department: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter department"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Monthly Income</label>
+                  <input
+                    type="number"
+                    value={employmentInfoForm.income || employmentInfoForm.monthlyIncome}
+                    onChange={(e) => setEmploymentInfoForm({ ...employmentInfoForm, income: e.target.value, monthlyIncome: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter monthly income"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Work Experience (Years)</label>
+                  <input
+                    type="number"
+                    value={employmentInfoForm.workExperience}
+                    onChange={(e) => setEmploymentInfoForm({ ...employmentInfoForm, workExperience: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter years of experience"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={handleEmploymentInfoSubmit}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Save Changes
+                </button>
+                <button
+                  onClick={() => setShowEmploymentModal(false)}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
                 </div>
               </div>
               <div>
@@ -5904,6 +6131,8 @@ export function UserProfileDetail() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Document Title</label>
                 <input
                   type="text"
+                  value={documentTitle}
+                  onChange={(e) => setDocumentTitle(e.target.value)}
                   placeholder="Enter document title"
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
@@ -5919,7 +6148,15 @@ export function UserProfileDetail() {
                     accept=".pdf,.jpg,.jpeg,.png"
                     className="hidden"
                     id="document-upload"
-                    multiple
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setDocumentFile(file);
+                        if (!documentTitle) {
+                          setDocumentTitle(file.name);
+                        }
+                      }
+                    }}
                   />
                   <label htmlFor="document-upload" className="cursor-pointer">
                     <div className="flex flex-col items-center">
@@ -5928,6 +6165,9 @@ export function UserProfileDetail() {
                       </div>
                       <p className="text-sm font-medium text-gray-900 mb-1">Click to upload or drag and drop</p>
                       <p className="text-xs text-gray-500">PDF, JPG, PNG up to 10MB</p>
+                      {documentFile && (
+                        <p className="text-xs text-green-600 mt-2">Selected: {documentFile.name}</p>
+                      )}
                     </div>
                   </label>
                 </div>
@@ -5937,6 +6177,8 @@ export function UserProfileDetail() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Description (Optional)</label>
                 <textarea
+                  value={documentDescription}
+                  onChange={(e) => setDocumentDescription(e.target.value)}
                   placeholder="Add any additional notes about this document"
                   rows={3}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -5959,11 +6201,42 @@ export function UserProfileDetail() {
               <div className="flex gap-3 pt-4">
                 <button
                   type="submit"
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.preventDefault();
-                    alert('Document uploaded successfully!');
-                    setShowUploadNewModal(false);
-                    setDocumentType('');
+                    if (!documentType || !documentTitle || !documentFile) {
+                      alert('Please fill in all required fields and select a file');
+                      return;
+                    }
+
+                    try {
+                      const formData = new FormData();
+                      formData.append('document', documentFile);
+                      formData.append('documentType', documentType);
+                      formData.append('documentTitle', documentTitle);
+                      if (documentDescription) {
+                        formData.append('description', documentDescription);
+                      }
+
+                      const response = await adminApiService.uploadUserDocument(params.userId!, formData);
+                      if (response.status === 'success') {
+                        alert('Document uploaded successfully!');
+                        setShowUploadNewModal(false);
+                        setDocumentType('');
+                        setDocumentTitle('');
+                        setDocumentFile(null);
+                        setDocumentDescription('');
+                        // Refresh user data
+                        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+                        if (profileResponse.status === 'success') {
+                          setUserData(profileResponse.data);
+                        }
+                      } else {
+                        alert(response.message || 'Failed to upload document');
+                      }
+                    } catch (error: any) {
+                      console.error('Error uploading document:', error);
+                      alert('Error uploading document: ' + (error.message || 'Unknown error'));
+                    }
                   }}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
                 >
@@ -5974,6 +6247,9 @@ export function UserProfileDetail() {
                   onClick={() => {
                     setShowUploadNewModal(false);
                     setDocumentType('');
+                    setDocumentTitle('');
+                    setDocumentFile(null);
+                    setDocumentDescription('');
                   }}
                   className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
                 >
@@ -7555,12 +7831,31 @@ export function UserProfileDetail() {
               <User className="w-8 h-8 text-gray-600" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-gray-900">
-                {getUserData('name')}
-                {getUserData('clid') && (
-                  <span className="ml-2 text-sm font-normal text-gray-500">({getUserData('clid')})</span>
+              <div className="flex items-center gap-3 mb-1">
+                <h1 className="text-xl font-bold text-gray-900">
+                  {getUserData('name')}
+                  {getUserData('clid') && (
+                    <span className="ml-2 text-sm font-normal text-gray-500">({getUserData('clid')})</span>
+                  )}
+                </h1>
+                {getUserData('profileStatus') && (
+                  <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                    getUserData('profileStatus') === 'submitted' ? 'bg-blue-100 text-blue-800' :
+                    getUserData('profileStatus') === 'under_review' ? 'bg-yellow-100 text-yellow-800' :
+                    getUserData('profileStatus') === 'follow_up' ? 'bg-orange-100 text-orange-800' :
+                    getUserData('profileStatus') === 'disbursal' ? 'bg-purple-100 text-purple-800' :
+                    getUserData('profileStatus') === 'ready_for_disbursement' ? 'bg-indigo-100 text-indigo-800' :
+                    getUserData('profileStatus') === 'account_manager' ? 'bg-green-100 text-green-800' :
+                    getUserData('profileStatus') === 'cleared' ? 'bg-gray-100 text-gray-800' :
+                    getUserData('profileStatus') === 'hold' || getUserData('status') === 'on_hold' ? 'bg-red-100 text-red-800' :
+                    'bg-gray-100 text-gray-800'
+                  }`}>
+                    {getUserData('profileStatus') === 'account_manager' && getUserData('assignedManager') 
+                      ? `Account Manager: ${getUserData('assignedManager')}`
+                      : getUserData('profileStatus')?.replace(/_/g, ' ').toUpperCase() || 'ACTIVE'}
+                  </span>
                 )}
-              </h1>
+              </div>
               <div className="flex items-center gap-4 text-sm text-gray-600">
                 {getUserData('clid') && <span>CLID: {getUserData('clid')}</span>}
                 <span className="flex items-center gap-1">
@@ -7571,6 +7866,21 @@ export function UserProfileDetail() {
                   <Mail className="w-3 h-3" />
                   {getUserData('email')}
                 </span>
+                {getUserData('creditScore') && (
+                  <span className="flex items-center gap-1">
+                    <span className="font-semibold">Pocket Score:</span> {getUserData('creditScore')}
+                  </span>
+                )}
+                {getUserData('experianScore') && (
+                  <span className="flex items-center gap-1">
+                    <span className="font-semibold">Experian:</span> {getUserData('experianScore')}
+                  </span>
+                )}
+                {getUserData('limitVsSalaryPercent') && (
+                  <span className="flex items-center gap-1">
+                    <span className="font-semibold">Limit vs Salary:</span> {getUserData('limitVsSalaryPercent')}%
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2 mt-2">
                 <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getUserData('status') === 'under_review' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
@@ -7590,7 +7900,28 @@ export function UserProfileDetail() {
           {/* Right: Key Info */}
           <div className="text-right">
             <div className="text-sm text-gray-600 mb-1">Registered: {formatDate(getUserData('registeredDate'))}</div>
-            <div className="text-sm text-gray-600 mb-2">Risk: {getUserData('riskCategory')} | Level: {getUserData('memberLevel')} | Credit Score: {getUserData('credit_score') || 'N/A'}</div>
+            <div className="text-sm text-gray-600 mb-2">
+              Risk: {getUserData('riskCategory')} | Level: {getUserData('memberLevel')}
+              {getUserData('loanLimit') > 0 && (
+                <span className="ml-2">
+                  | Loan Limit: ₹{getUserData('loanLimit').toLocaleString('en-IN')}
+                  {canEditUsers && (
+                    <button
+                      onClick={() => {
+                        const newLimit = prompt('Enter new loan limit:', getUserData('loanLimit'));
+                        if (newLimit && !isNaN(parseFloat(newLimit))) {
+                          handleUpdateLoanLimit(parseFloat(newLimit));
+                        }
+                      }}
+                      className="ml-1 text-blue-600 hover:text-blue-800"
+                      title="Edit loan limit"
+                    >
+                      <Edit className="w-3 h-3 inline" />
+                    </button>
+                  )}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -7653,4 +7984,5 @@ export function UserProfileDetail() {
       {renderModals()}
     </div>
   );
+}
 }

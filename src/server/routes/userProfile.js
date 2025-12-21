@@ -21,7 +21,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         profile_completed, eligibility_status, eligibility_reason, 
         eligibility_retry_date, selected_loan_plan_id, created_at, updated_at, last_login_at,
         pan_number, alternate_mobile, company_name, company_email, salary_date,
-        personal_email, official_email
+        personal_email, official_email, loan_limit, credit_score, experian_score,
+        monthly_net_income
       FROM users 
       WHERE id = ?
     `, [userId]);
@@ -63,6 +64,42 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     `, [userId]);
 
     console.log('📋 Found applications:', applications ? applications.length : 0);
+
+    // Get latest loan application status for profile status display
+    const latestApplication = applications && applications.length > 0 ? applications[0] : null;
+    const profileStatus = latestApplication ? latestApplication.status : (user.status || 'active');
+    
+    // Get assigned account manager if status is account_manager
+    let assignedManager = null;
+    if (profileStatus === 'account_manager' && latestApplication?.approved_by) {
+      const manager = await executeQuery('SELECT name FROM admins WHERE id = ?', [latestApplication.approved_by]);
+      if (manager && manager.length > 0) {
+        assignedManager = manager[0].name;
+      }
+    }
+
+    // Calculate pocket credit score (default 640, increase by 6 if loan cleared on/before due date)
+    let pocketCreditScore = user.credit_score || 640;
+    
+    // Check if user has any cleared loans that were cleared on or before due date
+    if (applications && applications.length > 0) {
+      const clearedLoans = applications.filter(app => app.status === 'cleared');
+      for (const loan of clearedLoans) {
+        // Check if loan was cleared on or before due date
+        if (loan.disbursed_at) {
+          const disbursedDate = new Date(loan.disbursed_at);
+          const dueDate = new Date(disbursedDate);
+          // Assuming tenure in months, calculate due date
+          const tenureDays = loan.tenure_months ? loan.tenure_months * 30 : 30;
+          dueDate.setDate(dueDate.getDate() + tenureDays);
+          const clearedDate = loan.updated_at ? new Date(loan.updated_at) : new Date();
+          
+          if (clearedDate <= dueDate) {
+            pocketCreditScore += 6;
+          }
+        }
+      }
+    }
 
     // Get ALL addresses (not just primary) - ordered by is_primary DESC, then created_at DESC
     const addresses = await executeQuery(`
@@ -296,16 +333,25 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       companyName: user.company_name || 'N/A',
       companyEmail: user.company_email || 'N/A',
       salaryDate: user.salary_date || null,
+      loanLimit: parseFloat(user.loan_limit) || 0,
+      monthlyIncome: parseFloat(user.monthly_net_income) || monthlyIncomeValue || 0,
       kycStatus: user.kyc_completed ? 'completed' : 'pending',
       isEmailVerified: user.email_verified ? true : false,
       isMobileVerified: user.phone_verified ? true : false,
       status: user.status || 'active',
+      profileStatus: profileStatus, // Latest loan application status
+      assignedManager: assignedManager, // Assigned account manager name
       registeredDate: user.created_at, // For admin UI compatibility
       createdAt: user.created_at,
       updatedAt: user.updated_at,
       lastLoginAt: user.last_login_at || 'N/A',
       riskCategory,
       memberLevel,
+      creditScore: pocketCreditScore, // Pocket credit score (calculated)
+      experianScore: user.experian_score || null, // Experian score from API
+      limitVsSalaryPercent: (user.monthly_net_income && user.loan_limit) 
+        ? ((parseFloat(user.loan_limit) / parseFloat(user.monthly_net_income)) * 100).toFixed(1)
+        : null,
       profileCompletionStep: user.profile_completion_step || 1,
       profileCompleted: user.profile_completed ? true : false,
       eligibilityStatus: user.eligibility_status || 'pending',
@@ -513,29 +559,96 @@ router.put('/:userId/loan-plan', authenticateAdmin, async (req, res) => {
   }
 });
 
+// Update user's loan limit (admin only)
+router.put('/:userId/loan-limit', authenticateAdmin, async (req, res) => {
+  try {
+    console.log('💰 Updating loan limit for user:', req.params.userId);
+    await initializeDatabase();
+    const { userId } = req.params;
+    const { loanLimit } = req.body;
+
+    if (!loanLimit || isNaN(parseFloat(loanLimit))) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid loan limit is required'
+      });
+    }
+
+    // Update user's loan limit
+    await executeQuery(
+      'UPDATE users SET loan_limit = ?, updated_at = NOW() WHERE id = ?',
+      [parseFloat(loanLimit), userId]
+    );
+
+    console.log('✅ Loan limit updated successfully');
+    res.json({
+      status: 'success',
+      message: 'Loan limit updated successfully',
+      data: { userId, loanLimit: parseFloat(loanLimit) }
+    });
+  } catch (error) {
+    console.error('Update loan limit error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update loan limit'
+    });
+  }
+});
+
 // Update user contact information
 router.put('/:userId/contact-info', authenticateAdmin, async (req, res) => {
   try {
     console.log('📞 Updating contact info for user:', req.params.userId);
     await initializeDatabase();
     const { userId } = req.params;
-    const { email, phone, alternatePhone } = req.body;
+    const { email, phone, alternatePhone, personalEmail, officialEmail } = req.body;
+
+    const updates = [];
+    const values = [];
+
+    if (email !== undefined) {
+      updates.push('email = ?');
+      values.push(email);
+    }
+    if (phone !== undefined) {
+      updates.push('phone = ?');
+      values.push(phone);
+    }
+    if (alternatePhone !== undefined) {
+      updates.push('alternate_mobile = ?');
+      values.push(alternatePhone);
+    }
+    if (personalEmail !== undefined) {
+      updates.push('personal_email = ?');
+      values.push(personalEmail);
+    }
+    if (officialEmail !== undefined) {
+      updates.push('official_email = ?');
+      values.push(officialEmail);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'No fields to update provided'
+      });
+    }
+
+    updates.push('updated_at = NOW()');
+    values.push(userId);
 
     // Update user contact info in MySQL
     await executeQuery(`
       UPDATE users 
-      SET 
-        email = ?,
-        phone = ?,
-        updated_at = NOW()
+      SET ${updates.join(', ')}
       WHERE id = ?
-    `, [email, phone, userId]);
+    `, values);
 
     console.log('✅ Contact info updated successfully');
     res.json({
       status: 'success',
       message: 'Contact information updated successfully',
-      data: { userId, email, phone, alternatePhone }
+      data: { userId, email, phone, alternatePhone, personalEmail, officialEmail }
     });
 
   } catch (error) {
@@ -579,21 +692,116 @@ router.put('/:userId/employment-info', authenticateAdmin, async (req, res) => {
     console.log('💼 Updating employment info for user:', req.params.userId);
     await initializeDatabase();
     const { userId } = req.params;
-    const { company, designation, monthlyIncome, workExperience } = req.body;
+    const { company, companyName, designation, industry, department, monthlyIncome, income, workExperience } = req.body;
 
-    // For now, we'll store employment info in memory since columns don't exist yet
-    console.log('✅ Employment info updated successfully (stored in memory)');
+    // Use companyName if provided, otherwise company
+    const finalCompanyName = companyName || company;
+    // Use income if provided, otherwise monthlyIncome
+    const finalIncome = income || monthlyIncome;
+
+    // Get the latest employment record for this user
+    const existingEmployment = await executeQuery(`
+      SELECT id FROM employment_details 
+      WHERE user_id = ? 
+      ORDER BY id DESC 
+      LIMIT 1
+    `, [userId]);
+
+    let employmentId;
+    if (existingEmployment && existingEmployment.length > 0) {
+      // Update existing employment record
+      employmentId = existingEmployment[0].id;
+      const updates = [];
+      const values = [];
+
+      if (finalCompanyName !== undefined) {
+        updates.push('company_name = ?');
+        values.push(finalCompanyName);
+      }
+      if (designation !== undefined) {
+        updates.push('designation = ?');
+        values.push(designation);
+      }
+      if (industry !== undefined) {
+        updates.push('industry = ?');
+        values.push(industry);
+      }
+      if (department !== undefined) {
+        updates.push('department = ?');
+        values.push(department);
+      }
+      if (finalIncome !== undefined && finalIncome !== null) {
+        updates.push('monthly_salary_old = ?');
+        values.push(finalIncome);
+      }
+      if (workExperience !== undefined && workExperience !== null) {
+        updates.push('work_experience_years = ?');
+        values.push(workExperience);
+      }
+
+      if (updates.length > 0) {
+        updates.push('updated_at = NOW()');
+        values.push(employmentId);
+        await executeQuery(`
+          UPDATE employment_details 
+          SET ${updates.join(', ')}
+          WHERE id = ?
+        `, values);
+      }
+    } else {
+      // Create new employment record if none exists
+      const result = await executeQuery(`
+        INSERT INTO employment_details 
+        (user_id, company_name, designation, industry, department, monthly_salary_old, work_experience_years, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+      `, [
+        userId,
+        finalCompanyName || null,
+        designation || null,
+        industry || null,
+        department || null,
+        finalIncome || null,
+        workExperience || null
+      ]);
+      employmentId = result.insertId;
+    }
+
+    // Also update users table with company_name and monthly_net_income
+    const userUpdates = [];
+    const userValues = [];
+    
+    if (finalCompanyName !== undefined) {
+      userUpdates.push('company_name = ?');
+      userValues.push(finalCompanyName);
+    }
+    if (finalIncome !== undefined && finalIncome !== null) {
+      userUpdates.push('monthly_net_income = ?');
+      userValues.push(finalIncome);
+    }
+
+    if (userUpdates.length > 0) {
+      userUpdates.push('updated_at = NOW()');
+      userValues.push(userId);
+      await executeQuery(`
+        UPDATE users 
+        SET ${userUpdates.join(', ')}
+        WHERE id = ?
+      `, userValues);
+    }
+
+    console.log('✅ Employment info updated successfully');
     res.json({
       status: 'success',
       message: 'Employment information updated successfully',
-      data: { userId, company, designation, monthlyIncome, workExperience }
+      data: { userId, employmentId, company: finalCompanyName, designation, industry, department, monthlyIncome: finalIncome, workExperience }
     });
 
   } catch (error) {
     console.error('Update employment info error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to update employment information'
+      message: 'Failed to update employment information',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
@@ -831,7 +1039,74 @@ router.put('/:userId/references/:referenceId', authenticateAdmin, async (req, re
   }
 });
 
-// Upload document
+// Upload document (with file)
+const multer = require('multer');
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only PDF, JPG, and PNG files are allowed.'));
+    }
+  }
+});
+
+router.post('/:userId/documents/upload', authenticateAdmin, upload.single('document'), async (req, res) => {
+  try {
+    console.log('📄 Uploading document for user:', req.params.userId);
+    await initializeDatabase();
+    const { userId } = req.params;
+    const { documentType, documentTitle, description } = req.body;
+
+    if (!req.file) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'No file uploaded'
+      });
+    }
+
+    if (!documentType || !documentTitle) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Document type and title are required'
+      });
+    }
+
+    // For now, we'll store document info in memory since table doesn't exist yet
+    // In production, you would upload to S3 and store metadata in database
+    console.log('✅ Document uploaded successfully:', {
+      fileName: req.file.originalname,
+      fileSize: req.file.size,
+      documentType,
+      documentTitle
+    });
+    
+    res.json({
+      status: 'success',
+      message: 'Document uploaded successfully',
+      data: { 
+        userId, 
+        documentType, 
+        documentTitle,
+        fileName: req.file.originalname,
+        fileSize: req.file.size,
+        description: description || null
+      }
+    });
+
+  } catch (error) {
+    console.error('Upload document error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message || 'Failed to upload document'
+    });
+  }
+});
+
+// Upload document (legacy endpoint for backward compatibility)
 router.post('/:userId/documents', authenticateAdmin, async (req, res) => {
   try {
     console.log('📄 Uploading document for user:', req.params.userId);

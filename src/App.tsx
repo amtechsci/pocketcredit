@@ -59,6 +59,7 @@ import { Logo } from './components/Logo';
 import AdminApp from './AdminApp';
 
 import { Toaster } from './components/ui/sonner';
+import { PendingDocumentNotification } from './components/PendingDocumentNotification';
 
 // Layout component for pages with header and footer
 function LayoutWithHeaderFooter({ children }: { children: React.ReactNode }) {
@@ -77,6 +78,7 @@ function LayoutWithHeaderFooter({ children }: { children: React.ReactNode }) {
 function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen w-full">
+      <PendingDocumentNotification />
       {children}
     </div>
   );
