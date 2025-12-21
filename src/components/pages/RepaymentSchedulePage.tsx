@@ -4,7 +4,10 @@ import {
   ArrowLeft,
   CheckCircle,
   AlertCircle,
-  Loader2
+  Loader2,
+  Lock,
+  TrendingUp,
+  Sparkles
 } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
@@ -205,45 +208,142 @@ export const RepaymentSchedulePage = () => {
   const daysDelayed = isDefaulted ? Math.ceil((currentDateMidnight.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
   // Tenure extension logic: D-5 to D+15
-  // TODO: Uncomment when tenure extension feature is ready
-  // Normalize due date to midnight for accurate day-based comparison
-  // (currentDateMidnight already calculated above for exhausted days)
-  // const dueDateMidnight = new Date(dueDate);
-  // dueDateMidnight.setHours(0, 0, 0, 0);
-  // const dMinus5 = new Date(dueDateMidnight);
-  // dMinus5.setDate(dMinus5.getDate() - 5);
-  // const dPlus15 = new Date(dueDateMidnight);
-  // dPlus15.setDate(dPlus15.getDate() + 15);
-  // const canExtend = currentDateMidnight >= dMinus5 && currentDateMidnight <= dPlus15;
+  const dueDateMidnight = new Date(dueDate);
+  dueDateMidnight.setHours(0, 0, 0, 0);
+  const dMinus5 = new Date(dueDateMidnight);
+  dMinus5.setDate(dMinus5.getDate() - 5);
+  const dPlus15 = new Date(dueDateMidnight);
+  dPlus15.setDate(dPlus15.getDate() + 15);
+  const canExtend = currentDateMidnight >= dMinus5 && currentDateMidnight <= dPlus15;
+
+  // Calculate loan progression stages
+  // Get user's monthly income and current loan limit
+  const monthlyIncome = kfsData?.borrower?.employment?.monthly_income || 
+                        (user as any)?.monthly_net_income || 
+                        loanData.sanctioned_amount || 
+                        0;
+  const currentLimit = (user as any)?.loan_limit || loanData.sanctioned_amount || 0;
+  const nextLimit = monthlyIncome > 0 ? Math.round(monthlyIncome * 1.5) : Math.max(currentLimit * 2, 100000); // 1.5 * salary or 2x current (min 1L)
+  
+  // Determine current stage (1-7) based on current limit
+  // Stage progression: 5k, 10k, 20k, 30k, 50k, 75k, 1.5*salary
+  const stageLimits = [
+    5000,
+    10000,
+    20000,
+    30000,
+    50000,
+    75000,
+    nextLimit
+  ];
+  
+  let currentStage = 1;
+  for (let i = 0; i < stageLimits.length; i++) {
+    if (currentLimit >= stageLimits[i]) {
+      currentStage = i + 1;
+    } else {
+      break;
+    }
+  }
+  
+  // Get current and next stage amounts
+  const currentStageAmount = stageLimits[currentStage - 1] || currentLimit;
+  const nextStageAmount = stageLimits[currentStage] || nextLimit;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 pb-12">
       <DashboardHeader userName={user?.first_name && user?.last_name ? `${user.first_name} ${user.last_name}` : user?.email || 'User'} />
 
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
+      <div className="container mx-auto px-4 py-4 sm:py-6 max-w-5xl">
+        {/* Header Message */}
+        <div className="text-center mb-6 sm:mb-8">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-2">
+            Get upto ₹{formatCurrency(nextLimit).replace('₹', '')} by closing this loan
+          </h1>
+          <p className="text-sm sm:text-base text-gray-600">Clear your loan fast to unlock higher limits</p>
+        </div>
 
-        {/* Main Repayment Card */}
-        <Card className="bg-white shadow-xl rounded-xl overflow-hidden mb-6 border-2 border-blue-100">
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-blue-100 text-sm">Loan ID: {loanData.loan_id || loanData.application_number || 'N/A'}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-blue-100 text-sm mb-1">Exhausted days</p>
-                <p className="text-2xl font-bold">{exhaustedDays} days</p>
+        {/* Loan Progression Stages */}
+        <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
+          <CardContent className="p-4 sm:p-6">
+            {/* Stage 01 - Current */}
+            <div className="relative mb-4 sm:mb-6">
+              <div className="flex items-start gap-3 sm:gap-4">
+                <div className="flex flex-col items-center flex-shrink-0">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                    <span className="text-white font-bold text-sm sm:text-base">01</span>
+                  </div>
+                  <div className="w-0.5 h-16 sm:h-20 bg-gray-300 mt-2"></div>
+                </div>
+                <div className="flex-1 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 sm:p-5 border-2 border-blue-200 relative">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs sm:text-sm font-semibold text-blue-700 bg-blue-100 px-2 py-1 rounded">Stage 01</span>
+                        <span className="text-xs sm:text-sm font-semibold text-orange-600 bg-orange-100 px-2 py-1 rounded flex items-center gap-1">
+                          <Sparkles className="w-3 h-3" />
+                          You are Here
+                        </span>
+                      </div>
+                      <p className="text-lg sm:text-2xl font-bold text-gray-900 mb-1">
+                        {formatCurrency(currentStageAmount)}
+                      </p>
+                      <p className="text-xs sm:text-sm text-gray-600">Your Current limit</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500 mb-1">Loan ID</p>
+                      <p className="text-sm font-semibold text-gray-700">{loanData.loan_id || loanData.application_number || 'N/A'}</p>
+                      <p className="text-xs text-gray-500 mt-2 mb-1">Exhausted days</p>
+                      <p className="text-base sm:text-lg font-bold text-gray-900">{exhaustedDays}</p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
 
-          <CardContent className="p-6 space-y-6">
-            {/* Total Outstanding - Prominent Display */}
-            <div className="text-center py-4 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border-2 border-blue-200">
-              <p className="text-sm text-gray-600 mb-2 font-medium">Total Outstanding till today</p>
-              <h1 className="text-4xl font-extrabold text-gray-900 mb-2">
+            {/* Stage 02 - Next */}
+            <div className="relative">
+              <div className="flex items-start gap-3 sm:gap-4">
+                <div className="flex flex-col items-center flex-shrink-0">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-300 flex items-center justify-center">
+                    <Lock className="w-5 h-5 sm:w-6 sm:h-6 text-gray-500" />
+                  </div>
+                </div>
+                <div className="flex-1 bg-gray-50 rounded-xl p-4 sm:p-5 border-2 border-gray-200 relative">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs sm:text-sm font-semibold text-gray-600 bg-gray-100 px-2 py-1 rounded">Stage 02</span>
+                        <Lock className="w-4 h-4 text-gray-400" />
+                      </div>
+                      <p className="text-lg sm:text-2xl font-bold text-gray-700 mb-1">
+                        {formatCurrency(nextStageAmount)}
+                      </p>
+                      <p className="text-xs sm:text-sm text-gray-600">Your Next limit</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500 mb-1">Disbursal in 2 min</p>
+                      <div className="inline-block bg-gray-200 text-gray-600 text-xs px-3 py-1 rounded-full">
+                        Locked
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Outstanding & Due Date Card */}
+        <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
+          <CardContent className="p-4 sm:p-6 space-y-4">
+            {/* Total Outstanding */}
+            <div className="text-center py-4 sm:py-6 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
+              <p className="text-xs sm:text-sm text-gray-600 mb-2 font-medium">Total Outstanding till today</p>
+              <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-gray-900 mb-2">
                 {formatCurrency(calculations.total_repayable || 0)}
               </h1>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs sm:text-sm text-gray-500">
                 Due date: {formatDate(dueDate.toISOString())}
               </p>
             </div>
@@ -251,65 +351,43 @@ export const RepaymentSchedulePage = () => {
             {/* Default Status */}
             {isDefaulted && (
               <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg animate-pulse">
-                <p className="text-red-600 font-bold text-lg uppercase tracking-wide">
+                <p className="text-red-600 font-bold text-base sm:text-lg uppercase tracking-wide">
                   ⚠ DEFAULTED ({daysDelayed} days delayed)
                 </p>
-                <p className="text-sm text-red-500 mt-1">Immediate action required</p>
+                <p className="text-xs sm:text-sm text-red-500 mt-1">Immediate action required</p>
               </div>
             )}
 
             {/* Action Buttons */}
             <div className="space-y-3 pt-4 border-t border-gray-200">
               <Button
-                className="w-full h-14 text-lg font-bold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all transform hover:scale-[1.02]"
+                className="w-full h-12 sm:h-14 text-base sm:text-lg font-bold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all transform hover:scale-[1.02]"
                 onClick={async () => {
                   try {
                     toast.loading('Creating payment order...');
 
-                    // Get loan ID - try multiple sources
                     const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
                     const amount = calculations.total_repayable;
-
-                    console.log('💳 Payment Data:', { loanId, amount });
 
                     if (!loanId || !amount) {
                       toast.error('Unable to process payment');
                       return;
                     }
 
-                    // Create payment order
                     const response = await apiService.createPaymentOrder(loanId, amount);
 
                     if (response.success && response.data?.paymentSessionId) {
-                      console.log('💳 Payment order created:', {
-                        orderId: response.data.orderId,
-                        paymentSessionId: response.data.paymentSessionId
-                      });
-                      
                       toast.success('Opening payment gateway...');
 
                       try {
-                        // Determine environment based on the checkout URL
-                        // Production: payments.cashfree.com (without -test)
-                        // Sandbox: payments-test.cashfree.com
                         const isProduction = response.data.checkoutUrl?.includes('payments.cashfree.com') && 
                                            !response.data.checkoutUrl?.includes('payments-test');
                         
-                        console.log('🔧 Cashfree SDK environment:', {
-                          checkoutUrl: response.data.checkoutUrl?.substring(0, 50) + '...',
-                          isProduction,
-                          mode: isProduction ? 'production' : 'sandbox'
-                        });
-                        
-                        // Load Cashfree SDK with correct environment
                         const cashfree = await load({ 
                           mode: isProduction ? "production" : "sandbox"
                         });
 
                         if (cashfree) {
-                          console.log('✅ Cashfree SDK loaded, opening checkout...');
-                          
-                          // Open Cashfree checkout using the SDK (recommended method)
                           cashfree.checkout({
                             paymentSessionId: response.data.paymentSessionId
                           });
@@ -320,9 +398,7 @@ export const RepaymentSchedulePage = () => {
                         console.error('Cashfree SDK error:', sdkError);
                         toast.error('Failed to open payment gateway. Please try again.');
                         
-                        // Fallback: Try direct URL redirect as backup
                         if (response.data.checkoutUrl) {
-                          console.log('🔄 Falling back to direct URL redirect');
                           window.location.href = response.data.checkoutUrl;
                         } else {
                           throw new Error('No payment session available');
@@ -340,67 +416,31 @@ export const RepaymentSchedulePage = () => {
                 Repay Now
               </Button>
 
-              {/* Extend button - hidden until feature is ready */}
-              {/* TODO: Uncomment when tenure extension feature is ready
+              {/* Extend Loan Tenure Button */}
               {canExtend && (
                 <Button
                   variant="outline"
-                  className="w-full h-12 border-2 border-blue-600 text-blue-600 hover:bg-blue-50"
+                  className="w-full h-12 border-2 border-blue-600 text-blue-600 hover:bg-blue-50 font-semibold"
                   onClick={() => {
                     toast.info('Tenure extension feature coming soon');
                   }}
                 >
+                  <TrendingUp className="w-4 h-4 mr-2" />
                   Extend your loan tenure
                 </Button>
               )}
-              */}
             </div>
           </CardContent>
         </Card>
-
-        {/* Loan Information Card */}
-        <Card className="bg-white shadow-lg rounded-xl mb-6">
-          <CardContent className="p-6">
-            <h3 className="text-xl font-semibold mb-4 text-gray-900">Loan Information</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm text-gray-500 mb-1">Loan Term</p>
-                <p className="font-semibold text-gray-900">
-                  {loanData.loan_term_days || 0} days
-                  {loanData.loan_term_months && ` (${loanData.loan_term_months} months)`}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 mb-1">Disbursed Date</p>
-                <p className="font-semibold text-gray-900">
-                  {formatDate(loanData.disbursed_at || loanData.created_at)}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 mb-1">Due Date</p>
-                <p className="font-semibold text-gray-900">
-                  {formatDate(dueDate.toISOString())}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 mb-1">Days Remaining</p>
-                <p className="font-semibold text-gray-900">
-                  {Math.max(0, Math.ceil((dueDate.getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24)))} days
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
 
         {/* Important Bullet Points */}
-        <Card className="bg-blue-50 border-blue-100 shadow-sm rounded-xl">
-          <CardContent className="p-5">
-            <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
-              <CheckCircle className="w-5 h-5" />
+        <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200 shadow-lg rounded-2xl">
+          <CardContent className="p-5 sm:p-6">
+            <h3 className="font-bold text-blue-900 mb-4 sm:mb-5 flex items-center gap-2 text-base sm:text-lg">
+              <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6" />
               Important Information
             </h3>
-            <ul className="space-y-3">
+            <ul className="space-y-3 sm:space-y-4">
               {[
                 "Timely repayment helps improve CIBIL / Experian / CRIF / Equifax scores",
                 "Get higher loan limits & faster approvals on your next loan",
@@ -409,7 +449,7 @@ export const RepaymentSchedulePage = () => {
                 "Prevent E-NACH bounce charges & bank penalties",
                 "Stay stress-free — no calls, no follow-ups"
               ].map((point, index) => (
-                <li key={index} className="flex gap-3 text-sm text-blue-800 items-start">
+                <li key={index} className="flex gap-3 text-xs sm:text-sm text-blue-800 items-start">
                   <span className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-1.5 flex-shrink-0" />
                   <span className="leading-relaxed">{point}</span>
                 </li>
