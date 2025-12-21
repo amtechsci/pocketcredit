@@ -738,9 +738,9 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       // Grievance Redressal
       grievance: {
         nodal_officer: {
-          name: 'Mr. Rajesh Kumar',
-          phone: '+91 9876543210',
-          email: 'grievance@pocketcredit.in'
+          name: 'Mr.Kiran',
+          phone: '+91 9573794121',
+          email: 'Kiran@pocketcredit.in'
         },
         escalation: {
           name: 'Ms. Priya Sharma',
@@ -761,8 +761,8 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       additional: {
         loan_transferable: 'Yes',
         co_lending: 'No',
-        recovery_clause: '1(X)',
-        grievance_clause: '12'
+        recovery_clause: '7',
+        grievance_clause: '8.3'
       },
 
       // Generated metadata

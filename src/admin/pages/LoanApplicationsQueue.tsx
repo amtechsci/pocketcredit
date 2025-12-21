@@ -22,6 +22,8 @@ import { adminApiService } from '../../services/adminApi';
 
 interface LoanApplication {
   id: string;
+  loanId?: string; // Full application number
+  shortLoanId?: string; // Short format: PLL + 4 digits
   applicantName: string;
   mobile: string;
   email: string;
@@ -716,7 +718,20 @@ export function LoanApplicationsQueue() {
                       onClick={() => handleViewDetails(application)}
                       className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
                     >
-                      {application.id}
+                      {(() => {
+                        // Use shortLoanId if available, otherwise generate it from id or loanId
+                        if (application.shortLoanId) {
+                          return application.shortLoanId;
+                        }
+                        // Generate short format: PLL + last 4 digits
+                        const sourceId = application.loanId || application.id;
+                        if (sourceId) {
+                          const last4 = sourceId.slice(-4);
+                          return `PLL${last4}`;
+                        }
+                        // Fallback: use id padded to 4 digits
+                        return `PLL${String(application.id).padStart(4, '0').slice(-4)}`;
+                      })()}
                     </button>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">

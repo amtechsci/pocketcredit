@@ -112,7 +112,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         <tr>
                             <td className="border border-black p-2">4</td>
                             <td className="border border-black p-2">Loan term (year/months/days)</td>
-                            <td className="border border-black p-2" colSpan={3}>{kfsData.loan.loan_term_days} days</td>
+                            <td className="border border-black p-2" colSpan={3}>Up to 165 days</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2">5</td>
@@ -227,7 +227,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                                 <td className="border border-black p-2">N/A</td>
                             </tr>
                         )}
-                        {/* Fees added to total */}
+                        {/* Fees added to total - Now show in left columns only */}
                         {addToTotalFees.length > 0 && (
                             addToTotalFees.map((fee: any, index: number) => (
                                 <tr key={`add-${index}`}>
@@ -235,10 +235,10 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                                     <td className="border border-black p-2">
                                         ({deductFromDisbursalFees.length + index + 1}) {fee.fee_name || 'Service fees'}
                                     </td>
-                                    <td className="border border-black p-2">N/A</td>
-                                    <td className="border border-black p-2">N/A</td>
                                     <td className="border border-black p-2">Onetime</td>
                                     <td className="border border-black p-2">{formatCurrency(parseFloat(fee.fee_amount || fee.amount || 0))}</td>
+                                    <td className="border border-black p-2">N/A</td>
+                                    <td className="border border-black p-2">N/A</td>
                                 </tr>
                             ))
                         )}
@@ -329,7 +329,12 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         <tr>
                             <td className="border border-black p-2"></td>
                             <td className="border border-black p-2">(v) Any other charges (please specify)</td>
-                            <td className="border border-black p-2">N/A</td>
+                            <td className="border border-black p-2">
+                                Loan Tenure Extension 1: 14% of (2) + GST<br />
+                                Loan Tenure Extension 2: 14% of (2) + GST<br />
+                                Loan Tenure Extension 3: 14% of (2) + GST<br />
+                                Loan Tenure Extension 4: 14% of (2) + GST
+                            </td>
                         </tr>
                     </tbody>
                 </table>
@@ -354,20 +359,20 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         <tr>
                             <td className="border border-black p-2" style={{ width: '5%' }}>1</td>
                             <td className="border border-black p-2" style={{ width: '70%' }}>Clause of Loan agreement relating to engagement of recovery agents</td>
-                            <td className="border border-black p-2" style={{ width: '25%' }}>1 (X)</td>
+                            <td className="border border-black p-2" style={{ width: '25%' }}>7</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2">2</td>
                             <td className="border border-black p-2">Clause of Loan agreement which details grievance redressal mechanism</td>
-                            <td className="border border-black p-2">12</td>
+                            <td className="border border-black p-2">8.3</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2">3</td>
                             <td className="border border-black p-2">Phone number and email id of the nodal grievance redressal officer</td>
                             <td className="border border-black p-2">
-                                Name: {kfsData.grievance.nodal_officer?.name || 'N/A'}<br />
-                                Number: {kfsData.grievance.nodal_officer?.phone || 'N/A'}<br />
-                                Mail ID: {kfsData.grievance.nodal_officer?.email || 'N/A'}
+                                Name: Mr.Kiran<br />
+                                Number: +91 9573794121<br />
+                                Mail ID: Kiran@pocketcredit.in
                             </td>
                         </tr>
                         <tr>
@@ -451,7 +456,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         <tr>
                             <td className="border border-black p-2">2</td>
                             <td className="border border-black p-2">Loan Term (in years/ months/ days)</td>
-                            <td className="border border-black p-2">{kfsData.loan.loan_term_days} days</td>
+                            <td className="border border-black p-2">Up to 165 days</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2"></td>
@@ -565,17 +570,17 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             <th className="border border-black p-2 bg-gray-100">Instalment No.</th>
                             <th className="border border-black p-2 bg-gray-100">Outstanding Principal (in Rupees)</th>
                             <th className="border border-black p-2 bg-gray-100">Principal (in Rupees)</th>
-                            <th className="border border-black p-2 bg-gray-100">Interest (in Rupees)</th>
+                            <th className="border border-black p-2 bg-gray-100">Interest + post service fee inclusive GST (in Rupees)</th>
                             <th className="border border-black p-2 bg-gray-100">Instalment (in Rupees)</th>
                         </tr>
                     </thead>
                     <tbody>
                         <tr>
                             <td className="border border-black p-2 text-center">1</td>
-                            <td className="border border-black p-2">{formatCurrency(kfsData.loan.sanctioned_amount)}</td>
-                            <td className="border border-black p-2">{formatCurrency(kfsData.loan.sanctioned_amount)}</td>
-                            <td className="border border-black p-2">{formatCurrency(kfsData.calculations.interest)}</td>
-                            <td className="border border-black p-2">{formatCurrency(kfsData.loan.sanctioned_amount + kfsData.calculations.interest)}</td>
+                            <td className="border border-black p-2">5000</td>
+                            <td className="border border-black p-2">5000</td>
+                            <td className="border border-black p-2">110+708</td>
+                            <td className="border border-black p-2">5818</td>
                         </tr>
                     </tbody>
                 </table>

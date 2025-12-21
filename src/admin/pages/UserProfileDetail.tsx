@@ -29,7 +29,8 @@ import {
   Filter,
   Flag,
   Shield,
-  Wallet
+  Wallet,
+  UserPlus
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import { adminApiService } from '../../services/adminApi';
@@ -91,12 +92,16 @@ export function UserProfileDetail() {
     officialEmail: ''
   });
   const [addressInfoForm, setAddressInfoForm] = useState({
-    address: '',
+    address_line1: '',
+    address_line2: '',
     city: '',
     state: '',
     pincode: '',
-    country: ''
+    country: 'India',
+    address_type: 'current' as 'current' | 'permanent' | 'office',
+    is_primary: false
   });
+  const [editingAddressId, setEditingAddressId] = useState<number | null>(null);
   const [employmentInfoForm, setEmploymentInfoForm] = useState({
     company: '',
     companyName: '',
@@ -827,17 +832,42 @@ export function UserProfileDetail() {
   };
 
   const handleAddressInfoSubmit = async () => {
+    // Validation
+    if (!addressInfoForm.address_line1 || !addressInfoForm.city || !addressInfoForm.state || !addressInfoForm.pincode) {
+      toast.error('Please fill in all required fields (Address Line 1, City, State, Pincode)');
+      return;
+    }
+
+    if (addressInfoForm.pincode.length !== 6) {
+      toast.error('Pincode must be 6 digits');
+      return;
+    }
+
     try {
-      const response = await adminApiService.updateUserAddressInfo(params.userId!, addressInfoForm);
-      if (response.status === 'success') {
-        alert('Address information updated successfully!');
-        setShowAddressModal(false);
+      let response;
+      if (editingAddressId) {
+        // Update existing address
+        response = await adminApiService.updateUserAddress(params.userId!, editingAddressId, addressInfoForm);
       } else {
-        alert('Failed to update address information');
+        // Add new address
+        response = await adminApiService.addUserAddress(params.userId!, addressInfoForm);
       }
-    } catch (error) {
-      console.error('Error updating address info:', error);
-      alert('Error updating address information');
+
+      if (response.status === 'success') {
+        toast.success(editingAddressId ? 'Address updated successfully!' : 'Address added successfully!');
+        setShowAddressModal(false);
+        setEditingAddressId(null);
+        // Refresh user data
+        const refreshResponse = await adminApiService.getUserProfile(params.userId!);
+        if (refreshResponse.status === 'success' && refreshResponse.data) {
+          setUserData(refreshResponse.data);
+        }
+      } else {
+        toast.error(response.message || 'Failed to save address');
+      }
+    } catch (error: any) {
+      console.error('Error saving address:', error);
+      toast.error(error.response?.data?.message || 'Error saving address');
     }
   };
 
@@ -2172,8 +2202,15 @@ export function UserProfileDetail() {
                 <span className="text-gray-500">Experience:</span>
                 <span className="ml-2 text-gray-900">
                   {(() => {
-                    const exp = latestEmployment.work_experience_years || getUserData('personalInfo.workExperience') || getUserData('personalInfo.totalExperience') || userData?.allEmployment?.[0]?.work_experience_years;
-                    return exp && exp !== 'N/A' ? `${exp} years` : 'N/A';
+                    // Try multiple sources for experience - check employment record first
+                    const exp = latestEmployment?.work_experience_years || 
+                                userData?.allEmployment?.[0]?.work_experience_years ||
+                                getUserData('personalInfo.workExperience') || 
+                                getUserData('personalInfo.totalExperience');
+                    // Check if it's a valid number (not null, not 'N/A', not 0)
+                    if (exp === null || exp === undefined || exp === 'N/A') return 'N/A';
+                    const expNum = typeof exp === 'number' ? exp : parseFloat(exp);
+                    return expNum && expNum > 0 ? `${expNum} years` : 'N/A';
                   })()}
                 </span>
               </div>
@@ -2195,8 +2232,15 @@ export function UserProfileDetail() {
                 <span className="text-gray-500">Income:</span>
                 <span className="ml-2 font-semibold text-green-600">
                   {(() => {
-                    const income = getUserData('personalInfo.monthlyIncome') || userData?.monthlyIncome || userData?.allEmployment?.[0]?.monthly_salary_old || latestEmployment.monthly_salary_old;
-                    return income && income > 0 ? formatCurrency(income) : 'N/A';
+                    // Try multiple sources for income - prioritize employment record
+                    const income = latestEmployment?.monthly_salary_old ||
+                                  userData?.allEmployment?.[0]?.monthly_salary_old ||
+                                  userData?.monthlyIncome || 
+                                  getUserData('personalInfo.monthlyIncome');
+                    // Check if it's a valid number greater than 0
+                    if (income === null || income === undefined || income === 'N/A') return 'N/A';
+                    const incomeNum = typeof income === 'number' ? income : parseFloat(income);
+                    return incomeNum && incomeNum > 0 ? formatCurrency(incomeNum) : 'N/A';
                   })()}
                 </span>
               </div>
@@ -2206,10 +2250,34 @@ export function UserProfileDetail() {
 
         {/* Addresses - Compact Cards */}
         <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-            <MapPin className="w-4 h-4" />
-            Addresses ({allAddresses.length})
-          </h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+              <MapPin className="w-4 h-4" />
+              Addresses ({allAddresses.length})
+            </h3>
+            {canEditUsers && (
+              <button
+                onClick={() => {
+                  setAddressInfoForm({
+                    address_line1: '',
+                    address_line2: '',
+                    city: '',
+                    state: '',
+                    pincode: '',
+                    country: 'India',
+                    address_type: 'current',
+                    is_primary: false
+                  });
+                  setEditingAddressId(null);
+                  setShowAddressModal(true);
+                }}
+                className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1"
+              >
+                <UserPlus className="w-3 h-3" />
+                Add
+              </button>
+            )}
+          </div>
           {allAddresses.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {allAddresses.map((addr: any, idx: number) => (
@@ -6038,9 +6106,14 @@ export function UserProfileDetail() {
         <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
             <div className="flex items-center justify-between mb-4">
-              <h4 className="text-lg font-semibold text-gray-900">Edit Address Information</h4>
+              <h4 className="text-lg font-semibold text-gray-900">
+                {editingAddressId ? 'Edit Address' : 'Add New Address'}
+              </h4>
               <button
-                onClick={() => setShowAddressModal(false)}
+                onClick={() => {
+                  setShowAddressModal(false);
+                  setEditingAddressId(null);
+                }}
                 className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
               >
                 <X className="w-5 h-5" />
@@ -6048,82 +6121,105 @@ export function UserProfileDetail() {
             </div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Address Type</label>
+                <select
+                  value={addressInfoForm.address_type}
+                  onChange={(e) => setAddressInfoForm({ ...addressInfoForm, address_type: e.target.value as 'current' | 'permanent' | 'office' })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="current">Current</option>
+                  <option value="permanent">Permanent</option>
+                  <option value="office">Office</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Address Line 1 <span className="text-red-500">*</span></label>
                 <textarea
-                  defaultValue={getUserData('personalInfo.address')}
+                  value={addressInfoForm.address_line1}
+                  onChange={(e) => setAddressInfoForm({ ...addressInfoForm, address_line1: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   rows={3}
+                  placeholder="Enter address line 1"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Address Line 2</label>
+                <textarea
+                  value={addressInfoForm.address_line2}
+                  onChange={(e) => setAddressInfoForm({ ...addressInfoForm, address_line2: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  rows={2}
+                  placeholder="Enter address line 2 (optional)"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">City <span className="text-red-500">*</span></label>
                   <input
                     type="text"
-                    defaultValue={getUserData('personalInfo.city')}
+                    value={addressInfoForm.city}
+                    onChange={(e) => setAddressInfoForm({ ...addressInfoForm, city: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter city"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">State <span className="text-red-500">*</span></label>
                   <input
                     type="text"
-                    defaultValue={getUserData('personalInfo.state')}
+                    value={addressInfoForm.state}
+                    onChange={(e) => setAddressInfoForm({ ...addressInfoForm, state: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter state"
                   />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Pincode</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Pincode <span className="text-red-500">*</span></label>
                   <input
                     type="text"
-                    defaultValue={getUserData('personalInfo.pincode')}
+                    value={addressInfoForm.pincode}
+                    onChange={(e) => setAddressInfoForm({ ...addressInfoForm, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter 6-digit pincode"
+                    maxLength={6}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Landmark</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
                   <input
                     type="text"
-                    defaultValue={getUserData('personalInfo.landmark')}
+                    value={addressInfoForm.country}
+                    onChange={(e) => setAddressInfoForm({ ...addressInfoForm, country: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter country"
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Residence Type</label>
-                  <select
-                    defaultValue={getUserData('personalInfo.residenceType')}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="Owned">Owned</option>
-                    <option value="Rented">Rented</option>
-                    <option value="Family Owned">Family Owned</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Years at Address</label>
+              <div>
+                <label className="flex items-center gap-2">
                   <input
-                    type="number"
-                    defaultValue={getUserData('personalInfo.yearsAtCurrentAddress')}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    type="checkbox"
+                    checked={addressInfoForm.is_primary}
+                    onChange={(e) => setAddressInfoForm({ ...addressInfoForm, is_primary: e.target.checked })}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
-                </div>
+                  <span className="text-sm font-medium text-gray-700">Set as primary address</span>
+                </label>
               </div>
               <div className="flex gap-3 pt-4">
                 <button
-                  onClick={() => {
-                    alert('Address information updated successfully!');
-                    setShowAddressModal(false);
-                  }}
+                  onClick={handleAddressInfoSubmit}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
                 >
-                  Save Changes
+                  {editingAddressId ? 'Update Address' : 'Add Address'}
                 </button>
                 <button
-                  onClick={() => setShowAddressModal(false)}
+                  onClick={() => {
+                    setShowAddressModal(false);
+                    setEditingAddressId(null);
+                  }}
                   className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
                 >
                   Cancel

@@ -448,10 +448,16 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         company: (employment && employment[0])?.company_name || 'N/A',
         industry: (employment && employment[0])?.industry || 'N/A',
         department: (employment && employment[0])?.department || 'N/A',
-        monthlyIncome: monthlyIncomeValue,
-        workExperience: (employment && employment[0])?.work_experience_years || 'N/A',
+        monthlyIncome: (employment && employment[0]?.monthly_salary_old && parseFloat(employment[0].monthly_salary_old) > 0) 
+          ? parseFloat(employment[0].monthly_salary_old) 
+          : (parseFloat(user.monthly_net_income) || monthlyIncomeValue || 0),
+        workExperience: (employment && employment[0]?.work_experience_years !== null && employment[0]?.work_experience_years !== undefined) 
+          ? employment[0].work_experience_years 
+          : null,
         designation: (employment && employment[0])?.designation || 'N/A',
-        totalExperience: (employment && employment[0])?.work_experience_years || 'N/A'
+        totalExperience: (employment && employment[0]?.work_experience_years !== null && employment[0]?.work_experience_years !== undefined) 
+          ? employment[0].work_experience_years 
+          : null
       },
       // All addresses (not just primary)
       allAddresses: addresses || [],
@@ -735,6 +741,66 @@ router.put('/:userId/contact-info', authenticateAdmin, async (req, res) => {
   }
 });
 
+// Add new address for user
+router.post('/:userId/addresses', authenticateAdmin, async (req, res) => {
+  try {
+    console.log('🏠 Adding address for user:', req.params.userId);
+    await initializeDatabase();
+    const { userId } = req.params;
+    const { address_line1, address_line2, city, state, pincode, country = 'India', address_type = 'current', is_primary = false } = req.body;
+
+    // Validation
+    if (!address_line1 || !city || !state || !pincode) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Address line 1, city, state, and pincode are required'
+      });
+    }
+
+    if (!/^\d{6}$/.test(pincode)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Pincode must be 6 digits'
+      });
+    }
+
+    // If setting as primary, unset other primary addresses
+    if (is_primary) {
+      await executeQuery(
+        `UPDATE addresses SET is_primary = 0 WHERE user_id = ?`,
+        [userId]
+      );
+    }
+
+    // Insert new address
+    const result = await executeQuery(
+      `INSERT INTO addresses (user_id, address_type, address_line1, address_line2, city, state, pincode, country, is_primary, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [userId, address_type, address_line1, address_line2 || null, city, state, pincode, country, is_primary ? 1 : 0]
+    );
+
+    // Fetch the created address
+    const newAddress = await executeQuery(
+      `SELECT * FROM addresses WHERE id = ?`,
+      [result.insertId]
+    );
+
+    console.log('✅ Address added successfully');
+    res.json({
+      status: 'success',
+      message: 'Address added successfully',
+      data: newAddress[0]
+    });
+
+  } catch (error) {
+    console.error('Add address error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to add address'
+    });
+  }
+});
+
 // Update user address information
 router.put('/:userId/address-info', authenticateAdmin, async (req, res) => {
   try {
@@ -757,6 +823,67 @@ router.put('/:userId/address-info', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to update address information'
+    });
+  }
+});
+
+// Update specific address
+router.put('/:userId/addresses/:addressId', authenticateAdmin, async (req, res) => {
+  try {
+    console.log('🏠 Updating address:', req.params.addressId, 'for user:', req.params.userId);
+    await initializeDatabase();
+    const { userId, addressId } = req.params;
+    const { address_line1, address_line2, city, state, pincode, country = 'India', address_type = 'current', is_primary = false } = req.body;
+
+    // Validation
+    if (!address_line1 || !city || !state || !pincode) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Address line 1, city, state, and pincode are required'
+      });
+    }
+
+    if (!/^\d{6}$/.test(pincode)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Pincode must be 6 digits'
+      });
+    }
+
+    // If setting as primary, unset other primary addresses
+    if (is_primary) {
+      await executeQuery(
+        `UPDATE addresses SET is_primary = 0 WHERE user_id = ? AND id != ?`,
+        [userId, addressId]
+      );
+    }
+
+    // Update address
+    await executeQuery(
+      `UPDATE addresses 
+       SET address_type = ?, address_line1 = ?, address_line2 = ?, city = ?, state = ?, pincode = ?, country = ?, is_primary = ?, updated_at = NOW()
+       WHERE id = ? AND user_id = ?`,
+      [address_type, address_line1, address_line2 || null, city, state, pincode, country, is_primary ? 1 : 0, addressId, userId]
+    );
+
+    // Fetch the updated address
+    const updatedAddress = await executeQuery(
+      `SELECT * FROM addresses WHERE id = ?`,
+      [addressId]
+    );
+
+    console.log('✅ Address updated successfully');
+    res.json({
+      status: 'success',
+      message: 'Address updated successfully',
+      data: updatedAddress[0]
+    });
+
+  } catch (error) {
+    console.error('Update address error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update address'
     });
   }
 });

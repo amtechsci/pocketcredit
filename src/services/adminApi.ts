@@ -482,6 +482,32 @@ class AdminApiService {
     return this.request('PUT', `/user-profile/${userId}/address-info`, data);
   }
 
+  async addUserAddress(userId: string, data: {
+    address_line1: string;
+    address_line2?: string;
+    city: string;
+    state: string;
+    pincode: string;
+    country?: string;
+    address_type?: 'current' | 'permanent' | 'office';
+    is_primary?: boolean;
+  }): Promise<ApiResponse<any>> {
+    return this.request('POST', `/user-profile/${userId}/addresses`, data);
+  }
+
+  async updateUserAddress(userId: string, addressId: number, data: {
+    address_line1: string;
+    address_line2?: string;
+    city: string;
+    state: string;
+    pincode: string;
+    country?: string;
+    address_type?: 'current' | 'permanent' | 'office';
+    is_primary?: boolean;
+  }): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/user-profile/${userId}/addresses/${addressId}`, data);
+  }
+
   async updateUserLoanPlan(userId: string, planId: number): Promise<ApiResponse<any>> {
     return this.request('PUT', `/user-profile/${userId}/loan-plan`, { plan_id: planId });
   }
