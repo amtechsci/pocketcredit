@@ -47,10 +47,78 @@ function verifyWebhookSignature(payload, signature, secret) {
 }
 
 /**
+ * Helper function to log webhook payloads to webhook_logs table
+ */
+async function logWebhookPayload(req, webhookType, endpoint, processed = false, error = null) {
+    try {
+        await initializeDatabase();
+
+        const headers = {};
+        Object.keys(req.headers).forEach(key => {
+            headers[key] = req.headers[key];
+        });
+
+        const queryParams = req.query && Object.keys(req.query).length > 0 ? req.query : null;
+        const bodyData = req.body && Object.keys(req.body).length > 0 ? req.body : null;
+
+        // Extract common fields for eNACH webhooks
+        const requestId = req.headers['x-request-id'] || req.body?.request_id || req.query?.request_id || null;
+        const eventId = req.headers['x-cashfree-event-id'] || req.body?.event_id || req.body?.data?.event_id || null;
+        const subscriptionId = req.body?.data?.subscription?.subscription_id || req.body?.subscription_id || null;
+        const cfSubscriptionId = req.body?.data?.subscription?.cf_subscription_id || req.body?.cf_subscription_id || null;
+        const status = req.body?.type || req.body?.status || null;
+
+        // Get client IP
+        const ipAddress = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || null;
+        const userAgent = req.headers['user-agent'] || null;
+
+        // Store raw payload as string
+        const rawPayload = JSON.stringify({
+            method: req.method,
+            url: req.url,
+            headers: headers,
+            query: req.query,
+            body: req.body
+        }, null, 2);
+
+        await executeQuery(
+            `INSERT INTO webhook_logs 
+             (webhook_type, http_method, endpoint, headers, query_params, body_data, raw_payload, 
+              request_id, client_ref_num, status, ip_address, user_agent, processed, processing_error, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+            [
+                webhookType,
+                req.method,
+                endpoint,
+                JSON.stringify(headers),
+                queryParams ? JSON.stringify(queryParams) : null,
+                bodyData ? JSON.stringify(bodyData) : null,
+                rawPayload,
+                requestId || eventId,
+                subscriptionId || cfSubscriptionId, // Use subscription ID as client_ref_num
+                status,
+                ipAddress,
+                userAgent,
+                processed,
+                error
+            ]
+        );
+
+        console.log(`📝 [eNACH Webhook] Logged to webhook_logs: ${webhookType} - ${req.method} ${endpoint}`);
+    } catch (logError) {
+        console.error('❌ [eNACH Webhook] Error logging to webhook_logs:', logError);
+        // Don't throw - logging failure shouldn't break webhook processing
+    }
+}
+
+/**
  * GET /api/enach/webhook
  * Test endpoint to verify webhook route is accessible
  */
 router.get('/webhook', async (req, res) => {
+    // Log GET request to webhook_logs
+    await logWebhookPayload(req, 'enach_webhook', '/api/enach/webhook', true, null);
+    
     res.json({
         status: 'ok',
         message: 'eNACH webhook endpoint is accessible',
@@ -63,7 +131,10 @@ router.get('/webhook', async (req, res) => {
  * OPTIONS /api/enach/webhook
  * Handle CORS preflight requests
  */
-router.options('/webhook', (req, res) => {
+router.options('/webhook', async (req, res) => {
+    // Log OPTIONS request to webhook_logs
+    await logWebhookPayload(req, 'enach_webhook', '/api/enach/webhook', true, null);
+    
     res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
     res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type, x-cashfree-signature, x-request-id, x-cashfree-event-id');
@@ -92,10 +163,17 @@ router.post('/webhook', express.json(), async (req, res) => {
         hasData: !!req.body?.data
     });
 
+    // Log POST request to webhook_logs BEFORE processing
+    let processingError = null;
+    let processed = false;
+
     // Handle test/ping webhooks from Cashfree
     // Cashfree may send test webhooks during configuration
     if (!req.body || Object.keys(req.body).length === 0 || req.body.type === 'ping' || req.body.type === 'test') {
         console.log(`[Webhook ${requestId}] Test/ping webhook received, responding OK`);
+        processed = true;
+        await logWebhookPayload(req, 'enach_webhook', '/api/enach/webhook', processed, null);
+        
         return res.status(200).json({
             status: 'ok',
             message: 'Webhook endpoint is active and receiving requests',
@@ -109,6 +187,9 @@ router.post('/webhook', express.json(), async (req, res) => {
         const isValid = verifyWebhookSignature(req.body, signature, CASHFREE_WEBHOOK_SECRET);
         if (!isValid) {
             console.error(`[Webhook ${requestId}] Invalid signature - rejecting webhook`);
+            processingError = 'Invalid webhook signature';
+            await logWebhookPayload(req, 'enach_webhook', '/api/enach/webhook', false, processingError);
+            
             // Still return 200 to avoid Cashfree retries, but log the issue
             return res.status(200).json({
                 status: 'error',
@@ -117,6 +198,9 @@ router.post('/webhook', express.json(), async (req, res) => {
             });
         }
     }
+
+    // Log webhook to webhook_logs (initially as not processed, will update after async processing)
+    await logWebhookPayload(req, 'enach_webhook', '/api/enach/webhook', false, null);
 
     // Always respond with 200 immediately to acknowledge receipt
     // Process webhook asynchronously after responding
@@ -128,15 +212,17 @@ router.post('/webhook', express.json(), async (req, res) => {
     });
 
     // Process webhook asynchronously (don't block response)
-    processWebhookAsync(req.body, requestId, eventId, signature).catch(error => {
+    processWebhookAsync(req.body, requestId, eventId, signature, req).catch(error => {
         console.error(`[Webhook ${requestId}] Async processing error:`, error);
+        // Update webhook_logs with error
+        logWebhookPayload(req, 'enach_webhook', '/api/enach/webhook', false, error.message).catch(() => {});
     });
 });
 
 /**
  * Process webhook asynchronously
  */
-async function processWebhookAsync(reqBody, requestId, eventId, signature) {
+async function processWebhookAsync(reqBody, requestId, eventId, signature, req = null) {
     try {
         await initializeDatabase();
 
@@ -260,8 +346,44 @@ async function processWebhookAsync(reqBody, requestId, eventId, signature) {
             error: processingError
         });
 
+        // Update webhook_logs with final processing status
+        if (req) {
+            try {
+                // Update the most recent webhook_logs entry for this request
+                await executeQuery(
+                    `UPDATE webhook_logs 
+                     SET processed = ?, processing_error = ?
+                     WHERE webhook_type = 'enach_webhook' 
+                     AND request_id = ?
+                     ORDER BY created_at DESC
+                     LIMIT 1`,
+                    [processed, processingError, requestId]
+                );
+                console.log(`📝 [eNACH Webhook] Updated webhook_logs for request ${requestId}`);
+            } catch (updateError) {
+                console.warn(`[Webhook ${requestId}] Could not update webhook_logs:`, updateError.message);
+            }
+        }
+
     } catch (error) {
         console.error(`[Webhook ${requestId}] Fatal error in async processing:`, error);
+        
+        // Update webhook_logs with error
+        if (req) {
+            try {
+                await executeQuery(
+                    `UPDATE webhook_logs 
+                     SET processed = ?, processing_error = ?
+                     WHERE webhook_type = 'enach_webhook' 
+                     AND request_id = ?
+                     ORDER BY created_at DESC
+                     LIMIT 1`,
+                    [false, error.message, requestId]
+                );
+            } catch (updateError) {
+                console.warn(`[Webhook ${requestId}] Could not update webhook_logs with error:`, updateError.message);
+            }
+        }
         // Error already logged, webhook was already acknowledged with 200
     }
 }

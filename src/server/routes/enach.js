@@ -169,9 +169,9 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                     INSERT INTO enach_plans 
                     (plan_id, plan_name, plan_type, 
                      plan_recurring_amount, plan_max_amount, plan_max_cycles, 
-                     plan_intervals, plan_interval_type, plan_note, plan_status, 
+                     plan_intervals, plan_interval_type, plan_status, 
                      loan_application_id, cashfree_response, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
                     ON DUPLICATE KEY UPDATE
                         plan_status = VALUES(plan_status),
                         cashfree_response = VALUES(cashfree_response),
@@ -185,7 +185,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                     planPayload.plan_max_cycles,
                     planPayload.plan_intervals,
                     planPayload.plan_interval_type,
-                    planPayload.plan_note,
                     planResponse.data.plan_status || 'ACTIVE',
                     applicationId,
                     JSON.stringify(planResponse.data)

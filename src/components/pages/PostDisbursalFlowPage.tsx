@@ -457,20 +457,14 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
       if (response.success && response.data) {
         const { authorization_url, subscription_id, sms_flow } = response.data;
 
-        // If SMS flow, inform user to check SMS
+        // If SMS flow, redirect to completion page with status polling
         if (sms_flow || !authorization_url) {
-          toast.success('eNACH mandate link sent to your mobile and email');
-          toast.info('Please check your SMS/Email and authorize the eNACH mandate', {
-            duration: 5000
-          });
-          
           // Store subscription ID for status checking
           sessionStorage.setItem('enach_subscription_id', subscription_id);
           sessionStorage.setItem('enach_application_id', applicationId.toString());
           
-          // Don't redirect - user needs to use SMS link
-          // They can check status later
-          setLoading(false);
+          // Redirect to eNACH completion page with status polling
+          navigate(`/enach-completion?subscription_id=${subscription_id}&applicationId=${applicationId}`);
           return;
         }
 

@@ -37,6 +37,7 @@ import { ApplicationUnderReviewPage } from './components/pages/ApplicationUnderR
 import { PostDisbursalFlowPage } from './components/pages/PostDisbursalFlowPage';
 import { RepaymentSchedulePage } from './components/pages/RepaymentSchedulePage';
 import { PaymentReturnPage } from './components/pages/PaymentReturnPage';
+import { EnachCompletionPage } from './components/pages/EnachCompletionPage';
 import { AccountAggregatorFlow } from './components/pages/AccountAggregatorFlow';
 import { ApplicationFlow } from './components/ApplicationFlow';
 import { CreditScorePage } from './components/pages/CreditScorePage';
@@ -427,6 +428,16 @@ function AppContent() {
           isAuthenticated ? (
             <DashboardLayout>
               <PaymentReturnPage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+
+        <Route path="/enach-completion" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <EnachCompletionPage />
             </DashboardLayout>
           ) : (
             <Navigate to="/auth" replace />
