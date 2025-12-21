@@ -250,6 +250,18 @@ export const RepaymentSchedulePage = () => {
   const currentStageAmount = stageLimits[currentStage - 1] || currentLimit;
   const nextStageAmount = stageLimits[currentStage] || nextLimit;
 
+  // Generate short loan ID format: PLL + last 4 digits
+  const getShortLoanId = () => {
+    const appNumber = loanData.loan_id || loanData.application_number || loanData.id || '';
+    if (appNumber) {
+      const last4 = String(appNumber).slice(-4);
+      return `PLL${last4}`;
+    }
+    return 'N/A';
+  };
+
+  const shortLoanId = getShortLoanId();
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 pb-12">
       <DashboardHeader userName={user?.first_name && user?.last_name ? `${user.first_name} ${user.last_name}` : user?.email || 'User'} />
@@ -262,77 +274,6 @@ export const RepaymentSchedulePage = () => {
           </h1>
           <p className="text-sm sm:text-base text-gray-600">Clear your loan fast to unlock higher limits</p>
         </div>
-
-        {/* Loan Progression Stages */}
-        <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
-          <CardContent className="p-4 sm:p-6">
-            {/* Stage 01 - Current */}
-            <div className="relative mb-4 sm:mb-6">
-              <div className="flex items-start gap-3 sm:gap-4">
-                <div className="flex flex-col items-center flex-shrink-0">
-                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
-                    <span className="text-white font-bold text-sm sm:text-base">01</span>
-                  </div>
-                  <div className="w-0.5 h-16 sm:h-20 bg-gray-300 mt-2"></div>
-                </div>
-                <div className="flex-1 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 sm:p-5 border-2 border-blue-200 relative">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs sm:text-sm font-semibold text-blue-700 bg-blue-100 px-2 py-1 rounded">Stage 01</span>
-                        <span className="text-xs sm:text-sm font-semibold text-orange-600 bg-orange-100 px-2 py-1 rounded flex items-center gap-1">
-                          <Sparkles className="w-3 h-3" />
-                          You are Here
-                        </span>
-                      </div>
-                      <p className="text-lg sm:text-2xl font-bold text-gray-900 mb-1">
-                        {formatCurrency(currentStageAmount)}
-                      </p>
-                      <p className="text-xs sm:text-sm text-gray-600">Your Current limit</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-gray-500 mb-1">Loan ID</p>
-                      <p className="text-sm font-semibold text-gray-700">{loanData.loan_id || loanData.application_number || 'N/A'}</p>
-                      <p className="text-xs text-gray-500 mt-2 mb-1">Exhausted days</p>
-                      <p className="text-base sm:text-lg font-bold text-gray-900">{exhaustedDays}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Stage 02 - Next */}
-            <div className="relative">
-              <div className="flex items-start gap-3 sm:gap-4">
-                <div className="flex flex-col items-center flex-shrink-0">
-                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-300 flex items-center justify-center">
-                    <Lock className="w-5 h-5 sm:w-6 sm:h-6 text-gray-500" />
-                  </div>
-                </div>
-                <div className="flex-1 bg-gray-50 rounded-xl p-4 sm:p-5 border-2 border-gray-200 relative">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs sm:text-sm font-semibold text-gray-600 bg-gray-100 px-2 py-1 rounded">Stage 02</span>
-                        <Lock className="w-4 h-4 text-gray-400" />
-                      </div>
-                      <p className="text-lg sm:text-2xl font-bold text-gray-700 mb-1">
-                        {formatCurrency(nextStageAmount)}
-                      </p>
-                      <p className="text-xs sm:text-sm text-gray-600">Your Next limit</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-gray-500 mb-1">Disbursal in 2 min</p>
-                      <div className="inline-block bg-gray-200 text-gray-600 text-xs px-3 py-1 rounded-full">
-                        Locked
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
         {/* Outstanding & Due Date Card */}
         <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
@@ -429,6 +370,77 @@ export const RepaymentSchedulePage = () => {
                   Extend your loan tenure
                 </Button>
               )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Loan Progression Stages - Offer Section */}
+        <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
+          <CardContent className="p-4 sm:p-6">
+            {/* Stage 01 - Current */}
+            <div className="relative mb-4 sm:mb-6">
+              <div className="flex items-start gap-3 sm:gap-4">
+                <div className="flex flex-col items-center flex-shrink-0">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
+                    <span className="text-white font-bold text-sm sm:text-base">01</span>
+                  </div>
+                  <div className="w-0.5 h-16 sm:h-20 bg-gray-300 mt-2"></div>
+                </div>
+                <div className="flex-1 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 sm:p-5 border-2 border-blue-200 relative">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs sm:text-sm font-semibold text-blue-700 bg-blue-100 px-2 py-1 rounded">Stage 01</span>
+                        <span className="text-xs sm:text-sm font-semibold text-orange-600 bg-orange-100 px-2 py-1 rounded flex items-center gap-1">
+                          <Sparkles className="w-3 h-3" />
+                          You are Here
+                        </span>
+                      </div>
+                      <p className="text-lg sm:text-2xl font-bold text-gray-900 mb-1">
+                        {formatCurrency(currentStageAmount)}
+                      </p>
+                      <p className="text-xs sm:text-sm text-gray-600">Your Current limit</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500 mb-1">Loan ID</p>
+                      <p className="text-sm font-semibold text-gray-700">{shortLoanId}</p>
+                      <p className="text-xs text-gray-500 mt-2 mb-1">Exhausted days</p>
+                      <p className="text-base sm:text-lg font-bold text-gray-900">{exhaustedDays}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Stage 02 - Next */}
+            <div className="relative">
+              <div className="flex items-start gap-3 sm:gap-4">
+                <div className="flex flex-col items-center flex-shrink-0">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-300 flex items-center justify-center">
+                    <Lock className="w-5 h-5 sm:w-6 sm:h-6 text-gray-500" />
+                  </div>
+                </div>
+                <div className="flex-1 bg-gray-50 rounded-xl p-4 sm:p-5 border-2 border-gray-200 relative">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs sm:text-sm font-semibold text-gray-600 bg-gray-100 px-2 py-1 rounded">Stage 02</span>
+                        <Lock className="w-4 h-4 text-gray-400" />
+                      </div>
+                      <p className="text-lg sm:text-2xl font-bold text-gray-700 mb-1">
+                        {formatCurrency(nextStageAmount)}
+                      </p>
+                      <p className="text-xs sm:text-sm text-gray-600">Your Next limit</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500 mb-1">Disbursal in 2 min</p>
+                      <div className="inline-block bg-gray-200 text-gray-600 text-xs px-3 py-1 rounded-full">
+                        Locked
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
