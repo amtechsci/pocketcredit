@@ -451,13 +451,13 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         monthlyIncome: (employment && employment[0]?.monthly_salary_old && parseFloat(employment[0].monthly_salary_old) > 0) 
           ? parseFloat(employment[0].monthly_salary_old) 
           : (parseFloat(user.monthly_net_income) || monthlyIncomeValue || 0),
-        workExperience: (employment && employment[0]?.work_experience_years !== null && employment[0]?.work_experience_years !== undefined) 
+        workExperience: (employment && employment[0]?.work_experience_years !== null && employment[0]?.work_experience_years !== undefined && employment[0]?.work_experience_years !== '') 
           ? employment[0].work_experience_years 
-          : null,
+          : (employment && employment[0]?.work_experience_years === 0 ? 0 : null),
         designation: (employment && employment[0])?.designation || 'N/A',
-        totalExperience: (employment && employment[0]?.work_experience_years !== null && employment[0]?.work_experience_years !== undefined) 
+        totalExperience: (employment && employment[0]?.work_experience_years !== null && employment[0]?.work_experience_years !== undefined && employment[0]?.work_experience_years !== '') 
           ? employment[0].work_experience_years 
-          : null
+          : (employment && employment[0]?.work_experience_years === 0 ? 0 : null)
       },
       // All addresses (not just primary)
       allAddresses: addresses || [],

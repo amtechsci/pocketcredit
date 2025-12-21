@@ -2203,14 +2203,31 @@ export function UserProfileDetail() {
                 <span className="ml-2 text-gray-900">
                   {(() => {
                     // Try multiple sources for experience - check employment record first
-                    const exp = latestEmployment?.work_experience_years || 
-                                userData?.allEmployment?.[0]?.work_experience_years ||
-                                getUserData('personalInfo.workExperience') || 
-                                getUserData('personalInfo.totalExperience');
-                    // Check if it's a valid number (not null, not 'N/A', not 0)
-                    if (exp === null || exp === undefined || exp === 'N/A') return 'N/A';
-                    const expNum = typeof exp === 'number' ? exp : parseFloat(exp);
-                    return expNum && expNum > 0 ? `${expNum} years` : 'N/A';
+                    let exp = latestEmployment?.work_experience_years;
+                    
+                    // If not found in latestEmployment, try allEmployment array
+                    if ((exp === null || exp === undefined || exp === '') && userData?.allEmployment?.length > 0) {
+                      exp = userData.allEmployment[0]?.work_experience_years;
+                    }
+                    
+                    // If still not found, try personalInfo
+                    if ((exp === null || exp === undefined || exp === '') && getUserData('personalInfo.workExperience')) {
+                      exp = getUserData('personalInfo.workExperience');
+                    }
+                    
+                    // If still not found, try totalExperience
+                    if ((exp === null || exp === undefined || exp === '') && getUserData('personalInfo.totalExperience')) {
+                      exp = getUserData('personalInfo.totalExperience');
+                    }
+                    
+                    // Check if it's a valid number (0 is valid, but null/undefined/'N/A' is not)
+                    if (exp === null || exp === undefined || exp === '' || exp === 'N/A') return 'N/A';
+                    
+                    // Convert to number if it's a string
+                    const expNum = typeof exp === 'number' ? exp : (isNaN(parseFloat(exp)) ? null : parseFloat(exp));
+                    
+                    // 0 years is valid, so check for null/NaN instead of falsy
+                    return (expNum !== null && !isNaN(expNum)) ? `${expNum} years` : 'N/A';
                   })()}
                 </span>
               </div>
@@ -8108,9 +8125,9 @@ export function UserProfileDetail() {
                     <span className="font-semibold">Pocket Score:</span> {getUserData('creditScore')}
                   </span>
                 )}
-                {getUserData('experianScore') && (
+                {(userData?.experianScore || getUserData('experianScore')) && (
                   <span className="flex items-center gap-1">
-                    <span className="font-semibold">Experian:</span> {getUserData('experianScore')}
+                    <span className="font-semibold">Experian:</span> {userData?.experianScore || getUserData('experianScore')}
                   </span>
                 )}
                 {getUserData('limitVsSalaryPercent') && (

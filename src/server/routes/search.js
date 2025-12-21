@@ -23,7 +23,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
     const allResults = [];
     const seenUserIds = new Set();
 
-    // 1. Search by user name, mobile, email, PAN, CLID
+    // 1. Search by user name, mobile, email, personal email, official email, PAN, CLID
     try {
       const userResults = await executeQuery(`
         SELECT 
@@ -38,6 +38,9 @@ router.get('/', authenticateAdmin, async (req, res) => {
             WHEN CONCAT(u.first_name, ' ', COALESCE(u.last_name, '')) LIKE ? THEN 'name'
             WHEN u.phone LIKE ? THEN 'number'
             WHEN u.alternate_mobile LIKE ? THEN 'alt number'
+            WHEN u.email LIKE ? THEN 'email'
+            WHEN u.personal_email LIKE ? THEN 'personal email'
+            WHEN u.official_email LIKE ? THEN 'official email'
             WHEN u.pan_number LIKE ? THEN 'pan'
             WHEN CONCAT('PC', LPAD(u.id, 5, '0')) LIKE ? THEN 'CLID'
             ELSE 'user data'
@@ -47,11 +50,14 @@ router.get('/', authenticateAdmin, async (req, res) => {
           CONCAT(u.first_name, ' ', COALESCE(u.last_name, '')) LIKE ?
           OR u.phone LIKE ?
           OR u.alternate_mobile LIKE ?
+          OR u.email LIKE ?
+          OR u.personal_email LIKE ?
+          OR u.official_email LIKE ?
           OR u.pan_number LIKE ?
           OR CONCAT('PC', LPAD(u.id, 5, '0')) LIKE ?
       `, [
-        searchTerm, searchTerm, searchTerm, searchTerm, searchTerm,
-        searchTerm, searchTerm, searchTerm, searchTerm, searchTerm
+        searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm,
+        searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm
       ]);
 
       for (const result of userResults) {
@@ -98,7 +104,82 @@ router.get('/', authenticateAdmin, async (req, res) => {
       console.error('Error in reference search:', error);
     }
 
-    // 3. Search by loan application number (both full and short format)
+    // 3. Search by employment details (company, designation)
+    try {
+      const employmentResults = await executeQuery(`
+        SELECT 
+          ed.user_id,
+          CONCAT(u.first_name, ' ', COALESCE(u.last_name, '')) as customer_name,
+          u.phone as number,
+          u.alternate_mobile as alt_number,
+          u.pan_number as pan,
+          CONCAT('PC', LPAD(u.id, 5, '0')) as clid,
+          'employment' as source,
+          CASE 
+            WHEN ed.company_name LIKE ? THEN CONCAT('Company: ', ed.company_name)
+            WHEN ed.designation LIKE ? THEN CONCAT('Designation: ', ed.designation)
+            ELSE 'employment data'
+          END as found_in
+        FROM employment_details ed
+        INNER JOIN users u ON ed.user_id = u.id
+        WHERE 
+          ed.company_name LIKE ?
+          OR ed.designation LIKE ?
+      `, [searchTerm, searchTerm, searchTerm, searchTerm]);
+
+      for (const result of employmentResults) {
+        if (!seenUserIds.has(result.user_id)) {
+          seenUserIds.add(result.user_id);
+          allResults.push(result);
+        } else {
+          const existing = allResults.find(r => r.user_id === result.user_id);
+          if (existing && !existing.found_in.includes(result.found_in)) {
+            existing.found_in += `, ${result.found_in}`;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error in employment search:', error);
+    }
+
+    // 4. Search by addresses
+    try {
+      const addressResults = await executeQuery(`
+        SELECT 
+          a.user_id,
+          CONCAT(u.first_name, ' ', COALESCE(u.last_name, '')) as customer_name,
+          u.phone as number,
+          u.alternate_mobile as alt_number,
+          u.pan_number as pan,
+          CONCAT('PC', LPAD(u.id, 5, '0')) as clid,
+          'address' as source,
+          CONCAT('Address: ', COALESCE(a.address_line1, ''), ' ', COALESCE(a.city, ''), ' ', COALESCE(a.state, '')) as found_in
+        FROM addresses a
+        INNER JOIN users u ON a.user_id = u.id
+        WHERE 
+          a.address_line1 LIKE ?
+          OR a.address_line2 LIKE ?
+          OR a.city LIKE ?
+          OR a.state LIKE ?
+          OR a.pincode LIKE ?
+      `, [searchTerm, searchTerm, searchTerm, searchTerm, searchTerm]);
+
+      for (const result of addressResults) {
+        if (!seenUserIds.has(result.user_id)) {
+          seenUserIds.add(result.user_id);
+          allResults.push(result);
+        } else {
+          const existing = allResults.find(r => r.user_id === result.user_id);
+          if (existing && !existing.found_in.includes(result.found_in)) {
+            existing.found_in += `, ${result.found_in}`;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error in address search:', error);
+    }
+
+    // 5. Search by loan application number (both full and short format)
     try {
       const loanResults = await executeQuery(`
         SELECT 

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { Search } from 'lucide-react';
 import { AdminLogin } from './admin/AdminLogin';
 import { AdminDashboard } from './admin/pages/AdminDashboard';
 import { LoanApplicationsQueue } from './admin/pages/LoanApplicationsQueue';
@@ -144,34 +145,16 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
               </nav>
             </div>
             <div className="flex items-center gap-4">
-              {/* Search Bar */}
-              <div className="relative hidden md:block">
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const formData = new FormData(e.currentTarget);
-                    const query = formData.get('search') as string;
-                    if (query?.trim()) {
-                      navigate(`/admin/search?q=${encodeURIComponent(query.trim())}`);
-                    }
-                  }}
-                >
-                  <input
-                    type="text"
-                    name="search"
-                    placeholder="Search by name, PAN, number, PC ID..."
-                    className="pl-10 pr-4 py-2 w-64 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                  />
-                  <svg
-                    className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                </form>
-              </div>
+              {/* Search Button */}
+              <button
+                onClick={() => {
+                  window.open('/admin/search', '_blank');
+                }}
+                className="hidden md:flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 hover:text-gray-900"
+              >
+                <Search className="w-4 h-4" />
+                <span>Search</span>
+              </button>
               <div className="text-right">
                 <div className="text-sm font-medium text-gray-900">{currentUser?.name}</div>
                 <div className="text-xs text-gray-500 capitalize">{currentUser?.role}</div>
