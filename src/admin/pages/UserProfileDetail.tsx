@@ -154,25 +154,9 @@ export function UserProfileDetail() {
   const transactionTypeOptions = [
     { value: 'loan_disbursement', label: 'Loan Disbursement' },
     { value: 'emi_payment', label: 'EMI Payment' },
-    { value: 'processing_fee', label: 'Processing Fee' },
-    { value: 'penalty', label: 'Penalty' },
-    { value: 'refund', label: 'Refund' },
-    { value: 'credit', label: 'Credit (Add Money)' },
-    { value: 'debit', label: 'Debit (Deduct Money)' },
-    { value: 'other', label: 'Other' }
-  ];
-
-  const paymentMethodOptions = [
-    { value: 'net_banking', label: 'Net Banking' },
-    { value: 'upi', label: 'UPI' },
-    { value: 'neft', label: 'NEFT' },
-    { value: 'rtgs', label: 'RTGS' },
-    { value: 'imps', label: 'IMPS' },
-    { value: 'debit_card', label: 'Debit Card' },
-    { value: 'credit_card', label: 'Credit Card' },
-    { value: 'cash', label: 'Cash' },
-    { value: 'cheque', label: 'Cheque' },
-    { value: 'other', label: 'Other' }
+    { value: 'settlement', label: 'Settlement' },
+    { value: 'full_payment', label: 'Full Payment' },
+    { value: 'part_payment', label: 'Part Payment' }
   ];
 
   // State for loan plan management
@@ -5796,11 +5780,8 @@ export function UserProfileDetail() {
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Related Loan</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment Method</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reference</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created By</th>
               </tr>
             </thead>
@@ -5813,26 +5794,23 @@ export function UserProfileDetail() {
                       <div className="text-xs text-gray-500">{transaction.transaction_time}</div>
                     </td>
                     <td className="px-3 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${transaction.transaction_type === 'credit' ? 'bg-green-100 text-green-800' :
-                        transaction.transaction_type === 'debit' ? 'bg-red-100 text-red-800' :
-                          transaction.transaction_type === 'loan_disbursement' ? 'bg-purple-100 text-purple-800' :
-                            transaction.transaction_type === 'emi_payment' ? 'bg-blue-100 text-blue-800' :
-                              'bg-gray-100 text-gray-800'
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        transaction.transaction_type === 'loan_disbursement' ? 'bg-purple-100 text-purple-800' :
+                        transaction.transaction_type === 'emi_payment' ? 'bg-blue-100 text-blue-800' :
+                        transaction.transaction_type === 'settlement' ? 'bg-yellow-100 text-yellow-800' :
+                        transaction.transaction_type === 'full_payment' ? 'bg-green-100 text-green-800' :
+                        transaction.transaction_type === 'part_payment' ? 'bg-teal-100 text-teal-800' :
+                        'bg-gray-100 text-gray-800'
                         }`}>
                         {transaction.transaction_type?.replace('_', ' ').toUpperCase()}
                       </span>
                     </td>
-                    <td className={`px-3 py-4 whitespace-nowrap text-sm font-semibold ${['credit', 'emi_payment', 'processing_fee', 'penalty', 'interest'].includes(transaction.transaction_type) ? 'text-green-600' :
-                      ['debit', 'loan_disbursement', 'refund'].includes(transaction.transaction_type) ? 'text-red-600' : 'text-gray-900'
+                    <td className={`px-3 py-4 whitespace-nowrap text-sm font-semibold ${
+                      ['emi_payment', 'full_payment', 'part_payment', 'settlement'].includes(transaction.transaction_type) ? 'text-green-600' :
+                      ['loan_disbursement'].includes(transaction.transaction_type) ? 'text-red-600' : 'text-gray-900'
                       }`}>
-                      {['credit', 'emi_payment', 'processing_fee', 'penalty', 'interest'].includes(transaction.transaction_type) ? '+' : '-'}
+                      {['emi_payment', 'full_payment', 'part_payment', 'settlement'].includes(transaction.transaction_type) ? '+' : '-'}
                       {formatCurrency(transaction.amount)}
-                    </td>
-                    <td className="px-3 py-4 text-sm text-gray-900 max-w-xs truncate">
-                      {transaction.description}
-                      {transaction.additional_notes && (
-                        <div className="text-xs text-gray-500 italic mt-1">{transaction.additional_notes}</div>
-                      )}
                     </td>
                     <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
                       {transaction.loan_application_id ? (
@@ -5842,20 +5820,8 @@ export function UserProfileDetail() {
                         </span>
                       ) : '-'}
                     </td>
-                    <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {transaction.payment_method?.replace('_', ' ').toUpperCase()}
-                    </td>
                     <td className="px-3 py-4 whitespace-nowrap text-sm font-mono text-gray-500">
                       {transaction.reference_number || '-'}
-                    </td>
-                    <td className="px-3 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${transaction.status === 'completed' ? 'bg-green-100 text-green-800' :
-                        transaction.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                          transaction.status === 'failed' ? 'bg-red-100 text-red-800' :
-                            'bg-gray-100 text-gray-800'
-                        }`}>
-                        {transaction.status?.toUpperCase()}
-                      </span>
                     </td>
                     <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
                       {transaction.created_by_name || 'System'}
@@ -5864,7 +5830,7 @@ export function UserProfileDetail() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={9} className="px-3 py-8 text-center text-gray-500">
+                  <td colSpan={6} className="px-3 py-8 text-center text-gray-500">
                     <div className="flex flex-col items-center justify-center">
                       <CreditCard className="w-8 h-8 text-gray-300 mb-2" />
                       <p>No transactions found for this user.</p>
@@ -5898,7 +5864,7 @@ export function UserProfileDetail() {
                 <p className="text-sm font-medium text-green-600">Total Credits</p>
                 <p className="text-xl font-semibold text-green-900">
                   {formatCurrency(getArray('transactions')
-                    .filter((t: any) => ['credit', 'emi_payment', 'processing_fee', 'penalty', 'interest'].includes(t.transaction_type) && t.status === 'completed')
+                    .filter((t: any) => ['emi_payment', 'full_payment', 'part_payment', 'settlement'].includes(t.transaction_type))
                     .reduce((sum: number, t: any) => sum + parseFloat(t.amount), 0))}
                 </p>
               </div>
@@ -5913,7 +5879,7 @@ export function UserProfileDetail() {
                 <p className="text-sm font-medium text-red-600">Total Debits</p>
                 <p className="text-xl font-semibold text-red-900">
                   {formatCurrency(getArray('transactions')
-                    .filter((t: any) => ['debit', 'loan_disbursement', 'refund'].includes(t.transaction_type) && t.status === 'completed')
+                    .filter((t: any) => ['loan_disbursement'].includes(t.transaction_type))
                     .reduce((sum: number, t: any) => sum + parseFloat(t.amount), 0))}
                 </p>
               </div>
@@ -7103,20 +7069,6 @@ export function UserProfileDetail() {
                   />
                 </div>
 
-                {/* Payment Method */}
-                <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
-                  <select
-                    value={transactionForm.paymentMethod}
-                    onChange={(e) => setTransactionForm({ ...transactionForm, paymentMethod: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  >
-                    {paymentMethodOptions.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-
                 {/* Reference Number */}
                 <div className="col-span-2 md:col-span-1">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Reference / UTR No.</label>
@@ -7126,45 +7078,6 @@ export function UserProfileDetail() {
                     onChange={(e) => setTransactionForm({ ...transactionForm, referenceNumber: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     placeholder="e.g. UPI12345678"
-                  />
-                </div>
-
-                {/* Status */}
-                <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                  <select
-                    value={transactionForm.status}
-                    onChange={(e) => setTransactionForm({ ...transactionForm, status: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  >
-                    <option value="completed">Completed</option>
-                    <option value="pending">Pending</option>
-                    <option value="failed">Failed</option>
-                    <option value="processing">Processing</option>
-                  </select>
-                </div>
-
-                {/* Description */}
-                <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                  <input
-                    type="text"
-                    value={transactionForm.description}
-                    onChange={(e) => setTransactionForm({ ...transactionForm, description: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    placeholder="Enter transaction details..."
-                  />
-                </div>
-
-                {/* Additional Notes */}
-                <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Internal Notes</label>
-                  <textarea
-                    value={transactionForm.additionalNotes}
-                    onChange={(e) => setTransactionForm({ ...transactionForm, additionalNotes: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    rows={2}
-                    placeholder="Private notes for admins..."
                   />
                 </div>
               </div>
