@@ -429,6 +429,16 @@ const startServer = async () => {
     // Initialize database connection
     await initializeDatabase();
 
+    // Run migrations
+    try {
+      const { createUserLoginHistoryTable } = require('./migrations/create_user_login_history_table');
+      await createUserLoginHistoryTable();
+      console.log('✅ Migrations completed');
+    } catch (migrationError) {
+      console.error('⚠️  Migration warning:', migrationError.message);
+      // Continue even if migration fails (table might already exist)
+    }
+
     // Initialize Redis connection
     await initializeRedis();
 

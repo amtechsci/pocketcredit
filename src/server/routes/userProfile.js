@@ -472,18 +472,12 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       followUps: [],
       notes: [],
       smsHistory: [],
-      loginHistory: user.last_login_at ? [{
-        time: new Date(user.last_login_at).toLocaleString('en-IN'),
-        ip: 'N/A',
-        device: 'N/A',
-        location: 'N/A'
-      }] : [],
       bankStatement: bankStatement,
       bankStatementRecords: bankStatementRecords, // All bank statement records
       kycVerification: kycData,
       kycDocuments: kycDocuments,
       userInfoRecords: userInfoRecords, // Multi-source of truth data
-      loginHistory: loginHistory, // User login history
+      loginHistory: loginHistory, // User login history from database
       loans: applications.map(app => {
         // Calculate EMI if we have the required data
         const calculateEMI = (principal, rate, tenure) => {
