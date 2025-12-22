@@ -320,7 +320,49 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         LIMIT 50
       `;
       const loginHistoryResults = await executeQuery(loginHistoryQuery, [userId]);
-      loginHistory = loginHistoryResults || [];
+      
+      // Transform login history to match frontend expectations for both formats
+      loginHistory = (loginHistoryResults || []).map(login => {
+        // Format device string
+        const deviceParts = [];
+        if (login.browser_name) deviceParts.push(login.browser_name);
+        if (login.browser_version) deviceParts.push(login.browser_version);
+        if (login.os_name) deviceParts.push(`on ${login.os_name}`);
+        const deviceString = deviceParts.length > 0 ? deviceParts.join(' ') : login.device_type || 'Unknown Device';
+        
+        // Format location string
+        const locationParts = [];
+        if (login.location_city) locationParts.push(login.location_city);
+        if (login.location_region) locationParts.push(login.location_region);
+        if (login.location_country) locationParts.push(login.location_country);
+        const locationString = locationParts.length > 0 ? locationParts.join(', ') : 'Unknown Location';
+        
+        return {
+          // Original database fields (for detailed table view in Personal tab)
+          id: login.id,
+          ip_address: login.ip_address,
+          user_agent: login.user_agent,
+          browser_name: login.browser_name,
+          browser_version: login.browser_version,
+          device_type: login.device_type,
+          os_name: login.os_name,
+          os_version: login.os_version,
+          location_country: login.location_country,
+          location_city: login.location_city,
+          location_region: login.location_region,
+          latitude: login.latitude,
+          longitude: login.longitude,
+          login_time: login.login_time,
+          success: login.success,
+          failure_reason: login.failure_reason,
+          created_at: login.created_at,
+          // Formatted fields for Login Data tab
+          device: deviceString,
+          location: locationString,
+          time: login.login_time ? new Date(login.login_time).toLocaleString('en-IN') : 'N/A',
+          ip: login.ip_address || 'N/A'
+        };
+      });
     } catch (e) {
       console.error('Error fetching login history:', e);
     }
