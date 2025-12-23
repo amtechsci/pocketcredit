@@ -16,7 +16,7 @@ const dbConfig = {
   reconnect: true,
   // MySQL2 specific options
   charset: 'utf8mb4',
-  timezone: '+00:00',
+  timezone: 'Asia/Kolkata',
   connectTimeout: 30000, // Reduced from 60000
   // Remove duplicate acquireTimeout and timeout
   idleTimeout: 300000, // 5 minutes
@@ -30,6 +30,16 @@ let pool;
 const initializePool = () => {
   if (!pool) {
     pool = mysql.createPool(dbConfig);
+    
+    // Set MySQL session timezone for each new connection
+    pool.on('connection', async (connection) => {
+      try {
+        await connection.execute("SET time_zone = '+05:30'");
+      } catch (error) {
+        console.warn('⚠️  Failed to set MySQL timezone:', error.message);
+      }
+    });
+    
     console.log('✅ MySQL connection pool initialized');
   }
   return pool;

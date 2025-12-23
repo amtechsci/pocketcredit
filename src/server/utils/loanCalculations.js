@@ -37,27 +37,34 @@ function calculateTotalDays(disbursedDate) {
  * @returns {Date} Next valid salary date
  */
 function getNextSalaryDate(startDate, targetDay) {
-  let year = startDate.getFullYear();
-  let month = startDate.getMonth();
+  // Normalize startDate to midnight (00:00:00) for consistent comparison
+  const normalizedStartDate = new Date(startDate);
+  normalizedStartDate.setHours(0, 0, 0, 0);
+  
+  let year = normalizedStartDate.getFullYear();
+  let month = normalizedStartDate.getMonth();
   let day = targetDay;
 
-  // Create date for this month's salary date
+  // Create date for this month's salary date (at midnight)
   let salaryDate = new Date(year, month, day);
+  salaryDate.setHours(0, 0, 0, 0);
 
   // If salary date has passed or is today, move to next month
-  if (salaryDate <= startDate) {
+  if (salaryDate <= normalizedStartDate) {
     month += 1;
     if (month > 11) {
       month = 0;
       year += 1;
     }
     salaryDate = new Date(year, month, day);
+    salaryDate.setHours(0, 0, 0, 0);
   }
 
   // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
   if (salaryDate.getDate() !== day) {
     const lastDay = new Date(year, month + 1, 0).getDate();
     salaryDate = new Date(year, month, Math.min(day, lastDay));
+    salaryDate.setHours(0, 0, 0, 0);
   }
 
   return salaryDate;
@@ -84,13 +91,15 @@ function getSalaryDateForMonth(startDate, targetDay, monthOffset = 0) {
     year -= 1;
   }
 
-  // Try to create date with target day
+  // Try to create date with target day (at midnight for consistency)
   let salaryDate = new Date(year, month, targetDay);
+  salaryDate.setHours(0, 0, 0, 0);
 
   // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
   if (salaryDate.getDate() !== targetDay) {
     const lastDay = new Date(year, month + 1, 0).getDate();
     salaryDate = new Date(year, month, Math.min(targetDay, lastDay));
+    salaryDate.setHours(0, 0, 0, 0);
   }
 
   return salaryDate;
@@ -159,6 +168,27 @@ function calculateInterestDays(planData, userData, calculationDate = new Date())
         if (daysToNextSalary < days) {
           // Move to next month's salary date
           nextSalaryDate = getSalaryDateForMonth(today, salaryDate, 1);
+          daysToNextSalary = Math.ceil((nextSalaryDate - today) / (1000 * 60 * 60 * 24)) + 1;
+        }
+
+        // For Multi-EMI, the repayment date is the first EMI date
+        // Ensure the repayment date matches the salary date exactly
+        // If nextSalaryDate doesn't match the target salary day, correct it
+        if (nextSalaryDate.getDate() !== salaryDate) {
+          // Recalculate to ensure we get the exact salary date in the same month
+          const targetYear = nextSalaryDate.getFullYear();
+          const targetMonth = nextSalaryDate.getMonth();
+          nextSalaryDate = new Date(targetYear, targetMonth, salaryDate);
+          nextSalaryDate.setHours(0, 0, 0, 0);
+          
+          // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day
+          if (nextSalaryDate.getDate() !== salaryDate) {
+            const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+            nextSalaryDate = new Date(targetYear, targetMonth, Math.min(salaryDate, lastDay));
+            nextSalaryDate.setHours(0, 0, 0, 0);
+          }
+          
+          // Recalculate days after correction
           daysToNextSalary = Math.ceil((nextSalaryDate - today) / (1000 * 60 * 60 * 24)) + 1;
         }
 

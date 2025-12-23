@@ -171,15 +171,20 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     const plannedTermCalculationDate = loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)
       ? new Date(loan.disbursed_at)  // Use disbursed date for planned term calculation
       : new Date();  // Use today for pending loans
+    // Normalize to midnight for consistent date calculations
+    plannedTermCalculationDate.setHours(0, 0, 0, 0);
     const plannedTermResult = calculateInterestDays(planData, userData, plannedTermCalculationDate);
     const plannedTermDays = plannedTermResult.days;
 
     // KFS should show the original planned loan terms for documents, but actual days for repayment schedule
     // Use plan's repayment days calculation (could be fixed days or salary-based) unless useActualDays is true
+    const calculationDateForOptions = loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)
+      ? new Date(loan.disbursed_at)  // Use disbursed date for calculation
+      : new Date();  // Use today for pending loans
+    // Normalize to midnight for consistent date calculations
+    calculationDateForOptions.setHours(0, 0, 0, 0);
     const calculationOptions = {
-      calculationDate: loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)
-        ? new Date(loan.disbursed_at)  // Use disbursed date for calculation
-        : new Date(),  // Use today for pending loans
+      calculationDate: calculationDateForOptions,
       customDays: actualExhaustedDays  // Only override with actual exhausted days if useActualDays=true
     };
 
@@ -366,6 +371,15 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           firstDueDate.setDate(firstDueDate.getDate() + plannedTermDays);
           firstDueDate.setHours(0, 0, 0, 0);
         }
+        firstDueDate.setHours(0, 0, 0, 0);
+        
+        // For salary-based Multi-EMI loans, ensure firstDueDate matches the salary date
+        if (emiCount > 1 && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
+          const salaryDate = parseInt(userData.salary_date);
+          if (salaryDate >= 1 && salaryDate <= 31) {
+            firstDueDate = getSalaryDateForMonth(firstDueDate, salaryDate, 0);
+          }
+        }
         
         // Calculate actual loan term days for APR calculation
         // For Multi-EMI loans, calculate from disbursement date to last EMI date
@@ -381,18 +395,9 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
             const salaryDate = parseInt(userData.salary_date);
             if (salaryDate >= 1 && salaryDate <= 31) {
-              // Calculate base date (first EMI date)
-              let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
-              
-              // Check if duration is less than minimum days
-              const minDuration = planData.repayment_days || 15;
-              const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
-              if (daysToNextSalary < minDuration) {
-                nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
-              }
-              
+              // Use firstDueDate as the base (already calculated from plannedTermResult.repaymentDate)
               // Get last EMI date (emiCount - 1 because first is at index 0)
-              lastEmiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, emiCount - 1);
+              lastEmiDate = getSalaryDateForMonth(firstDueDate, salaryDate, emiCount - 1);
             } else {
               // Fallback: use firstDueDate + (emiCount - 1) months
               lastEmiDate = new Date(firstDueDate);
@@ -435,19 +440,27 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         if (emiCount > 1) {
           const interestRatePerDay = loanValues.interest?.rate_per_day || planData.interest_percent_per_day || (interest / (principal * days));
           
-          // Generate all EMI dates
+          // Generate all EMI dates - recalculate from base date for salary-based loans to ensure accuracy
           let allEmiDates = [];
           if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
             const salaryDate = parseInt(userData.salary_date);
             if (salaryDate >= 1 && salaryDate <= 31) {
-              let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
+              // Recalculate first EMI date from base date to ensure it matches salary date exactly
+              const baseDateForEmi = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+              baseDateForEmi.setHours(0, 0, 0, 0);
+              let nextSalaryDate = getNextSalaryDate(baseDateForEmi, salaryDate);
+              
+              // Check if duration is less than minimum days
               const minDuration = planData.repayment_days || 15;
-              const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+              const daysToNextSalary = Math.ceil((nextSalaryDate - baseDateForEmi) / (1000 * 60 * 60 * 24)) + 1;
               if (daysToNextSalary < minDuration) {
-                nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+                nextSalaryDate = getSalaryDateForMonth(baseDateForEmi, salaryDate, 1);
               }
+              
+              // Generate all EMI dates from the corrected first salary date
               for (let i = 0; i < emiCount; i++) {
-                allEmiDates.push(getSalaryDateForMonth(nextSalaryDate, salaryDate, i));
+                const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
+                allEmiDates.push(emiDate);
               }
             }
           } else {
@@ -563,7 +576,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         
         return {
           principal,
-          interest,
+          interest: emiCount > 1 ? interestForAPR : interest,
           total_repayable: loanValues.total?.repayable || loanValues.totalRepayableAmount || 0,
           total_amount: loanValues.total?.repayable || loanValues.totalRepayableAmount || 0,
           disbursed_amount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
@@ -897,11 +910,15 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     const calculationDate = loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)
       ? new Date(loan.disbursed_at)
       : new Date();
+    // Normalize to midnight for consistent date calculations
+    calculationDate.setHours(0, 0, 0, 0);
 
     // Calculate PLANNED loan term days (for due date and loan_term_days) - always use planned term
     const plannedTermCalculationDate = loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)
       ? new Date(loan.disbursed_at)  // Use disbursed date for planned term calculation
       : new Date();  // Use today for pending loans
+    // Normalize to midnight for consistent date calculations
+    plannedTermCalculationDate.setHours(0, 0, 0, 0);
     const plannedTermResult = calculateInterestDays(planData, userData, plannedTermCalculationDate);
     const plannedTermDays = plannedTermResult.days;
 
@@ -920,9 +937,11 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     }
 
     // Extract values for KFS
+    // Define emiCount early so it can be used in firstDueDate calculation
+    const emiCount = planData.emi_count || 1;
+    
     const processingFee = calculations.totals.disbursalFee;
     // For EMI loans, multiply repayable fee GST by EMI count
-    const emiCount = planData.emi_count || 1;
     const repayableFeeGST = emiCount > 1 
       ? calculations.totals.repayableFeeGST * emiCount 
       : calculations.totals.repayableFeeGST;
@@ -934,7 +953,9 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
 
     // Generate first due date from repayment date or calculate using PLANNED term days
     let firstDueDate;
-    if (calculations.interest.repayment_date) {
+    if (plannedTermResult.repaymentDate) {
+      firstDueDate = new Date(plannedTermResult.repaymentDate);
+    } else if (calculations.interest.repayment_date) {
       firstDueDate = new Date(calculations.interest.repayment_date);
     } else {
       // Use disbursed date (or today if not disbursed) + planned term days
@@ -943,6 +964,15 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       firstDueDate = new Date(baseDate);
       firstDueDate.setDate(firstDueDate.getDate() + plannedTermDays);
       firstDueDate.setHours(0, 0, 0, 0);
+    }
+    firstDueDate.setHours(0, 0, 0, 0);
+    
+    // For salary-based Multi-EMI loans, ensure firstDueDate matches the salary date
+    if (emiCount > 1 && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
+      const salaryDate = parseInt(userData.salary_date);
+      if (salaryDate >= 1 && salaryDate <= 31) {
+        firstDueDate = getSalaryDateForMonth(firstDueDate, salaryDate, 0);
+      }
     }
 
     // Calculate actual loan term days for APR calculation
@@ -959,18 +989,9 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
         const salaryDate = parseInt(userData.salary_date);
         if (salaryDate >= 1 && salaryDate <= 31) {
-          // Calculate base date (first EMI date)
-          let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
-          
-          // Check if duration is less than minimum days
-          const minDuration = planData.repayment_days || 15;
-          const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
-          if (daysToNextSalary < minDuration) {
-            nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
-          }
-          
+          // Use firstDueDate as the base (already calculated from plannedTermResult.repaymentDate)
           // Get last EMI date (emiCount - 1 because first is at index 0)
-          lastEmiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, emiCount - 1);
+          lastEmiDate = getSalaryDateForMonth(firstDueDate, salaryDate, emiCount - 1);
         } else {
           // Fallback: use firstDueDate + (emiCount - 1) months
           lastEmiDate = new Date(firstDueDate);
@@ -1021,20 +1042,31 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     if (emiCount > 1) {
       const interestRatePerDay = calculations.interest.rate_per_day || (interest / (principal * days));
       
-      // Generate all EMI dates
+      // Generate all EMI dates - recalculate from base date for salary-based loans to ensure accuracy
       let allEmiDates = [];
       if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
         const salaryDate = parseInt(userData.salary_date);
         if (salaryDate >= 1 && salaryDate <= 31) {
-          let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
+          // Recalculate first EMI date from base date to ensure it matches salary date exactly
+          const baseDateForEmi = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+          baseDateForEmi.setHours(0, 0, 0, 0);
+          let nextSalaryDate = getNextSalaryDate(baseDateForEmi, salaryDate);
+          
+          // Check if duration is less than minimum days
           const minDuration = planData.repayment_days || 15;
-          const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+          const daysToNextSalary = Math.ceil((nextSalaryDate - baseDateForEmi) / (1000 * 60 * 60 * 24)) + 1;
           if (daysToNextSalary < minDuration) {
-            nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+            nextSalaryDate = getSalaryDateForMonth(baseDateForEmi, salaryDate, 1);
           }
+          
+          // Generate all EMI dates from the corrected first salary date
           for (let i = 0; i < emiCount; i++) {
-            allEmiDates.push(getSalaryDateForMonth(nextSalaryDate, salaryDate, i));
+            const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
+            allEmiDates.push(emiDate);
           }
+          
+          // Update firstDueDate to match the first EMI date for consistency
+          firstDueDate = allEmiDates[0];
         }
       } else {
         const daysPerEmi = {
@@ -1212,7 +1244,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       interest: {
         rate_per_day: calculations.interest.rate_per_day,
         rate_type: calculations.interest.calculation_method === 'salary_date' ? 'Salary Date Based' : 'Fixed',
-        total_interest: interest,
+        total_interest: emiCount > 1 ? interestForAPR : interest,
         calculation_days: days
       },
 
@@ -1269,7 +1301,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         processing_fee: processingFee,
         gst: gst,
         disbursed_amount: disbAmount,
-        interest: interest,
+        interest: emiCount > 1 ? interestForAPR : interest,
         total_repayable: totalRepayable,
         apr: parseFloat(apr.toFixed(2))
       },
