@@ -89,7 +89,11 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         <tr>
                             <td className="border border-black p-2" style={{ width: '5%' }}>1</td>
                             <td className="border border-black p-2" style={{ width: '40%' }}>Loan proposal/account No.</td>
-                            <td className="border border-black p-2" style={{ width: '20%' }}>{kfsData.loan.application_number}</td>
+                            <td className="border border-black p-2" style={{ width: '20%' }}>
+                                {kfsData.loan.application_number 
+                                    ? `PLL${kfsData.loan.application_number.slice(-4)}` 
+                                    : kfsData.loan.application_number}
+                            </td>
                             <td className="border border-black p-2" style={{ width: '15%' }}>Type of Loan</td>
                             <td className="border border-black p-2" style={{ width: '20%' }}>{kfsData.loan.type}</td>
                         </tr>
@@ -192,8 +196,8 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         </tr>
                         <tr>
                             <td className="border border-black p-2"></td>
-                            <td className="border border-black p-2" colSpan={2}>Payable to the RE (A)</td>
-                            <td className="border border-black p-2" colSpan={3}>Payable to a third party through RE (B)</td>
+                            <td className="border border-black border-r-0 p-2" colSpan={2}>Payable to the RE (A)</td>
+                            <td className="border border-black border-l-0 p-2 text-right" colSpan={3}>Payable to a third party through RE (B)</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2"></td>
@@ -303,8 +307,10 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                                 <p className="mb-2"><strong>a) Late Payment Fees / Penal charges:</strong></p>
                                 <p className="mb-1">If you miss a loan repayment:</p>
                                 <ul className="list-disc ml-5 mb-2">
-                                    <li>On the first day after the due date: You'll be charged a one-time penalty of 4% of the overdue principal amount.</li>
-                                    <li>From the second day until the loan is fully repaid: You'll be charged a daily penalty of 0.2% of the overdue principal each day.</li>
+                                    <li>On the first day after the due date: You'll be charged a one-time penalty of 5% of the overdue principal amount.</li>
+                                    <li>From 2nd day after due date to 10th day after due date: you'll be charged 1% per day of the overdue principal amount.</li>
+                                    <li>From 11th day after due date to 120th day after due date: you'll be charged 0.6% per day of the overdue principal amount.</li>
+                                    <li>Above 120 days it's "0"</li>
                                 </ul>
                                 <p className="mb-2"><strong>Clarification:</strong> For the avoidance of doubt, it is hereby clarified that the Penal Charges will be calculated on the principal overdue amount only and shall be levied distinctly and separately from the components of the principal overdue amount and the loan interest. These charges are not added to the rate of interest against which the loan has been advanced and are also not subject to any further interest. Please note that these charges are calculated in a manner so as to be commensurate to the default and are levied in a non-discriminatory manner for this loan product.</p>
                                 <p><strong>b) Annualized Rate of Interest post-due date:</strong></p>
@@ -495,39 +501,39 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         </tr>
                         <tr>
                             <td className="border border-black p-2">6</td>
-                            <td className="border border-black p-2">Fee/ Charges payable (in Rupees)</td>
+                            <td className="border border-black p-2">Payable to the RE</td>
                             <td className="border border-black p-2">
-                                {formatCurrency(
+                                {(
                                     kfsData.fees.processing_fee +
                                     kfsData.fees.gst +
                                     (kfsData.fees.total_add_to_total || 0)
-                                )}
+                                ).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2"></td>
                             <td className="border border-black p-2">A Payable to the RE</td>
                             <td className="border border-black p-2">
-                                {formatCurrency(kfsData.fees.processing_fee + kfsData.fees.gst)}
+                                {(
+                                    kfsData.fees.processing_fee +
+                                    kfsData.fees.gst +
+                                    (kfsData.fees.total_add_to_total || 0)
+                                ).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2"></td>
                             <td className="border border-black p-2">B Payable to third-party routed through RE</td>
-                            <td className="border border-black p-2">
-                                {kfsData.fees.total_add_to_total > 0
-                                    ? formatCurrency(kfsData.fees.total_add_to_total)
-                                    : 'N/A'}
-                            </td>
+                            <td className="border border-black p-2">NA</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2">7</td>
-                            <td className="border border-black p-2">Net disbursed amount (1-6) (in Rupees)</td>
+                            <td className="border border-black p-2">Net disbursed amount (in Rupees)</td>
                             <td className="border border-black p-2">{formatCurrency(kfsData.calculations.disbursed_amount)}</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2">8</td>
-                            <td className="border border-black p-2">Total amount to be paid by the borrower (sum of 1 and 5) (in Rupees)</td>
+                            <td className="border border-black p-2">Total amount to be paid by the borrower (in Rupees)</td>
                             <td className="border border-black p-2">{formatCurrency(kfsData.calculations.total_repayable)}</td>
                         </tr>
                         <tr>
@@ -577,10 +583,12 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                     <tbody>
                         <tr>
                             <td className="border border-black p-2 text-center">1</td>
-                            <td className="border border-black p-2">5000</td>
-                            <td className="border border-black p-2">5000</td>
-                            <td className="border border-black p-2">110+708</td>
-                            <td className="border border-black p-2">5818</td>
+                            <td className="border border-black p-2">{formatCurrency(kfsData.loan.sanctioned_amount || kfsData.calculations.principal || 0)}</td>
+                            <td className="border border-black p-2">{formatCurrency(kfsData.loan.sanctioned_amount || kfsData.calculations.principal || 0)}</td>
+                            <td className="border border-black p-2">
+                                {Math.round(kfsData.calculations.interest || 0)}+{Math.round((kfsData.fees.total_add_to_total || 0) + (kfsData.fees.gst_on_add_to_total || 0))}
+                            </td>
+                            <td className="border border-black p-2">{formatCurrency(kfsData.calculations.total_repayable || 0)}</td>
                         </tr>
                     </tbody>
                 </table>

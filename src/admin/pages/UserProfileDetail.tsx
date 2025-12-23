@@ -126,6 +126,8 @@ export function UserProfileDetail() {
     email: '',
     address: ''
   });
+  const [editingNote, setEditingNote] = useState<number | null>(null);
+  const [noteText, setNoteText] = useState<{ [key: number]: string }>({});
   const [noteForm, setNoteForm] = useState({
     subject: '',
     note: '',
@@ -2886,6 +2888,34 @@ export function UserProfileDetail() {
       }
     };
 
+    const handleSaveNote = async (referenceId: number) => {
+      const note = noteText[referenceId] || '';
+      
+      try {
+        const response = await adminApiService.updateReferenceStatus(
+          params.userId!,
+          referenceId.toString(),
+          undefined,
+          note
+        );
+
+        if (response.status === 'success') {
+          toast.success('Note saved successfully!');
+          setEditingNote(null);
+          // Refresh user data
+          const profileResponse = await adminApiService.getUserProfile(params.userId!);
+          if (profileResponse.status === 'success') {
+            setUserData(profileResponse.data);
+          }
+        } else {
+          toast.error(response.message || 'Failed to save note');
+        }
+      } catch (error: any) {
+        console.error('Error saving note:', error);
+        toast.error(error.message || 'Failed to save note');
+      }
+    };
+
     return (
       <div className="space-y-6">
         <div className="bg-white rounded-lg border border-gray-200 p-6">
@@ -2977,6 +3007,57 @@ export function UserProfileDetail() {
                       </div>
                     </div>
                   )}
+
+                  {/* Notes Section */}
+                  <div className="mt-3 border-t border-gray-200 pt-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                        <MessageSquare className="w-4 h-4" />
+                        Admin Notes
+                      </label>
+                      {editingNote !== ref.id && (
+                        <button
+                          onClick={() => {
+                            setEditingNote(ref.id);
+                            setNoteText({ ...noteText, [ref.id]: ref.notes || '' });
+                          }}
+                          className="text-xs text-blue-600 hover:text-blue-800"
+                        >
+                          {ref.notes ? 'Edit' : 'Add Note'}
+                        </button>
+                      )}
+                    </div>
+                    
+                    {editingNote === ref.id ? (
+                      <div className="space-y-2">
+                        <textarea
+                          value={noteText[ref.id] || ''}
+                          onChange={(e) => setNoteText({ ...noteText, [ref.id]: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                          rows={3}
+                          placeholder="Add notes about this reference..."
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleSaveNote(ref.id)}
+                            className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700"
+                          >
+                            Save Note
+                          </button>
+                          <button
+                            onClick={() => setEditingNote(null)}
+                            className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-md hover:bg-gray-200"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-gray-600 bg-gray-50 rounded-md p-3 min-h-[60px]">
+                        {ref.notes || 'No notes added yet'}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -3909,6 +3990,9 @@ export function UserProfileDetail() {
                       const calculation = loanCalculations[loanId];
                       const isLoading = calculationsLoading[loanId];
 
+                      // Use shortLoanId from backend, or generate fallback
+                      const shortLoanId = loan.shortLoanId || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
+
                       // Fetch calculation if not loaded yet
                       if (loanId && !calculation && !isLoading) {
                         fetchLoanCalculation(loanId);
@@ -3917,7 +4001,7 @@ export function UserProfileDetail() {
                       return (
                         <tr key={index} className="hover:bg-gray-50 border-l-4 border-l-green-500">
                           <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {loan.loanId || loan.id}
+                            {shortLoanId}
                           </td>
                           <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
                             {calculation ? formatCurrency(calculation.principal) : isLoading ? '...' : 'N/A'}

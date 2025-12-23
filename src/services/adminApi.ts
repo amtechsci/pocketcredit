@@ -286,7 +286,7 @@ class AdminApiService {
     return this.request('POST', `/user-profile/${userId}/references`, referenceData);
   }
 
-  async updateReferenceStatus(userId: string, referenceId: string, verificationStatus: string, feedback?: string, rejectionReason?: string): Promise<ApiResponse<any>> {
+  async updateReferenceStatus(userId: string, referenceId: string, verificationStatus?: string, feedback?: string, rejectionReason?: string): Promise<ApiResponse<any>> {
     return this.request('PUT', `/user-profile/${userId}/references/${referenceId}`, { verificationStatus, feedback, rejectionReason });
   }
 

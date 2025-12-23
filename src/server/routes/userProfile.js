@@ -129,7 +129,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
 
     // Get ALL references for this user
     const references = await executeQuery(`
-      SELECT id, user_id, name, phone, relation, status, admin_id, created_at, updated_at 
+      SELECT id, user_id, name, phone, relation, status, admin_id, admin_notes as notes, created_at, updated_at 
       FROM \`references\` 
       WHERE user_id = ? 
       ORDER BY created_at ASC
@@ -1243,36 +1243,81 @@ router.put('/:userId/references/:referenceId', authenticateAdmin, async (req, re
     const { userId, referenceId } = req.params;
     const { verificationStatus, feedback, rejectionReason } = req.body;
 
-    if (!verificationStatus || !['pending', 'verified', 'rejected'].includes(verificationStatus)) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Invalid status. Must be pending, verified, or rejected'
-      });
-    }
-
     // Get admin ID from request (if available)
     const adminId = req.admin?.id || null;
 
-    // Update reference status
+    // Add admin_notes column if it doesn't exist
+    try {
+      // Check if column exists
+      const columnCheck = await executeQuery(`
+        SELECT COLUMN_NAME 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'references' 
+        AND COLUMN_NAME = 'admin_notes'
+      `);
+      
+      if (!columnCheck || columnCheck.length === 0) {
+        await executeQuery(`
+          ALTER TABLE \`references\` 
+          ADD COLUMN admin_notes TEXT NULL AFTER status
+        `);
+        console.log('✅ Added admin_notes column to references table');
+      }
+    } catch (err) {
+      // Column might already exist or other error, log and continue
+      console.log('⚠️  Could not add admin_notes column:', err.message);
+    }
+
+    // Build update query dynamically based on what's provided
+    let updateFields = [];
+    let updateValues = [];
+
+    if (verificationStatus && ['pending', 'verified', 'rejected'].includes(verificationStatus)) {
+      updateFields.push('status = ?');
+      updateValues.push(verificationStatus);
+    }
+
+    if (adminId) {
+      updateFields.push('admin_id = ?');
+      updateValues.push(adminId);
+    }
+
+    if (feedback !== undefined) {
+      updateFields.push('admin_notes = ?');
+      updateValues.push(feedback);
+    }
+
+    updateFields.push('updated_at = NOW()');
+    updateValues.push(referenceId, userId);
+
+    if (updateFields.length === 1) { // Only updated_at
+      return res.status(400).json({
+        status: 'error',
+        message: 'No valid fields to update'
+      });
+    }
+
+    // Update reference
     await executeQuery(
       `UPDATE \`references\` 
-       SET status = ?, admin_id = ?, updated_at = NOW() 
+       SET ${updateFields.join(', ')}
        WHERE id = ? AND user_id = ?`,
-      [verificationStatus, adminId, referenceId, userId]
+      updateValues
     );
 
-    console.log('✅ Reference status updated successfully');
+    console.log('✅ Reference updated successfully');
     res.json({
       status: 'success',
-      message: 'Reference status updated successfully',
-      data: { referenceId, status: verificationStatus }
+      message: 'Reference updated successfully',
+      data: { referenceId, status: verificationStatus, notes: feedback }
     });
 
   } catch (error) {
-    console.error('Update reference status error:', error);
+    console.error('Update reference error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to update reference status'
+      message: 'Failed to update reference'
     });
   }
 });
