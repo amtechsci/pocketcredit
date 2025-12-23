@@ -424,11 +424,16 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         
         // For Multi-EMI loans, calculate total interest by summing interest for each EMI period
         // Each EMI period has interest calculated on the outstanding principal for that period
+        // Define baseDate for debug logging (used for both single and multi-EMI)
+        const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+        baseDate.setHours(0, 0, 0, 0);
+        
+        // Initialize emiPeriodDetails for debug logging
+        let emiPeriodDetails = [];
+        
         let interestForAPR = interest;
         if (emiCount > 1) {
           const interestRatePerDay = loanValues.interest?.rate_per_day || planData.interest_percent_per_day || (interest / (principal * days));
-          const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
-          baseDate.setHours(0, 0, 0, 0);
           
           // Generate all EMI dates
           let allEmiDates = [];
@@ -515,6 +520,18 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
               interestForAPR += interestForPeriod;
               
+              // Store period details for debugging
+              emiPeriodDetails.push({
+                period: i + 1,
+                previousDate: previousDate.toISOString().split('T')[0],
+                emiDate: emiDate.toISOString().split('T')[0],
+                daysForPeriod,
+                outstandingPrincipal: outstandingPrincipal.toFixed(2),
+                principalForThisEmi: principalForThisEmi.toFixed(2),
+                interestForPeriod: interestForPeriod.toFixed(2),
+                interestRatePerDay
+              });
+              
               // Reduce outstanding principal for next period
               outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
             }
@@ -524,6 +541,25 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         // Calculate APR
         const totalCharges = processingFee + gst + repayableFee + interestForAPR;
         const apr = loanTermDaysForAPR > 0 ? ((totalCharges / principal) / loanTermDaysForAPR) * 36500 : 0;
+        
+        // Debug: Log APR calculation details
+        console.log('APR Calculation Debug (User):', {
+          processingFee,
+          gst,
+          repayableFee,
+          interest: interest,
+          interestForAPR: interestForAPR,
+          totalCharges,
+          principal,
+          loanTermDaysForAPR,
+          interestCalculationDays: days,
+          emiCount,
+          interestRatePerDay: loanValues.interest?.rate_per_day || planData.interest_percent_per_day || (interest / (principal * days)),
+          disbursementDate: baseDate.toISOString().split('T')[0],
+          emiPeriodDetails: emiCount > 1 ? emiPeriodDetails : undefined,
+          apr: apr.toFixed(2),
+          aprCalculation: `((${totalCharges} / ${principal}) / ${loanTermDaysForAPR}) * 36500 = ${apr.toFixed(2)}`
+        });
         
         return {
           principal,
@@ -974,11 +1010,16 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     
     // For Multi-EMI loans, calculate total interest by summing interest for each EMI period
     // Each EMI period has interest calculated on the outstanding principal for that period
+    // Define baseDate for debug logging (used for both single and multi-EMI)
+    const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+    baseDate.setHours(0, 0, 0, 0);
+    
+    // Initialize emiPeriodDetails for debug logging
+    let emiPeriodDetails = [];
+    
     let interestForAPR = interest;
     if (emiCount > 1) {
       const interestRatePerDay = calculations.interest.rate_per_day || (interest / (principal * days));
-      const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
-      baseDate.setHours(0, 0, 0, 0);
       
       // Generate all EMI dates
       let allEmiDates = [];
@@ -1053,6 +1094,18 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
           interestForAPR += interestForPeriod;
           
+          // Store period details for debugging
+          emiPeriodDetails.push({
+            period: i + 1,
+            previousDate: previousDate.toISOString().split('T')[0],
+            emiDate: emiDate.toISOString().split('T')[0],
+            daysForPeriod,
+            outstandingPrincipal: outstandingPrincipal.toFixed(2),
+            principalForThisEmi: principalForThisEmi.toFixed(2),
+            interestForPeriod: interestForPeriod.toFixed(2),
+            interestRatePerDay
+          });
+          
           // Reduce outstanding principal for next period
           outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
         }
@@ -1074,7 +1127,11 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       loanTermDaysForAPR,
       interestCalculationDays: days,
       emiCount,
-      apr: apr.toFixed(2)
+      interestRatePerDay: calculations.interest.rate_per_day || (interest / (principal * days)),
+      disbursementDate: baseDate.toISOString().split('T')[0],
+      emiPeriodDetails: emiCount > 1 ? emiPeriodDetails : undefined,
+      apr: apr.toFixed(2),
+      aprCalculation: `((${totalCharges} / ${principal}) / ${loanTermDaysForAPR}) * 36500 = ${apr.toFixed(2)}`
     });
 
     // Use firstDueDate as dueDate for KFS data

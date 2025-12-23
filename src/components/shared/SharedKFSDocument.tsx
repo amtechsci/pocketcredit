@@ -44,6 +44,63 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
         }
     };
 
+    // Calculate total interest and total repayable for Multi-EMI loans
+    const calculateTotalInterestAndRepayable = () => {
+        const principal = kfsData.loan.sanctioned_amount || kfsData.calculations.principal || 0;
+        const emiCount = kfsData.loan.emi_count || 1;
+        const interestCalculationDays = kfsData.interest?.calculation_days || kfsData.calculations?.interest?.days || 0;
+        const interestRatePerDay = kfsData.interest?.rate_per_day || (kfsData.calculations.interest || 0) / (principal * interestCalculationDays || 1);
+        
+        const postServiceFeePerEmi = (kfsData.fees.total_add_to_total || 0) / emiCount;
+        const postServiceFeeGSTPerEmi = Math.round(postServiceFeePerEmi * 0.18);
+        const postServiceFeeWithGSTPerEmi = postServiceFeePerEmi + postServiceFeeGSTPerEmi;
+        
+        let totalInterest = kfsData.calculations.interest || 0;
+        let totalRepayable = kfsData.calculations.total_repayable || 0;
+        
+        // For Multi-EMI loans, recalculate total interest and total repayable
+        if (emiCount > 1 && kfsData.repayment?.all_emi_dates && Array.isArray(kfsData.repayment.all_emi_dates) && kfsData.repayment.all_emi_dates.length === emiCount) {
+            const disbursedDate = kfsData.loan.disbursed_at ? new Date(kfsData.loan.disbursed_at) : new Date();
+            disbursedDate.setHours(0, 0, 0, 0);
+            
+            const principalPerEmi = Math.floor(principal / emiCount * 100) / 100;
+            const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
+            
+            let outstandingPrincipal = principal;
+            totalInterest = 0;
+            totalRepayable = 0;
+            
+            for (let i = 0; i < emiCount; i++) {
+                const emiDate = new Date(kfsData.repayment.all_emi_dates[i]);
+                emiDate.setHours(0, 0, 0, 0);
+                
+                let previousDate;
+                if (i === 0) {
+                    previousDate = disbursedDate;
+                } else {
+                    previousDate = new Date(kfsData.repayment.all_emi_dates[i - 1]);
+                    previousDate.setDate(previousDate.getDate() + 1);
+                }
+                previousDate.setHours(0, 0, 0, 0);
+                const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                
+                const principalForThisEmi = i === emiCount - 1 
+                    ? Math.round((principalPerEmi + remainder) * 100) / 100
+                    : principalPerEmi;
+                
+                const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
+                totalInterest += interestForPeriod;
+                
+                const instalmentAmount = principalForThisEmi + interestForPeriod + postServiceFeeWithGSTPerEmi;
+                totalRepayable += instalmentAmount;
+                
+                outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
+            }
+        }
+        
+        return { totalInterest, totalRepayable };
+    };
+
     const calculateAPR = () => {
         if (!kfsData) return '0.00';
         
@@ -634,7 +691,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         <tr>
                             <td className="border border-black p-2">5</td>
                             <td className="border border-black p-2">Total Interest Amount to be charged during the entire tenor of the loan as per the rate prevailing on sanction date (in Rupees)</td>
-                            <td className="border border-black p-2">{formatCurrency(kfsData.calculations.interest)}</td>
+                            <td className="border border-black p-2">{formatCurrency(calculateTotalInterestAndRepayable().totalInterest)}</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2">6</td>
@@ -671,7 +728,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         <tr>
                             <td className="border border-black p-2">8</td>
                             <td className="border border-black p-2">Total amount to be paid by the borrower (in Rupees)</td>
-                            <td className="border border-black p-2">{formatCurrency(kfsData.calculations.total_repayable)}</td>
+                            <td className="border border-black p-2">{formatCurrency(calculateTotalInterestAndRepayable().totalRepayable)}</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2">9</td>
