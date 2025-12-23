@@ -290,6 +290,10 @@ class AdminApiService {
     return this.request('PUT', `/user-profile/${userId}/references/${referenceId}`, { verificationStatus, feedback, rejectionReason });
   }
 
+  async updateReference(userId: string, referenceId: string, data: { name?: string; phone?: string; relation?: string }): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/user-profile/${userId}/references/${referenceId}`, data);
+  }
+
   // Transactions Management
   async getUserTransactions(userId: string): Promise<ApiResponse<any>> {
     return this.request('GET', `/user-profile/${userId}/transactions`);

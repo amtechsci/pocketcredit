@@ -1241,7 +1241,7 @@ router.put('/:userId/references/:referenceId', authenticateAdmin, async (req, re
     console.log('👥 Updating reference status:', req.params.referenceId);
     await initializeDatabase();
     const { userId, referenceId } = req.params;
-    const { verificationStatus, feedback, rejectionReason } = req.body;
+    const { verificationStatus, feedback, rejectionReason, name, phone, relation } = req.body;
 
     // Get admin ID from request (if available)
     const adminId = req.admin?.id || null;
@@ -1288,6 +1288,21 @@ router.put('/:userId/references/:referenceId', authenticateAdmin, async (req, re
       updateValues.push(feedback);
     }
 
+    if (name !== undefined) {
+      updateFields.push('name = ?');
+      updateValues.push(name);
+    }
+
+    if (phone !== undefined) {
+      updateFields.push('phone = ?');
+      updateValues.push(phone);
+    }
+
+    if (relation !== undefined) {
+      updateFields.push('relation = ?');
+      updateValues.push(relation);
+    }
+
     updateFields.push('updated_at = NOW()');
     updateValues.push(referenceId, userId);
 
@@ -1318,6 +1333,41 @@ router.put('/:userId/references/:referenceId', authenticateAdmin, async (req, re
     res.status(500).json({
       status: 'error',
       message: 'Failed to update reference'
+    });
+  }
+});
+
+// POST /api/user-profile/:userId/references - Add a new reference (Admin only)
+router.post('/:userId/references', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+    const { name, phone, relation } = req.body;
+
+    if (!name || !phone || !relation) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Name, phone, and relation are required'
+      });
+    }
+
+    const result = await executeQuery(
+      'INSERT INTO `references` (user_id, name, phone, relation, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
+      [userId, name, phone, relation]
+    );
+
+    console.log('✅ Reference added successfully');
+    res.json({
+      status: 'success',
+      message: 'Reference added successfully',
+      data: { id: result.insertId, name, phone, relation }
+    });
+
+  } catch (error) {
+    console.error('Add reference error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to add reference'
     });
   }
 });

@@ -128,6 +128,10 @@ export function UserProfileDetail() {
   });
   const [editingNote, setEditingNote] = useState<number | null>(null);
   const [noteText, setNoteText] = useState<{ [key: number]: string }>({});
+  const [editingReference, setEditingReference] = useState<number | null>(null);
+  const [editingReferenceField, setEditingReferenceField] = useState<{ [key: number]: 'name' | 'phone' | 'relation' | null }>({});
+  const [referenceEditValues, setReferenceEditValues] = useState<{ [key: number]: { name?: string; phone?: string; relation?: string } }>({});
+  const [newReference, setNewReference] = useState({ name: '', phone: '', relation: '' });
   const [noteForm, setNoteForm] = useState({
     subject: '',
     note: '',
@@ -1050,6 +1054,32 @@ export function UserProfileDetail() {
     } catch (error) {
       console.error('Error adding reference details:', error);
       alert('Error adding reference details');
+    }
+  };
+
+  const handleAddReference = async () => {
+    if (!newReference.name || !newReference.phone || !newReference.relation) {
+      toast.error('Please fill in all fields');
+      return;
+    }
+
+    try {
+      const response = await adminApiService.addReference(params.userId!, newReference);
+      if (response.status === 'success') {
+        toast.success('Reference added successfully!');
+        setShowAddReferenceModal(false);
+        setNewReference({ name: '', phone: '', relation: '' });
+        // Refresh user data
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success') {
+          setUserData(profileResponse.data);
+        }
+      } else {
+        toast.error(response.message || 'Failed to add reference');
+      }
+    } catch (error: any) {
+      console.error('Error adding reference:', error);
+      toast.error(error.message || 'Failed to add reference');
     }
   };
 
@@ -2831,6 +2861,55 @@ export function UserProfileDetail() {
   const renderReferenceTab = () => {
     const allReferences = userData?.references || [];
     
+    const handleEditReference = (refId: number, field: 'name' | 'phone' | 'relation') => {
+      setEditingReference(refId);
+      setEditingReferenceField({ ...editingReferenceField, [refId]: field });
+      const ref = allReferences.find((r: any) => r.id === refId);
+      setReferenceEditValues({
+        ...referenceEditValues,
+        [refId]: {
+          name: ref?.name || '',
+          phone: ref?.phone || '',
+          relation: ref?.relation || ''
+        }
+      });
+    };
+
+    const handleSaveReferenceEdit = async (refId: number) => {
+      const editData = referenceEditValues[refId];
+      if (!editData) return;
+
+      try {
+        const response = await adminApiService.updateReference(
+          params.userId!,
+          refId.toString(),
+          editData
+        );
+
+        if (response.status === 'success') {
+          toast.success('Reference updated successfully!');
+          setEditingReference(null);
+          setEditingReferenceField({ ...editingReferenceField, [refId]: null });
+          // Refresh user data
+          const profileResponse = await adminApiService.getUserProfile(params.userId!);
+          if (profileResponse.status === 'success') {
+            setUserData(profileResponse.data);
+          }
+        } else {
+          toast.error(response.message || 'Failed to update reference');
+        }
+      } catch (error: any) {
+        console.error('Error updating reference:', error);
+        toast.error(error.message || 'Failed to update reference');
+      }
+    };
+
+    const handleCancelEdit = (refId: number) => {
+      setEditingReference(null);
+      setEditingReferenceField({ ...editingReferenceField, [refId]: null });
+      setReferenceEditValues({ ...referenceEditValues, [refId]: {} });
+    };
+    
     const handleVerifyReference = async (referenceId: number) => {
       if (!confirm('Are you sure you want to verify this reference?')) {
         return;
@@ -2922,6 +3001,13 @@ export function UserProfileDetail() {
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Reference Details</h3>
             <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowAddReferenceModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+              >
+                <Plus className="w-4 h-4" />
+                Add Reference
+              </button>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-600">
                   {allReferences.filter((ref: any) => ref.status === 'verified').length} of {allReferences.length} verified
@@ -2936,7 +3022,45 @@ export function UserProfileDetail() {
               {allReferences.map((ref: any, index: number) => (
                 <div key={ref.id || index} className="border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3">
-                    <h4 className="font-medium text-gray-900">{ref.name || 'N/A'}</h4>
+                    {editingReference === ref.id && editingReferenceField[ref.id] === 'name' ? (
+                      <div className="flex items-center gap-2 flex-1">
+                        <input
+                          type="text"
+                          value={referenceEditValues[ref.id]?.name || ''}
+                          onChange={(e) => setReferenceEditValues({
+                            ...referenceEditValues,
+                            [ref.id]: { ...referenceEditValues[ref.id], name: e.target.value }
+                          })}
+                          className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                          placeholder="Name"
+                        />
+                        <button
+                          onClick={() => handleSaveReferenceEdit(ref.id)}
+                          className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => handleCancelEdit(ref.id)}
+                          className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-md hover:bg-gray-200"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 flex-1">
+                        <h4 className="font-medium text-gray-900">{ref.name || 'N/A'}</h4>
+                        {canEditUsers && (
+                          <button
+                            onClick={() => handleEditReference(ref.id, 'name')}
+                            className="text-blue-600 hover:text-blue-800"
+                            title="Edit Name"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    )}
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                       ref.status === 'verified' ? 'bg-green-100 text-green-800' :
                       ref.status === 'rejected' ? 'bg-red-100 text-red-800' :
@@ -2947,11 +3071,89 @@ export function UserProfileDetail() {
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-4">
-                    <div>
-                      <span className="text-gray-600">Relationship:</span> {ref.relation || 'N/A'}
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-600">Relationship:</span>
+                      {editingReference === ref.id && editingReferenceField[ref.id] === 'relation' ? (
+                        <div className="flex items-center gap-2 flex-1">
+                          <input
+                            type="text"
+                            value={referenceEditValues[ref.id]?.relation || ''}
+                            onChange={(e) => setReferenceEditValues({
+                              ...referenceEditValues,
+                              [ref.id]: { ...referenceEditValues[ref.id], relation: e.target.value }
+                            })}
+                            className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            placeholder="Relation"
+                          />
+                          <button
+                            onClick={() => handleSaveReferenceEdit(ref.id)}
+                            className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => handleCancelEdit(ref.id)}
+                            className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-md hover:bg-gray-200"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <span>{ref.relation || 'N/A'}</span>
+                          {canEditUsers && (
+                            <button
+                              onClick={() => handleEditReference(ref.id, 'relation')}
+                              className="text-blue-600 hover:text-blue-800"
+                              title="Edit Relation"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                          )}
+                        </>
+                      )}
                     </div>
-                    <div>
-                      <span className="text-gray-600">Phone:</span> {ref.phone || 'N/A'}
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-600">Phone:</span>
+                      {editingReference === ref.id && editingReferenceField[ref.id] === 'phone' ? (
+                        <div className="flex items-center gap-2 flex-1">
+                          <input
+                            type="text"
+                            value={referenceEditValues[ref.id]?.phone || ''}
+                            onChange={(e) => setReferenceEditValues({
+                              ...referenceEditValues,
+                              [ref.id]: { ...referenceEditValues[ref.id], phone: e.target.value }
+                            })}
+                            className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            placeholder="Phone"
+                          />
+                          <button
+                            onClick={() => handleSaveReferenceEdit(ref.id)}
+                            className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => handleCancelEdit(ref.id)}
+                            className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-md hover:bg-gray-200"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <span>{ref.phone || 'N/A'}</span>
+                          {canEditUsers && (
+                            <button
+                              onClick={() => handleEditReference(ref.id, 'phone')}
+                              className="text-blue-600 hover:text-blue-800"
+                              title="Edit Phone"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -6868,177 +7070,57 @@ export function UserProfileDetail() {
             </div>
 
             <form className="space-y-4">
-              {/* Personal Information */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
-                  <input
-                    type="text"
-                    placeholder="Enter full name"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Relationship *</label>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  >
-                    <option value="">Select Relationship</option>
-                    <option value="family">Family Member</option>
-                    <option value="friend">Friend</option>
-                    <option value="colleague">Colleague</option>
-                    <option value="neighbor">Neighbor</option>
-                    <option value="relative">Relative</option>
-                    <option value="acquaintance">Acquaintance</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Mobile Number *</label>
-                  <input
-                    type="tel"
-                    placeholder="Enter mobile number"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
-                  <input
-                    type="email"
-                    placeholder="Enter email address"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              {/* Professional Information */}
-              <div className="border-t pt-4">
-                <h5 className="text-md font-medium text-gray-900 mb-3">Professional Information</h5>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Occupation</label>
-                    <input
-                      type="text"
-                      placeholder="Enter occupation"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Company/Organization</label>
-                    <input
-                      type="text"
-                      placeholder="Enter company name"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Work Address</label>
-                  <textarea
-                    placeholder="Enter work address"
-                    rows={2}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              {/* Contact Preferences */}
-              <div className="border-t pt-4">
-                <h5 className="text-md font-medium text-gray-900 mb-3">Contact Preferences</h5>
-                <div className="space-y-3">
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="prefer-call"
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="prefer-call" className="ml-2 text-sm text-gray-700">
-                      Prefer phone calls for verification
-                    </label>
-                  </div>
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="prefer-sms"
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="prefer-sms" className="ml-2 text-sm text-gray-700">
-                      Prefer SMS for verification
-                    </label>
-                  </div>
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="prefer-email"
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="prefer-email" className="ml-2 text-sm text-gray-700">
-                      Prefer email for verification
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              {/* Verification Details */}
-              <div className="border-t pt-4">
-                <h5 className="text-md font-medium text-gray-900 mb-3">Verification Details</h5>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Verification Priority</label>
-                    <select
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="normal">Normal</option>
-                      <option value="high">High</option>
-                      <option value="urgent">Urgent</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Verification Method</label>
-                    <select
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="call">Phone Call</option>
-                      <option value="sms">SMS</option>
-                      <option value="email">Email</option>
-                      <option value="visit">Personal Visit</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Additional Information */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Additional Notes (Optional)</label>
-                <textarea
-                  placeholder="Add any additional notes about this reference"
-                  rows={3}
+                <label className="block text-sm font-medium text-gray-700 mb-2">Name *</label>
+                <input
+                  type="text"
+                  value={newReference.name}
+                  onChange={(e) => setNewReference({ ...newReference, name: e.target.value })}
+                  placeholder="Enter name"
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Phone *</label>
+                <input
+                  type="tel"
+                  value={newReference.phone}
+                  onChange={(e) => setNewReference({ ...newReference, phone: e.target.value })}
+                  placeholder="Enter phone number"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Relation *</label>
+                <input
+                  type="text"
+                  value={newReference.relation}
+                  onChange={(e) => setNewReference({ ...newReference, relation: e.target.value })}
+                  placeholder="Enter relationship"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
                 />
               </div>
 
               {/* Action Buttons */}
               <div className="flex gap-3 pt-4">
                 <button
-                  type="submit"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    alert('Reference added successfully!');
-                    setShowAddReferenceModal(false);
-                  }}
+                  type="button"
+                  onClick={handleAddReference}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
                 >
                   Add Reference
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowAddReferenceModal(false)}
+                  onClick={() => {
+                    setShowAddReferenceModal(false);
+                    setNewReference({ name: '', phone: '', relation: '' });
+                  }}
                   className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
                 >
                   Cancel
