@@ -676,7 +676,14 @@ export function UserProfileDetail() {
     }
   }, [activeTab, userData?.id]);
 
-  // Fetch credit analytics when credit analytics tab is active
+  // Fetch credit analytics automatically when userData is loaded (for Experian score display)
+  useEffect(() => {
+    if (userData?.id && !creditAnalyticsData) {
+      fetchCreditAnalytics();
+    }
+  }, [userData?.id]);
+
+  // Fetch credit analytics when credit analytics tab is active (refresh if needed)
   useEffect(() => {
     if (activeTab === 'credit-analytics' && userData?.id) {
       fetchCreditAnalytics();
@@ -2217,34 +2224,7 @@ export function UserProfileDetail() {
               <div>
                 <span className="text-gray-500">Experience:</span>
                 <span className="ml-2 text-gray-900">
-                  {(() => {
-                    // Try multiple sources for experience - check employment record first
-                    let exp = latestEmployment?.work_experience_years;
-                    
-                    // If not found in latestEmployment, try allEmployment array
-                    if ((exp === null || exp === undefined || exp === '') && userData?.allEmployment?.length > 0) {
-                      exp = userData.allEmployment[0]?.work_experience_years;
-                    }
-                    
-                    // If still not found, try personalInfo
-                    if ((exp === null || exp === undefined || exp === '') && getUserData('personalInfo.workExperience')) {
-                      exp = getUserData('personalInfo.workExperience');
-                    }
-                    
-                    // If still not found, try totalExperience
-                    if ((exp === null || exp === undefined || exp === '') && getUserData('personalInfo.totalExperience')) {
-                      exp = getUserData('personalInfo.totalExperience');
-                    }
-                    
-                    // Check if it's a valid number (0 is valid, but null/undefined/'N/A' is not)
-                    if (exp === null || exp === undefined || exp === '' || exp === 'N/A') return 'N/A';
-                    
-                    // Convert to number if it's a string
-                    const expNum = typeof exp === 'number' ? exp : (isNaN(parseFloat(exp)) ? null : parseFloat(exp));
-                    
-                    // 0 years is valid, so check for null/NaN instead of falsy
-                    return (expNum !== null && !isNaN(expNum)) ? `${expNum} years` : 'N/A';
-                  })()}
+                  {userData?.work_experience_range || getUserData('work_experience_range') || 'N/A'}
                 </span>
               </div>
               <div>
@@ -8204,11 +8184,43 @@ export function UserProfileDetail() {
                     <span className="font-semibold">Pocket Score:</span> {getUserData('creditScore')}
                   </span>
                 )}
-                {(userData?.experianScore || getUserData('experianScore')) && (
-                  <span className="flex items-center gap-1">
-                    <span className="font-semibold">Experian:</span> {userData?.experianScore || getUserData('experianScore')}
-                  </span>
-                )}
+                {(() => {
+                  // Calculate Experian score using same logic as credit analytics tab
+                  let experianScore = null;
+                  
+                  // First check creditAnalyticsData (most reliable source)
+                  if (creditAnalyticsData) {
+                    const { credit_score, full_report } = creditAnalyticsData;
+                    const reportData = full_report?.result?.result_json?.INProfileResponse || {};
+                    
+                    // Check multiple sources for credit score (same logic as credit analytics tab)
+                    let displayScore = credit_score;
+                    if (!displayScore || displayScore === 'N/A' || displayScore === null) {
+                      displayScore = reportData.SCORE?.BureauScore;
+                    }
+                    if (!displayScore || displayScore === 'N/A' || displayScore === null) {
+                      displayScore = reportData?.BureauScore;
+                    }
+                    if (displayScore && displayScore !== 'N/A' && displayScore !== null) {
+                      experianScore = displayScore;
+                    }
+                  }
+                  
+                  // Fallback to userData if not found in creditAnalyticsData
+                  if (!experianScore || experianScore === 'N/A' || experianScore === null) {
+                    experianScore = userData?.experianScore || getUserData('experianScore');
+                  }
+                  
+                  // Always display Experian score if we have any value (including from creditAnalyticsData)
+                  if (experianScore !== null && experianScore !== undefined && experianScore !== '') {
+                    return (
+                      <span className="flex items-center gap-1">
+                        <span className="font-semibold">Experian:</span> {experianScore}
+                      </span>
+                    );
+                  }
+                  return null;
+                })()}
                 {getUserData('limitVsSalaryPercent') && (
                   <span className="flex items-center gap-1">
                     <span className="font-semibold">Limit vs Salary:</span> {getUserData('limitVsSalaryPercent')}%

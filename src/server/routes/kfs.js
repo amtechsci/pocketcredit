@@ -3,7 +3,7 @@ const router = express.Router();
 const { authenticateAdmin } = require('../middleware/auth');
 const { requireAuth } = require('../middleware/jwtAuth');
 const { initializeDatabase, executeQuery } = require('../config/database');
-const { calculateLoanValues, calculateTotalDays, calculateCompleteLoanValues, calculateInterestDays } = require('../utils/loanCalculations');
+const { calculateLoanValues, calculateTotalDays, calculateCompleteLoanValues, calculateInterestDays, getNextSalaryDate, getSalaryDateForMonth } = require('../utils/loanCalculations');
 const pdfService = require('../services/pdfService');
 const emailService = require('../services/emailService');
 
@@ -246,10 +246,22 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         principal_amount: loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0,
         disbursal_amount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
         disbursed_at: loan.disbursed_at || null,
-        loan_term_days: plannedTermDays || loan.loan_term_days || loanPlan.tenure_days || loanPlan.repayment_days || loanPlan.total_duration_days || 0,
+        loan_term_days: (() => {
+          // Calculate loan term days based on EMI count for EMI loans
+          const emiCount = planData.emi_count || null;
+          if (emiCount && emiCount > 1) {
+            // EMI loan: calculate days based on EMI count
+            // Formula: 165 + (emi_count - 1) * 30
+            // 1 EMI: 165 days, 2 EMI: 195 days, 3 EMI: 225 days, 4 EMI: 255 days, etc.
+            return 165 + (emiCount - 1) * 30;
+          }
+          // Single payment loan: always show 165 days (base + 4 extensions possible)
+          return 165;
+        })(),
         loan_term_months: Math.ceil((plannedTermDays || loan.loan_term_days || loanPlan.tenure_days || loanPlan.repayment_days || loanPlan.total_duration_days || 0) / 30),
         interest_rate: loan.interest_rate || loanPlan.base_interest_rate || 0,
-        repayment_frequency: loanPlan.repayment_frequency || 'Monthly'
+        repayment_frequency: loanPlan.repayment_frequency || 'Monthly',
+        emi_count: planData.emi_count || null
       },
       borrower: {
         name: `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'N/A',
@@ -278,29 +290,328 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         calculation_method: 'Daily',
         annual_rate: ((planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001) * 365 * 100).toFixed(2),
         days: loanValues.interest?.days || 0,
-        amount: loanValues.interest?.amount || 0
+        amount: loanValues.interest?.amount || 0,
+        calculation_days: loanValues.interest?.days || 0  // Actual days used for interest calculation
       },
       fees: {
         processing_fee: loanValues.totals?.disbursalFee || loanValues.processingFee || 0,
-        gst: (loanValues.totals?.disbursalFeeGST || 0) + (loanValues.totals?.repayableFeeGST || 0) || loanValues.processingFeeGST || 0,
-        total_add_to_total: loanValues.totals?.repayableFee || loanValues.totalAddToTotal || 0,
-        fees_breakdown: feesBreakdown
+        total_add_to_total: (() => {
+          // For EMI loans, multiply post service fee by EMI count
+          const emiCount = planData.emi_count || 1;
+          const baseFee = loanValues.totals?.repayableFee || loanValues.totalAddToTotal || 0;
+          return emiCount > 1 ? baseFee * emiCount : baseFee;
+        })(),
+        gst_on_add_to_total: (() => {
+          // For EMI loans, multiply GST on post service fee by EMI count
+          const emiCount = planData.emi_count || 1;
+          const baseGST = loanValues.totals?.repayableFeeGST || 0;
+          return emiCount > 1 ? baseGST * emiCount : baseGST;
+        })(),
+        gst: (() => {
+          // Total GST = disbursal fee GST + (repayable fee GST * emi_count for EMI loans)
+          const emiCount = planData.emi_count || 1;
+          const disbursalGST = loanValues.totals?.disbursalFeeGST || 0;
+          const repayableGST = loanValues.totals?.repayableFeeGST || 0;
+          const repayableGSTMultiplied = emiCount > 1 ? repayableGST * emiCount : repayableGST;
+          return disbursalGST + repayableGSTMultiplied || loanValues.processingFeeGST || 0;
+        })(),
+        fees_breakdown: (() => {
+          // For EMI loans, multiply add_to_total fees by EMI count
+          const emiCount = planData.emi_count || 1;
+          if (emiCount > 1) {
+            return feesBreakdown.map(fee => {
+              if (fee.application_method === 'add_to_total') {
+                return {
+                  ...fee,
+                  amount: (fee.amount || 0) * emiCount,
+                  fee_amount: (fee.fee_amount || fee.amount || 0) * emiCount,
+                  gst_amount: (fee.gst_amount || 0) * emiCount,
+                  total_with_gst: (fee.total_with_gst || 0) * emiCount
+                };
+              }
+              return fee;
+            });
+          }
+          return feesBreakdown;
+        })()
       },
-      calculations: {
-        principal: loanValues.principal || loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0,
-        interest: loanValues.interest?.amount || loanValues.totalInterest || 0,
-        total_repayable: loanValues.total?.repayable || loanValues.totalRepayableAmount || 0,
-        total_amount: loanValues.total?.repayable || loanValues.totalRepayableAmount || 0,
-        disbursed_amount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
-        netDisbursalAmount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
-        emi: loanValues.emiAmount || 0
-      },
-      repayment: {
-        emi_amount: loanValues.emiAmount || 0,
-        total_emis: Math.ceil((loan.loan_term_days || loanPlan.tenure_days || 0) / 30),
-        first_emi_date: loan.first_emi_date || 'N/A',
-        last_emi_date: loan.last_emi_date || 'N/A'
-      },
+      calculations: (() => {
+        const principal = loanValues.principal || loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0;
+        const processingFee = loanValues.totals?.disbursalFee || loanValues.processingFee || 0;
+        const interest = loanValues.interest?.amount || loanValues.totalInterest || 0;
+        const days = loanValues.interest?.days || 0;
+        const emiCount = planData.emi_count || 1;
+        
+        // Calculate total GST (disbursal fee GST + repayable fee GST * emi_count for EMI loans)
+        const disbursalGST = loanValues.totals?.disbursalFeeGST || 0;
+        const repayableGST = loanValues.totals?.repayableFeeGST || 0;
+        const repayableGSTMultiplied = emiCount > 1 ? repayableGST * emiCount : repayableGST;
+        const gst = disbursalGST + repayableGSTMultiplied;
+        
+        // Calculate repayable fee (post service fee) - multiply by EMI count for Multi-EMI
+        const repayableFee = emiCount > 1
+          ? (loanValues.totals?.repayableFee || 0) * emiCount
+          : (loanValues.totals?.repayableFee || 0);
+        
+        // Calculate first due date for Multi-EMI loan term calculation
+        let firstDueDate;
+        if (plannedTermResult.repaymentDate) {
+          firstDueDate = new Date(plannedTermResult.repaymentDate);
+        } else if (loanValues.interest?.repayment_date) {
+          firstDueDate = new Date(loanValues.interest.repayment_date);
+        } else {
+          const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+          baseDate.setHours(0, 0, 0, 0);
+          firstDueDate = new Date(baseDate);
+          firstDueDate.setDate(firstDueDate.getDate() + plannedTermDays);
+          firstDueDate.setHours(0, 0, 0, 0);
+        }
+        
+        // Calculate actual loan term days for APR calculation
+        // For Multi-EMI loans, calculate from disbursement date to last EMI date
+        // For single payment loans, use actual interest calculation days
+        let loanTermDaysForAPR = days;  // Default: use interest calculation days
+        
+        if (emiCount > 1) {
+          // Generate last EMI date to calculate actual loan term
+          const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+          baseDate.setHours(0, 0, 0, 0);
+          
+          let lastEmiDate;
+          if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
+            const salaryDate = parseInt(userData.salary_date);
+            if (salaryDate >= 1 && salaryDate <= 31) {
+              // Calculate base date (first EMI date)
+              let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
+              
+              // Check if duration is less than minimum days
+              const minDuration = planData.repayment_days || 15;
+              const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+              if (daysToNextSalary < minDuration) {
+                nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+              }
+              
+              // Get last EMI date (emiCount - 1 because first is at index 0)
+              lastEmiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, emiCount - 1);
+            } else {
+              // Fallback: use firstDueDate + (emiCount - 1) months
+              lastEmiDate = new Date(firstDueDate);
+              lastEmiDate.setMonth(lastEmiDate.getMonth() + (emiCount - 1));
+            }
+          } else {
+            // For non-salary date Multi-EMI, calculate based on frequency
+            const daysPerEmi = {
+              daily: 1,
+              weekly: 7,
+              biweekly: 14,
+              monthly: 30
+            };
+            const daysBetween = daysPerEmi[planData.emi_frequency] || 30;
+            lastEmiDate = new Date(firstDueDate);
+            if (planData.emi_frequency === 'monthly') {
+              lastEmiDate.setMonth(lastEmiDate.getMonth() + (emiCount - 1));
+            } else {
+              lastEmiDate.setDate(lastEmiDate.getDate() + ((emiCount - 1) * daysBetween));
+            }
+            lastEmiDate.setHours(0, 0, 0, 0);
+          }
+          
+          // Calculate actual loan term days from disbursement to last EMI
+          if (lastEmiDate) {
+            loanTermDaysForAPR = Math.ceil((lastEmiDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+          }
+        }
+        
+        // For Multi-EMI loans, calculate total interest by summing interest for each EMI period
+        // Each EMI period has interest calculated on the outstanding principal for that period
+        let interestForAPR = interest;
+        if (emiCount > 1) {
+          const interestRatePerDay = loanValues.interest?.rate_per_day || planData.interest_percent_per_day || (interest / (principal * days));
+          const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+          baseDate.setHours(0, 0, 0, 0);
+          
+          // Generate all EMI dates
+          let allEmiDates = [];
+          if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
+            const salaryDate = parseInt(userData.salary_date);
+            if (salaryDate >= 1 && salaryDate <= 31) {
+              let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
+              const minDuration = planData.repayment_days || 15;
+              const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+              if (daysToNextSalary < minDuration) {
+                nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+              }
+              for (let i = 0; i < emiCount; i++) {
+                allEmiDates.push(getSalaryDateForMonth(nextSalaryDate, salaryDate, i));
+              }
+            }
+          } else {
+            // Calculate first due date for non-salary date plans
+            let firstDueDate;
+            if (plannedTermResult.repaymentDate) {
+              firstDueDate = new Date(plannedTermResult.repaymentDate);
+            } else if (loanValues.interest?.repayment_date) {
+              firstDueDate = new Date(loanValues.interest.repayment_date);
+            } else {
+              firstDueDate = new Date(baseDate);
+              firstDueDate.setDate(firstDueDate.getDate() + plannedTermDays);
+            }
+            firstDueDate.setHours(0, 0, 0, 0);
+            
+            const daysPerEmi = {
+              daily: 1,
+              weekly: 7,
+              biweekly: 14,
+              monthly: 30
+            };
+            const daysBetween = daysPerEmi[planData.emi_frequency] || 30;
+            for (let i = 0; i < emiCount; i++) {
+              const emiDate = new Date(firstDueDate);
+              if (planData.emi_frequency === 'monthly') {
+                emiDate.setMonth(emiDate.getMonth() + i);
+              } else {
+                emiDate.setDate(emiDate.getDate() + (i * daysBetween));
+              }
+              emiDate.setHours(0, 0, 0, 0);
+              allEmiDates.push(emiDate);
+            }
+          }
+          
+          // Calculate total interest by summing interest for each EMI period
+          if (allEmiDates.length === emiCount) {
+            // Calculate principal distribution (handle cases where it doesn't divide evenly)
+            // For 3 EMIs: 33.33%, 33.33%, 33.34% (or ₹3,333.33, ₹3,333.33, ₹3,333.34)
+            // For 4 EMIs: 25%, 25%, 25%, 25% (or ₹2,500 each)
+            const principalPerEmi = Math.floor(principal / emiCount * 100) / 100; // Round to 2 decimals
+            const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
+            
+            let outstandingPrincipal = principal;
+            interestForAPR = 0;
+            
+            for (let i = 0; i < emiCount; i++) {
+              const emiDate = new Date(allEmiDates[i]);
+              emiDate.setHours(0, 0, 0, 0);
+              
+              // Calculate days for this EMI period
+              // First period (disbursement to first EMI): inclusive, add +1
+              // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
+              let previousDate;
+              if (i === 0) {
+                previousDate = baseDate;
+              } else {
+                // Start from day AFTER previous EMI date
+                previousDate = new Date(allEmiDates[i - 1]);
+                previousDate.setDate(previousDate.getDate() + 1);
+              }
+              previousDate.setHours(0, 0, 0, 0);
+              const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+              
+              // Calculate principal for this EMI (add remainder to last EMI)
+              const principalForThisEmi = i === emiCount - 1 
+                ? Math.round((principalPerEmi + remainder) * 100) / 100
+                : principalPerEmi;
+              
+              // Calculate interest for this period on outstanding principal
+              const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
+              interestForAPR += interestForPeriod;
+              
+              // Reduce outstanding principal for next period
+              outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
+            }
+          }
+        }
+        
+        // Calculate APR
+        const totalCharges = processingFee + gst + repayableFee + interestForAPR;
+        const apr = loanTermDaysForAPR > 0 ? ((totalCharges / principal) / loanTermDaysForAPR) * 36500 : 0;
+        
+        return {
+          principal,
+          interest,
+          total_repayable: loanValues.total?.repayable || loanValues.totalRepayableAmount || 0,
+          total_amount: loanValues.total?.repayable || loanValues.totalRepayableAmount || 0,
+          disbursed_amount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
+          netDisbursalAmount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
+          emi: loanValues.emiAmount || 0,
+          apr: parseFloat(apr.toFixed(2))
+        };
+      })(),
+      repayment: (() => {
+        const emiCount = planData.emi_count || null;
+        const isMultiEmi = emiCount && emiCount > 1;
+        
+        // Calculate first due date
+        let firstDueDate;
+        if (plannedTermResult.repaymentDate) {
+          firstDueDate = new Date(plannedTermResult.repaymentDate);
+        } else if (loanValues.interest?.repayment_date) {
+          firstDueDate = new Date(loanValues.interest.repayment_date);
+        } else {
+          const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+          baseDate.setHours(0, 0, 0, 0);
+          firstDueDate = new Date(baseDate);
+          firstDueDate.setDate(firstDueDate.getDate() + plannedTermDays);
+          firstDueDate.setHours(0, 0, 0, 0);
+        }
+
+        // Generate all EMI dates for Multi-EMI plans
+        let allEmiDates = [];
+        if (isMultiEmi && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
+          const salaryDate = parseInt(userData.salary_date);
+          if (salaryDate >= 1 && salaryDate <= 31) {
+            // Calculate base date (first EMI date)
+            const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+            baseDate.setHours(0, 0, 0, 0);
+            let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
+            
+            // Check if duration is less than minimum days
+            const minDuration = planData.repayment_days || 15;
+            const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+            if (daysToNextSalary < minDuration) {
+              nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+            }
+            
+            // Generate all EMI dates
+            for (let i = 0; i < emiCount; i++) {
+              const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
+              allEmiDates.push(emiDate.toISOString());
+            }
+          }
+        } else if (isMultiEmi) {
+          // For non-salary date Multi-EMI, calculate based on frequency
+          const baseDate = firstDueDate;
+          const daysPerEmi = {
+            daily: 1,
+            weekly: 7,
+            biweekly: 14,
+            monthly: 30
+          };
+          const daysBetween = daysPerEmi[planData.emi_frequency] || 30;
+          
+          for (let i = 0; i < emiCount; i++) {
+            const emiDate = new Date(baseDate);
+            if (planData.emi_frequency === 'monthly') {
+              emiDate.setMonth(emiDate.getMonth() + i);
+            } else {
+              emiDate.setDate(emiDate.getDate() + (i * daysBetween));
+            }
+            emiDate.setHours(0, 0, 0, 0);
+            allEmiDates.push(emiDate.toISOString());
+          }
+        } else {
+          // Single payment loan
+          allEmiDates = [firstDueDate.toISOString()];
+        }
+
+        return {
+          emi_amount: loanValues.emiAmount || 0,
+          total_emis: isMultiEmi ? emiCount : Math.ceil((loan.loan_term_days || loanPlan.tenure_days || 0) / 30),
+          first_emi_date: loan.first_emi_date || 'N/A',
+          last_emi_date: loan.last_emi_date || 'N/A',
+          first_due_date: firstDueDate.toISOString(),
+          all_emi_dates: allEmiDates
+        };
+      })(),
       penal_charges: {
         late_fee_per_day: loanPlan.late_fee_per_day || 0,
         late_fee_cap: loanPlan.late_fee_cap || 0,
@@ -574,29 +885,200 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
 
     // Extract values for KFS
     const processingFee = calculations.totals.disbursalFee;
-    const gst = calculations.totals.disbursalFeeGST + calculations.totals.repayableFeeGST;
+    // For EMI loans, multiply repayable fee GST by EMI count
+    const emiCount = planData.emi_count || 1;
+    const repayableFeeGST = emiCount > 1 
+      ? calculations.totals.repayableFeeGST * emiCount 
+      : calculations.totals.repayableFeeGST;
+    const gst = calculations.totals.disbursalFeeGST + repayableFeeGST;
     const disbAmount = calculations.disbursal.amount;
     const interest = calculations.interest.amount;
     const days = calculations.interest.days;
     const totalRepayable = calculations.total.repayable;
 
-    // Calculate APR (Annual Percentage Rate)
-    // APR = ((All Fees + GST + Interest) / Loan Amount) / Days * 36500
-    const totalCharges = processingFee + gst + calculations.totals.repayableFee + interest;
-    const apr = days > 0 ? ((totalCharges / principal) / days) * 36500 : 0;
-
-    // Generate due date from repayment date or calculate using PLANNED term days
-    let dueDate;
+    // Generate first due date from repayment date or calculate using PLANNED term days
+    let firstDueDate;
     if (calculations.interest.repayment_date) {
-      dueDate = new Date(calculations.interest.repayment_date);
+      firstDueDate = new Date(calculations.interest.repayment_date);
     } else {
       // Use disbursed date (or today if not disbursed) + planned term days
       const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
       baseDate.setHours(0, 0, 0, 0);
-      dueDate = new Date(baseDate);
-      dueDate.setDate(dueDate.getDate() + plannedTermDays);
-      dueDate.setHours(0, 0, 0, 0);
+      firstDueDate = new Date(baseDate);
+      firstDueDate.setDate(firstDueDate.getDate() + plannedTermDays);
+      firstDueDate.setHours(0, 0, 0, 0);
     }
+
+    // Calculate actual loan term days for APR calculation
+    // For Multi-EMI loans, calculate from disbursement date to last EMI date
+    // For single payment loans, use actual interest calculation days
+    let loanTermDaysForAPR = days;  // Default: use interest calculation days
+    
+    if (emiCount > 1) {
+      // Generate last EMI date to calculate actual loan term
+      const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+      baseDate.setHours(0, 0, 0, 0);
+      
+      let lastEmiDate;
+      if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
+        const salaryDate = parseInt(userData.salary_date);
+        if (salaryDate >= 1 && salaryDate <= 31) {
+          // Calculate base date (first EMI date)
+          let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
+          
+          // Check if duration is less than minimum days
+          const minDuration = planData.repayment_days || 15;
+          const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+          if (daysToNextSalary < minDuration) {
+            nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+          }
+          
+          // Get last EMI date (emiCount - 1 because first is at index 0)
+          lastEmiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, emiCount - 1);
+        } else {
+          // Fallback: use firstDueDate + (emiCount - 1) months
+          lastEmiDate = new Date(firstDueDate);
+          lastEmiDate.setMonth(lastEmiDate.getMonth() + (emiCount - 1));
+        }
+      } else {
+        // For non-salary date Multi-EMI, calculate based on frequency
+        const daysPerEmi = {
+          daily: 1,
+          weekly: 7,
+          biweekly: 14,
+          monthly: 30
+        };
+        const daysBetween = daysPerEmi[planData.emi_frequency] || 30;
+        lastEmiDate = new Date(firstDueDate);
+        if (planData.emi_frequency === 'monthly') {
+          lastEmiDate.setMonth(lastEmiDate.getMonth() + (emiCount - 1));
+        } else {
+          lastEmiDate.setDate(lastEmiDate.getDate() + ((emiCount - 1) * daysBetween));
+        }
+        lastEmiDate.setHours(0, 0, 0, 0);
+      }
+      
+      // Calculate actual loan term days from disbursement to last EMI
+      if (lastEmiDate) {
+        loanTermDaysForAPR = Math.ceil((lastEmiDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+      }
+    }
+
+    // Calculate APR (Annual Percentage Rate)
+    // APR = ((All Fees + GST + Interest) / Loan Amount) / Days * 36500
+    // For EMI loans, multiply repayable fee by EMI count
+    // For Multi-EMI loans, calculate total interest by summing interest for each EMI period
+    const repayableFee = emiCount > 1 
+      ? calculations.totals.repayableFee * emiCount 
+      : calculations.totals.repayableFee;
+    
+    // For Multi-EMI loans, calculate total interest by summing interest for each EMI period
+    // Each EMI period has interest calculated on the outstanding principal for that period
+    let interestForAPR = interest;
+    if (emiCount > 1) {
+      const interestRatePerDay = calculations.interest.rate_per_day || (interest / (principal * days));
+      const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+      baseDate.setHours(0, 0, 0, 0);
+      
+      // Generate all EMI dates
+      let allEmiDates = [];
+      if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
+        const salaryDate = parseInt(userData.salary_date);
+        if (salaryDate >= 1 && salaryDate <= 31) {
+          let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
+          const minDuration = planData.repayment_days || 15;
+          const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+          if (daysToNextSalary < minDuration) {
+            nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+          }
+          for (let i = 0; i < emiCount; i++) {
+            allEmiDates.push(getSalaryDateForMonth(nextSalaryDate, salaryDate, i));
+          }
+        }
+      } else {
+        const daysPerEmi = {
+          daily: 1,
+          weekly: 7,
+          biweekly: 14,
+          monthly: 30
+        };
+        const daysBetween = daysPerEmi[planData.emi_frequency] || 30;
+        for (let i = 0; i < emiCount; i++) {
+          const emiDate = new Date(firstDueDate);
+          if (planData.emi_frequency === 'monthly') {
+            emiDate.setMonth(emiDate.getMonth() + i);
+          } else {
+            emiDate.setDate(emiDate.getDate() + (i * daysBetween));
+          }
+          emiDate.setHours(0, 0, 0, 0);
+          allEmiDates.push(emiDate);
+        }
+      }
+      
+      // Calculate total interest by summing interest for each EMI period
+      if (allEmiDates.length === emiCount) {
+        // Calculate principal distribution (handle cases where it doesn't divide evenly)
+        // For 3 EMIs: 33.33%, 33.33%, 33.34% (or ₹3,333.33, ₹3,333.33, ₹3,333.34)
+        // For 4 EMIs: 25%, 25%, 25%, 25% (or ₹2,500 each)
+        const principalPerEmi = Math.floor(principal / emiCount * 100) / 100; // Round to 2 decimals
+        const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
+        
+        let outstandingPrincipal = principal;
+        interestForAPR = 0;
+        
+        for (let i = 0; i < emiCount; i++) {
+          const emiDate = allEmiDates[i];
+          emiDate.setHours(0, 0, 0, 0);
+          
+          // Calculate days for this EMI period
+          // First period (disbursement to first EMI): inclusive, add +1
+          // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
+          let previousDate;
+          if (i === 0) {
+            previousDate = baseDate;
+          } else {
+            // Start from day AFTER previous EMI date
+            previousDate = new Date(allEmiDates[i - 1]);
+            previousDate.setDate(previousDate.getDate() + 1);
+          }
+          previousDate.setHours(0, 0, 0, 0);
+          const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          
+          // Calculate principal for this EMI (add remainder to last EMI)
+          const principalForThisEmi = i === emiCount - 1 
+            ? Math.round((principalPerEmi + remainder) * 100) / 100
+            : principalPerEmi;
+          
+          // Calculate interest for this period on outstanding principal
+          const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
+          interestForAPR += interestForPeriod;
+          
+          // Reduce outstanding principal for next period
+          outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
+        }
+      }
+    }
+    
+    const totalCharges = processingFee + gst + repayableFee + interestForAPR;
+    const apr = loanTermDaysForAPR > 0 ? ((totalCharges / principal) / loanTermDaysForAPR) * 36500 : 0;
+    
+    // Debug: Log APR calculation details
+    console.log('APR Calculation Debug (Admin):', {
+      processingFee,
+      gst,
+      repayableFee,
+      interest: interest,
+      interestForAPR: interestForAPR,
+      totalCharges,
+      principal,
+      loanTermDaysForAPR,
+      interestCalculationDays: days,
+      emiCount,
+      apr: apr.toFixed(2)
+    });
+
+    // Use firstDueDate as dueDate for KFS data
+    const dueDate = firstDueDate;
 
     // Prepare KFS data
     const kfsData = {
@@ -620,13 +1102,25 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         type: loan.loan_purpose || 'Personal Loan',
         sanctioned_amount: principal,
         disbursed_amount: disbAmount,
-        loan_term_days: plannedTermDays,
+        loan_term_days: (() => {
+          // Calculate loan term days based on EMI count for EMI loans
+          const emiCount = planData.emi_count || null;
+          if (emiCount && emiCount > 1) {
+            // EMI loan: calculate days based on EMI count
+            // Formula: 165 + (emi_count - 1) * 30
+            // 1 EMI: 165 days, 2 EMI: 195 days, 3 EMI: 225 days, 4 EMI: 255 days, etc.
+            return 165 + (emiCount - 1) * 30;
+          }
+          // Single payment loan: always show 165 days (base + 4 extensions possible)
+          return 165;
+        })(),
         status: loan.status,
         created_at: loan.created_at,
         applied_date: loan.created_at,
         approved_date: loan.approved_at,
         disbursed_date: loan.disbursed_at,
-        due_date: dueDate.toISOString()
+        due_date: dueDate.toISOString(),
+        emi_count: planData.emi_count || null
       },
 
       // Borrower Details
@@ -681,19 +1175,35 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
             total_with_gst: fee.total_with_gst,
             application_method: 'deduct_from_disbursal'
           })),
-          ...calculations.fees.addToTotal.map(fee => ({
-            fee_name: fee.fee_name,
-            fee_percent: fee.fee_percent,
-            fee_amount: fee.fee_amount,
-            gst_amount: fee.gst_amount,
-            total_with_gst: fee.total_with_gst,
-            application_method: 'add_to_total'
-          }))
+          ...calculations.fees.addToTotal.map(fee => {
+            // For EMI loans, multiply add_to_total fees by EMI count
+            const emiCount = planData.emi_count || 1;
+            const multiplier = emiCount > 1 ? emiCount : 1;
+            return {
+              fee_name: fee.fee_name,
+              fee_percent: fee.fee_percent,
+              fee_amount: fee.fee_amount * multiplier,
+              gst_amount: fee.gst_amount * multiplier,
+              total_with_gst: fee.total_with_gst * multiplier,
+              application_method: 'add_to_total',
+              amount: fee.fee_amount * multiplier
+            };
+          })
         ],
         total_deduct_from_disbursal: calculations.totals.disbursalFee,
-        total_add_to_total: calculations.totals.repayableFee,
+        total_add_to_total: (() => {
+          // For EMI loans, multiply post service fee by EMI count
+          const emiCount = planData.emi_count || 1;
+          const baseFee = calculations.totals.repayableFee;
+          return emiCount > 1 ? baseFee * emiCount : baseFee;
+        })(),
         gst_on_deduct_from_disbursal: calculations.totals.disbursalFeeGST,
-        gst_on_add_to_total: calculations.totals.repayableFeeGST
+        gst_on_add_to_total: (() => {
+          // For EMI loans, multiply GST on post service fee by EMI count
+          const emiCount = planData.emi_count || 1;
+          const baseGST = calculations.totals.repayableFeeGST;
+          return emiCount > 1 ? baseGST * emiCount : baseGST;
+        })()
       },
 
       // Calculations
@@ -708,22 +1218,77 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       },
 
       // Repayment Schedule
-      repayment: {
-        type: 'Bullet Payment',
-        number_of_instalments: 1,
-        instalment_amount: totalRepayable,
-        first_due_date: dueDate.toISOString(),
-        schedule: [
-          {
-            instalment_no: 1,
-            outstanding_principal: principal,
-            principal: principal,
-            interest: interest,
-            instalment_amount: totalRepayable,
-            due_date: dueDate.toISOString()
+      repayment: (() => {
+        const emiCount = planData.emi_count || null;
+        const isMultiEmi = emiCount && emiCount > 1;
+        
+        // Generate all EMI dates for Multi-EMI plans
+        let allEmiDates = [];
+        if (isMultiEmi && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
+          const salaryDate = parseInt(userData.salary_date);
+          if (salaryDate >= 1 && salaryDate <= 31) {
+            // Calculate base date (first EMI date)
+            const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+            baseDate.setHours(0, 0, 0, 0);
+            let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
+            
+            // Check if duration is less than minimum days
+            const minDuration = planData.repayment_days || 15;
+            const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+            if (daysToNextSalary < minDuration) {
+              nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+            }
+            
+            // Generate all EMI dates
+            for (let i = 0; i < emiCount; i++) {
+              const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
+              allEmiDates.push(emiDate.toISOString());
+            }
           }
-        ]
-      },
+        } else if (isMultiEmi) {
+          // For non-salary date Multi-EMI, calculate based on frequency
+          const baseDate = dueDate;
+          const daysPerEmi = {
+            daily: 1,
+            weekly: 7,
+            biweekly: 14,
+            monthly: 30
+          };
+          const daysBetween = daysPerEmi[planData.emi_frequency] || 30;
+          
+          for (let i = 0; i < emiCount; i++) {
+            const emiDate = new Date(baseDate);
+            if (planData.emi_frequency === 'monthly') {
+              emiDate.setMonth(emiDate.getMonth() + i);
+            } else {
+              emiDate.setDate(emiDate.getDate() + (i * daysBetween));
+            }
+            emiDate.setHours(0, 0, 0, 0);
+            allEmiDates.push(emiDate.toISOString());
+          }
+        } else {
+          // Single payment loan
+          allEmiDates = [dueDate.toISOString()];
+        }
+
+        return {
+          type: isMultiEmi ? 'EMI' : 'Bullet Payment',
+          number_of_instalments: isMultiEmi ? emiCount : 1,
+          instalment_amount: isMultiEmi ? (totalRepayable / emiCount) : totalRepayable,
+          first_due_date: dueDate.toISOString(),
+          all_emi_dates: allEmiDates,
+          schedule: [
+            {
+              instalment_no: 1,
+              outstanding_principal: principal,
+              principal: principal,
+              interest: interest,
+              instalment_amount: totalRepayable,
+              due_date: dueDate.toISOString()
+            }
+          ]
+        };
+      })(),
 
       // Penal Charges (with 18% GST)
       penal_charges: {

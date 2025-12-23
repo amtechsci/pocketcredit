@@ -22,7 +22,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         eligibility_retry_date, selected_loan_plan_id, created_at, updated_at, last_login_at,
         pan_number, alternate_mobile, company_name, company_email, salary_date,
         personal_email, official_email, loan_limit, credit_score, experian_score,
-        monthly_net_income
+        monthly_net_income, work_experience_range
       FROM users 
       WHERE id = ?
     `, [userId]);
@@ -463,6 +463,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       memberLevel,
       creditScore: pocketCreditScore, // Pocket credit score (calculated)
       experianScore: user.experian_score || null, // Experian score from API
+      work_experience_range: user.work_experience_range || null, // Work experience range from users table
       limitVsSalaryPercent: (user.monthly_net_income && user.loan_limit) 
         ? ((parseFloat(user.loan_limit) / parseFloat(user.monthly_net_income)) * 100).toFixed(1)
         : null,

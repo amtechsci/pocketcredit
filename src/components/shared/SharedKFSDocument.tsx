@@ -46,10 +46,103 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
 
     const calculateAPR = () => {
         if (!kfsData) return '0.00';
-        const totalCharges = kfsData.fees.processing_fee + kfsData.fees.gst +
-            (kfsData.fees.total_add_to_total || 0) + kfsData.calculations.interest;
+        
+        // Use backend-calculated APR if available (already uses correct days for Multi-EMI)
+        if (kfsData.calculations?.apr !== undefined && kfsData.calculations.apr !== null) {
+            return kfsData.calculations.apr.toFixed(2);
+        }
+        
+        // Fallback: Calculate APR on frontend
+        const processingFee = kfsData.fees.processing_fee || 0;
+        const gst = kfsData.fees.gst || 0;
+        const postServiceFee = kfsData.fees.total_add_to_total || 0;
         const principal = kfsData.loan.sanctioned_amount;
-        const days = kfsData.loan.loan_term_days;
+        const emiCount = kfsData.loan.emi_count || 1;
+        const interestCalculationDays = kfsData.interest?.calculation_days || kfsData.calculations?.interest?.days || 0;
+        const interestRatePerDay = kfsData.interest?.rate_per_day || (kfsData.calculations.interest || 0) / (principal * interestCalculationDays || 1);
+        
+        // For Multi-EMI loans, calculate total interest by summing interest for each EMI period
+        // Each EMI period has interest calculated on the outstanding principal for that period
+        let totalInterest = kfsData.calculations.interest || 0;
+        
+        if (emiCount > 1 && kfsData.repayment?.all_emi_dates && Array.isArray(kfsData.repayment.all_emi_dates) && kfsData.repayment.all_emi_dates.length > 1) {
+            // Calculate interest for each EMI period
+            const disbursedDate = kfsData.loan.disbursed_at ? new Date(kfsData.loan.disbursed_at) : new Date();
+            disbursedDate.setHours(0, 0, 0, 0);
+            
+            // Calculate principal distribution (handle cases where it doesn't divide evenly)
+            // For 3 EMIs: 33.33%, 33.33%, 33.34% (or ₹3,333.33, ₹3,333.33, ₹3,333.34)
+            // For 4 EMIs: 25%, 25%, 25%, 25% (or ₹2,500 each)
+            const principalPerEmi = Math.floor(principal / emiCount * 100) / 100; // Round to 2 decimals
+            const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
+            
+            let outstandingPrincipal = principal;
+            totalInterest = 0;
+            
+            for (let i = 0; i < emiCount; i++) {
+                const emiDate = new Date(kfsData.repayment.all_emi_dates[i]);
+                emiDate.setHours(0, 0, 0, 0);
+                
+                // Calculate days for this EMI period
+                // First period (disbursement to first EMI): inclusive, add +1
+                // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
+                let previousDate;
+                if (i === 0) {
+                    previousDate = disbursedDate;
+                } else {
+                    // Start from day AFTER previous EMI date
+                    previousDate = new Date(kfsData.repayment.all_emi_dates[i - 1]);
+                    previousDate.setDate(previousDate.getDate() + 1);
+                }
+                previousDate.setHours(0, 0, 0, 0);
+                const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                
+                // Calculate principal for this EMI (add remainder to last EMI)
+                const principalForThisEmi = i === emiCount - 1 
+                    ? Math.round((principalPerEmi + remainder) * 100) / 100
+                    : principalPerEmi;
+                
+                // Calculate interest for this period on outstanding principal
+                const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
+                totalInterest += interestForPeriod;
+                
+                // Reduce outstanding principal for next period
+                outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
+            }
+        }
+        
+        const totalCharges = processingFee + gst + postServiceFee + totalInterest;
+        
+        // Calculate actual loan term days for APR
+        // For Multi-EMI loans, calculate from disbursement date to last EMI date
+        // For single payment loans, use actual interest calculation days
+        let days = interestCalculationDays || kfsData.loan.loan_term_days || 165;
+        
+        if (emiCount > 1 && kfsData.repayment?.all_emi_dates && Array.isArray(kfsData.repayment.all_emi_dates) && kfsData.repayment.all_emi_dates.length > 0) {
+            // Use actual last EMI date to calculate loan term
+            const lastEmiDate = new Date(kfsData.repayment.all_emi_dates[kfsData.repayment.all_emi_dates.length - 1]);
+            const disbursedDate = kfsData.loan.disbursed_at ? new Date(kfsData.loan.disbursed_at) : new Date();
+            disbursedDate.setHours(0, 0, 0, 0);
+            lastEmiDate.setHours(0, 0, 0, 0);
+            days = Math.ceil((lastEmiDate.getTime() - disbursedDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        }
+        
+        // Debug: Log calculation details
+        console.log('APR Calculation Debug:', {
+            processingFee,
+            gst,
+            postServiceFee,
+            interest: totalInterest,
+            totalCharges,
+            principal,
+            days,
+            emiCount,
+            calculation_days: kfsData.interest?.calculation_days,
+            interest_days: kfsData.calculations?.interest?.days,
+            loan_term_days: kfsData.loan.loan_term_days,
+            apr: ((totalCharges / principal) / days * 36500).toFixed(2)
+        });
+        
         return ((totalCharges / principal) / days * 36500).toFixed(2);
     };
 
@@ -116,7 +209,20 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         <tr>
                             <td className="border border-black p-2">4</td>
                             <td className="border border-black p-2">Loan term (year/months/days)</td>
-                            <td className="border border-black p-2" colSpan={3}>Up to 165 days</td>
+                            <td className="border border-black p-2" colSpan={3}>
+                              {(() => {
+                                const emiCount = kfsData.loan.emi_count;
+                                if (emiCount && emiCount > 1) {
+                                  // EMI loan: calculate days based on EMI count
+                                  // Formula: 165 + (emi_count - 1) * 30
+                                  // 1 EMI: 165 days, 2 EMI: 195 days, 3 EMI: 225 days, 4 EMI: 255 days, etc.
+                                  const days = 165 + (emiCount - 1) * 30;
+                                  return `Up to ${days} days`;
+                                }
+                                // Single payment loan: always show 165 days (base + 4 extensions possible)
+                                return `Up to 165 days`;
+                              })()}
+                            </td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2">5</td>
@@ -135,7 +241,15 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             <td className="border border-black p-2">N/A</td>
                             <td className="border border-black p-2">N/A</td>
                             <td className="border border-black p-2">N/A</td>
-                            <td className="border border-black p-2">{formatDate(kfsData.repayment.first_due_date)}</td>
+                            <td className="border border-black p-2">
+                              {(() => {
+                                // For Multi-EMI plans, show all EMI dates comma-separated
+                                if (kfsData.repayment.all_emi_dates && kfsData.repayment.all_emi_dates.length > 1) {
+                                  return kfsData.repayment.all_emi_dates.map((date: string) => formatDate(date)).join(', ');
+                                }
+                                return formatDate(kfsData.repayment.first_due_date);
+                              })()}
+                            </td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2">6</td>
@@ -462,12 +576,27 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         <tr>
                             <td className="border border-black p-2">2</td>
                             <td className="border border-black p-2">Loan Term (in years/ months/ days)</td>
-                            <td className="border border-black p-2">Up to 165 days</td>
+                            <td className="border border-black p-2">
+                              {(() => {
+                                const emiCount = kfsData.loan.emi_count;
+                                if (emiCount && emiCount > 1) {
+                                  // EMI loan: calculate days based on EMI count
+                                  // Formula: 165 + (emi_count - 1) * 30
+                                  // 1 EMI: 165 days, 2 EMI: 195 days, 3 EMI: 225 days, 4 EMI: 255 days, etc.
+                                  const days = 165 + (emiCount - 1) * 30;
+                                  return `Up to ${days} days`;
+                                }
+                                // Single payment loan: always show 165 days (base + 4 extensions possible)
+                                return `Up to 165 days`;
+                              })()}
+                            </td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2"></td>
                             <td className="border border-black p-2">a) No. of instalments for payment of principal, in case of non- equated periodic loans</td>
-                            <td className="border border-black p-2">1</td>
+                            <td className="border border-black p-2">
+                              {kfsData.loan.emi_count || kfsData.repayment?.number_of_instalments || (kfsData.repayment?.all_emi_dates?.length || 1)}
+                            </td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2"></td>
@@ -482,7 +611,15 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         <tr>
                             <td className="border border-black p-2"></td>
                             <td className="border border-black p-2">d) Commencement of repayment, post sanction</td>
-                            <td className="border border-black p-2">{formatDate(kfsData.repayment.first_due_date)}</td>
+                            <td className="border border-black p-2">
+                              {(() => {
+                                // For Multi-EMI plans, show all EMI dates comma-separated
+                                if (kfsData.repayment.all_emi_dates && kfsData.repayment.all_emi_dates.length > 1) {
+                                  return kfsData.repayment.all_emi_dates.map((date: string) => formatDate(date)).join(', ');
+                                }
+                                return formatDate(kfsData.repayment.first_due_date);
+                              })()}
+                            </td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2">3</td>
@@ -501,7 +638,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         </tr>
                         <tr>
                             <td className="border border-black p-2">6</td>
-                            <td className="border border-black p-2">Payable to the RE</td>
+                            <td className="border border-black p-2">Fee/ Charges payable (in Rupees)</td>
                             <td className="border border-black p-2">
                                 {(
                                     kfsData.fees.processing_fee +
@@ -549,7 +686,15 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         <tr>
                             <td className="border border-black p-2">11</td>
                             <td className="border border-black p-2">Due date of payment of instalment and interest</td>
-                            <td className="border border-black p-2">{formatDate(kfsData.repayment.first_due_date)}</td>
+                            <td className="border border-black p-2">
+                              {(() => {
+                                // For Multi-EMI plans, show all EMI dates comma-separated
+                                if (kfsData.repayment.all_emi_dates && kfsData.repayment.all_emi_dates.length > 1) {
+                                  return kfsData.repayment.all_emi_dates.map((date: string) => formatDate(date)).join(', ');
+                                }
+                                return formatDate(kfsData.repayment.first_due_date);
+                              })()}
+                            </td>
                         </tr>
                     </tbody>
                 </table>
@@ -581,15 +726,99 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         </tr>
                     </thead>
                     <tbody>
-                        <tr>
-                            <td className="border border-black p-2 text-center">1</td>
-                            <td className="border border-black p-2">{formatCurrency(kfsData.loan.sanctioned_amount || kfsData.calculations.principal || 0)}</td>
-                            <td className="border border-black p-2">{formatCurrency(kfsData.loan.sanctioned_amount || kfsData.calculations.principal || 0)}</td>
-                            <td className="border border-black p-2">
-                                {Math.round(kfsData.calculations.interest || 0)}+{Math.round((kfsData.fees.total_add_to_total || 0) + (kfsData.fees.gst_on_add_to_total || 0))}
-                            </td>
-                            <td className="border border-black p-2">{formatCurrency(kfsData.calculations.total_repayable || 0)}</td>
-                        </tr>
+                        {(() => {
+                            const principal = kfsData.loan.sanctioned_amount || kfsData.calculations.principal || 0;
+                            const emiCount = kfsData.loan.emi_count || 1;
+                            const interestCalculationDays = kfsData.interest?.calculation_days || kfsData.calculations?.interest?.days || 0;
+                            const interestRatePerDay = kfsData.interest?.rate_per_day || (kfsData.calculations.interest || 0) / (principal * interestCalculationDays || 1);
+                            
+                            const postServiceFeePerEmi = (kfsData.fees.total_add_to_total || 0) / emiCount;
+                            const postServiceFeeGSTPerEmi = Math.round(postServiceFeePerEmi * 0.18);
+                            const postServiceFeeWithGSTPerEmi = postServiceFeePerEmi + postServiceFeeGSTPerEmi;
+                            
+                            // For Multi-EMI loans, show each EMI as a separate row
+                            if (emiCount > 1 && kfsData.repayment?.all_emi_dates && Array.isArray(kfsData.repayment.all_emi_dates) && kfsData.repayment.all_emi_dates.length === emiCount) {
+                                const disbursedDate = kfsData.loan.disbursed_at ? new Date(kfsData.loan.disbursed_at) : new Date();
+                                disbursedDate.setHours(0, 0, 0, 0);
+                                
+                                // Calculate principal distribution (handle cases where it doesn't divide evenly)
+                                // For 3 EMIs: 33.33%, 33.33%, 33.34% (or ₹3,333.33, ₹3,333.33, ₹3,333.34)
+                                // For 4 EMIs: 25%, 25%, 25%, 25% (or ₹2,500 each)
+                                const principalPerEmi = Math.floor(principal / emiCount * 100) / 100; // Round to 2 decimals
+                                const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
+                                
+                                let outstandingPrincipal = principal;
+                                const rows = [];
+                                
+                                for (let i = 0; i < emiCount; i++) {
+                                    const emiDate = new Date(kfsData.repayment.all_emi_dates[i]);
+                                    emiDate.setHours(0, 0, 0, 0);
+                                    
+                                    // Calculate days for this EMI period
+                                    // First period (disbursement to first EMI): inclusive, add +1
+                                    // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
+                                    let previousDate;
+                                    if (i === 0) {
+                                        previousDate = disbursedDate;
+                                    } else {
+                                        // Start from day AFTER previous EMI date
+                                        previousDate = new Date(kfsData.repayment.all_emi_dates[i - 1]);
+                                        previousDate.setDate(previousDate.getDate() + 1);
+                                    }
+                                    previousDate.setHours(0, 0, 0, 0);
+                                    const daysForPeriod = i === 0 
+                                        ? Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+                                        : Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                                    
+                                    // Calculate principal for this EMI (add remainder to last EMI)
+                                    const principalForThisEmi = i === emiCount - 1 
+                                        ? Math.round((principalPerEmi + remainder) * 100) / 100
+                                        : principalPerEmi;
+                                    
+                                    // Calculate interest for this period on outstanding principal
+                                    const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
+                                    
+                                    // Calculate instalment for this EMI
+                                    const instalmentAmount = principalForThisEmi + interestForPeriod + postServiceFeeWithGSTPerEmi;
+                                    
+                                    rows.push(
+                                        <tr key={i}>
+                                            <td className="border border-black p-2 text-center">{i + 1}</td>
+                                            <td className="border border-black p-2">{formatCurrency(outstandingPrincipal)}</td>
+                                            <td className="border border-black p-2">{formatCurrency(principalForThisEmi)}</td>
+                                            <td className="border border-black p-2">
+                                                {Math.round(interestForPeriod)}+{Math.round(postServiceFeeWithGSTPerEmi)}
+                                            </td>
+                                            <td className="border border-black p-2">{formatCurrency(instalmentAmount)}</td>
+                                        </tr>
+                                    );
+                                    
+                                    // Reduce outstanding principal for next period
+                                    outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
+                                }
+                                
+                                return rows;
+                            } else {
+                                // Single payment loan - show single row
+                                const totalInterest = kfsData.calculations.interest || 0;
+                                const postServiceFee = kfsData.fees.total_add_to_total || 0;
+                                const postServiceFeeGST = Math.round(postServiceFee * 0.18);
+                                const postServiceFeeWithGST = postServiceFee + postServiceFeeGST;
+                                const instalmentAmount = principal + totalInterest + postServiceFee + postServiceFeeGST;
+                                
+                                return (
+                                    <tr>
+                                        <td className="border border-black p-2 text-center">1</td>
+                                        <td className="border border-black p-2">{formatCurrency(principal)}</td>
+                                        <td className="border border-black p-2">{formatCurrency(principal)}</td>
+                                        <td className="border border-black p-2">
+                                            {Math.round(totalInterest)}+{Math.round(postServiceFeeWithGST)}
+                                        </td>
+                                        <td className="border border-black p-2">{formatCurrency(instalmentAmount)}</td>
+                                    </tr>
+                                );
+                            }
+                        })()}
                     </tbody>
                 </table>
 

@@ -64,6 +64,39 @@ function getNextSalaryDate(startDate, targetDay) {
 }
 
 /**
+ * Get salary date for a specific month offset from start date
+ * @param {Date} startDate - Starting date
+ * @param {number} targetDay - Day of month (1-31)
+ * @param {number} monthOffset - Number of months to add (0 = current month, 1 = next month, etc.)
+ * @returns {Date} Salary date for the specified month
+ */
+function getSalaryDateForMonth(startDate, targetDay, monthOffset = 0) {
+  let year = startDate.getFullYear();
+  let month = startDate.getMonth() + monthOffset;
+  
+  // Handle year rollover
+  while (month > 11) {
+    month -= 12;
+    year += 1;
+  }
+  while (month < 0) {
+    month += 12;
+    year -= 1;
+  }
+
+  // Try to create date with target day
+  let salaryDate = new Date(year, month, targetDay);
+
+  // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
+  if (salaryDate.getDate() !== targetDay) {
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    salaryDate = new Date(year, month, Math.min(targetDay, lastDay));
+  }
+
+  return salaryDate;
+}
+
+/**
  * Calculate days for interest based on plan type and salary date
  * @param {Object} planData - Plan data
  * @param {Object} userData - User data
@@ -79,41 +112,61 @@ function calculateInterestDays(planData, userData, calculationDate = new Date())
   let repaymentDate = null;
 
   // If plan uses salary date calculation
-  if (planData.calculate_by_salary_date && planData.plan_type === 'single' && userData.salary_date) {
+  if (planData.calculate_by_salary_date && userData.salary_date) {
     const salaryDate = parseInt(userData.salary_date);
 
     if (salaryDate >= 1 && salaryDate <= 31) {
-      // Get next salary date
-      let nextSalaryDate = getNextSalaryDate(today, salaryDate);
+      if (planData.plan_type === 'single') {
+        // Single payment plan: calculate to next salary date or extend if duration is less
+        let nextSalaryDate = getNextSalaryDate(today, salaryDate);
 
-      // Calculate days from today to next salary date (INCLUSIVE)
-      // Start day is counted as day 1
-      // Example: Dec 14 to Jan 4 = 22 days (Dec 14 is day 1)
-      let daysToNextSalary = Math.ceil((nextSalaryDate - today) / (1000 * 60 * 60 * 24)) + 1;
+        // Calculate days from today to next salary date (INCLUSIVE)
+        // Start day is counted as day 1
+        // Example: Dec 14 to Jan 4 = 22 days (Dec 14 is day 1)
+        let daysToNextSalary = Math.ceil((nextSalaryDate - today) / (1000 * 60 * 60 * 24)) + 1;
 
-      // If days to next salary date is less than required duration, extend to following month
-      if (daysToNextSalary < days) {
-        // Keep adding months until we reach or exceed the required duration
-        let targetSalaryDate = new Date(nextSalaryDate);
-        let daysToTarget = daysToNextSalary;
+        // If days to next salary date is less than required duration, extend to following month
+        if (daysToNextSalary < days) {
+          // Keep adding months until we reach or exceed the required duration
+          let targetSalaryDate = new Date(nextSalaryDate);
+          let daysToTarget = daysToNextSalary;
 
-        while (daysToTarget < days) {
-          targetSalaryDate = getNextSalaryDate(
-            new Date(targetSalaryDate.getFullYear(), targetSalaryDate.getMonth() + 1, 1),
-            salaryDate
-          );
-          // INCLUSIVE counting: add 1 to include start day
-          daysToTarget = Math.ceil((targetSalaryDate - today) / (1000 * 60 * 60 * 24)) + 1;
+          while (daysToTarget < days) {
+            targetSalaryDate = getNextSalaryDate(
+              new Date(targetSalaryDate.getFullYear(), targetSalaryDate.getMonth() + 1, 1),
+              salaryDate
+            );
+            // INCLUSIVE counting: add 1 to include start day
+            daysToTarget = Math.ceil((targetSalaryDate - today) / (1000 * 60 * 60 * 24)) + 1;
+          }
+
+          days = daysToTarget;
+          repaymentDate = targetSalaryDate;
+        } else {
+          days = daysToNextSalary;
+          repaymentDate = nextSalaryDate;
         }
 
-        days = daysToTarget;
-        repaymentDate = targetSalaryDate;
-      } else {
+        calculationMethod = 'salary_date';
+      } else if (planData.plan_type === 'multi_emi' && planData.emi_frequency === 'monthly') {
+        // Multi-EMI plan with monthly frequency: calculate first EMI date
+        let nextSalaryDate = getNextSalaryDate(today, salaryDate);
+        
+        // Calculate days from today to next salary date (INCLUSIVE)
+        let daysToNextSalary = Math.ceil((nextSalaryDate - today) / (1000 * 60 * 60 * 24)) + 1;
+
+        // If days to next salary date is less than required duration (minimum days), extend to following month
+        if (daysToNextSalary < days) {
+          // Move to next month's salary date
+          nextSalaryDate = getSalaryDateForMonth(today, salaryDate, 1);
+          daysToNextSalary = Math.ceil((nextSalaryDate - today) / (1000 * 60 * 60 * 24)) + 1;
+        }
+
+        // For Multi-EMI, the repayment date is the first EMI date
         days = daysToNextSalary;
         repaymentDate = nextSalaryDate;
+        calculationMethod = 'salary_date';
       }
-
-      calculationMethod = 'salary_date';
     }
   }
 
@@ -515,10 +568,10 @@ module.exports = {
   calculateLoanValues,
   calculateTotalDays,
   getNextSalaryDate,
+  getSalaryDateForMonth,
   calculateCompleteLoanValues,
   getLoanCalculation,
   updateLoanCalculation,
-  getNextSalaryDate,
   calculateInterestDays
 };
 

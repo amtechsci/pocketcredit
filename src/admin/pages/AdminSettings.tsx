@@ -1419,7 +1419,9 @@ export function AdminSettings() {
         plan_name: planForm.plan_name,
         plan_code: planForm.plan_code,
         plan_type: planForm.plan_type,
-        repayment_days: planForm.plan_type === 'single' ? parseInt(planForm.repayment_days) : undefined,
+        repayment_days: planForm.plan_type === 'single' 
+          ? parseInt(planForm.repayment_days) 
+          : (planForm.calculate_by_salary_date && planForm.repayment_days ? parseInt(planForm.repayment_days) : undefined),
         calculate_by_salary_date: planForm.calculate_by_salary_date,
         emi_frequency: planForm.plan_type === 'multi_emi' ? planForm.emi_frequency : undefined,
         emi_count: planForm.plan_type === 'multi_emi' ? parseInt(planForm.emi_count) : undefined,
@@ -2954,6 +2956,25 @@ export function AdminSettings() {
                                 />
                               </div>
                             </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Duration (Days) {planForm.calculate_by_salary_date ? '*' : ''} <span className="text-xs text-gray-500">(Minimum days between loan date and first EMI)</span>
+                              </label>
+                              <input
+                                type="number"
+                                value={planForm.repayment_days}
+                                onChange={(e) => setPlanForm({ ...planForm, repayment_days: e.target.value })}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                placeholder="e.g., 15"
+                                required={planForm.calculate_by_salary_date}
+                                min="1"
+                              />
+                              <p className="text-xs text-gray-500 mt-1">
+                                {planForm.calculate_by_salary_date 
+                                  ? "If days between loan date and salary date is less than this, first EMI moves to next month's salary date"
+                                  : "Minimum days before first EMI (required when 'Calculate by salary date' is enabled)"}
+                              </p>
+                            </div>
                             <div className="flex items-center space-x-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
                               <input
                                 type="checkbox"
@@ -2970,9 +2991,9 @@ export function AdminSettings() {
                               <div className="ml-6 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded">
                                 <p className="text-xs text-yellow-800">
                                   <strong>How it works:</strong> EMI dates will be calculated based on the user's salary date. 
-                                  For monthly EMIs, each EMI will be scheduled on the user's salary date of each month. 
-                                  For other frequencies (daily, weekly, bi-weekly), the first EMI will start from the next salary date, then follow the frequency. 
-                                  If the user has no salary date, EMIs will start from today.
+                                  For monthly EMIs, each EMI will be scheduled on the user's salary date of each month (e.g., 31st). 
+                                  If a month doesn't have that date (e.g., Feb 31), it will use the last day of that month (e.g., Feb 28). 
+                                  If the duration to the next salary date is less than the specified duration, it will extend to the following month's salary date.
                                 </p>
                               </div>
                             )}

@@ -1,7 +1,7 @@
 const express = require('express');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
-const { calculateCompleteLoanValues, getNextSalaryDate } = require('../utils/loanCalculations');
+const { calculateCompleteLoanValues, getNextSalaryDate, getSalaryDateForMonth } = require('../utils/loanCalculations');
 const router = express.Router();
 
 /**
@@ -260,36 +260,63 @@ router.post('/calculate', requireAuth, async (req, res) => {
       startDate.setHours(0, 0, 0, 0); // Normalize to start of day
       
       // If calculate_by_salary_date is enabled and user has salary date, start from next salary date
-      if (plan.calculate_by_salary_date === 1 && user.salary_date) {
+      if (plan.calculate_by_salary_date === 1 && user.salary_date && plan.emi_frequency === 'monthly') {
         const salaryDate = parseInt(user.salary_date);
         if (salaryDate >= 1 && salaryDate <= 31) {
-          // Use imported helper function
+          // Get next salary date
+          let nextSalaryDate = getNextSalaryDate(startDate, salaryDate);
+          
+          // Calculate days from today to next salary date (INCLUSIVE)
+          let daysToNextSalary = Math.ceil((nextSalaryDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+          
+          // If duration (repayment_days) is set and days to next salary is less than duration, extend to next month
+          const minDuration = plan.repayment_days || 15;
+          if (daysToNextSalary < minDuration) {
+            // Move to next month's salary date
+            nextSalaryDate = getSalaryDateForMonth(startDate, salaryDate, 1);
+          }
+          
+          startDate = nextSalaryDate;
+        }
+      } else if (plan.calculate_by_salary_date === 1 && user.salary_date) {
+        // For non-monthly frequencies, just use next salary date as starting point
+        const salaryDate = parseInt(user.salary_date);
+        if (salaryDate >= 1 && salaryDate <= 31) {
           startDate = getNextSalaryDate(startDate, salaryDate);
         }
       }
 
       // Generate EMI schedule starting from startDate
       for (let i = 0; i < plan.emi_count; i++) {
-        const dueDate = new Date(startDate);
+        let dueDate;
         
         // Calculate due date based on EMI frequency
         if (plan.emi_frequency === 'daily') {
+          dueDate = new Date(startDate);
           dueDate.setDate(dueDate.getDate() + i);
         } else if (plan.emi_frequency === 'weekly') {
+          dueDate = new Date(startDate);
           dueDate.setDate(dueDate.getDate() + (i * 7));
         } else if (plan.emi_frequency === 'biweekly') {
+          dueDate = new Date(startDate);
           dueDate.setDate(dueDate.getDate() + (i * 14));
         } else if (plan.emi_frequency === 'monthly') {
-          // For monthly, add months and adjust to salary date
-          dueDate.setMonth(dueDate.getMonth() + i);
+          // For monthly with salary date, use getSalaryDateForMonth to handle edge cases
           if (plan.calculate_by_salary_date === 1 && user.salary_date) {
             const salaryDate = parseInt(user.salary_date);
             if (salaryDate >= 1 && salaryDate <= 31) {
-              // Set to the salary date of that month
-              const lastDay = new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0).getDate();
-              dueDate.setDate(Math.min(salaryDate, lastDay));
+              // Get salary date for the i-th month from startDate
+              dueDate = getSalaryDateForMonth(startDate, salaryDate, i);
+            } else {
+              dueDate = new Date(startDate);
+              dueDate.setMonth(dueDate.getMonth() + i);
             }
+          } else {
+            dueDate = new Date(startDate);
+            dueDate.setMonth(dueDate.getMonth() + i);
           }
+        } else {
+          dueDate = new Date(startDate);
         }
         
         emiSchedule.push({
