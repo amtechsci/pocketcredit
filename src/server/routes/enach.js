@@ -337,16 +337,10 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             subscription_meta: {
                 return_url: `${BACKEND_URL}/api/enach/callback?applicationId=${applicationId}&subscription_id=${subscriptionId}`,
                 notification_channel: ['EMAIL', 'SMS']
-            },
-            // Add authorization_details with payment_methods to enable dashboard redirect
-            // According to Cashfree docs, this should include "enach" in payment_methods
-            // Add authorization_details with payment_methods to enable dashboard redirect
-            // According to Cashfree docs, for ENACH, authorization_amount is always 0
-            authorization_details: {
-                payment_methods: ['enach'],
-                authorization_amount: 0, // For ENACH, authorization_amount is always 0 as per Cashfree docs
-                authorization_amount_refund: false
             }
+            // NOTE: authorization_details is NOT included for eNACH subscriptions
+            // Cashfree rejects authorization_amount: 0, and eNACH doesn't require it
+            // The subscription will be created and authorization link will be sent via SMS/Email
         };
 
         console.log(`[${requestId}] [eNACH] Creating subscription for application ${applicationId}`, {
