@@ -92,6 +92,9 @@ const logApiCall = (method, url, headers, body, response = null, error = null) =
  */
 router.post('/create-subscription', authenticateToken, async (req, res) => {
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    let subscriptionId = null; // Declare at function scope for error handling
+    let planId = null;
+    
     console.log(`\n${'='.repeat(80)}`);
     console.log(`[eNACH STARTED] ${requestId}`);
     console.log(`${'='.repeat(80)}`);
@@ -357,13 +360,23 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         
         logApiCall('POST', subscriptionUrl, subscriptionHeaders, subscriptionPayload);
         
-        const subscriptionResponse = await axios.post(
-            subscriptionUrl,
-            subscriptionPayload,
-            { headers: subscriptionHeaders }
-        );
-        
-        logApiCall('POST', subscriptionUrl, subscriptionHeaders, subscriptionPayload, subscriptionResponse);
+        let subscriptionResponse;
+        try {
+            subscriptionResponse = await axios.post(
+                subscriptionUrl,
+                subscriptionPayload,
+                { 
+                    headers: subscriptionHeaders,
+                    timeout: 60000 // 60 seconds timeout for subscription creation
+                }
+            );
+            logApiCall('POST', subscriptionUrl, subscriptionHeaders, subscriptionPayload, subscriptionResponse);
+        } catch (subscriptionError) {
+            // Log the error response
+            logApiCall('POST', subscriptionUrl, subscriptionHeaders, subscriptionPayload, null, subscriptionError);
+            // Re-throw to be caught by outer catch block
+            throw subscriptionError;
+        }
 
         // Log full response structure to debug
         console.log(`[eNACH] Subscription created: ${subscriptionId}`, {
