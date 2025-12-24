@@ -8,6 +8,17 @@ const pdfService = require('../services/pdfService');
 const emailService = require('../services/emailService');
 
 /**
+ * Format date to YYYY-MM-DD in local timezone (not UTC)
+ * This prevents timezone shifts when converting to ISO string
+ */
+function formatDateLocal(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * GET /api/kfs/user/:loanId
  * User-facing endpoint to get KFS data for their own loan
  */
@@ -507,21 +518,24 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             interestForAPR = 0;
             
             for (let i = 0; i < emiCount; i++) {
-              const emiDate = new Date(allEmiDates[i]);
-              emiDate.setHours(0, 0, 0, 0);
+              // allEmiDates contains Date objects, ensure we work with Date objects
+              const emiDate = allEmiDates[i] instanceof Date ? allEmiDates[i] : new Date(allEmiDates[i]);
+              emiDate.setHours(12, 0, 0, 0);
               
               // Calculate days for this EMI period
               // First period (disbursement to first EMI): inclusive, add +1
               // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
               let previousDate;
               if (i === 0) {
-                previousDate = baseDate;
+                previousDate = new Date(baseDate);
+                previousDate.setHours(12, 0, 0, 0);
               } else {
                 // Start from day AFTER previous EMI date
-                previousDate = new Date(allEmiDates[i - 1]);
+                const prevEmiDate = allEmiDates[i - 1] instanceof Date ? allEmiDates[i - 1] : new Date(allEmiDates[i - 1]);
+                previousDate = new Date(prevEmiDate);
                 previousDate.setDate(previousDate.getDate() + 1);
+                previousDate.setHours(12, 0, 0, 0);
               }
-              previousDate.setHours(0, 0, 0, 0);
               const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
               
               // Calculate principal for this EMI (add remainder to last EMI)
@@ -620,10 +634,23 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
             }
             
+            // Ensure nextSalaryDate matches the salary date exactly (correct if getNextSalaryDate returned wrong date)
+            const firstEmiYear = nextSalaryDate.getFullYear();
+            const firstEmiMonth = nextSalaryDate.getMonth();
+            let correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, salaryDate);
+            correctedFirstEmiDate.setHours(0, 0, 0, 0);
+            // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
+            if (correctedFirstEmiDate.getDate() !== salaryDate) {
+              const lastDay = new Date(firstEmiYear, firstEmiMonth + 1, 0).getDate();
+              correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, Math.min(salaryDate, lastDay));
+              correctedFirstEmiDate.setHours(0, 0, 0, 0);
+            }
+            nextSalaryDate = correctedFirstEmiDate;
+            
             // Generate all EMI dates
             for (let i = 0; i < emiCount; i++) {
               const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
-              allEmiDates.push(emiDate.toISOString());
+              allEmiDates.push(formatDateLocal(emiDate));
             }
           }
         } else if (isMultiEmi) {
@@ -1059,11 +1086,27 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
             nextSalaryDate = getSalaryDateForMonth(baseDateForEmi, salaryDate, 1);
           }
           
+          // Ensure nextSalaryDate matches the salary date exactly (correct if getNextSalaryDate returned wrong date)
+          const firstEmiYear = nextSalaryDate.getFullYear();
+          const firstEmiMonth = nextSalaryDate.getMonth();
+          let correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, salaryDate);
+          correctedFirstEmiDate.setHours(12, 0, 0, 0);
+          // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
+          if (correctedFirstEmiDate.getDate() !== salaryDate) {
+            const lastDay = new Date(firstEmiYear, firstEmiMonth + 1, 0).getDate();
+            correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, Math.min(salaryDate, lastDay));
+            correctedFirstEmiDate.setHours(12, 0, 0, 0);
+          }
+          nextSalaryDate = correctedFirstEmiDate;
+          
           // Generate all EMI dates from the corrected first salary date
           for (let i = 0; i < emiCount; i++) {
             const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
             allEmiDates.push(emiDate);
           }
+          
+          // Debug: Log corrected EMI dates (using local timezone format)
+          console.log('📅 Corrected EMI Dates:', allEmiDates.map(d => formatDateLocal(d)));
           
           // Update firstDueDate to match the first EMI date for consistency
           firstDueDate = allEmiDates[0];
@@ -1100,21 +1143,24 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         interestForAPR = 0;
         
         for (let i = 0; i < emiCount; i++) {
-          const emiDate = allEmiDates[i];
-          emiDate.setHours(0, 0, 0, 0);
+          // allEmiDates contains Date objects, ensure we work with Date objects
+          const emiDate = allEmiDates[i] instanceof Date ? allEmiDates[i] : new Date(allEmiDates[i]);
+          emiDate.setHours(12, 0, 0, 0);
           
           // Calculate days for this EMI period
           // First period (disbursement to first EMI): inclusive, add +1
           // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
           let previousDate;
           if (i === 0) {
-            previousDate = baseDate;
+            previousDate = new Date(baseDate);
+            previousDate.setHours(12, 0, 0, 0);
           } else {
             // Start from day AFTER previous EMI date
-            previousDate = new Date(allEmiDates[i - 1]);
+            const prevEmiDate = allEmiDates[i - 1] instanceof Date ? allEmiDates[i - 1] : new Date(allEmiDates[i - 1]);
+            previousDate = new Date(prevEmiDate);
             previousDate.setDate(previousDate.getDate() + 1);
+            previousDate.setHours(12, 0, 0, 0);
           }
-          previousDate.setHours(0, 0, 0, 0);
           const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
           
           // Calculate principal for this EMI (add remainder to last EMI)
@@ -1127,10 +1173,12 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           interestForAPR += interestForPeriod;
           
           // Store period details for debugging
+          // Note: emiDate is from allEmiDates array which uses corrected dates
+          // Use local timezone format to avoid UTC conversion issues
           emiPeriodDetails.push({
             period: i + 1,
-            previousDate: previousDate.toISOString().split('T')[0],
-            emiDate: emiDate.toISOString().split('T')[0],
+            previousDate: formatDateLocal(previousDate),
+            emiDate: formatDateLocal(emiDate),
             daysForPeriod,
             outstandingPrincipal: outstandingPrincipal.toFixed(2),
             principalForThisEmi: principalForThisEmi.toFixed(2),
@@ -1328,10 +1376,23 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
               nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
             }
             
+            // Ensure nextSalaryDate matches the salary date exactly (correct if getNextSalaryDate returned wrong date)
+            const firstEmiYear = nextSalaryDate.getFullYear();
+            const firstEmiMonth = nextSalaryDate.getMonth();
+            let correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, salaryDate);
+            correctedFirstEmiDate.setHours(0, 0, 0, 0);
+            // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
+            if (correctedFirstEmiDate.getDate() !== salaryDate) {
+              const lastDay = new Date(firstEmiYear, firstEmiMonth + 1, 0).getDate();
+              correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, Math.min(salaryDate, lastDay));
+              correctedFirstEmiDate.setHours(0, 0, 0, 0);
+            }
+            nextSalaryDate = correctedFirstEmiDate;
+            
             // Generate all EMI dates
             for (let i = 0; i < emiCount; i++) {
               const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
-              allEmiDates.push(emiDate.toISOString());
+              allEmiDates.push(formatDateLocal(emiDate));
             }
           }
         } else if (isMultiEmi) {

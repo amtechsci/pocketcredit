@@ -45,9 +45,9 @@ function getNextSalaryDate(startDate, targetDay) {
   let month = normalizedStartDate.getMonth();
   let day = targetDay;
 
-  // Create date for this month's salary date (at midnight)
+  // Create date for this month's salary date (at midday to avoid timezone shifts)
   let salaryDate = new Date(year, month, day);
-  salaryDate.setHours(0, 0, 0, 0);
+  salaryDate.setHours(12, 0, 0, 0);
 
   // If salary date has passed or is today, move to next month
   if (salaryDate <= normalizedStartDate) {
@@ -57,14 +57,14 @@ function getNextSalaryDate(startDate, targetDay) {
       year += 1;
     }
     salaryDate = new Date(year, month, day);
-    salaryDate.setHours(0, 0, 0, 0);
+    salaryDate.setHours(12, 0, 0, 0);
   }
 
   // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
   if (salaryDate.getDate() !== day) {
     const lastDay = new Date(year, month + 1, 0).getDate();
     salaryDate = new Date(year, month, Math.min(day, lastDay));
-    salaryDate.setHours(0, 0, 0, 0);
+    salaryDate.setHours(12, 0, 0, 0);
   }
 
   return salaryDate;
@@ -91,15 +91,15 @@ function getSalaryDateForMonth(startDate, targetDay, monthOffset = 0) {
     year -= 1;
   }
 
-  // Try to create date with target day (at midnight for consistency)
+  // Try to create date with target day (at midday to avoid timezone shifts)
   let salaryDate = new Date(year, month, targetDay);
-  salaryDate.setHours(0, 0, 0, 0);
+  salaryDate.setHours(12, 0, 0, 0);
 
   // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
   if (salaryDate.getDate() !== targetDay) {
     const lastDay = new Date(year, month + 1, 0).getDate();
     salaryDate = new Date(year, month, Math.min(targetDay, lastDay));
-    salaryDate.setHours(0, 0, 0, 0);
+    salaryDate.setHours(12, 0, 0, 0);
   }
 
   return salaryDate;

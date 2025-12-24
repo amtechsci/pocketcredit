@@ -50,11 +50,62 @@ const getCashfreeHeaders = (idempotencyKey = null) => {
     return headers;
 };
 
+// Helper to log API calls with full details
+const logApiCall = (method, url, headers, body, response = null, error = null) => {
+    const logId = `[${Date.now()}]`;
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`${logId} [eNACH API CALL] ${method.toUpperCase()} ${url}`);
+    console.log(`${'='.repeat(80)}`);
+    
+    // Log Headers (mask sensitive data)
+    const safeHeaders = { ...headers };
+    if (safeHeaders['x-client-secret']) {
+        safeHeaders['x-client-secret'] = '***MASKED***';
+    }
+    console.log(`${logId} [HEADERS]:`, JSON.stringify(safeHeaders, null, 2));
+    
+    // Log Request Body
+    if (body) {
+        console.log(`${logId} [REQUEST BODY]:`, JSON.stringify(body, null, 2));
+    }
+    
+    // Log Response or Error
+    if (error) {
+        console.log(`${logId} [ERROR]:`, {
+            status: error.response?.status || 'N/A',
+            statusText: error.response?.statusText || 'N/A',
+            data: error.response?.data || error.message,
+            code: error.code || 'N/A'
+        });
+    } else if (response) {
+        console.log(`${logId} [RESPONSE STATUS]:`, response.status, response.statusText);
+        console.log(`${logId} [RESPONSE HEADERS]:`, JSON.stringify(response.headers || {}, null, 2));
+        console.log(`${logId} [RESPONSE DATA]:`, JSON.stringify(response.data || {}, null, 2));
+    }
+    
+    console.log(`${'='.repeat(80)}\n`);
+};
+
 /**
  * POST /api/enach/create-subscription
  * Create eNACH subscription for loan application
  */
 router.post('/create-subscription', authenticateToken, async (req, res) => {
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`[eNACH STARTED] ${requestId}`);
+    console.log(`${'='.repeat(80)}`);
+    console.log(`[${requestId}] [INCOMING REQUEST]`);
+    console.log(`[${requestId}] [METHOD]: POST /api/enach/create-subscription`);
+    console.log(`[${requestId}] [HEADERS]:`, JSON.stringify({
+        'content-type': req.headers['content-type'],
+        'authorization': req.headers['authorization'] ? 'Bearer ***MASKED***' : 'N/A',
+        'user-agent': req.headers['user-agent'],
+        'x-forwarded-for': req.headers['x-forwarded-for']
+    }, null, 2));
+    console.log(`[${requestId}] [REQUEST BODY]:`, JSON.stringify(req.body, null, 2));
+    console.log(`${'='.repeat(80)}\n`);
+    
     try {
         // Validate Cashfree configuration
         if (!CASHFREE_CLIENT_ID || !CASHFREE_CLIENT_SECRET) {
@@ -155,6 +206,10 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         // - plan_max_amount is 60% of monthly salary
         // - plan_max_cycles is 0 for unlimited (or very high number)
         // - plan_intervals and plan_interval_type are not required
+        // Sanitize plan_note to only use alphanumerics and allowed special characters
+        // Cashfree only allows alphanumerics and few special characters (no ₹, %, parentheses)
+        const sanitizedPlanNote = `On-demand payment plan for loan ${loan.application_number}. Maximum amount: INR ${planMaxAmount.toLocaleString('en-IN')} - 60 percent of monthly salary`;
+        
         const planPayload = {
             plan_id: planId,
             plan_name: `Loan Repayment Plan - ${loan.application_number}`,
@@ -162,25 +217,31 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             plan_currency: 'INR',
             plan_max_amount: planMaxAmount,
             plan_max_cycles: 0, // 0 means unlimited cycles
-            plan_note: `On-demand payment plan for loan ${loan.application_number}. Maximum amount: ₹${planMaxAmount.toLocaleString('en-IN')} (60% of monthly salary)`
+            plan_note: sanitizedPlanNote
         };
 
         let planResponse;
         let planCreated = false;
         try {
-            console.log(`[eNACH] Creating plan with payload:`, JSON.stringify(planPayload, null, 2));
+            const planHeaders = getCashfreeHeaders(planId);
+            const planUrl = `${CASHFREE_API_BASE}/plans`;
+            
+            logApiCall('POST', planUrl, planHeaders, planPayload);
+            
             planResponse = await axios.post(
-                `${CASHFREE_API_BASE}/plans`,
+                planUrl,
                 planPayload,
-                { headers: getCashfreeHeaders(planId) } // Use plan_id as idempotency key
+                { headers: planHeaders }
             );
-            console.log(`[eNACH] Plan created successfully: ${planId}`, {
+            
+            logApiCall('POST', planUrl, planHeaders, planPayload, planResponse);
+            
+            console.log(`[${requestId}] [eNACH] Plan created successfully: ${planId}`, {
                 cf_plan_id: planResponse.data.cf_plan_id,
                 plan_type: planResponse.data.plan_type,
                 plan_max_amount: planResponse.data.plan_max_amount,
                 plan_max_cycles: planResponse.data.plan_max_cycles,
-                status: planResponse.data.plan_status,
-                full_response: JSON.stringify(planResponse.data, null, 2)
+                status: planResponse.data.plan_status
             });
             
             // Verify the plan was created with correct type
@@ -209,11 +270,14 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                     error: 'Please try again. If the issue persists, contact support.'
                 });
             } else {
-                console.error('[eNACH] ❌ Error creating plan:', {
+                const planHeaders = getCashfreeHeaders(planId);
+                const planUrl = `${CASHFREE_API_BASE}/plans`;
+                logApiCall('POST', planUrl, planHeaders, planPayload, null, planError);
+                
+                console.error(`[${requestId}] [eNACH] ❌ Error creating plan:`, {
                     status: planError.response?.status,
                     data: planError.response?.data,
-                    message: planError.message,
-                    payload: JSON.stringify(planPayload, null, 2)
+                    message: planError.message
                 });
                 return res.status(500).json({
                     success: false,
@@ -282,17 +346,24 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             }
         };
 
-        console.log(`[eNACH] Creating subscription for application ${applicationId}`, {
+        console.log(`[${requestId}] [eNACH] Creating subscription for application ${applicationId}`, {
             subscription_id: subscriptionId,
             plan_id: planId,
             environment: IS_PRODUCTION ? 'PRODUCTION' : 'SANDBOX'
         });
 
+        const subscriptionHeaders = getCashfreeHeaders(subscriptionId);
+        const subscriptionUrl = `${CASHFREE_API_BASE}/subscriptions`;
+        
+        logApiCall('POST', subscriptionUrl, subscriptionHeaders, subscriptionPayload);
+        
         const subscriptionResponse = await axios.post(
-            `${CASHFREE_API_BASE}/subscriptions`,
+            subscriptionUrl,
             subscriptionPayload,
-            { headers: getCashfreeHeaders(subscriptionId) } // Use subscription_id as idempotency key
+            { headers: subscriptionHeaders }
         );
+        
+        logApiCall('POST', subscriptionUrl, subscriptionHeaders, subscriptionPayload, subscriptionResponse);
 
         // Log full response structure to debug
         console.log(`[eNACH] Subscription created: ${subscriptionId}`, {
@@ -372,15 +443,21 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             const cfSubscriptionId = subscriptionResponse.data.cf_subscription_id;
             
             try {
-                console.log(`[eNACH] Attempting to raise authorization payment for subscription: ${cfSubscriptionId}`);
+                console.log(`[${requestId}] [eNACH] Attempting to raise authorization payment for subscription: ${cfSubscriptionId}`);
                 // Try to raise an authorization payment - this might return the authorization URL
+                const authHeaders = getCashfreeHeaders();
+                const authUrl = `${CASHFREE_API_BASE}/subscriptions/${cfSubscriptionId}/authorize`;
+                const authBody = { authorization_amount: 0 }; // For ENACH, authorization_amount is always 0
+                
+                logApiCall('POST', authUrl, authHeaders, authBody);
+                
                 const authPaymentResponse = await axios.post(
-                    `${CASHFREE_API_BASE}/subscriptions/${cfSubscriptionId}/authorize`,
-                    {
-                        authorization_amount: 0 // For ENACH, authorization_amount is always 0
-                    },
-                    { headers: getCashfreeHeaders() }
+                    authUrl,
+                    authBody,
+                    { headers: authHeaders }
                 );
+                
+                logApiCall('POST', authUrl, authHeaders, authBody, authPaymentResponse);
                 
                 // Check for authorization URL in the response
                 if (authPaymentResponse.data?.authorization_url) {
@@ -396,7 +473,12 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                     console.log(`[eNACH] Retrieved authorization URL from custom action: ${authorizationUrl}`);
                 }
             } catch (authError) {
-                console.warn('[eNACH] Could not raise authorization payment:', {
+                const authHeaders = getCashfreeHeaders();
+                const authUrl = `${CASHFREE_API_BASE}/subscriptions/${cfSubscriptionId}/authorize`;
+                const authBody = { authorization_amount: 0 };
+                logApiCall('POST', authUrl, authHeaders, authBody, null, authError);
+                
+                console.warn(`[${requestId}] [eNACH] Could not raise authorization payment:`, {
                     status: authError.response?.status,
                     error: authError.response?.data || authError.message
                 });
@@ -479,11 +561,12 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         // For eNACH, if no authorization URL is available, Cashfree sends authorization link via SMS
         // This is the default behavior for eNACH - the authorization link is sent via SMS/Email
         // We should inform the frontend about this
+        let finalResponse;
         if (!authorizationUrl) {
-            console.log('[eNACH] No authorization URL - Cashfree will send authorization link via SMS');
+            console.log(`[${requestId}] [eNACH] No authorization URL - Cashfree will send authorization link via SMS`);
             
             // Return success response with SMS flow indicator
-            return res.json({
+            finalResponse = {
                 success: true,
                 data: {
                     subscription_id: subscriptionId,
@@ -494,28 +577,41 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                     message: 'eNACH authorization link will be sent to your registered mobile number and email. Please check and authorize the mandate.',
                     sms_flow: true
                 }
-            });
+            };
+        } else {
+            // Return response to frontend - always include authorization_url for redirect
+            finalResponse = {
+                success: true,
+                data: {
+                    subscription_id: subscriptionId,
+                    cf_subscription_id: subscriptionResponse.data.cf_subscription_id,
+                    authorization_url: authorizationUrl,
+                    subscription_status: subscriptionResponse.data.subscription_status,
+                    subscription_session_id: subscriptionResponse.data.subscription_session_id,
+                    message: 'Redirecting to eNACH authorization page...'
+                }
+            };
         }
-
-        // Return response to frontend - always include authorization_url for redirect
-        res.json({
-            success: true,
-            data: {
-                subscription_id: subscriptionId,
-                cf_subscription_id: subscriptionResponse.data.cf_subscription_id,
-                authorization_url: authorizationUrl,
-                subscription_status: subscriptionResponse.data.subscription_status,
-                subscription_session_id: subscriptionResponse.data.subscription_session_id,
-                message: 'Redirecting to eNACH authorization page...'
-            }
-        });
+        
+        console.log(`\n${'='.repeat(80)}`);
+        console.log(`[eNACH ENDED] ${requestId}`);
+        console.log(`${'='.repeat(80)}`);
+        console.log(`[${requestId}] [RESPONSE TO CLIENT]:`, JSON.stringify(finalResponse, null, 2));
+        console.log(`${'='.repeat(80)}\n`);
+        
+        res.json(finalResponse);
 
     } catch (error) {
-        console.error('[eNACH] Error creating subscription:', {
+        console.error(`\n${'='.repeat(80)}`);
+        console.error(`[eNACH ERROR] ${requestId}`);
+        console.error(`${'='.repeat(80)}`);
+        console.error(`[${requestId}] [ERROR DETAILS]:`, {
             error: error.response?.data || error.message,
             status: error.response?.status,
-            subscription_id: subscriptionId || 'N/A'
+            subscription_id: subscriptionId || 'N/A',
+            stack: error.stack
         });
+        console.error(`${'='.repeat(80)}\n`);
 
         // Provide more helpful error messages
         let errorMessage = 'Failed to create eNACH subscription';
@@ -560,13 +656,28 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
  * Check subscription status
  */
 router.get('/subscription-status/:subscriptionId', authenticateToken, async (req, res) => {
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`[eNACH STARTED] ${requestId} - GET /subscription-status/:subscriptionId`);
+    console.log(`${'='.repeat(80)}`);
+    console.log(`[${requestId}] [INCOMING REQUEST]`);
+    console.log(`[${requestId}] [PARAMS]:`, JSON.stringify(req.params, null, 2));
+    console.log(`${'='.repeat(80)}\n`);
+    
     try {
         const { subscriptionId } = req.params;
 
+        const statusHeaders = getCashfreeHeaders();
+        const statusUrl = `${CASHFREE_API_BASE}/subscriptions/${subscriptionId}`;
+        
+        logApiCall('GET', statusUrl, statusHeaders, null);
+        
         const statusResponse = await axios.get(
-            `${CASHFREE_API_BASE}/subscriptions/${subscriptionId}`,
-            { headers: getCashfreeHeaders() }
+            statusUrl,
+            { headers: statusHeaders }
         );
+        
+        logApiCall('GET', statusUrl, statusHeaders, null, statusResponse);
 
         // Update database with latest status
         await initializeDatabase();
@@ -582,18 +693,33 @@ router.get('/subscription-status/:subscriptionId', authenticateToken, async (req
             subscriptionId
         ]);
 
-        res.json({
+        const successResponse = {
             success: true,
             data: statusResponse.data
-        });
+        };
+        
+        console.log(`[${requestId}] [RESPONSE]:`, JSON.stringify(successResponse, null, 2));
+        console.log(`[eNACH ENDED] ${requestId}\n`);
+        
+        res.json(successResponse);
 
     } catch (error) {
-        console.error('Error fetching subscription status:', error.response?.data || error.message);
-        res.status(500).json({
+        const statusHeaders = getCashfreeHeaders();
+        const statusUrl = error.config?.url || `${CASHFREE_API_BASE}/subscriptions/${req.params.subscriptionId}`;
+        logApiCall('GET', statusUrl, statusHeaders, null, null, error);
+        
+        console.error(`[${requestId}] Error fetching subscription status:`, error.response?.data || error.message);
+        
+        const errorResponse = {
             success: false,
             message: 'Failed to fetch subscription status',
             error: error.response?.data?.message || error.message
-        });
+        };
+        
+        console.log(`[${requestId}] [RESPONSE]:`, JSON.stringify(errorResponse, null, 2));
+        console.log(`[eNACH ENDED] ${requestId}\n`);
+        
+        res.status(500).json(errorResponse);
     }
 });
 
@@ -602,6 +728,14 @@ router.get('/subscription-status/:subscriptionId', authenticateToken, async (req
  * Get subscription details for a loan application
  */
 router.get('/subscription/:applicationId', authenticateToken, async (req, res) => {
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`[eNACH STARTED] ${requestId} - GET /subscription/:applicationId`);
+    console.log(`${'='.repeat(80)}`);
+    console.log(`[${requestId}] [INCOMING REQUEST]`);
+    console.log(`[${requestId}] [PARAMS]:`, JSON.stringify(req.params, null, 2));
+    console.log(`${'='.repeat(80)}\n`);
+    
     try {
         await initializeDatabase();
         const userId = req.user.id;
@@ -616,24 +750,36 @@ router.get('/subscription/:applicationId', authenticateToken, async (req, res) =
 
         const subscriptions = await executeQuery(query, [userId, applicationId]);
 
+        let response;
         if (!subscriptions || subscriptions.length === 0) {
-            return res.json({
+            response = {
                 success: true,
                 data: null
-            });
+            };
+        } else {
+            response = {
+                success: true,
+                data: subscriptions[0]
+            };
         }
-
-        res.json({
-            success: true,
-            data: subscriptions[0]
-        });
+        
+        console.log(`[${requestId}] [RESPONSE]:`, JSON.stringify(response, null, 2));
+        console.log(`[eNACH ENDED] ${requestId}\n`);
+        
+        res.json(response);
 
     } catch (error) {
-        console.error('Error fetching subscription:', error);
-        res.status(500).json({
+        console.error(`[${requestId}] Error fetching subscription:`, error);
+        
+        const errorResponse = {
             success: false,
             message: 'Failed to fetch subscription'
-        });
+        };
+        
+        console.log(`[${requestId}] [RESPONSE]:`, JSON.stringify(errorResponse, null, 2));
+        console.log(`[eNACH ENDED] ${requestId}\n`);
+        
+        res.status(500).json(errorResponse);
     }
 });
 
