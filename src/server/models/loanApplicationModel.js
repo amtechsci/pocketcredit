@@ -45,7 +45,6 @@ const createApplication = async (userId, applicationData) => {
       emi_schedule,
       // Legacy fields (kept for backward compatibility)
       tenure_months = null,
-      interest_rate = null,
       emi_amount = null
     } = applicationData;
 
@@ -163,9 +162,9 @@ const createApplication = async (userId, applicationData) => {
         fees_breakdown, disbursal_amount,
         total_interest, interest_percent_per_day,
         total_repayable, late_fee_structure, emi_schedule,
-        tenure_months, interest_rate, emi_amount,
+        tenure_months, emi_amount,
         status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', NOW(), NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', NOW(), NOW())
     `;
 
     // Prepare fees_breakdown JSON (use provided fees_breakdown or construct from fees array)
@@ -201,7 +200,6 @@ const createApplication = async (userId, applicationData) => {
       late_fee_structure ? JSON.stringify(late_fee_structure) : null,
       emi_schedule ? JSON.stringify(emi_schedule) : null,
       tenure_months,
-      interest_rate,
       emi_amount
     ];
 
@@ -253,7 +251,6 @@ const findApplicationsByUserId = async (userId) => {
         la.loan_amount,
         la.loan_purpose,
         la.tenure_months,
-        la.interest_rate,
         la.emi_amount,
         la.status,
         la.rejection_reason,
@@ -410,7 +407,6 @@ const getApplicationSummary = (application) => {
     loan_amount: application.loan_amount,
     loan_purpose: application.loan_purpose,
     tenure_months: application.tenure_months,
-    interest_rate: application.interest_rate,
     emi_amount: application.emi_amount,
     status: application.status,
     rejection_reason: application.rejection_reason,

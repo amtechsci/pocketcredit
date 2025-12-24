@@ -44,7 +44,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
         la.loan_amount as loanAmount,
         la.loan_purpose as loanType,
         la.tenure_months as tenure,
-        la.interest_rate as interestRate,
+        la.interest_percent_per_day,
         la.emi_amount as emiAmount,
         la.status,
         la.rejection_reason as rejectionReason,
@@ -264,7 +264,9 @@ router.get('/', authenticateAdmin, async (req, res) => {
         status: app.status,
         applicationDate: app.applicationDate,
         tenure: app.tenure || 0,
-        interestRate: app.interestRate || 0,
+        interestRate: app.interest_percent_per_day 
+          ? parseFloat((app.interest_percent_per_day * 365 * 100).toFixed(2)) 
+          : 0,
         emiAmount: app.emiAmount || 0,
         rejectionReason: app.rejectionReason,
         approvedBy: app.approvedBy,
@@ -409,7 +411,9 @@ router.get('/:applicationId', authenticateAdmin, async (req, res) => {
       loanAmount: app.loan_amount,
       loanPurpose: app.loan_purpose,
       tenureMonths: app.tenure_months,
-      interestRate: app.interest_rate,
+      interestRate: app.interest_percent_per_day 
+        ? parseFloat((app.interest_percent_per_day * 365 * 100).toFixed(2)) 
+        : null,
       emiAmount: app.emi_amount,
       status: app.status,
       rejectionReason: app.rejection_reason,

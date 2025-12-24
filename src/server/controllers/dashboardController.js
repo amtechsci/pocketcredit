@@ -278,7 +278,7 @@ const fetchDashboardData = async (userId) => {
       id,
       application_number as loan_number,
       loan_amount,
-      interest_rate,
+      interest_percent_per_day,
       tenure_months,
       status,
       disbursed_at,

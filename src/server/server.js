@@ -361,12 +361,6 @@ app.use('/api/bank-statement', userBankStatementRoutes);
 
 // Development-only routes (disabled in production for security)
 if (process.env.NODE_ENV !== 'production') {
-  const testDigitapRoutes = require('./routes/testDigitap');
-  app.use('/api/test-digitap', testDigitapRoutes);
-
-  const checkTableRoutes = require('./routes/checkTable');
-  app.use('/api/check-table', checkTableRoutes);
-
   console.log('🧪 Development routes enabled');
 }
 

@@ -730,7 +730,7 @@ class ApiService {
       id: number;
       loan_number: string;
       loan_amount: number;
-      interest_rate: number;
+      interest_rate: number; // Calculated from interest_percent_per_day * 365 * 100 on backend
       tenure_months: number;
       emi_amount: number;
       status: string;

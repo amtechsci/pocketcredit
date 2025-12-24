@@ -445,6 +445,95 @@ export const RepaymentSchedulePage = () => {
           </CardContent>
         </Card>
 
+        {/* Repayment Schedule Table */}
+        {kfsData?.repayment?.schedule && kfsData.repayment.schedule.length > 0 && (
+          <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
+            <CardContent className="p-4 sm:p-6">
+              <h3 className="font-bold text-gray-900 mb-4 sm:mb-5 flex items-center gap-2 text-base sm:text-lg">
+                <TrendingUp className="w-5 h-5 sm:w-6 sm:h-6" />
+                Repayment Schedule
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="bg-gradient-to-r from-blue-50 to-indigo-50">
+                      <th className="border border-gray-300 p-2 sm:p-3 text-left text-xs sm:text-sm font-semibold text-gray-700">EMI #</th>
+                      <th className="border border-gray-300 p-2 sm:p-3 text-left text-xs sm:text-sm font-semibold text-gray-700">Due Date</th>
+                      <th className="border border-gray-300 p-2 sm:p-3 text-right text-xs sm:text-sm font-semibold text-gray-700">Outstanding Principal</th>
+                      <th className="border border-gray-300 p-2 sm:p-3 text-right text-xs sm:text-sm font-semibold text-gray-700">Principal</th>
+                      <th className="border border-gray-300 p-2 sm:p-3 text-right text-xs sm:text-sm font-semibold text-gray-700">Interest</th>
+                      {kfsData.repayment.schedule[0]?.post_service_fee > 0 && (
+                        <>
+                          <th className="border border-gray-300 p-2 sm:p-3 text-right text-xs sm:text-sm font-semibold text-gray-700">Post Service Fee</th>
+                          <th className="border border-gray-300 p-2 sm:p-3 text-right text-xs sm:text-sm font-semibold text-gray-700">GST</th>
+                        </>
+                      )}
+                      <th className="border border-gray-300 p-2 sm:p-3 text-right text-xs sm:text-sm font-semibold text-gray-700">Total Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {kfsData.repayment.schedule.map((installment: any, index: number) => {
+                      const isPastDue = new Date(installment.due_date) < new Date();
+                      const isUpcoming = index === 0 || new Date(installment.due_date) >= new Date();
+                      
+                      return (
+                        <tr 
+                          key={installment.instalment_no} 
+                          className={`${isPastDue ? 'bg-red-50' : isUpcoming ? 'bg-green-50' : 'bg-white'} hover:bg-blue-50 transition-colors`}
+                        >
+                          <td className="border border-gray-300 p-2 sm:p-3 text-xs sm:text-sm font-medium text-gray-900">
+                            {installment.instalment_no}
+                          </td>
+                          <td className="border border-gray-300 p-2 sm:p-3 text-xs sm:text-sm text-gray-700">
+                            {formatDate(installment.due_date)}
+                            {isPastDue && (
+                              <span className="ml-2 text-xs text-red-600 font-semibold">(Overdue)</span>
+                            )}
+                          </td>
+                          <td className="border border-gray-300 p-2 sm:p-3 text-right text-xs sm:text-sm text-gray-700">
+                            {formatCurrency(installment.outstanding_principal || 0)}
+                          </td>
+                          <td className="border border-gray-300 p-2 sm:p-3 text-right text-xs sm:text-sm text-gray-700">
+                            {formatCurrency(installment.principal || 0)}
+                          </td>
+                          <td className="border border-gray-300 p-2 sm:p-3 text-right text-xs sm:text-sm text-gray-700">
+                            {formatCurrency(installment.interest || 0)}
+                          </td>
+                          {kfsData.repayment.schedule[0]?.post_service_fee > 0 && (
+                            <>
+                              <td className="border border-gray-300 p-2 sm:p-3 text-right text-xs sm:text-sm text-gray-700">
+                                {formatCurrency(installment.post_service_fee || 0)}
+                              </td>
+                              <td className="border border-gray-300 p-2 sm:p-3 text-right text-xs sm:text-sm text-gray-700">
+                                {formatCurrency(installment.gst_on_post_service_fee || 0)}
+                              </td>
+                            </>
+                          )}
+                          <td className="border border-gray-300 p-2 sm:p-3 text-right text-xs sm:text-sm font-semibold text-gray-900">
+                            {formatCurrency(installment.instalment_amount || 0)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-gradient-to-r from-gray-50 to-blue-50 font-bold">
+                      <td colSpan={kfsData.repayment.schedule[0]?.post_service_fee > 0 ? 6 : 4} className="border border-gray-300 p-2 sm:p-3 text-right text-xs sm:text-sm text-gray-900">
+                        Total Amount to be Paid:
+                      </td>
+                      <td className="border border-gray-300 p-2 sm:p-3 text-right text-sm sm:text-base font-bold text-gray-900">
+                        {formatCurrency(
+                          kfsData.repayment.schedule.reduce((sum: number, inst: any) => sum + (inst.instalment_amount || 0), 0)
+                        )}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Important Bullet Points */}
         <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200 shadow-lg rounded-2xl">
           <CardContent className="p-5 sm:p-6">

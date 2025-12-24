@@ -54,7 +54,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     const applications = await executeQuery(`
       SELECT 
         id, application_number, loan_amount, loan_purpose, 
-        tenure_months, interest_rate, status, rejection_reason, 
+        tenure_months, status, rejection_reason, 
         approved_by, approved_at, disbursed_at, created_at, updated_at,
         processing_fee_percent, interest_percent_per_day, 
         processing_fee, total_interest, total_repayable, plan_snapshot
@@ -523,15 +523,27 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       loginHistory: loginHistory, // User login history from database
       loans: applications.map(app => {
         // Calculate EMI if we have the required data
-        const calculateEMI = (principal, rate, tenure) => {
-          if (!principal || !rate || !tenure) return 0;
-          const monthlyRate = rate / 100 / 12;
+        // Convert interest_percent_per_day to annual rate, then to monthly rate
+        const calculateEMI = (principal, interestPercentPerDay, tenure) => {
+          if (!principal || !interestPercentPerDay || !tenure) return 0;
+          // Convert daily rate to annual rate, then to monthly rate
+          const annualRate = interestPercentPerDay * 365 * 100; // Convert to percentage
+          const monthlyRate = annualRate / 100 / 12; // Convert to decimal monthly rate
           const emi = (principal * monthlyRate * Math.pow(1 + monthlyRate, tenure)) /
             (Math.pow(1 + monthlyRate, tenure) - 1);
           return Math.round(emi);
         };
 
-        const emi = calculateEMI(app.loan_amount, app.interest_rate, app.tenure_months);
+        // Calculate interest_rate from interest_percent_per_day for display
+        const interestRate = app.interest_percent_per_day 
+          ? (app.interest_percent_per_day * 365 * 100).toFixed(2) 
+          : null;
+        
+        const emi = calculateEMI(
+          app.loan_amount, 
+          app.interest_percent_per_day || 0.001, 
+          app.tenure_months
+        );
         const processingFee = Math.round(app.loan_amount * 0.025); // 2.5% processing fee
         const gst = Math.round(processingFee * 0.18); // 18% GST on processing fee
         const totalInterest = emi * app.tenure_months - app.loan_amount;
@@ -557,7 +569,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           tenure: app.tenure_months,
           timePeriod: app.tenure_months,
           processingFeePercent: app.processing_fee_percent || 14,
-          interestRate: app.interest_percent_per_day || 0.3,
+          interestRate: interestRate ? parseFloat(interestRate) : null,
           disbursedAmount: app.disbursed_at ? app.loan_amount : 0,
           processingFee: app.processing_fee || processingFee,
           gst: gst,

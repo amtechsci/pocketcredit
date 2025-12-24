@@ -275,7 +275,11 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           return 165;
         })(),
         loan_term_months: Math.ceil((plannedTermDays || loan.loan_term_days || loanPlan.tenure_days || loanPlan.repayment_days || loanPlan.total_duration_days || 0) / 30),
-        interest_rate: loan.interest_rate || loanPlan.base_interest_rate || 0,
+        interest_rate: planData.interest_percent_per_day 
+          ? parseFloat((planData.interest_percent_per_day * 365 * 100).toFixed(2)) 
+          : (loanPlan.interest_percent_per_day 
+            ? parseFloat((loanPlan.interest_percent_per_day * 365 * 100).toFixed(2)) 
+            : 0),
         repayment_frequency: loanPlan.repayment_frequency || 'Monthly',
         emi_count: planData.emi_count || null
       },
@@ -300,7 +304,11 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         }
       },
       interest: {
-        rate: loan.interest_rate || loanPlan.base_interest_rate || 0,
+        rate: planData.interest_percent_per_day 
+          ? parseFloat((planData.interest_percent_per_day * 365 * 100).toFixed(2)) 
+          : (loanPlan.interest_percent_per_day 
+            ? parseFloat((loanPlan.interest_percent_per_day * 365 * 100).toFixed(2)) 
+            : 0),
         rate_per_day: planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001,
         type: 'Reducing Balance',
         calculation_method: 'Daily',
@@ -679,13 +687,97 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           allEmiDates = [firstDueDate.toISOString()];
         }
 
+        // Generate repayment schedule with all installments
+        let schedule = [];
+        const principal = loanValues.principal || loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0;
+        const totalRepayable = loanValues.total?.repayable || loanValues.totalRepayableAmount || 0;
+        const interest = loanValues.interest?.amount || loanValues.totalInterest || 0;
+        
+        if (isMultiEmi && allEmiDates.length === emiCount) {
+          // For Multi-EMI loans, generate schedule with all installments
+          const interestDays = loanValues.interest?.days || plannedTermDays || 15;
+          const interestRatePerDay = loanValues.interest?.rate_per_day || planData.interest_percent_per_day || (interestDays > 0 ? (interest / (principal * interestDays)) : 0.001);
+          const principalPerEmi = Math.floor(principal / emiCount * 100) / 100;
+          const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
+          const postServiceFeePerEmi = loanValues.totals?.repayableFee || 0;
+          const postServiceFeeGSTPerEmi = loanValues.totals?.repayableFeeGST || 0;
+          
+          let outstandingPrincipal = principal;
+          const baseDateForSchedule = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+          baseDateForSchedule.setHours(12, 0, 0, 0);
+          
+          for (let i = 0; i < emiCount; i++) {
+            // Get EMI date (handle both Date objects and strings)
+            const emiDateStr = allEmiDates[i];
+            const emiDate = emiDateStr instanceof Date ? new Date(emiDateStr) : new Date(emiDateStr);
+            emiDate.setHours(12, 0, 0, 0);
+            
+            // Calculate days for this period
+            let previousDate;
+            if (i === 0) {
+              previousDate = new Date(baseDateForSchedule);
+            } else {
+              const prevEmiDateStr = allEmiDates[i - 1];
+              const prevEmiDate = prevEmiDateStr instanceof Date ? new Date(prevEmiDateStr) : new Date(prevEmiDateStr);
+              previousDate = new Date(prevEmiDate);
+              previousDate.setDate(previousDate.getDate() + 1);
+              previousDate.setHours(12, 0, 0, 0);
+            }
+            
+            const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+            
+            // Calculate principal for this EMI
+            const principalForThisEmi = i === emiCount - 1 
+              ? Math.round((principalPerEmi + remainder) * 100) / 100
+              : principalPerEmi;
+            
+            // Calculate interest for this period
+            const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
+            
+            // Calculate installment amount (principal + interest + post service fee + GST)
+            const instalmentAmount = Math.round((principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi) * 100) / 100;
+            
+            schedule.push({
+              instalment_no: i + 1,
+              outstanding_principal: Math.round(outstandingPrincipal * 100) / 100,
+              principal: principalForThisEmi,
+              interest: interestForPeriod,
+              post_service_fee: postServiceFeePerEmi,
+              gst_on_post_service_fee: postServiceFeeGSTPerEmi,
+              instalment_amount: instalmentAmount,
+              due_date: emiDate.toISOString() // Keep ISO format for API consistency, frontend will format for display
+            });
+            
+            // Reduce outstanding principal for next period
+            outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
+          }
+        } else {
+          // Single payment loan
+          const postServiceFee = loanValues.totals?.repayableFee || 0;
+          const postServiceFeeGST = loanValues.totals?.repayableFeeGST || 0;
+          schedule.push({
+            instalment_no: 1,
+            outstanding_principal: principal,
+            principal: principal,
+            interest: interest,
+            post_service_fee: postServiceFee,
+            gst_on_post_service_fee: postServiceFeeGST,
+            instalment_amount: totalRepayable,
+            due_date: firstDueDate.toISOString()
+          });
+        }
+
         return {
-          emi_amount: loanValues.emiAmount || 0,
-          total_emis: isMultiEmi ? emiCount : Math.ceil((loan.loan_term_days || loanPlan.tenure_days || 0) / 30),
-          first_emi_date: loan.first_emi_date || 'N/A',
-          last_emi_date: loan.last_emi_date || 'N/A',
-          first_due_date: firstDueDate.toISOString(),
-          all_emi_dates: allEmiDates
+          type: isMultiEmi ? 'EMI' : 'Bullet Payment',
+          number_of_instalments: isMultiEmi ? emiCount : 1,
+          instalment_amount: isMultiEmi ? schedule[0]?.instalment_amount || (totalRepayable / emiCount) : totalRepayable,
+          emi_amount: loanValues.emiAmount || (isMultiEmi ? schedule[0]?.instalment_amount : totalRepayable),
+          total_emis: isMultiEmi ? emiCount : 1,
+          first_emi_date: schedule.length > 0 ? schedule[0].due_date : (loan.first_emi_date || 'N/A'),
+          last_emi_date: schedule.length > 0 ? schedule[schedule.length - 1].due_date : (loan.last_emi_date || 'N/A'),
+          first_due_date: schedule.length > 0 ? schedule[0].due_date : firstDueDate.toISOString(),
+          all_emi_dates: allEmiDates,
+          schedule: schedule
         };
       })(),
       penal_charges: {
@@ -1380,20 +1472,33 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
             const firstEmiYear = nextSalaryDate.getFullYear();
             const firstEmiMonth = nextSalaryDate.getMonth();
             let correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, salaryDate);
-            correctedFirstEmiDate.setHours(0, 0, 0, 0);
+            correctedFirstEmiDate.setHours(12, 0, 0, 0);
             // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
             if (correctedFirstEmiDate.getDate() !== salaryDate) {
               const lastDay = new Date(firstEmiYear, firstEmiMonth + 1, 0).getDate();
               correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, Math.min(salaryDate, lastDay));
-              correctedFirstEmiDate.setHours(0, 0, 0, 0);
+              correctedFirstEmiDate.setHours(12, 0, 0, 0);
             }
             nextSalaryDate = correctedFirstEmiDate;
             
-            // Generate all EMI dates
+            // Debug: Log salary date and corrected first EMI date for repayment schedule
+            console.log('📅 Repayment Schedule - Date Calculation:', {
+              salaryDate,
+              disbursementDate: baseDate.toISOString().split('T')[0],
+              nextSalaryDateBeforeCorrection: getNextSalaryDate(baseDate, salaryDate).toISOString().split('T')[0],
+              correctedFirstEmiDate: formatDateLocal(correctedFirstEmiDate),
+              firstEmiYear,
+              firstEmiMonth: firstEmiMonth + 1 // +1 because getMonth() returns 0-11
+            });
+            
+            // Generate all EMI dates from the corrected first salary date
             for (let i = 0; i < emiCount; i++) {
               const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
               allEmiDates.push(formatDateLocal(emiDate));
             }
+            
+            // Debug: Log all generated EMI dates for repayment schedule
+            console.log('📅 Repayment Schedule - All EMI Dates:', allEmiDates);
           }
         } else if (isMultiEmi) {
           // For non-salary date Multi-EMI, calculate based on frequency
@@ -1421,22 +1526,89 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           allEmiDates = [dueDate.toISOString()];
         }
 
+        // Generate repayment schedule with all installments
+        let schedule = [];
+        
+        if (isMultiEmi && allEmiDates.length === emiCount) {
+          // For Multi-EMI loans, generate schedule with all installments
+          const interestRatePerDay = calculations.interest.rate_per_day || (interest / (principal * days));
+          const principalPerEmi = Math.floor(principal / emiCount * 100) / 100;
+          const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
+          const postServiceFeePerEmi = calculations.totals.repayableFee || 0;
+          const postServiceFeeGSTPerEmi = calculations.totals.repayableFeeGST || 0;
+          
+          let outstandingPrincipal = principal;
+          const baseDateForSchedule = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+          baseDateForSchedule.setHours(12, 0, 0, 0);
+          
+          for (let i = 0; i < emiCount; i++) {
+            // Get EMI date (handle both Date objects and strings)
+            const emiDateStr = allEmiDates[i];
+            const emiDate = emiDateStr instanceof Date ? new Date(emiDateStr) : new Date(emiDateStr);
+            emiDate.setHours(12, 0, 0, 0);
+            
+            // Calculate days for this period
+            let previousDate;
+            if (i === 0) {
+              previousDate = new Date(baseDateForSchedule);
+            } else {
+              const prevEmiDateStr = allEmiDates[i - 1];
+              const prevEmiDate = prevEmiDateStr instanceof Date ? new Date(prevEmiDateStr) : new Date(prevEmiDateStr);
+              previousDate = new Date(prevEmiDate);
+              previousDate.setDate(previousDate.getDate() + 1);
+              previousDate.setHours(12, 0, 0, 0);
+            }
+            
+            const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+            
+            // Calculate principal for this EMI
+            const principalForThisEmi = i === emiCount - 1 
+              ? Math.round((principalPerEmi + remainder) * 100) / 100
+              : principalPerEmi;
+            
+            // Calculate interest for this period
+            const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
+            
+            // Calculate installment amount (principal + interest + post service fee + GST)
+            const instalmentAmount = Math.round((principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi) * 100) / 100;
+            
+            schedule.push({
+              instalment_no: i + 1,
+              outstanding_principal: Math.round(outstandingPrincipal * 100) / 100,
+              principal: principalForThisEmi,
+              interest: interestForPeriod,
+              post_service_fee: postServiceFeePerEmi,
+              gst_on_post_service_fee: postServiceFeeGSTPerEmi,
+              instalment_amount: instalmentAmount,
+              due_date: emiDate.toISOString() // Keep ISO format for API consistency, frontend will format for display
+            });
+            
+            // Reduce outstanding principal for next period
+            outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
+          }
+        } else {
+          // Single payment loan
+          const postServiceFee = calculations.totals.repayableFee || 0;
+          const postServiceFeeGST = calculations.totals.repayableFeeGST || 0;
+          schedule.push({
+            instalment_no: 1,
+            outstanding_principal: principal,
+            principal: principal,
+            interest: interest,
+            post_service_fee: postServiceFee,
+            gst_on_post_service_fee: postServiceFeeGST,
+            instalment_amount: totalRepayable,
+            due_date: dueDate.toISOString()
+          });
+        }
+
         return {
           type: isMultiEmi ? 'EMI' : 'Bullet Payment',
           number_of_instalments: isMultiEmi ? emiCount : 1,
-          instalment_amount: isMultiEmi ? (totalRepayable / emiCount) : totalRepayable,
-          first_due_date: dueDate.toISOString(),
+          instalment_amount: isMultiEmi ? schedule[0]?.instalment_amount || (totalRepayable / emiCount) : totalRepayable,
+          first_due_date: schedule.length > 0 ? schedule[0].due_date : dueDate.toISOString(),
           all_emi_dates: allEmiDates,
-          schedule: [
-            {
-              instalment_no: 1,
-              outstanding_principal: principal,
-              principal: principal,
-              interest: interest,
-              instalment_amount: totalRepayable,
-              due_date: dueDate.toISOString()
-            }
-          ]
+          schedule: schedule
         };
       })(),
 
