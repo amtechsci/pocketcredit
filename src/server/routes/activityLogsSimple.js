@@ -2,15 +2,6 @@ const express = require('express');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const router = express.Router();
 
-// Test endpoint
-router.get('/test', (req, res) => {
-  res.json({
-    status: 'success',
-    message: 'Activity logs route is working',
-    timestamp: new Date().toISOString()
-  });
-});
-
 // Get recent activities - fetch real data
 router.get('/recent', async (req, res) => {
   try {

@@ -61,7 +61,7 @@ export interface LoanApplication {
   tenure_months: number;
   interest_rate?: number;
   emi_amount?: number;
-  status: 'submitted' | 'under_review' | 'approved' | 'rejected' | 'disbursed';
+  status: 'submitted' | 'under_review' | 'approved' | 'rejected';
   rejection_reason?: string;
   approved_at?: string;
   disbursed_at?: string;

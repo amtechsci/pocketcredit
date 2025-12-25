@@ -513,8 +513,6 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
       updateQuery += ', approved_at = NOW()';
     } else if (status === 'rejected') {
       updateQuery += ', rejected_at = NOW()';
-    } else if (status === 'disbursed') {
-      updateQuery += ', disbursed_at = NOW()';
     }
 
     updateQuery += ' WHERE id = ?';
@@ -693,6 +691,7 @@ router.put('/:applicationId/loan-plan', authenticateAdmin, async (req, res) => {
       allow_extension: plan.allow_extension === 1 || plan.allow_extension === true,
       extension_show_from_days: plan.extension_show_from_days,
       extension_show_till_days: plan.extension_show_till_days,
+      max_extensions: plan.max_extensions || null,
       fees: planFees.map(pf => ({
         fee_name: pf.fee_name,
         fee_percent: parseFloat(pf.fee_percent),
@@ -792,7 +791,6 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       underReview: statusCounts['under_review'] || 0,
       approved: statusCounts['follow_up'] || 0,
       rejected: statusCounts['rejected'] || 0,
-      disbursed: statusCounts['disbursed'] || 0,
       pendingDocuments: statusCounts['pending_documents'] || 0,
       personalLoans: typeCounts['Personal'] || 0,
       businessLoans: typeCounts['Business'] || 0,

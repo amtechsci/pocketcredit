@@ -230,7 +230,6 @@ export function LoanApplicationsQueue() {
     account_manager: 'bg-purple-100 text-purple-800',
     cleared: 'bg-gray-100 text-gray-800',
     rejected: 'bg-red-100 text-red-800',
-    disbursed: 'bg-purple-100 text-purple-800',
     pending_documents: 'bg-orange-100 text-orange-800'
   };
 
@@ -245,7 +244,6 @@ export function LoanApplicationsQueue() {
       account_manager: 'Account Manager',
       cleared: 'Cleared',
       rejected: 'Rejected',
-      disbursed: 'Disbursed',
       pending_documents: 'Pending Documents'
     };
     return statusLabels[status] || status.replace('_', ' ').toUpperCase();

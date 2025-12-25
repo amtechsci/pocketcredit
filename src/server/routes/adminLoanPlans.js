@@ -212,6 +212,7 @@ router.post('/', authenticateAdmin, async (req, res) => {
       allow_extension,
       extension_show_from_days,
       extension_show_till_days,
+      max_extensions,
       is_default
     } = req.body;
 
@@ -274,8 +275,8 @@ router.post('/', authenticateAdmin, async (req, res) => {
       `INSERT INTO loan_plans 
         (plan_name, plan_code, plan_type, repayment_days, calculate_by_salary_date, emi_frequency, emi_count, 
          total_duration_days, interest_percent_per_day, eligible_member_tiers, eligible_employment_types,
-         is_active, is_default, description, terms_conditions, allow_extension, extension_show_from_days, extension_show_till_days)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         is_active, is_default, description, terms_conditions, allow_extension, extension_show_from_days, extension_show_till_days, max_extensions)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         plan_name,
         plan_code,
@@ -294,7 +295,8 @@ router.post('/', authenticateAdmin, async (req, res) => {
         terms_conditions || null,
         allow_extension ? 1 : 0,
         extension_show_from_days !== undefined && extension_show_from_days !== null ? parseInt(extension_show_from_days) : null,
-        extension_show_till_days !== undefined && extension_show_till_days !== null ? parseInt(extension_show_till_days) : null
+        extension_show_till_days !== undefined && extension_show_till_days !== null ? parseInt(extension_show_till_days) : null,
+        max_extensions !== undefined && max_extensions !== null ? parseInt(max_extensions) : null
       ]
     );
 
@@ -338,7 +340,8 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       terms_conditions,
       allow_extension,
       extension_show_from_days,
-      extension_show_till_days
+      extension_show_till_days,
+      max_extensions
     } = req.body;
 
     // Check if plan exists
@@ -379,7 +382,7 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
           emi_frequency = ?, emi_count = ?, total_duration_days = ?, 
           interest_percent_per_day = ?, eligible_member_tiers = ?, eligible_employment_types = ?,
           is_active = ?, is_default = ?, description = ?, terms_conditions = ?,
-          allow_extension = ?, extension_show_from_days = ?, extension_show_till_days = ?,
+          allow_extension = ?, extension_show_from_days = ?, extension_show_till_days = ?, max_extensions = ?,
           updated_at = NOW()
       WHERE id = ?`,
       [
@@ -401,6 +404,7 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
         allow_extension ? 1 : 0,
         extension_show_from_days !== undefined && extension_show_from_days !== null ? parseInt(extension_show_from_days) : null,
         extension_show_till_days !== undefined && extension_show_till_days !== null ? parseInt(extension_show_till_days) : null,
+        max_extensions !== undefined && max_extensions !== null ? parseInt(max_extensions) : null,
         id
       ]
     );

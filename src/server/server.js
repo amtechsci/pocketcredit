@@ -339,9 +339,8 @@ app.use('/api/admin/loan-documents', adminLoanDocumentsRouter);
 const emailOtpRoutes = require('./routes/emailOtp');
 app.use('/api/email-otp', emailOtpRoutes);
 
-// User Residence routes (merged with userRoutes, but keeping separate for clarity)
-const userResidenceRoutes = require('./routes/userResidence');
-app.use('/api/user', userResidenceRoutes);
+// User routes (includes profile, addresses, loan-plan, and additional-info)
+// userResidence routes have been merged into userRoutes
 
 // Digilocker KYC routes
 const digilockerRoutes = require('./routes/digilocker');

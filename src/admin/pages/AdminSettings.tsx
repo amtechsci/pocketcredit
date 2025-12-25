@@ -103,6 +103,7 @@ interface LoanPlan {
   allow_extension: boolean;
   extension_show_from_days: number | null;
   extension_show_till_days: number | null;
+  max_extensions: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -485,7 +486,8 @@ export function AdminSettings() {
     is_active: true,
     allow_extension: false,
     extension_show_from_days: '',
-    extension_show_till_days: ''
+    extension_show_till_days: '',
+    max_extensions: ''
   });
 
   const [showPasswords, setShowPasswords] = useState<{ [key: string]: boolean }>({});
@@ -1432,7 +1434,8 @@ export function AdminSettings() {
         is_active: planForm.is_active,
         allow_extension: planForm.allow_extension,
         extension_show_from_days: planForm.allow_extension && planForm.extension_show_from_days ? parseInt(planForm.extension_show_from_days) : null,
-        extension_show_till_days: planForm.allow_extension && planForm.extension_show_till_days ? parseInt(planForm.extension_show_till_days) : null
+        extension_show_till_days: planForm.allow_extension && planForm.extension_show_till_days ? parseInt(planForm.extension_show_till_days) : null,
+        max_extensions: planForm.allow_extension && planForm.max_extensions ? parseInt(planForm.max_extensions) : null
       };
 
       if (editingPlan) {
@@ -1470,7 +1473,8 @@ export function AdminSettings() {
       is_active: plan.is_active,
       allow_extension: plan.allow_extension || false,
       extension_show_from_days: plan.extension_show_from_days?.toString() || '',
-      extension_show_till_days: plan.extension_show_till_days?.toString() || ''
+      extension_show_till_days: plan.extension_show_till_days?.toString() || '',
+      max_extensions: plan.max_extensions?.toString() || ''
     });
     setShowPlanForm(true);
   };
@@ -1526,7 +1530,8 @@ export function AdminSettings() {
       is_active: true,
       allow_extension: false,
       extension_show_from_days: '',
-      extension_show_till_days: ''
+      extension_show_till_days: '',
+      max_extensions: ''
     });
   };
 
@@ -3084,6 +3089,22 @@ export function AdminSettings() {
                                     min="0"
                                   />
                                   <p className="text-xs text-gray-500 mt-1">Positive number: days after due date (e.g., 15 = D+15)</p>
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Max Extensions *
+                                  </label>
+                                  <input
+                                    type="number"
+                                    value={planForm.max_extensions}
+                                    onChange={(e) => setPlanForm({ ...planForm, max_extensions: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    placeholder="e.g., 4"
+                                    required={planForm.allow_extension}
+                                    min="1"
+                                    max="10"
+                                  />
+                                  <p className="text-xs text-gray-500 mt-1">Maximum number of extensions allowed (e.g., 4 for max 4 extensions)</p>
                                 </div>
                               </div>
                               <div className="p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded">

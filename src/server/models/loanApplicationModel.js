@@ -132,6 +132,7 @@ const createApplication = async (userId, applicationData) => {
             allow_extension: plan.allow_extension === 1 || plan.allow_extension === true,
             extension_show_from_days: plan.extension_show_from_days,
             extension_show_till_days: plan.extension_show_till_days,
+            max_extensions: plan.max_extensions || null,
             fees: planFees.map(pf => ({
               fee_name: pf.fee_name,
               fee_percent: parseFloat(pf.fee_percent),
@@ -350,8 +351,7 @@ const getApplicationStats = async (userId) => {
         SUM(CASE WHEN status = 'under_review' THEN 1 ELSE 0 END) as under_review_count,
         SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved_count,
         SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected_count,
-        SUM(CASE WHEN status = 'disbursed' THEN 1 ELSE 0 END) as disbursed_count,
-        SUM(CASE WHEN status = 'approved' OR status = 'disbursed' THEN loan_amount ELSE 0 END) as total_approved_amount
+        SUM(CASE WHEN status = 'approved' OR status = 'account_manager' THEN loan_amount ELSE 0 END) as total_approved_amount
       FROM loan_applications 
       WHERE user_id = ?
     `;

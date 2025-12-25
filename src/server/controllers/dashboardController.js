@@ -263,9 +263,9 @@ const fetchDashboardData = async (userId) => {
   const loanStatsQuery = `
     SELECT 
       COUNT(*) as total_loans,
-      SUM(CASE WHEN status IN ('approved', 'disbursed') THEN 1 ELSE 0 END) as active_loans,
-      SUM(CASE WHEN status IN ('approved', 'disbursed') THEN loan_amount ELSE 0 END) as total_loan_amount,
-      SUM(CASE WHEN status IN ('approved', 'disbursed') THEN loan_amount ELSE 0 END) as outstanding_amount
+      SUM(CASE WHEN status IN ('approved', 'account_manager') THEN 1 ELSE 0 END) as active_loans,
+      SUM(CASE WHEN status IN ('approved', 'account_manager') THEN loan_amount ELSE 0 END) as total_loan_amount,
+      SUM(CASE WHEN status IN ('approved', 'account_manager') THEN loan_amount ELSE 0 END) as outstanding_amount
     FROM loan_applications 
     WHERE user_id = ?
   `;
@@ -285,7 +285,7 @@ const fetchDashboardData = async (userId) => {
       loan_purpose,
       DATEDIFF(CURDATE(), disbursed_at) as days_since_disbursement
     FROM loan_applications
-    WHERE user_id = ? AND status IN ('approved', 'disbursed')
+    WHERE user_id = ? AND status IN ('approved', 'account_manager')
     ORDER BY created_at DESC
   `;
   const activeLoans = await executeQuery(activeLoansQuery, [userId]);

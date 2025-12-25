@@ -31,8 +31,8 @@ export const ApplicationUnderReviewPage = () => {
         const latestApplication = response.data.applications[0];
         setApplicationStatus(latestApplication.status);
         
-        // If application is approved or disbursed, redirect to dashboard
-        if (['approved', 'disbursed'].includes(latestApplication.status)) {
+        // If application is approved, redirect to dashboard
+        if (latestApplication.status === 'approved') {
           navigate('/dashboard');
         }
       }

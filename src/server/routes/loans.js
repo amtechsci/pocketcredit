@@ -7,11 +7,6 @@ const router = express.Router();
 // LOAN APPLICATION MANAGEMENT
 // =====================================================
 
-// Test endpoint
-router.get('/test', (req, res) => {
-  res.json({ message: 'Loans route is working' });
-});
-
 // NOTE: Old /api/loans/apply endpoint removed - use /api/loan-applications/apply instead
 
 // GET /api/loans/pending - Get Pending Loan Applications for Dashboard

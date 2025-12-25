@@ -142,7 +142,7 @@ const schemas = {
 
   // Admin Applications schemas
   updateApplicationStatus: Joi.object({
-    status: Joi.string().valid('applied', 'under_review', 'approved', 'rejected', 'disbursed', 'pending_documents').required(),
+    status: Joi.string().valid('applied', 'under_review', 'approved', 'rejected', 'pending_documents').required(),
     reason: Joi.string().max(500).allow(''),
     assignedManager: Joi.string().min(2).max(100).allow(''),
     recoveryOfficer: Joi.string().min(2).max(100).allow('')
@@ -244,7 +244,7 @@ const querySchemas = {
   }),
 
   loanFilter: Joi.object({
-    status: Joi.string().valid('pending', 'under_review', 'approved', 'rejected', 'disbursed', 'active', 'closed'),
+    status: Joi.string().valid('pending', 'under_review', 'approved', 'rejected', 'active', 'closed'),
     type: Joi.string().valid('personal', 'business'),
     minAmount: Joi.number().min(0),
     maxAmount: Joi.number().min(0),

@@ -1361,7 +1361,7 @@ export function UserProfileDetail() {
         amount: 100000,
         principalAmount: 100000,
         type: 'Personal Loan',
-        status: 'disbursed',
+        status: 'account_manager',
         appliedDate: '2025-01-05',
         approvedDate: '2025-01-06',
         disbursedDate: '2025-01-07',

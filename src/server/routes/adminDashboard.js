@@ -39,7 +39,7 @@ const getDashboardStats = async (req, res) => {
     ] = await Promise.all([
       executeQuery('SELECT COUNT(*) as total, SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as recent, SUM(CASE WHEN kyc_completed = 1 THEN 1 ELSE 0 END) as verified, SUM(CASE WHEN kyc_completed = 0 THEN 1 ELSE 0 END) as pending FROM users', [startDate]),
       executeQuery('SELECT COUNT(*) as total, SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as recent, SUM(CASE WHEN LOWER(status) IN ("submitted", "pending", "under_review") THEN 1 ELSE 0 END) as pending, SUM(CASE WHEN LOWER(status) = "follow_up" THEN 1 ELSE 0 END) as follow_up, SUM(CASE WHEN LOWER(status) = "rejected" THEN 1 ELSE 0 END) as rejected, SUM(loan_amount) as totalAmount, AVG(loan_amount) as avgAmount FROM loan_applications', [startDate]),
-      executeQuery('SELECT COUNT(*) as total, SUM(CASE WHEN status = "approved" THEN 1 ELSE 0 END) as active, SUM(CASE WHEN status = "disbursed" THEN 1 ELSE 0 END) as disbursed, SUM(loan_amount) as totalDisbursed, AVG(loan_amount) as avgAmount FROM loan_applications WHERE status IN ("approved", "disbursed")')
+      executeQuery('SELECT COUNT(*) as total, SUM(CASE WHEN status = "approved" THEN 1 ELSE 0 END) as active, SUM(CASE WHEN status = "account_manager" THEN 1 ELSE 0 END) as disbursed, SUM(loan_amount) as totalDisbursed, AVG(loan_amount) as avgAmount FROM loan_applications WHERE status IN ("approved", "account_manager")')
     ]);
 
     const users = usersResult[0];
