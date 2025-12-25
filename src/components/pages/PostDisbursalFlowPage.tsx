@@ -491,24 +491,40 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
 
         toast.success('Redirecting to eNACH authorization...');
 
+        // Check if this is an NPCI eNACH URL (always requires POST)
+        const isNpciUrl = authorization_url && authorization_url.includes('enach.npci.org.in');
+        
         // Handle redirect based on method
-        // If redirect_method is "post", we need to submit a form instead of using window.location.href
-        if (redirect_method === 'post' || redirect_action === 'post') {
+        // NPCI URLs and explicit POST redirects need form submission
+        if (redirect_method === 'post' || redirect_action === 'post' || isNpciUrl) {
           // Create a form and submit it with POST method
           const form = document.createElement('form');
           form.method = 'POST';
           form.action = authorization_url;
           form.style.display = 'none';
+          form.target = '_self'; // Submit in same window
 
           // Add payload fields if provided
           if (redirect_payload && typeof redirect_payload === 'object') {
+            // Handle nested objects in payload
             Object.keys(redirect_payload).forEach((key) => {
+              const value = redirect_payload[key];
+              if (value === null || value === undefined) {
+                return; // Skip null/undefined values
+              }
+              
               const input = document.createElement('input');
               input.type = 'hidden';
               input.name = key;
-              input.value = typeof redirect_payload[key] === 'object' 
-                ? JSON.stringify(redirect_payload[key]) 
-                : String(redirect_payload[key]);
+              
+              if (typeof value === 'object' && !Array.isArray(value)) {
+                // For nested objects, flatten or stringify based on NPCI requirements
+                // NPCI typically expects flat form fields, so we stringify complex objects
+                input.value = JSON.stringify(value);
+              } else {
+                input.value = String(value);
+              }
+              
               form.appendChild(input);
             });
           }

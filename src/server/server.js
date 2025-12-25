@@ -165,6 +165,14 @@ app.use(cors({
     // Allow production domain
     if (origin === 'https://pocketcredit.in') return callback(null, true);
 
+    // Allow Cashfree domains (for webhooks and callbacks)
+    if (origin.includes('cashfree.com')) return callback(null, true);
+    if (origin.includes('cashfree.net')) return callback(null, true);
+    
+    // Allow NPCI eNACH domain (for authorization callbacks)
+    if (origin.includes('enach.npci.org.in')) return callback(null, true);
+    if (origin.includes('npci.org.in')) return callback(null, true);
+
     // Reject all others
     callback(new Error('Not allowed by CORS'));
   },

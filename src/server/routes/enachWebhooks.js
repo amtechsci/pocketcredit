@@ -574,24 +574,46 @@ async function handleMandateRejected(eventData, requestId) {
  * Cashfree sends data in: data.subscription_details and data.authorization_details
  */
 async function handleSubscriptionStatusChanged(eventData, requestId) {
+    console.log(`[Webhook ${requestId}] 📥 handleSubscriptionStatusChanged called with eventData:`, {
+        hasSubscriptionDetails: !!eventData.subscription_details,
+        hasSubscription: !!eventData.subscription,
+        hasAuthorizationDetails: !!eventData.authorization_details,
+        eventDataKeys: Object.keys(eventData || {})
+    });
+
     // Cashfree sends data in different formats - handle both
     const subscriptionDetails = eventData.subscription_details || eventData.subscription || eventData;
     const authorizationDetails = eventData.authorization_details || {};
     
-    const subscriptionId = subscriptionDetails.subscription_id;
-    const cfSubscriptionId = subscriptionDetails.cf_subscription_id;
-    const subscriptionStatus = subscriptionDetails.subscription_status;
-    const authorizationStatus = authorizationDetails.authorizationStatus || authorizationDetails.authorization_status;
-    const authorizationReference = authorizationDetails.authorizationReference || authorizationDetails.authorization_reference;
-    const authorizationTime = authorizationDetails.authorizationTime || authorizationDetails.authorization_time;
-    const paymentId = authorizationDetails.paymentId || authorizationDetails.payment_id;
+    const subscriptionId = subscriptionDetails?.subscription_id;
+    const cfSubscriptionId = subscriptionDetails?.cf_subscription_id;
+    const subscriptionStatus = subscriptionDetails?.subscription_status;
+    const authorizationStatus = authorizationDetails?.authorizationStatus || authorizationDetails?.authorization_status;
+    const authorizationReference = authorizationDetails?.authorizationReference || authorizationDetails?.authorization_reference;
+    const authorizationTime = authorizationDetails?.authorizationTime || authorizationDetails?.authorization_time;
+    const paymentId = authorizationDetails?.paymentId || authorizationDetails?.payment_id;
 
-    console.log(`[Webhook ${requestId}] Processing SUBSCRIPTION_STATUS_CHANGED for ${subscriptionId}`, {
+    console.log(`[Webhook ${requestId}] Processing SUBSCRIPTION_STATUS_CHANGED:`, {
+        subscriptionId,
+        cfSubscriptionId,
         subscriptionStatus,
         authorizationStatus,
-        cfSubscriptionId,
-        authorizationReference
+        authorizationReference,
+        authorizationTime,
+        paymentId,
+        subscriptionDetailsKeys: subscriptionDetails ? Object.keys(subscriptionDetails) : [],
+        authorizationDetailsKeys: authorizationDetails ? Object.keys(authorizationDetails) : []
     });
+
+    if (!subscriptionId && !cfSubscriptionId) {
+        console.error(`[Webhook ${requestId}] ❌ Missing subscription identifiers:`, {
+            subscriptionId,
+            cfSubscriptionId,
+            subscriptionDetails,
+            eventData
+        });
+        throw new Error('Missing subscription_id or cf_subscription_id in webhook payload');
+    }
 
     // Determine the final status based on subscription and authorization status
     let finalStatus = subscriptionStatus;
@@ -616,12 +638,44 @@ async function handleSubscriptionStatusChanged(eventData, requestId) {
     }
 
     // Update subscription in database
+    // Note: authorization_reference is stored in cashfree_response JSON, not as a separate column
     try {
-        await executeQuery(
+        // First, check if subscription exists
+        const existingSubscriptions = await executeQuery(
+            `SELECT id, subscription_id, cf_subscription_id, status FROM enach_subscriptions 
+             WHERE subscription_id = ? OR cf_subscription_id = ?`,
+            [subscriptionId, cfSubscriptionId]
+        );
+
+        if (!existingSubscriptions || existingSubscriptions.length === 0) {
+            console.error(`[Webhook ${requestId}] ❌ Subscription not found in database:`, {
+                subscriptionId,
+                cfSubscriptionId,
+                searchedBy: {
+                    subscription_id: subscriptionId,
+                    cf_subscription_id: cfSubscriptionId
+                }
+            });
+            throw new Error(`Subscription not found: ${subscriptionId} (CF: ${cfSubscriptionId})`);
+        }
+
+        console.log(`[Webhook ${requestId}] Found ${existingSubscriptions.length} subscription(s) to update:`, {
+            subscriptionId,
+            cfSubscriptionId,
+            currentStatus: existingSubscriptions[0].status
+        });
+
+        // Include authorization_reference in the cashfree_response JSON
+        const updatedResponse = {
+            ...eventData,
+            authorization_reference: authorizationReference || null,
+            authorization_time: authorizationTime || null
+        };
+        
+        const updateResult = await executeQuery(
             `UPDATE enach_subscriptions 
              SET status = ?,
                  mandate_status = ?,
-                 authorization_reference = ?,
                  authorized_at = ?,
                  cashfree_response = ?,
                  updated_at = NOW()
@@ -629,22 +683,39 @@ async function handleSubscriptionStatusChanged(eventData, requestId) {
             [
                 finalStatus,
                 mandateStatus,
-                authorizationReference || null,
                 authorizationTime ? new Date(authorizationTime) : null,
-                JSON.stringify(eventData),
+                JSON.stringify(updatedResponse),
                 subscriptionId,
                 cfSubscriptionId
             ]
         );
 
-        console.log(`[Webhook ${requestId}] ✅ Subscription ${subscriptionId} updated:`, {
-            status: finalStatus,
-            mandateStatus: mandateStatus,
-            authorizationStatus: authorizationStatus,
-            authorizationReference: authorizationReference
-        });
+        const affectedRows = updateResult?.affectedRows || updateResult || 0;
+        
+        if (affectedRows === 0) {
+            console.warn(`[Webhook ${requestId}] ⚠️  UPDATE query executed but no rows affected:`, {
+                subscriptionId,
+                cfSubscriptionId,
+                finalStatus,
+                mandateStatus
+            });
+        } else {
+            console.log(`[Webhook ${requestId}] ✅ Subscription ${subscriptionId} updated (${affectedRows} row(s) affected):`, {
+                status: finalStatus,
+                mandateStatus: mandateStatus,
+                authorizationStatus: authorizationStatus,
+                authorizationReference: authorizationReference,
+                previousStatus: existingSubscriptions[0].status
+            });
+        }
     } catch (dbError) {
         console.error(`[Webhook ${requestId}] ❌ Error updating subscription:`, dbError);
+        console.error(`[Webhook ${requestId}] Error details:`, {
+            message: dbError.message,
+            stack: dbError.stack,
+            subscriptionId,
+            cfSubscriptionId
+        });
         throw dbError;
     }
 }
@@ -680,34 +751,57 @@ router.get('/callback', async (req, res) => {
         const status = req.query.status || req.query.subscription_status;
         const error = req.query.error || req.query.error_message;
 
-        // Redirect to frontend with all parameters
-        const frontendUrl = process.env.FRONTEND_URL || 'https://pocketcredit.in';
-        const redirectUrl = new URL('/post-disbursal', frontendUrl);
-        
-        if (applicationId) redirectUrl.searchParams.set('applicationId', applicationId);
-        if (subscriptionId) redirectUrl.searchParams.set('subscription_id', subscriptionId);
-        redirectUrl.searchParams.set('enach', 'complete');
-        if (status) redirectUrl.searchParams.set('status', status);
-        if (error) redirectUrl.searchParams.set('error', error);
+        // Build redirect URL safely
+        let redirectUrl;
+        try {
+            const frontendUrl = process.env.FRONTEND_URL || 'https://pocketcredit.in';
+            redirectUrl = new URL('/post-disbursal', frontendUrl);
+            
+            if (applicationId) redirectUrl.searchParams.set('applicationId', applicationId);
+            if (subscriptionId) redirectUrl.searchParams.set('subscription_id', subscriptionId);
+            redirectUrl.searchParams.set('enach', 'complete');
+            if (status) redirectUrl.searchParams.set('status', status);
+            if (error) redirectUrl.searchParams.set('error', error);
 
-        console.log(`[eNACH Callback ${requestId}] Redirecting to frontend: ${redirectUrl.toString()}`);
+            console.log(`[eNACH Callback ${requestId}] Redirecting to frontend: ${redirectUrl.toString()}`);
+        } catch (urlError) {
+            console.error(`[eNACH Callback ${requestId}] Error building redirect URL:`, urlError);
+            // Fallback to simple redirect
+            redirectUrl = `https://pocketcredit.in/post-disbursal?enach=complete${applicationId ? '&applicationId=' + applicationId : ''}${subscriptionId ? '&subscription_id=' + subscriptionId : ''}`;
+        }
         
-        res.redirect(redirectUrl.toString());
+        if (!res.headersSent) {
+            res.redirect(302, redirectUrl.toString());
+        }
     } catch (error) {
         console.error(`[eNACH Callback ${requestId}] Fatal error in callback handler:`, error);
         console.error(`[eNACH Callback ${requestId}] Error stack:`, error.stack);
         
-        // Try to redirect anyway, or show error page
-        const frontendUrl = process.env.FRONTEND_URL || 'https://pocketcredit.in';
-        const redirectUrl = new URL('/post-disbursal', frontendUrl);
-        
-        if (req.query.applicationId) redirectUrl.searchParams.set('applicationId', req.query.applicationId);
-        if (req.query.subscription_id) redirectUrl.searchParams.set('subscription_id', req.query.subscription_id);
-        redirectUrl.searchParams.set('enach', 'complete');
-        redirectUrl.searchParams.set('error', 'callback_error');
-        
+        // Try to redirect anyway, or return error response
         if (!res.headersSent) {
-            res.redirect(redirectUrl.toString());
+            try {
+                const frontendUrl = process.env.FRONTEND_URL || 'https://pocketcredit.in';
+                const applicationId = req.query.applicationId;
+                const subscriptionId = req.query.subscription_id || req.query.subscriptionId;
+                
+                let fallbackUrl = `${frontendUrl}/post-disbursal?enach=complete&error=callback_error`;
+                if (applicationId) fallbackUrl += `&applicationId=${applicationId}`;
+                if (subscriptionId) fallbackUrl += `&subscription_id=${subscriptionId}`;
+                
+                res.redirect(302, fallbackUrl);
+            } catch (redirectError) {
+                console.error(`[eNACH Callback ${requestId}] Failed to redirect:`, redirectError);
+                // Last resort - return JSON error
+                res.status(500).json({
+                    success: false,
+                    status: 'error',
+                    message: 'Callback processing failed. Please check your subscription status manually.',
+                    requestId
+                });
+            }
+        } else {
+            // Headers already sent, can't redirect or send JSON
+            console.error(`[eNACH Callback ${requestId}] Headers already sent, cannot send error response`);
         }
     }
 });
@@ -738,51 +832,62 @@ router.post('/callback', express.json(), express.urlencoded({ extended: true }),
         }
 
         // Extract parameters from body or query
-        const applicationId = req.body.applicationId || req.query.applicationId;
-        const subscriptionId = req.body.subscription_id || req.body.subscriptionId || req.query.subscription_id;
-        const status = req.body.status || req.body.subscription_status || req.query.status;
-        const error = req.body.error || req.body.error_message || req.query.error;
+        const applicationId = req.body?.applicationId || req.query?.applicationId;
+        const subscriptionId = req.body?.subscription_id || req.body?.subscriptionId || req.query?.subscription_id;
+        const status = req.body?.status || req.body?.subscription_status || req.query?.status;
+        const error = req.body?.error || req.body?.error_message || req.query?.error;
 
-        // Redirect to frontend with all parameters
-        const frontendUrl = process.env.FRONTEND_URL || 'https://pocketcredit.in';
-        const redirectUrl = new URL('/post-disbursal', frontendUrl);
-        
-        if (applicationId) redirectUrl.searchParams.set('applicationId', applicationId);
-        if (subscriptionId) redirectUrl.searchParams.set('subscription_id', subscriptionId);
-        redirectUrl.searchParams.set('enach', 'complete');
-        if (status) redirectUrl.searchParams.set('status', status);
-        if (error) redirectUrl.searchParams.set('error', error);
+        // Build redirect URL safely
+        let redirectUrl;
+        try {
+            const frontendUrl = process.env.FRONTEND_URL || 'https://pocketcredit.in';
+            redirectUrl = new URL('/post-disbursal', frontendUrl);
+            
+            if (applicationId) redirectUrl.searchParams.set('applicationId', applicationId);
+            if (subscriptionId) redirectUrl.searchParams.set('subscription_id', subscriptionId);
+            redirectUrl.searchParams.set('enach', 'complete');
+            if (status) redirectUrl.searchParams.set('status', status);
+            if (error) redirectUrl.searchParams.set('error', error);
 
-        console.log(`[eNACH Callback ${requestId}] Redirecting to frontend: ${redirectUrl.toString()}`);
+            console.log(`[eNACH Callback ${requestId}] Redirecting to frontend: ${redirectUrl.toString()}`);
+        } catch (urlError) {
+            console.error(`[eNACH Callback ${requestId}] Error building redirect URL:`, urlError);
+            // Fallback to simple redirect
+            redirectUrl = `https://pocketcredit.in/post-disbursal?enach=complete${applicationId ? '&applicationId=' + applicationId : ''}${subscriptionId ? '&subscription_id=' + subscriptionId : ''}`;
+        }
         
-        res.redirect(redirectUrl.toString());
+        if (!res.headersSent) {
+            res.redirect(302, redirectUrl.toString());
+        }
     } catch (error) {
         console.error(`[eNACH Callback ${requestId}] Fatal error in callback handler:`, error);
         console.error(`[eNACH Callback ${requestId}] Error stack:`, error.stack);
         
-        // Try to redirect anyway, or show error page
-        const frontendUrl = process.env.FRONTEND_URL || 'https://pocketcredit.in';
-        const redirectUrl = new URL('/post-disbursal', frontendUrl);
-        
-        if (req.body?.applicationId || req.query?.applicationId) {
-            redirectUrl.searchParams.set('applicationId', req.body?.applicationId || req.query?.applicationId);
-        }
-        if (req.body?.subscription_id || req.query?.subscription_id) {
-            redirectUrl.searchParams.set('subscription_id', req.body?.subscription_id || req.query?.subscription_id);
-        }
-        redirectUrl.searchParams.set('enach', 'complete');
-        redirectUrl.searchParams.set('error', 'callback_error');
-        
+        // Try to redirect anyway, or return error response
         if (!res.headersSent) {
-            res.redirect(redirectUrl.toString());
+            try {
+                const frontendUrl = process.env.FRONTEND_URL || 'https://pocketcredit.in';
+                const applicationId = req.body?.applicationId || req.query?.applicationId;
+                const subscriptionId = req.body?.subscription_id || req.query?.subscription_id;
+                
+                let fallbackUrl = `${frontendUrl}/post-disbursal?enach=complete&error=callback_error`;
+                if (applicationId) fallbackUrl += `&applicationId=${applicationId}`;
+                if (subscriptionId) fallbackUrl += `&subscription_id=${subscriptionId}`;
+                
+                res.redirect(302, fallbackUrl);
+            } catch (redirectError) {
+                console.error(`[eNACH Callback ${requestId}] Failed to redirect:`, redirectError);
+                // Last resort - return JSON error
+                res.status(500).json({
+                    success: false,
+                    status: 'error',
+                    message: 'Callback processing failed. Please check your subscription status manually.',
+                    requestId
+                });
+            }
         } else {
-            // If headers already sent, try to send JSON error
-            res.status(500).json({
-                success: false,
-                status: 'error',
-                message: 'Internal server error',
-                requestId
-            });
+            // Headers already sent, can't redirect or send JSON
+            console.error(`[eNACH Callback ${requestId}] Headers already sent, cannot send error response`);
         }
     }
 });

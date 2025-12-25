@@ -137,6 +137,23 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             : 'net_banking';
 
         // Fetch loan application details with all email fields and salary
+        // Convert applicationId to integer to ensure proper type matching
+        const applicationIdInt = parseInt(applicationId, 10);
+        if (isNaN(applicationIdInt)) {
+            console.error(`[${requestId}] [eNACH] Invalid applicationId: ${applicationId}`);
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid application ID'
+            });
+        }
+
+        console.log(`[${requestId}] [eNACH] Fetching loan application:`, {
+            applicationId: applicationIdInt,
+            userId: userId,
+            applicationIdType: typeof applicationIdInt,
+            userIdType: typeof userId
+        });
+
         const loanQuery = `
       SELECT 
         la.*,
@@ -152,9 +169,29 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
       WHERE la.id = ? AND la.user_id = ?
     `;
 
-        const loans = await executeQuery(loanQuery, [applicationId, userId]);
+        const loans = await executeQuery(loanQuery, [applicationIdInt, userId]);
+
+        console.log(`[${requestId}] [eNACH] Loan query result:`, {
+            found: loans && loans.length > 0,
+            count: loans ? loans.length : 0,
+            applicationId: applicationIdInt,
+            userId: userId
+        });
 
         if (!loans || loans.length === 0) {
+            // Check if application exists but belongs to different user
+            const checkQuery = `SELECT id, user_id FROM loan_applications WHERE id = ?`;
+            const checkResult = await executeQuery(checkQuery, [applicationIdInt]);
+            
+            if (checkResult && checkResult.length > 0) {
+                console.error(`[${requestId}] [eNACH] Application ${applicationIdInt} exists but belongs to user ${checkResult[0].user_id}, not ${userId}`);
+                return res.status(403).json({
+                    success: false,
+                    message: 'You do not have permission to access this loan application'
+                });
+            }
+            
+            console.error(`[${requestId}] [eNACH] Application ${applicationIdInt} not found in database`);
             return res.status(404).json({
                 success: false,
                 message: 'Loan application not found'
@@ -206,8 +243,8 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
 
         // Create or use existing plan
         // For simplicity, we'll create a plan per loan (or you can use a fixed plan ID)
-        const planId = `plan_loan_${applicationId}_${Date.now()}`;
-        const subscriptionId = `sub_loan_${applicationId}_${Date.now()}`;
+        const planId = `plan_loan_${applicationIdInt}_${Date.now()}`;
+        const subscriptionId = `sub_loan_${applicationIdInt}_${Date.now()}`;
 
         // Step 1: Create Plan - ON_DEMAND type (merchant triggers charges manually)
         // For ON_DEMAND plans:
@@ -341,7 +378,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 }
             ],
             subscription_meta: {
-                return_url: `${BACKEND_URL}/api/enach/callback?applicationId=${applicationId}&subscription_id=${subscriptionId}`,
+                return_url: `${BACKEND_URL}/api/enach/callback?applicationId=${applicationIdInt}&subscription_id=${subscriptionId}`,
                 notification_channel: ['EMAIL', 'SMS']
             }
             // NOTE: authorization_details is NOT included for eNACH subscriptions
@@ -349,7 +386,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             // The subscription will be created and authorization link will be sent via SMS/Email
         };
 
-        console.log(`[${requestId}] [eNACH] Creating subscription for application ${applicationId}`, {
+        console.log(`[${requestId}] [eNACH] Creating subscription for application ${applicationIdInt}`, {
             subscription_id: subscriptionId,
             plan_id: planId,
             environment: IS_PRODUCTION ? 'PRODUCTION' : 'SANDBOX'
@@ -615,7 +652,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         try {
             await executeQuery(insertQuery, [
                 userId,
-                applicationId,
+                applicationIdInt,
                 subscriptionId,
                 subscriptionResponse.data.cf_subscription_id || null,
                 planId,
