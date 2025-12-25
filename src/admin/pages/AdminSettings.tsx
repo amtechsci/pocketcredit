@@ -2836,13 +2836,20 @@ export function AdminSettings() {
                 <>
                   {/* Plan Form */}
                   {showPlanForm && (
-                    <div className="mb-6 p-6 bg-blue-50 border border-blue-200 rounded-lg">
-                      <h3 className="text-md font-semibold text-gray-900 mb-4">
-                        {editingPlan ? 'Edit Loan Plan' : 'Add New Loan Plan'}
-                      </h3>
-                      <form onSubmit={saveLoanPlan} className="space-y-6">
-                        {/* Basic Info */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="mb-6 bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                      <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
+                        <h3 className="text-lg font-semibold text-white">
+                          {editingPlan ? 'Edit Loan Plan' : 'Add New Loan Plan'}
+                        </h3>
+                      </div>
+                      <form onSubmit={saveLoanPlan} className="p-6 space-y-8">
+                        {/* Basic Information Section */}
+                        <div className="border-b border-gray-200 pb-6">
+                          <h4 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                            <div className="w-1 h-5 bg-blue-600 rounded"></div>
+                            Basic Information
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                               Plan Name *
@@ -2884,11 +2891,16 @@ export function AdminSettings() {
                             </select>
                           </div>
                         </div>
+                        </div>
 
-                        {/* Conditional Fields based on Plan Type */}
-                        {planForm.plan_type === 'single' ? (
-                          <div className="space-y-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Repayment Configuration Section */}
+                        <div className="border-b border-gray-200 pb-6">
+                          <h4 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                            <div className="w-1 h-5 bg-blue-600 rounded"></div>
+                            Repayment Configuration
+                          </h4>
+                          {planForm.plan_type === 'single' ? (
+                            <div className="space-y-4">
                               <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                   Duration (Days) *
@@ -2904,21 +2916,20 @@ export function AdminSettings() {
                                 />
                                 <p className="text-xs text-gray-500 mt-1">Base duration for repayment calculation</p>
                               </div>
-                            </div>
-                            <div className="flex items-center space-x-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                              <input
-                                type="checkbox"
-                                id="calculate_by_salary_date"
-                                checked={planForm.calculate_by_salary_date}
-                                onChange={(e) => setPlanForm({ ...planForm, calculate_by_salary_date: e.target.checked })}
-                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                              />
-                              <label htmlFor="calculate_by_salary_date" className="text-sm font-medium text-gray-700 cursor-pointer">
-                                Calculate by salary date
-                              </label>
-                            </div>
+                              <div className="flex items-center space-x-2 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                <input
+                                  type="checkbox"
+                                  id="calculate_by_salary_date"
+                                  checked={planForm.calculate_by_salary_date}
+                                  onChange={(e) => setPlanForm({ ...planForm, calculate_by_salary_date: e.target.checked })}
+                                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                />
+                                <label htmlFor="calculate_by_salary_date" className="text-sm font-medium text-gray-700 cursor-pointer">
+                                  Calculate by salary date
+                                </label>
+                              </div>
                             {planForm.calculate_by_salary_date && (
-                              <div className="ml-6 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded">
+                              <div className="mt-3 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded">
                                 <p className="text-xs text-yellow-800">
                                   <strong>How it works:</strong> The repayment date will be calculated based on the user's salary date. 
                                   If the duration to the next salary date is less than the specified duration, it will extend to the following month's salary date. 
@@ -2926,10 +2937,10 @@ export function AdminSettings() {
                                 </p>
                               </div>
                             )}
-                          </div>
-                        ) : (
-                          <div className="space-y-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            </div>
+                          ) : (
+                            <div className="space-y-4">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                   EMI Frequency *
@@ -2960,106 +2971,117 @@ export function AdminSettings() {
                                   min="1"
                                 />
                               </div>
-                            </div>
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Duration (Days) {planForm.calculate_by_salary_date ? '*' : ''} 
+                                  <span className="text-xs text-gray-500 font-normal">(Minimum days between loan date and first EMI)</span>
+                                </label>
+                                <input
+                                  type="number"
+                                  value={planForm.repayment_days}
+                                  onChange={(e) => setPlanForm({ ...planForm, repayment_days: e.target.value })}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  placeholder="e.g., 15"
+                                  required={planForm.calculate_by_salary_date}
+                                  min="1"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {planForm.calculate_by_salary_date 
+                                    ? "If days between loan date and salary date is less than this, first EMI moves to next month's salary date"
+                                    : "Minimum days before first EMI (required when 'Calculate by salary date' is enabled)"}
+                                </p>
+                              </div>
+                              <div className="flex items-center space-x-2 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                <input
+                                  type="checkbox"
+                                  id="calculate_by_salary_date_emi"
+                                  checked={planForm.calculate_by_salary_date}
+                                  onChange={(e) => setPlanForm({ ...planForm, calculate_by_salary_date: e.target.checked })}
+                                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                />
+                                <label htmlFor="calculate_by_salary_date_emi" className="text-sm font-medium text-gray-700 cursor-pointer">
+                                  Calculate by salary date
+                                </label>
+                              </div>
+                              {planForm.calculate_by_salary_date && (
+                                <div className="mt-3 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded">
+                                  <p className="text-xs text-yellow-800">
+                                    <strong>How it works:</strong> EMI dates will be calculated based on the user's salary date. 
+                                    For monthly EMIs, each EMI will be scheduled on the user's salary date of each month (e.g., 31st). 
+                                    If a month doesn't have that date (e.g., Feb 31), it will use the last day of that month (e.g., Feb 28). 
+                                    If the duration to the next salary date is less than the specified duration, it will extend to the following month's salary date.
+                                  </p>
+                                </div>
+                              )}
+                              </div>
+                            )}
+                        </div>
+
+                        {/* Interest & Description Section */}
+                        <div className="border-b border-gray-200 pb-6">
+                          <h4 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                            <div className="w-1 h-5 bg-blue-600 rounded"></div>
+                            Interest Rate & Description
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Duration (Days) {planForm.calculate_by_salary_date ? '*' : ''} <span className="text-xs text-gray-500">(Minimum days between loan date and first EMI)</span>
+                                Interest Rate (% per day) *
                               </label>
                               <input
                                 type="number"
-                                value={planForm.repayment_days}
-                                onChange={(e) => setPlanForm({ ...planForm, repayment_days: e.target.value })}
+                                step="0.0001"
+                                value={planForm.interest_percent_per_day}
+                                onChange={(e) => setPlanForm({ ...planForm, interest_percent_per_day: e.target.value })}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="e.g., 15"
-                                required={planForm.calculate_by_salary_date}
-                                min="1"
+                                placeholder="0.001"
+                                required
+                                min="0"
                               />
-                              <p className="text-xs text-gray-500 mt-1">
-                                {planForm.calculate_by_salary_date 
-                                  ? "If days between loan date and salary date is less than this, first EMI moves to next month's salary date"
-                                  : "Minimum days before first EMI (required when 'Calculate by salary date' is enabled)"}
-                              </p>
+                              <p className="text-xs text-gray-500 mt-1">e.g., 0.001 = 0.1% per day</p>
                             </div>
-                            <div className="flex items-center space-x-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Description
+                              </label>
+                              <textarea
+                                value={planForm.description}
+                                onChange={(e) => setPlanForm({ ...planForm, description: e.target.value })}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                placeholder="Brief description of this plan"
+                                rows={2}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Loan Extension Section */}
+                        <div className="border-b border-gray-200 pb-6">
+                          <h4 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                            <div className="w-1 h-5 bg-purple-600 rounded"></div>
+                            Loan Extension Settings
+                          </h4>
+                          <div className="space-y-4 p-4 bg-gradient-to-br from-purple-50 to-indigo-50 border border-purple-200 rounded-lg">
+                            <div className="flex items-center space-x-2 mb-4">
                               <input
                                 type="checkbox"
-                                id="calculate_by_salary_date_emi"
-                                checked={planForm.calculate_by_salary_date}
-                                onChange={(e) => setPlanForm({ ...planForm, calculate_by_salary_date: e.target.checked })}
-                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                id="allow_extension"
+                                checked={planForm.allow_extension}
+                                onChange={(e) => setPlanForm({ ...planForm, allow_extension: e.target.checked })}
+                                className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
                               />
-                              <label htmlFor="calculate_by_salary_date_emi" className="text-sm font-medium text-gray-700 cursor-pointer">
-                                Calculate by salary date
+                              <label htmlFor="allow_extension" className="text-sm font-medium text-gray-700 cursor-pointer">
+                                Allow Loan Extension
                               </label>
                             </div>
-                            {planForm.calculate_by_salary_date && (
-                              <div className="ml-6 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded">
-                                <p className="text-xs text-yellow-800">
-                                  <strong>How it works:</strong> EMI dates will be calculated based on the user's salary date. 
-                                  For monthly EMIs, each EMI will be scheduled on the user's salary date of each month (e.g., 31st). 
-                                  If a month doesn't have that date (e.g., Feb 31), it will use the last day of that month (e.g., Feb 28). 
-                                  If the duration to the next salary date is less than the specified duration, it will extend to the following month's salary date.
+                            
+                            {planForm.allow_extension && (
+                              <div className="space-y-4 bg-white p-4 rounded-lg border border-purple-100">
+                                <p className="text-xs text-gray-600 mb-4">
+                                  Configure when users can extend their loan and how many extensions are allowed.
                                 </p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Other Settings */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Interest Rate (% per day) *
-                            </label>
-                            <input
-                              type="number"
-                              step="0.0001"
-                              value={planForm.interest_percent_per_day}
-                              onChange={(e) => setPlanForm({ ...planForm, interest_percent_per_day: e.target.value })}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              placeholder="0.001"
-                              required
-                              min="0"
-                            />
-                            <p className="text-xs text-gray-500 mt-1">e.g., 0.001 = 0.1% per day</p>
-                          </div>
-                        </div>
-
-                        {/* Description */}
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Description
-                          </label>
-                          <textarea
-                            value={planForm.description}
-                            onChange={(e) => setPlanForm({ ...planForm, description: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="Brief description of this plan"
-                            rows={2}
-                          />
-                        </div>
-
-                        {/* Loan Extension Option */}
-                        <div className="space-y-4 p-4 bg-purple-50 border border-purple-200 rounded-md">
-                          <div className="flex items-center space-x-2">
-                            <input
-                              type="checkbox"
-                              id="allow_extension"
-                              checked={planForm.allow_extension}
-                              onChange={(e) => setPlanForm({ ...planForm, allow_extension: e.target.checked })}
-                              className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
-                            />
-                            <label htmlFor="allow_extension" className="text-sm font-medium text-gray-700 cursor-pointer">
-                              Allow Loan Extension
-                            </label>
-                          </div>
-                          
-                          {planForm.allow_extension && (
-                            <div className="ml-6 space-y-4">
-                              <p className="text-xs text-gray-600 mb-2">
-                                Set the date range when users can extend their loan. Use negative numbers for days before due date (D-5) and positive numbers for days after due date (D+15).
-                              </p>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div>
                                   <label className="block text-sm font-medium text-gray-700 mb-1">
                                     Show From (Days) *
@@ -3106,18 +3128,24 @@ export function AdminSettings() {
                                   />
                                   <p className="text-xs text-gray-500 mt-1">Maximum number of extensions allowed (e.g., 4 for max 4 extensions)</p>
                                 </div>
+                                </div>
+                                <div className="mt-4 p-3 bg-blue-50 border-l-4 border-blue-400 rounded">
+                                  <p className="text-xs text-blue-800">
+                                    <strong>Example:</strong> If set to D-5 to D+15, users can extend their loan starting from 5 days before the due date until 15 days after the due date.
+                                  </p>
+                                </div>
                               </div>
-                              <div className="p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded">
-                                <p className="text-xs text-yellow-800">
-                                  <strong>Example:</strong> If set to D-5 to D+15, users can extend their loan starting from 5 days before the due date until 15 days after the due date.
-                                </p>
-                              </div>
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </div>
 
-                        {/* Status */}
-                        <div className="flex items-center space-x-2 p-3 bg-gray-50 border border-gray-200 rounded-md">
+                        {/* Status Section */}
+                        <div className="pb-6">
+                          <h4 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                            <div className="w-1 h-5 bg-blue-600 rounded"></div>
+                            Plan Status
+                          </h4>
+                          <div className="flex items-center space-x-2 p-4 bg-gray-50 border border-gray-200 rounded-lg">
                           <input
                             type="checkbox"
                             id="plan_is_active"
@@ -3125,25 +3153,27 @@ export function AdminSettings() {
                             onChange={(e) => setPlanForm({ ...planForm, is_active: e.target.checked })}
                             className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                           />
-                          <label htmlFor="plan_is_active" className="text-sm font-medium text-gray-700 cursor-pointer">
-                            Active (uncheck to make this plan inactive)
-                          </label>
+                            <label htmlFor="plan_is_active" className="text-sm font-medium text-gray-700 cursor-pointer">
+                              Active (uncheck to make this plan inactive)
+                            </label>
+                          </div>
                         </div>
 
-                        <div className="flex gap-2">
-                          <button
-                            type="submit"
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                          >
-                            <Save className="w-4 h-4 inline mr-1" />
-                            {editingPlan ? 'Update Plan' : 'Create Plan'}
-                          </button>
+                        {/* Form Actions */}
+                        <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
                           <button
                             type="button"
                             onClick={cancelEditPlan}
-                            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                            className="px-6 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
                           >
                             Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2 shadow-sm"
+                          >
+                            <Save className="w-4 h-4" />
+                            {editingPlan ? 'Update Plan' : 'Create Plan'}
                           </button>
                         </div>
                       </form>
