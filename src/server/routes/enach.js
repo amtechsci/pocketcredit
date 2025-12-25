@@ -121,7 +121,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
 
         await initializeDatabase();
         const userId = req.user.id;
-        const { applicationId } = req.body;
+        const { applicationId, authMode } = req.body;
 
         if (!applicationId) {
             return res.status(400).json({
@@ -129,6 +129,12 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 message: 'Application ID is required'
             });
         }
+
+        // Validate authMode - default to 'net_banking' if not provided
+        const validAuthModes = ['net_banking', 'debit_card', 'aadhaar'];
+        const selectedAuthMode = authMode && validAuthModes.includes(authMode) 
+            ? authMode 
+            : 'net_banking';
 
         // Fetch loan application details with all email fields and salary
         const loanQuery = `
@@ -444,51 +450,111 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             }
         }
 
-        // If still no URL, try to raise an authorization payment to get the authorization URL
-        // For eNACH, we may need to raise a payment/authorization request to get the URL
-        if (!authorizationUrl && subscriptionResponse.data.cf_subscription_id) {
-            const cfSubscriptionId = subscriptionResponse.data.cf_subscription_id;
+        // Step 3: Call Subscription Pay API to create an AUTH and get redirect URL
+        // According to Cashfree documentation: https://www.cashfree.com/docs/api-reference/payments/latest/subscription/payment/raise
+        // For seamless flow (redirect URL), we need to call /subscriptions/pay with payment_type: "AUTH"
+        // This will return the redirect URL in the response data.url field
+        if (!authorizationUrl && subscriptionResponse.data.subscription_session_id && subscriptionResponse.data.subscription_id) {
+            // Generate unique payment ID for this authorization
+            const paymentId = `auth_${subscriptionId}_${Date.now()}`;
+            
+            // Prepare the AUTH request payload
+            // For eNACH authorization, we need:
+            // - subscription_id: Our subscription ID
+            // - payment_id: Unique payment identifier
+            // - payment_type: "AUTH"
+            // - subscription_session_id: Required for AUTH
+            // - payment_method.enach: Must include channel, auth_mode, and account details
+            //   According to docs: channel is required, can be "link" for eNACH
+            const authPaymentPayload = {
+                subscription_id: subscriptionId,
+                payment_id: paymentId,
+                payment_type: 'AUTH',
+                subscription_session_id: subscriptionResponse.data.subscription_session_id,
+                payment_method: {
+                    enach: {
+                        channel: 'link', // Required: "link" for eNACH redirect flow
+                        auth_mode: selectedAuthMode, // Use selected auth mode from frontend
+                        account_holder_name: bank.account_holder_name || `${loan.first_name} ${loan.last_name}`,
+                        account_number: bank.account_number,
+                        account_type: (bank.account_type || 'SAVINGS').toUpperCase(),
+                        account_bank_code: bank.ifsc_code.substring(0, 4) // First 4 characters of IFSC
+                    }
+                }
+            };
             
             try {
-                console.log(`[${requestId}] [eNACH] Attempting to raise authorization payment for subscription: ${cfSubscriptionId}`);
-                // Try to raise an authorization payment - this might return the authorization URL
-                const authHeaders = getCashfreeHeaders();
-                const authUrl = `${CASHFREE_API_BASE}/subscriptions/${cfSubscriptionId}/authorize`;
-                const authBody = { authorization_amount: 0 }; // For ENACH, authorization_amount is always 0
+                console.log(`[${requestId}] [eNACH] Step 3: Calling Subscription Pay API to create AUTH and get redirect URL`);
                 
-                logApiCall('POST', authUrl, authHeaders, authBody);
+                const authHeaders = getCashfreeHeaders(paymentId);
+                const authUrl = `${CASHFREE_API_BASE}/subscriptions/pay`;
+                
+                logApiCall('POST', authUrl, authHeaders, authPaymentPayload);
                 
                 const authPaymentResponse = await axios.post(
                     authUrl,
-                    authBody,
-                    { headers: authHeaders }
+                    authPaymentPayload,
+                    { 
+                        headers: authHeaders,
+                        timeout: 60000 // 60 seconds timeout
+                    }
                 );
                 
-                logApiCall('POST', authUrl, authHeaders, authBody, authPaymentResponse);
+                logApiCall('POST', authUrl, authHeaders, authPaymentPayload, authPaymentResponse);
                 
-                // Check for authorization URL in the response
-                if (authPaymentResponse.data?.authorization_url) {
-                    authorizationUrl = authPaymentResponse.data.authorization_url;
-                    console.log(`[eNACH] Retrieved authorization URL from authorize endpoint: ${authorizationUrl}`);
-                } else if (authPaymentResponse.data?.data?.url) {
-                    // Sometimes URL is nested in data.url
+                // Extract redirect information from response
+                // According to documentation, the response structure is:
+                // {
+                //   "action": "custom" | "post",
+                //   "data": {
+                //     "url": "https://...",  // This is the redirect URL
+                //     "payload": {...},       // Payload for POST requests
+                //     "method": "post"        // HTTP method
+                //   },
+                //   "channel": "...",
+                //   "payment_status": "PENDING",
+                //   ...
+                // }
+                if (authPaymentResponse.data?.data?.url) {
+                    // Store the full response data for frontend to handle POST redirects
                     authorizationUrl = authPaymentResponse.data.data.url;
-                    console.log(`[eNACH] Retrieved authorization URL from data.url: ${authorizationUrl}`);
-                } else if (authPaymentResponse.data?.action === 'custom' && authPaymentResponse.data?.data?.url) {
-                    // For eNACH, URL might be in action: custom, data.url
-                    authorizationUrl = authPaymentResponse.data.data.url;
-                    console.log(`[eNACH] Retrieved authorization URL from custom action: ${authorizationUrl}`);
+                    const action = authPaymentResponse.data.action;
+                    const payload = authPaymentResponse.data.data.payload;
+                    const method = authPaymentResponse.data.data.method || (action === 'post' ? 'post' : 'get');
+                    
+                    console.log(`[eNACH] ✅ Retrieved authorization data from Subscription Pay API`);
+                    console.log(`[eNACH] URL: ${authorizationUrl}`);
+                    console.log(`[eNACH] Action: ${action || 'N/A'}`);
+                    console.log(`[eNACH] Method: ${method || 'N/A'}`);
+                    console.log(`[eNACH] Channel: ${authPaymentResponse.data.channel || 'N/A'}`);
+                    console.log(`[eNACH] Payment status: ${authPaymentResponse.data.payment_status || 'N/A'}`);
+                    
+                    // Store additional redirect info for frontend
+                    // We'll include this in the response so frontend can handle POST redirects
+                    subscriptionResponse.data._redirect_info = {
+                        action: action,
+                        method: method,
+                        payload: payload,
+                        url: authorizationUrl
+                    };
+                } else {
+                    console.warn(`[eNACH] ⚠️  Subscription Pay API response does not contain data.url`);
+                    console.warn(`[eNACH] Response structure:`, JSON.stringify(authPaymentResponse.data, null, 2));
                 }
             } catch (authError) {
-                const authHeaders = getCashfreeHeaders();
-                const authUrl = `${CASHFREE_API_BASE}/subscriptions/${cfSubscriptionId}/authorize`;
-                const authBody = { authorization_amount: 0 };
-                logApiCall('POST', authUrl, authHeaders, authBody, null, authError);
+                const authHeaders = getCashfreeHeaders(paymentId);
+                const authUrl = `${CASHFREE_API_BASE}/subscriptions/pay`;
+                logApiCall('POST', authUrl, authHeaders, authPaymentPayload, null, authError);
                 
-                console.warn(`[${requestId}] [eNACH] Could not raise authorization payment:`, {
+                console.error(`[${requestId}] [eNACH] ❌ Error calling Subscription Pay API:`, {
                     status: authError.response?.status,
-                    error: authError.response?.data || authError.message
+                    statusText: authError.response?.statusText,
+                    error: authError.response?.data || authError.message,
+                    code: authError.code
                 });
+                
+                // Don't fail the entire request - we can still fall back to SMS flow
+                console.warn(`[eNACH] Will fall back to SMS/Email flow if no other URL is found`);
             }
         }
 
@@ -586,7 +652,9 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 }
             };
         } else {
-            // Return response to frontend - always include authorization_url for redirect
+            // Return response to frontend - include authorization_url and redirect info
+            const redirectInfo = subscriptionResponse.data._redirect_info || null;
+            
             finalResponse = {
                 success: true,
                 data: {
@@ -595,7 +663,11 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                     authorization_url: authorizationUrl,
                     subscription_status: subscriptionResponse.data.subscription_status,
                     subscription_session_id: subscriptionResponse.data.subscription_session_id,
-                    message: 'Redirecting to eNACH authorization page...'
+                    message: 'Redirecting to eNACH authorization page...',
+                    // Include redirect info for POST redirects
+                    redirect_action: redirectInfo?.action || null,
+                    redirect_method: redirectInfo?.method || null,
+                    redirect_payload: redirectInfo?.payload || null
                 }
             };
         }

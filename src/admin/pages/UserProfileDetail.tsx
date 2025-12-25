@@ -2430,87 +2430,9 @@ export function UserProfileDetail() {
   // Documents Tab
   const renderDocumentsTab = () => {
     const documents = getUserData('documents');
-    const bankStatements = userData?.bankStatementRecords || [];
     console.log('Documents data:', documents);
-    console.log('Bank statements:', bankStatements);
     return (
       <div className="space-y-6">
-        {/* Bank Statements Section */}
-        {bankStatements.length > 0 && (
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Bank Statements</h3>
-            <div className="space-y-3">
-              {bankStatements.map((stmt: any, index: number) => (
-                <div key={index} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-5 h-5 text-blue-600" />
-                      <div>
-                        <h4 className="font-medium text-gray-900">
-                          Bank Statement {index + 1}
-                          {stmt.bank_name && ` - ${stmt.bank_name}`}
-                        </h4>
-                        <p className="text-xs text-gray-500">
-                          Uploaded: {stmt.created_at ? new Date(stmt.created_at).toLocaleString('en-IN') : 'N/A'}
-                        </p>
-                      </div>
-                    </div>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      stmt.status === 'completed' ? 'bg-green-100 text-green-800' :
-                      stmt.status === 'processing' ? 'bg-yellow-100 text-yellow-800' :
-                      stmt.status === 'failed' ? 'bg-red-100 text-red-800' :
-                      'bg-gray-100 text-gray-800'
-                    }`}>
-                      {stmt.status || 'Unknown'}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mt-3">
-                    <div>
-                      <span className="text-gray-500">Method:</span>
-                      <span className="ml-2 text-gray-900 capitalize">{stmt.upload_method || 'N/A'}</span>
-                    </div>
-                    {stmt.file_name && (
-                      <div>
-                        <span className="text-gray-500">File:</span>
-                        <span className="ml-2 text-gray-900 truncate">{stmt.file_name}</span>
-                      </div>
-                    )}
-                    {stmt.file_size && (
-                      <div>
-                        <span className="text-gray-500">Size:</span>
-                        <span className="ml-2 text-gray-900">{(stmt.file_size / 1024 / 1024).toFixed(2)} MB</span>
-                      </div>
-                    )}
-                    {stmt.txn_id && (
-                      <div>
-                        <span className="text-gray-500">Txn ID:</span>
-                        <span className="ml-2 text-gray-900 font-mono text-xs">{stmt.txn_id}</span>
-                      </div>
-                    )}
-                  </div>
-                  {stmt.has_report_data && (
-                    <div className="mt-2 pt-2 border-t border-gray-100">
-                      <span className="text-xs text-green-600">✓ Report data available</span>
-                    </div>
-                  )}
-                  {stmt.file_path && (
-                    <div className="mt-2">
-                      <a 
-                        href={stmt.file_path} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="text-xs text-blue-600 hover:text-blue-800"
-                      >
-                        View File →
-                      </a>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Upload Document Section */}
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
@@ -6106,51 +6028,6 @@ export function UserProfileDetail() {
               )}
             </tbody>
           </table>
-        </div>
-
-        {/* Summary Cards */}
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-blue-50 p-4 rounded-lg">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <CreditCard className="w-8 h-8 text-blue-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-blue-600">Total Transactions</p>
-                <p className="text-2xl font-semibold text-blue-900">{getArray('transactions').length}</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-green-50 p-4 rounded-lg">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <TrendingDown className="w-8 h-8 text-green-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-green-600">Total Credits</p>
-                <p className="text-xl font-semibold text-green-900">
-                  {formatCurrency(getArray('transactions')
-                    .filter((t: any) => ['emi_payment', 'full_payment', 'part_payment', 'settlement'].includes(t.transaction_type))
-                    .reduce((sum: number, t: any) => sum + parseFloat(t.amount), 0))}
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-red-50 p-4 rounded-lg">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <TrendingUp className="w-8 h-8 text-red-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-red-600">Total Debits</p>
-                <p className="text-xl font-semibold text-red-900">
-                  {formatCurrency(getArray('transactions')
-                    .filter((t: any) => ['loan_disbursement'].includes(t.transaction_type))
-                    .reduce((sum: number, t: any) => sum + parseFloat(t.amount), 0))}
-                </p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>

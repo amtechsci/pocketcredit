@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Label } from '../ui/label';
 import { DashboardHeader } from '../DashboardHeader';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
@@ -387,6 +389,7 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
   const [existingSubscription, setExistingSubscription] = useState<any>(null);
   const [bankDetails, setBankDetails] = useState<any>(null);
   const [loadingBank, setLoadingBank] = useState(true);
+  const [authMode, setAuthMode] = useState<string>('net_banking');
 
   useEffect(() => {
     // Check if subscription already exists for this loan
@@ -458,10 +461,17 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
       setError(null);
 
       // Create eNACH subscription via Cashfree
-      const response = await apiService.createEnachSubscription(applicationId);
+      const response = await apiService.createEnachSubscription(applicationId, authMode);
 
       if (response.success && response.data) {
-        const { authorization_url, subscription_id, sms_flow } = response.data;
+        const { 
+          authorization_url, 
+          subscription_id, 
+          sms_flow,
+          redirect_action,
+          redirect_method,
+          redirect_payload
+        } = response.data;
 
         // If SMS flow, redirect to completion page with status polling
         if (sms_flow || !authorization_url) {
@@ -481,9 +491,34 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
 
         toast.success('Redirecting to eNACH authorization...');
 
-        // Redirect to Cashfree authorization page (dashboard-based flow)
-        // User will complete mandate there and return via return_url
-        window.location.href = authorization_url;
+        // Handle redirect based on method
+        // If redirect_method is "post", we need to submit a form instead of using window.location.href
+        if (redirect_method === 'post' || redirect_action === 'post') {
+          // Create a form and submit it with POST method
+          const form = document.createElement('form');
+          form.method = 'POST';
+          form.action = authorization_url;
+          form.style.display = 'none';
+
+          // Add payload fields if provided
+          if (redirect_payload && typeof redirect_payload === 'object') {
+            Object.keys(redirect_payload).forEach((key) => {
+              const input = document.createElement('input');
+              input.type = 'hidden';
+              input.name = key;
+              input.value = typeof redirect_payload[key] === 'object' 
+                ? JSON.stringify(redirect_payload[key]) 
+                : String(redirect_payload[key]);
+              form.appendChild(input);
+            });
+          }
+
+          document.body.appendChild(form);
+          form.submit();
+        } else {
+          // For GET redirects, use window.location.href
+          window.location.href = authorization_url;
+        }
       } else {
         throw new Error(response.message || 'Failed to create eNACH subscription');
       }
@@ -696,6 +731,46 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
           )}
         </CardContent>
       </Card>
+
+      {/* Authentication Mode Selection */}
+      {bankDetails && (
+        <Card className="border-gray-300">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <CreditCard className="w-5 h-5 text-blue-600" />
+              Authentication Mode
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <Label htmlFor="auth-mode" className="text-sm font-medium text-gray-700">
+                Select how you want to authenticate the e-NACH mandate
+              </Label>
+              <Select value={authMode} onValueChange={setAuthMode}>
+                <SelectTrigger id="auth-mode" className="w-full">
+                  <SelectValue placeholder="Select authentication mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="net_banking">Net Banking</SelectItem>
+                  <SelectItem value="debit_card">Debit Card</SelectItem>
+                  <SelectItem value="aadhaar">Aadhaar</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                <p className="text-xs text-blue-800">
+                  <strong>Net Banking:</strong> Authenticate using your bank's net banking credentials
+                </p>
+                <p className="text-xs text-blue-800 mt-1">
+                  <strong>Debit Card:</strong> Authenticate using your debit card details
+                </p>
+                <p className="text-xs text-blue-800 mt-1">
+                  <strong>Aadhaar:</strong> Authenticate using your Aadhaar number and OTP
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Show existing subscription status if any */}
       {existingSubscription && (

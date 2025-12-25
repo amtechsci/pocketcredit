@@ -1266,12 +1266,15 @@ class ApiService {
   /**
    * Create eNACH subscription for loan application
    */
-  async createEnachSubscription(applicationId: number): Promise<ApiResponse<{
+  async createEnachSubscription(applicationId: number, authMode?: string): Promise<ApiResponse<{
     subscription_id: string;
     authorization_url: string;
     subscription_status: string;
   }>> {
-    return this.request('POST', '/enach/create-subscription', { applicationId });
+    return this.request('POST', '/enach/create-subscription', { 
+      applicationId,
+      authMode: authMode || 'net_banking'
+    });
   }
 
   /**
