@@ -57,7 +57,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         tenure_months, status, rejection_reason, 
         approved_by, approved_at, disbursed_at, created_at, updated_at,
         processing_fee_percent, interest_percent_per_day, 
-        processing_fee, total_interest, total_repayable, plan_snapshot
+        processing_fee, total_interest, total_repayable, plan_snapshot,
+        disbursal_amount
       FROM loan_applications 
       WHERE user_id = ?
       ORDER BY created_at DESC
@@ -558,6 +559,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           loanId: app.application_number,
           shortLoanId: shortLoanId,
           amount: app.loan_amount,
+          loan_amount: app.loan_amount,
           principalAmount: app.loan_amount,
           type: app.loan_purpose || 'Personal Loan',
           status: app.status,
@@ -571,6 +573,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           processingFeePercent: app.processing_fee_percent || 14,
           interestRate: interestRate ? parseFloat(interestRate) : null,
           disbursedAmount: app.disbursed_at ? app.loan_amount : 0,
+          disbursal_amount: app.disbursal_amount || null,
+          disbursalAmount: app.disbursal_amount || null,
           processingFee: app.processing_fee || processingFee,
           gst: gst,
           interest: app.total_interest || totalInterest,

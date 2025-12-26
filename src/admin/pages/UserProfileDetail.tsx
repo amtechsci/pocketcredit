@@ -30,11 +30,13 @@ import {
   Flag,
   Shield,
   Wallet,
-  UserPlus
+  UserPlus,
+  HelpCircle
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import { adminApiService } from '../../services/adminApi';
 import { toast } from 'sonner';
+import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '../../components/ui/tooltip';
 
 
 
@@ -4049,6 +4051,47 @@ export function UserProfileDetail() {
     );
   };
 
+  // Helper function to calculate DPD (Days Past Due)
+  const calculateDPD = (disbursedDate: string, dueDate: string | null, currentDate: Date = new Date()) => {
+    if (!dueDate) return 0;
+    const due = new Date(dueDate);
+    due.setHours(0, 0, 0, 0);
+    const current = new Date(currentDate);
+    current.setHours(0, 0, 0, 0);
+    const diff = Math.floor((current.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+    return diff > 0 ? diff : 0;
+  };
+
+  // Helper function to calculate penalty charges
+  const calculatePenalty = (principal: number, dpd: number) => {
+    if (dpd <= 0) return { penalty: 0, gst: 0, total: 0 };
+    
+    let penaltyPercent = 0;
+    if (dpd === 1) {
+      penaltyPercent = 5; // 5% on first day
+    } else if (dpd >= 2 && dpd <= 10) {
+      penaltyPercent = 1 * (dpd - 1); // 1% per day from day 2-10
+    } else if (dpd >= 11 && dpd <= 120) {
+      penaltyPercent = 9 + (0.6 * (dpd - 10)); // 9% (days 2-10) + 0.6% per day from day 11-120
+    }
+    // Above 120 days, penalty is 0
+    
+    const penalty = (principal * penaltyPercent) / 100;
+    const gst = (penalty * 18) / 100;
+    return { penalty, gst, total: penalty + gst };
+  };
+
+  // Helper function to calculate interest till current date
+  const calculateInterestTillDate = (principal: number, ratePerDay: number, disbursedDate: string, currentDate: Date = new Date()) => {
+    if (!disbursedDate) return 0;
+    const disbursed = new Date(disbursedDate);
+    disbursed.setHours(0, 0, 0, 0);
+    const current = new Date(currentDate);
+    current.setHours(0, 0, 0, 0);
+    const days = Math.max(1, Math.floor((current.getTime() - disbursed.getTime()) / (1000 * 60 * 60 * 24)));
+    return principal * ratePerDay * days;
+  };
+
   // Loans Tab (Account Manager)
   const renderLoansTab = () => {
     const runningLoans = getArray('loans').filter((loan: any) =>
@@ -4068,26 +4111,181 @@ export function UserProfileDetail() {
           {runningLoans.length > 0 ? (
             <>
               {/* Loans Table */}
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan ID</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Principal Amount</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Interest Rate</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disb Amount</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disbursal Fees</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Repayable Fees</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Interest</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Amount</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Apply Date</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status Date</th>
-                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
+              <TooltipProvider>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-xs">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-gray-50 z-10">Loan ID</th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center gap-1">
+                            Processed Date
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-gray-400 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-gray-900 text-white text-xs rounded-md px-3 py-2 max-w-xs z-50">
+                                <p>Date when the loan was processed/disbursed</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan extension Availed date</th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Principal Amount</th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center gap-1">
+                            Processed Amount
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-gray-400 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-gray-900 text-white text-xs rounded-md px-3 py-2 max-w-xs z-50">
+                                <p>Amount actually disbursed to the borrower (after deducting fees)</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center gap-1">
+                            Exhausted Period
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-gray-400 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-gray-900 text-white text-xs rounded-md px-3 py-2 max-w-xs z-50">
+                                <p>Number of days since loan disbursement</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan Extension period till</th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center gap-1">
+                            P.fee
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-gray-400 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-gray-900 text-white text-xs rounded-md px-3 py-2 max-w-xs z-50">
+                                <p>Processing fee charged on the loan</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center gap-1">
+                            post service fee
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-gray-400 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-gray-900 text-white text-xs rounded-md px-3 py-2 max-w-xs z-50">
+                                <p>Post service fee added to the total repayable amount</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center gap-1">
+                            gst
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-gray-400 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-gray-900 text-white text-xs rounded-md px-3 py-2 max-w-xs z-50">
+                                <p>gst on p.fee & post service fee</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center gap-1">
+                            Interest
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-gray-400 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-gray-900 text-white text-xs rounded-md px-3 py-2 max-w-xs z-50">
+                                <p>Total Interest for full tenure</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center gap-1">
+                            Penalty
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-gray-400 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-gray-900 text-white text-xs rounded-md px-3 py-2 max-w-xs z-50">
+                                <p>Penalty Charge + gst on penalty</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Due date</th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center gap-1">
+                            Total Amount
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-gray-400 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-gray-900 text-white text-xs rounded-md px-3 py-2 max-w-xs z-50">
+                                <p>principal + post service fee + gst on post service fee + interest balance till current date + penalty if any + gst on penalty</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">EMI Dates</th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center gap-1">
+                            Pre close
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-gray-400 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-gray-900 text-white text-xs rounded-md px-3 py-2 max-w-xs z-50">
+                                <p>Pre close (changes wrt date)</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status Log</th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan closed amount</th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan closed date</th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center gap-1">
+                            Loan extension
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-gray-400 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-gray-900 text-white text-xs rounded-md px-3 py-2 max-w-xs z-50">
+                                <p>Loan extension fee + interest till date (from Dpd -5 to DPD 15) + penalty if applicable</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan extended amount</th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan extended date</th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center gap-1">
+                            DPD
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="w-3 h-3 text-gray-400 cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-gray-900 text-white text-xs rounded-md px-3 py-2 max-w-xs z-50">
+                                <p>Days Past Due - Number of days the loan payment is overdue</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Auto pay</th>
+                      </tr>
+                    </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {runningLoans.map((loan: any, index: number) => {
                       const loanId = loan.id || loan.loanId;
@@ -4102,83 +4300,164 @@ export function UserProfileDetail() {
                         fetchLoanCalculation(loanId);
                       }
 
+                      // Calculate derived values
+                      const processedDate = loan.disbursedDate || loan.disbursed_at || loan.approvedDate || loan.approved_at;
+                      const principal = calculation?.principal || loan.principalAmount || loan.amount || loan.loan_amount || 0;
+                      const processedAmount = calculation?.disbursal?.amount || loan.disbursal_amount || loan.disbursalAmount || principal;
+                      const disbursedDate = loan.disbursedDate || loan.disbursed_at;
+                      
+                      // Calculate exhausted period (days since disbursement)
+                      let exhaustedPeriod = 'N/A';
+                      if (disbursedDate) {
+                        const disbursed = new Date(disbursedDate);
+                        const current = new Date();
+                        const days = Math.max(1, Math.floor((current.getTime() - disbursed.getTime()) / (1000 * 60 * 60 * 24)));
+                        exhaustedPeriod = `${days} days`;
+                      }
+
+                      // Calculate due date
+                      let dueDate = null;
+                      if (calculation?.interest?.repayment_date) {
+                        dueDate = calculation.interest.repayment_date;
+                      } else if (disbursedDate && calculation?.interest?.days) {
+                        const due = new Date(disbursedDate);
+                        due.setDate(due.getDate() + calculation.interest.days);
+                        dueDate = due.toISOString().split('T')[0];
+                      }
+
+                      // Calculate DPD
+                      const dpd = dueDate ? calculateDPD(disbursedDate || '', dueDate) : 0;
+
+                      // Calculate penalty
+                      const penaltyData = calculatePenalty(principal, dpd);
+
+                      // Calculate interest till current date
+                      const interestTillDate = disbursedDate && calculation?.interest?.rate_per_day
+                        ? calculateInterestTillDate(principal, calculation.interest.rate_per_day, disbursedDate)
+                        : 0;
+
+                      // Processing fee
+                      const processingFee = calculation?.totals?.disbursalFee || loan.processingFee || 0;
+                      const processingFeeGST = calculation?.totals?.disbursalFeeGST || 0;
+
+                      // Post service fee (repayable fees)
+                      const postServiceFee = calculation?.totals?.repayableFee || 0;
+                      const postServiceFeeGST = calculation?.totals?.repayableFeeGST || 0;
+
+                      // Total GST on processing fee and post service fee
+                      const totalGSTOnFees = processingFeeGST + postServiceFeeGST;
+
+                      // Total interest for full tenure
+                      const totalInterestFullTenure = calculation?.interest?.amount || loan.interest || 0;
+
+                      // Calculate total amount: principal + post service fee + gst on post service fee + interest balance till current date + penalty if any + gst on penalty
+                      const totalAmount = principal + postServiceFee + postServiceFeeGST + interestTillDate + penaltyData.total;
+
+                      // Loan extension fields (placeholder - these would come from database)
+                      const loanExtensionAvailedDate = loan.extension_availed_date || 'N/A';
+                      const loanExtensionPeriodTill = loan.extension_period_till || 'N/A';
+                      const loanExtensionFee = loan.extension_fee || 0;
+                      const loanExtendedAmount = loan.extended_amount || 'N/A';
+                      const loanExtendedDate = loan.extended_date || 'N/A';
+
+                      // Loan closed fields
+                      const loanClosedAmount = loan.status === 'cleared' ? (loan.closed_amount || totalAmount) : 'N/A';
+                      const loanClosedDate = loan.status === 'cleared' ? (loan.closed_date || loan.updatedAt) : 'N/A';
+
+                      // EMI Dates
+                      let emiDates = 'N/A';
+                      if (calculation?.repayment?.schedule) {
+                        emiDates = calculation.repayment.schedule.map((emi: any) => formatDate(emi.due_date)).join(', ');
+                      } else if (calculation?.emi_schedule) {
+                        emiDates = calculation.emi_schedule.map((emi: any) => formatDate(emi.due_date || emi.date)).join(', ');
+                      } else if (calculation?.repayment?.all_emi_dates) {
+                        emiDates = calculation.repayment.all_emi_dates.map((date: string) => formatDate(date)).join(', ');
+                      } else if (dueDate) {
+                        emiDates = formatDate(dueDate);
+                      }
+
+                      // Pre close amount (changes with date - would need calculation based on current date)
+                      const preCloseAmount = 'N/A'; // This would require complex calculation
+
+                      // Status log
+                      const statusLog = `${loan.status} - ${formatDate(loan.statusDate || loan.updatedAt)}`;
+
+                      // Auto pay
+                      const autoPay = loan.auto_pay_enabled ? 'Yes' : 'No';
+
                       return (
                         <tr key={index} className="hover:bg-gray-50 border-l-4 border-l-green-500">
-                          <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          <td className="px-2 py-4 whitespace-nowrap text-sm font-medium text-gray-900 sticky left-0 bg-white z-10">
                             {shortLoanId}
                           </td>
-                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {calculation ? formatCurrency(calculation.principal) : isLoading ? '...' : 'N/A'}
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {processedDate ? formatDate(processedDate) : 'N/A'}
                           </td>
-                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {calculation ? `${(calculation.interest.rate_per_day * 100).toFixed(4)}%` : isLoading ? '...' : 'N/A'}
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {loanExtensionAvailedDate !== 'N/A' ? formatDate(loanExtensionAvailedDate) : 'N/A'}
                           </td>
-                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {calculation ? calculation.interest.days : isLoading ? '...' : 'N/A'} days
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatCurrency(principal)}
                           </td>
-                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {calculation ? formatCurrency(calculation.disbursal.amount) : isLoading ? '...' : 'N/A'}
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatCurrency(processedAmount)}
                           </td>
-                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {calculation ? formatCurrency(calculation.totals.disbursalFee + calculation.totals.disbursalFeeGST) : isLoading ? '...' : 'N/A'}
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {exhaustedPeriod}
                           </td>
-                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {calculation ? formatCurrency(calculation.totals.repayableFee + calculation.totals.repayableFeeGST) : isLoading ? '...' : 'N/A'}
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {loanExtensionPeriodTill !== 'N/A' ? formatDate(loanExtensionPeriodTill) : 'N/A'}
                           </td>
-                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {calculation ? formatCurrency(calculation.interest.amount) : isLoading ? '...' : 'N/A'}
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatCurrency(processingFee)}
                           </td>
-                          <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {calculation ? formatCurrency(calculation.total.repayable) : isLoading ? '...' : 'N/A'}
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatCurrency(postServiceFee)}
                           </td>
-                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {formatDate(loan.appliedDate || loan.createdAt)}
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatCurrency(totalGSTOnFees)}
                           </td>
-                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {loan.reason || 'Personal Loan'}
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatCurrency(totalInterestFullTenure)}
                           </td>
-                          <td className="px-3 py-4 whitespace-nowrap">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${loan.status === 'account_manager' ? 'bg-green-100 text-green-800' :
-                              loan.status === 'cleared' ? 'bg-blue-100 text-blue-800' :
-                                'bg-gray-100 text-gray-800'
-                              }`}>
-                              {loan.status.replace('_', ' ')}
-                            </span>
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatCurrency(penaltyData.total)}
                           </td>
-                          <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {formatDate(loan.statusDate || loan.updatedAt)}
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {dueDate ? formatDate(dueDate) : 'N/A'}
                           </td>
-                          <td className="px-3 py-4 whitespace-nowrap text-sm font-medium">
-                            <div className="flex items-center gap-2">
-                              <button
-                                className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-50"
-                                title="View Application Details"
-                                onClick={() => handleViewApplication(loan.loanId)}
-                              >
-                                <Eye className="w-4 h-4" />
-                              </button>
-                              <button
-                                className="text-gray-600 hover:text-gray-900 p-1 rounded hover:bg-gray-50"
-                                title="Edit Application"
-                                onClick={() => handleEditLoan(loan.loanId)}
-                              >
-                                <Edit className="w-4 h-4" />
-                              </button>
-                              <button
-                                className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
-                                onClick={() => window.open(`/admin/loan-agreement/${loan.id}`, '_blank')}
-                                title="View Loan Agreement"
-                              >
-                                Agreement
-                              </button>
-                              <button
-                                className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
-                                onClick={() => window.open(`/admin/kfs/${loan.id}`, '_blank')}
-                                title="View Key Facts Statement"
-                              >
-                                KFS
-                              </button>
-                            </div>
+                          <td className="px-2 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {formatCurrency(totalAmount)}
+                          </td>
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {emiDates}
+                          </td>
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {preCloseAmount}
+                          </td>
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {statusLog}
+                          </td>
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {loanClosedAmount !== 'N/A' ? formatCurrency(loanClosedAmount) : 'N/A'}
+                          </td>
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {loanClosedDate !== 'N/A' ? formatDate(loanClosedDate) : 'N/A'}
+                          </td>
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatCurrency(loanExtensionFee + interestTillDate + penaltyData.total)}
+                          </td>
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {loanExtendedAmount !== 'N/A' ? formatCurrency(loanExtendedAmount) : 'N/A'}
+                          </td>
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {loanExtendedDate !== 'N/A' ? formatDate(loanExtendedDate) : 'N/A'}
+                          </td>
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {dpd}
+                          </td>
+                          <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {autoPay}
                           </td>
                         </tr>
                       );
@@ -4186,6 +4465,7 @@ export function UserProfileDetail() {
                   </tbody>
                 </table>
               </div>
+              </TooltipProvider>
             </>
           ) : (
             <div className="text-center py-12">
@@ -7027,20 +7307,8 @@ export function UserProfileDetail() {
                   </select>
                 </div>
 
-                {/* Amount */}
-                <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₹)</label>
-                  <input
-                    type="number"
-                    value={transactionForm.amount}
-                    onChange={(e) => setTransactionForm({ ...transactionForm, amount: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    placeholder="0.00"
-                  />
-                </div>
-
                 {/* Loan Application Selector (Visible if loan related or requested) */}
-                <div className="col-span-2">
+                <div className="col-span-2 md:col-span-1">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Related Loan Application
                     {transactionForm.transactionType === 'loan_disbursement' && <span className="text-red-500">*</span>}
@@ -7053,7 +7321,10 @@ export function UserProfileDetail() {
                       let amount = transactionForm.amount;
                       if (transactionForm.transactionType === 'loan_disbursement' && appId) {
                         const loan = getArray('loans')?.find((l: any) => l.id.toString() === appId || l.loanId?.toString() === appId);
-                        if (loan) amount = loan.amount || loan.loan_amount || loan.principalAmount;
+                        if (loan) {
+                          // Use disbursal_amount if available, otherwise fall back to full amount
+                          amount = loan.disbursal_amount || loan.disbursalAmount || loan.amount || loan.loan_amount || loan.principalAmount;
+                        }
                       }
                       setTransactionForm({ ...transactionForm, loanApplicationId: appId, amount: amount ? amount.toString() : '' });
                     }}
@@ -7079,6 +7350,20 @@ export function UserProfileDetail() {
                       Selecting a loan here will automatically update its status to "Account Manager" after disbursement.
                     </p>
                   )}
+                </div>
+
+                {/* Amount */}
+                <div className="col-span-2 md:col-span-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {transactionForm.transactionType === 'loan_disbursement' ? 'Disb Amount (₹)' : 'Amount (₹)'}
+                  </label>
+                  <input
+                    type="number"
+                    value={transactionForm.amount}
+                    onChange={(e) => setTransactionForm({ ...transactionForm, amount: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="0.00"
+                  />
                 </div>
 
                 {/* Date & Time */}
