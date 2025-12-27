@@ -1741,6 +1741,22 @@ export function UserProfileDetail() {
 
   const formatDate = (dateString: string) => {
     if (!dateString) return 'N/A';
+    
+    // Handle MySQL datetime format: "2025-12-25 23:19:50"
+    // Extract just the date part to avoid timezone conversion issues
+    if (typeof dateString === 'string' && dateString.includes(' ')) {
+      const datePart = dateString.split(' ')[0]; // Get "2025-12-25"
+      const [year, month, day] = datePart.split('-');
+      if (year && month && day) {
+        // Create date in local timezone using date components (not parsing string)
+        const d = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+        if (!isNaN(d.getTime())) {
+          return d.toLocaleDateString('en-IN');
+        }
+      }
+    }
+    
+    // Fallback to original parsing for ISO dates or other formats
     const d = new Date(dateString);
     if (isNaN(d.getTime())) return 'N/A';
     return d.toLocaleDateString('en-IN');
