@@ -230,7 +230,8 @@ router.post('/webhook', express.json(), async (req, res) => {
 
         // Process webhook asynchronously (don't block response)
         processWebhookAsync(req.body, requestId, eventId, signature, req).catch(error => {
-            console.error(`[Webhook ${requestId}] Async processing error:`, error);
+            console.error(`[Webhook ${requestId}] ❌ Async processing error (uncaught):`, error);
+            console.error(`[Webhook ${requestId}] Error stack:`, error.stack);
             // Update webhook_logs with error
             logWebhookPayload(req, 'enach_webhook', '/api/enach/webhook', false, error.message).catch(() => {});
         });
@@ -263,8 +264,11 @@ router.post('/webhook', express.json(), async (req, res) => {
  * Process webhook asynchronously
  */
 async function processWebhookAsync(reqBody, requestId, eventId, signature, req = null) {
+    console.log(`[Webhook ${requestId}] 🚀 processWebhookAsync started`);
     try {
+        console.log(`[Webhook ${requestId}] 📦 Initializing database...`);
         await initializeDatabase();
+        console.log(`[Webhook ${requestId}] ✅ Database initialized`);
 
         const {
             type: eventType,
@@ -277,7 +281,8 @@ async function processWebhookAsync(reqBody, requestId, eventId, signature, req =
             cfSubscriptionId: eventData?.subscription?.cf_subscription_id || eventData?.subscription_details?.cf_subscription_id,
             subscriptionStatus: eventData?.subscription?.subscription_status || eventData?.subscription_details?.subscription_status,
             authorizationStatus: eventData?.authorization_details?.authorizationStatus || eventData?.authorization_details?.authorization_status,
-            environment: NODE_ENV
+            environment: NODE_ENV,
+            eventDataKeys: eventData ? Object.keys(eventData) : []
         });
 
         // Extract event ID for idempotency
@@ -332,6 +337,8 @@ async function processWebhookAsync(reqBody, requestId, eventId, signature, req =
         let processed = false;
         let processingError = null;
 
+        console.log(`[Webhook ${requestId}] 🔄 Starting event processing for type: "${eventType}"`);
+        
         try {
             switch (eventType) {
                 case 'subscription.activated':
@@ -368,6 +375,7 @@ async function processWebhookAsync(reqBody, requestId, eventId, signature, req =
                 case 'subscription.status_changed':
                     // Handle SUBSCRIPTION_STATUS_CHANGED event
                     // This event is sent when subscription status changes (e.g., BANK_APPROVAL_PENDING -> ACTIVE)
+                    console.log(`[Webhook ${requestId}] 🎯 Matched SUBSCRIPTION_STATUS_CHANGED case, calling handleSubscriptionStatusChanged`);
                     await handleSubscriptionStatusChanged(eventData, requestId);
                     processed = true;
                     break;
@@ -387,7 +395,10 @@ async function processWebhookAsync(reqBody, requestId, eventId, signature, req =
             }
         } catch (error) {
             processingError = error.message;
-            console.error(`[Webhook ${requestId}] Processing error:`, error);
+            console.error(`[Webhook ${requestId}] ❌ Processing error in switch statement:`, error);
+            console.error(`[Webhook ${requestId}] Error stack:`, error.stack);
+            console.error(`[Webhook ${requestId}] Event type was: ${eventType}`);
+            console.error(`[Webhook ${requestId}] Event data keys:`, eventData ? Object.keys(eventData) : 'null');
         }
 
         // Update processing status
@@ -429,7 +440,10 @@ async function processWebhookAsync(reqBody, requestId, eventId, signature, req =
         }
 
     } catch (error) {
-        console.error(`[Webhook ${requestId}] Fatal error in async processing:`, error);
+        console.error(`[Webhook ${requestId}] ❌ FATAL ERROR in async processing:`, error);
+        console.error(`[Webhook ${requestId}] Error message:`, error.message);
+        console.error(`[Webhook ${requestId}] Error stack:`, error.stack);
+        console.error(`[Webhook ${requestId}] Error name:`, error.name);
         
         // Update webhook_logs with error
         if (req) {
@@ -444,10 +458,12 @@ async function processWebhookAsync(reqBody, requestId, eventId, signature, req =
                     [false, error.message, requestId]
                 );
             } catch (updateError) {
-                console.warn(`[Webhook ${requestId}] Could not update webhook_logs with error:`, updateError.message);
+                console.error(`[Webhook ${requestId}] Failed to log error to webhook_logs:`, updateError);
             }
         }
         // Error already logged, webhook was already acknowledged with 200
+    } finally {
+        console.log(`[Webhook ${requestId}] 🏁 processWebhookAsync completed/finished`);
     }
 }
 

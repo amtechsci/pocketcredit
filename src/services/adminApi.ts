@@ -466,6 +466,10 @@ class AdminApiService {
     return this.request('PUT', `/user-profile/${userId}/basic-info`, data);
   }
 
+  async updateUserSalaryDate(userId: string, salaryDate: string | null): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/user-profile/${userId}/salary-date`, { salaryDate });
+  }
+
   async updateUserContactInfo(userId: string, data: {
     email?: string;
     phone?: string;

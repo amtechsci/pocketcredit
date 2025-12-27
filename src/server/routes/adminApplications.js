@@ -490,14 +490,21 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
     const { applicationId } = req.params;
     const { status, reason, assignedManager, recoveryOfficer } = req.validatedData;
 
-    // Check if application exists
-    const applicationResult = await executeQuery('SELECT id FROM loan_applications WHERE id = ?', [applicationId]);
+    // Check if application exists and get full data
+    const applicationResult = await executeQuery(
+      `SELECT id, user_id, status, loan_amount, plan_snapshot, interest_percent_per_day, 
+       fees_breakdown, processed_at, disbursal_amount FROM loan_applications WHERE id = ?`, 
+      [applicationId]
+    );
+    
     if (applicationResult.length === 0) {
       return res.status(404).json({
         status: 'error',
         message: 'Application not found'
       });
     }
+
+    const loan = applicationResult[0];
 
     // Build update query
     let updateQuery = 'UPDATE loan_applications SET status = ?, updated_at = NOW()';
@@ -513,6 +520,58 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
       updateQuery += ', approved_at = NOW()';
     } else if (status === 'rejected') {
       updateQuery += ', rejected_at = NOW()';
+    } else if (status === 'account_manager') {
+      // When status changes to account_manager, set processed_at and save calculated values
+      if (!loan.processed_at) {
+        const { getLoanCalculation } = require('../utils/loanCalculations');
+        
+        // Get loan calculation
+        let calculatedValues = null;
+        try {
+          calculatedValues = await getLoanCalculation(parseInt(applicationId));
+          console.log(`📊 Got loan calculation for loan #${applicationId}`);
+        } catch (calcError) {
+          console.error(`❌ Error getting loan calculation:`, calcError);
+        }
+
+        // Calculate values to save
+        const processedAmount = calculatedValues?.disbursal?.amount || loan.disbursal_amount || null;
+        const exhaustedPeriodDays = 0; // At processing time, it's day 0
+        const pFee = calculatedValues?.totals?.disbursalFee || loan.processing_fee || null;
+        const postServiceFee = calculatedValues?.totals?.repayableFee || null;
+        const gst = (calculatedValues?.totals?.disbursalFeeGST || 0) + (calculatedValues?.totals?.repayableFeeGST || 0);
+        const interest = calculatedValues?.interest?.amount || loan.total_interest || null;
+        const penalty = 0; // No penalty at processing time
+        const dueDate = calculatedValues?.interest?.repayment_date 
+          ? new Date(calculatedValues.interest.repayment_date).toISOString().split('T')[0]
+          : null;
+
+        updateQuery += `, processed_at = NOW(), 
+          processed_amount = ?,
+          exhausted_period_days = ?,
+          processed_p_fee = ?,
+          processed_post_service_fee = ?,
+          processed_gst = ?,
+          processed_interest = ?,
+          processed_penalty = ?,
+          processed_due_date = ?,
+          disbursed_at = COALESCE(disbursed_at, NOW())`;
+        
+        updateParams.push(
+          processedAmount,
+          exhaustedPeriodDays,
+          pFee,
+          postServiceFee,
+          gst || null,
+          interest,
+          penalty,
+          dueDate
+        );
+        
+        console.log(`✅ Saving calculated values for loan #${applicationId} when changing to account_manager`);
+      } else {
+        console.log(`⚠️ Loan #${applicationId} already processed, skipping calculation save`);
+      }
     }
 
     updateQuery += ' WHERE id = ?';
@@ -634,9 +693,9 @@ router.put('/:applicationId/loan-plan', authenticateAdmin, async (req, res) => {
       });
     }
 
-    // Verify loan application exists
+    // Verify loan application exists and check if processed
     const applications = await executeQuery(
-      'SELECT id, user_id FROM loan_applications WHERE id = ?',
+      'SELECT id, user_id, processed_at FROM loan_applications WHERE id = ?',
       [applicationId]
     );
 
@@ -644,6 +703,14 @@ router.put('/:applicationId/loan-plan', authenticateAdmin, async (req, res) => {
       return res.status(404).json({
         status: 'error',
         message: 'Loan application not found'
+      });
+    }
+
+    // Prevent plan changes if loan is already processed
+    if (applications[0].processed_at) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Cannot change loan plan after loan has been processed (disbursed). Loan plan is frozen at processing time.'
       });
     }
 

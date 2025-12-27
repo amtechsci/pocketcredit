@@ -66,8 +66,8 @@ export function UserProfileDetail() {
   const [showAddTemplateModal, setShowAddTemplateModal] = useState(false);
   const { canEditUsers, currentUser } = useAdmin();
 
-  // Debug admin context
-  console.log('Admin context in UserProfileDetail:', { canEditUsers, currentUser });
+  // Debug admin context (commented out to reduce console noise)
+  // console.log('Admin context in UserProfileDetail:', { canEditUsers, currentUser });
 
   // Real data state
   const [userData, setUserData] = useState<any>(null);
@@ -130,10 +130,13 @@ export function UserProfileDetail() {
   });
   const [editingNote, setEditingNote] = useState<number | null>(null);
   const [noteText, setNoteText] = useState<{ [key: number]: string }>({});
+  const [editingSalaryDate, setEditingSalaryDate] = useState(false);
+  const [salaryDateEditValue, setSalaryDateEditValue] = useState('');
   const [editingReference, setEditingReference] = useState<number | null>(null);
   const [editingReferenceField, setEditingReferenceField] = useState<{ [key: number]: 'name' | 'phone' | 'relation' | null }>({});
   const [referenceEditValues, setReferenceEditValues] = useState<{ [key: number]: { name?: string; phone?: string; relation?: string } }>({});
   const [newReference, setNewReference] = useState({ name: '', phone: '', relation: '' });
+  const [referenceErrors, setReferenceErrors] = useState({ name: '', phone: '', relation: '' });
   const [noteForm, setNoteForm] = useState({
     subject: '',
     note: '',
@@ -1066,9 +1069,45 @@ export function UserProfileDetail() {
     }
   };
 
-  const handleAddReference = async () => {
-    if (!newReference.name || !newReference.phone || !newReference.relation) {
-      toast.error('Please fill in all fields');
+  const handleAddReference = async (e?: React.FormEvent | React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    // Clear previous errors
+    setReferenceErrors({ name: '', phone: '', relation: '' });
+    
+    let hasErrors = false;
+    const errors = { name: '', phone: '', relation: '' };
+    
+    // Validate name
+    if (!newReference.name || newReference.name.trim() === '') {
+      errors.name = 'Name is required';
+      hasErrors = true;
+    }
+    
+    // Validate phone number
+    if (!newReference.phone || newReference.phone.trim() === '') {
+      errors.phone = 'Phone number is required';
+      hasErrors = true;
+    } else {
+      const phoneDigits = newReference.phone.replace(/\D/g, '');
+      if (phoneDigits.length !== 10) {
+        errors.phone = 'Mobile number must be exactly 10 digits';
+        hasErrors = true;
+      }
+    }
+    
+    // Validate relation
+    if (!newReference.relation || newReference.relation.trim() === '') {
+      errors.relation = 'Relation is required';
+      hasErrors = true;
+    }
+    
+    if (hasErrors) {
+      setReferenceErrors(errors);
+      toast.error('Please fix the errors in the form');
       return;
     }
 
@@ -1078,6 +1117,7 @@ export function UserProfileDetail() {
         toast.success('Reference added successfully!');
         setShowAddReferenceModal(false);
         setNewReference({ name: '', phone: '', relation: '' });
+        setReferenceErrors({ name: '', phone: '', relation: '' });
         // Refresh user data
         const profileResponse = await adminApiService.getUserProfile(params.userId!);
         if (profileResponse.status === 'success') {
@@ -1122,6 +1162,47 @@ export function UserProfileDetail() {
       console.error('Error sending SMS:', error);
       alert('Error sending SMS');
     }
+  };
+
+  const handleEditSalaryDate = () => {
+    setSalaryDateEditValue(userData?.salaryDate?.toString() || '');
+    setEditingSalaryDate(true);
+  };
+
+  const handleSaveSalaryDate = async () => {
+    // Validate salary date is between 1 and 31
+    const day = parseInt(salaryDateEditValue);
+    if (salaryDateEditValue && (isNaN(day) || day < 1 || day > 31)) {
+      toast.error('Salary date must be a number between 1 and 31');
+      return;
+    }
+
+    try {
+      const response = await adminApiService.updateUserSalaryDate(
+        params.userId!,
+        salaryDateEditValue || null
+      );
+
+      if (response.status === 'success') {
+        toast.success('Salary date updated successfully!');
+        setEditingSalaryDate(false);
+        // Refresh user data
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success') {
+          setUserData(profileResponse.data);
+        }
+      } else {
+        toast.error(response.message || 'Failed to update salary date');
+      }
+    } catch (error: any) {
+      console.error('Error updating salary date:', error);
+      toast.error(error.message || 'Failed to update salary date');
+    }
+  };
+
+  const handleCancelSalaryDateEdit = () => {
+    setEditingSalaryDate(false);
+    setSalaryDateEditValue('');
   };
 
   // Enhanced mock user data with much more detail (fallback)
@@ -2043,10 +2124,6 @@ export function UserProfileDetail() {
               Basic Information
             </h3>
             <div className="space-y-2 text-sm">
-              <div>
-                <span className="text-gray-500">Name (User Entered):</span>
-                <span className="ml-2 font-medium text-gray-900">{getUserData('name')}</span>
-              </div>
               {(() => {
                 const userInfoRecords = userData?.userInfoRecords || [];
                 const aadharInfo = userInfoRecords.find((r: any) => r.source === 'digilocker');
@@ -2229,19 +2306,56 @@ export function UserProfileDetail() {
                   {userData?.work_experience_range || getUserData('work_experience_range') || 'N/A'}
                 </span>
               </div>
-              <div>
+              <div className="flex items-center gap-2">
                 <span className="text-gray-500">Salary Date:</span>
-                <span className="ml-2 text-gray-900">
-                  {userData?.salaryDate 
-                    ? `${userData.salaryDate}${(() => {
-                        const day = Number(userData.salaryDate);
-                        if (day === 1 || day === 21 || day === 31) return 'st';
-                        if (day === 2 || day === 22) return 'nd';
-                        if (day === 3 || day === 23) return 'rd';
-                        return 'th';
-                      })()}` 
-                    : 'N/A'}
-                </span>
+                {editingSalaryDate ? (
+                  <div className="flex items-center gap-2 flex-1">
+                    <input
+                      type="number"
+                      min="1"
+                      max="31"
+                      value={salaryDateEditValue}
+                      onChange={(e) => setSalaryDateEditValue(e.target.value)}
+                      className="w-20 px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      placeholder="Day (1-31)"
+                    />
+                    <button
+                      onClick={handleSaveSalaryDate}
+                      className="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={handleCancelSalaryDateEdit}
+                      className="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded-md hover:bg-gray-200"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <span className="ml-2 text-gray-900">
+                      {userData?.salaryDate 
+                        ? `${userData.salaryDate}${(() => {
+                            const day = Number(userData.salaryDate);
+                            if (day === 1 || day === 21 || day === 31) return 'st';
+                            if (day === 2 || day === 22) return 'nd';
+                            if (day === 3 || day === 23) return 'rd';
+                            return 'th';
+                          })()}` 
+                        : 'N/A'}
+                    </span>
+                    {canEditUsers && (
+                      <button
+                        onClick={handleEditSalaryDate}
+                        className="text-blue-600 hover:text-blue-800"
+                        title="Edit Salary Date"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
               <div>
                 <span className="text-gray-500">Income:</span>
@@ -2782,6 +2896,15 @@ export function UserProfileDetail() {
     const handleSaveReferenceEdit = async (refId: number) => {
       const editData = referenceEditValues[refId];
       if (!editData) return;
+
+      // Validate phone number if it's being edited - must be exactly 10 digits
+      if (editData.phone) {
+        const phoneDigits = editData.phone.replace(/\D/g, '');
+        if (phoneDigits.length !== 10) {
+          toast.error('Phone number must be exactly 10 digits');
+          return;
+        }
+      }
 
       try {
         const response = await adminApiService.updateReference(
@@ -4301,23 +4424,37 @@ export function UserProfileDetail() {
                       }
 
                       // Calculate derived values
-                      const processedDate = loan.disbursedDate || loan.disbursed_at || loan.approvedDate || loan.approved_at;
+                      // Processed Date: Use processed_at if available (when loan was actually processed/disbursed)
+                      // Otherwise use approved_at or disbursed_at as fallback
+                      const processedDate = loan.processed_at || loan.processedDate || loan.disbursed_at || loan.disbursedDate || loan.approved_at || loan.approvedDate || null;
+                      // Explicitly check for null/undefined/empty string to avoid showing incorrect dates
+                      const hasProcessedDate = processedDate && processedDate !== 'null' && processedDate !== 'undefined' && processedDate !== '';
+                      
                       const principal = calculation?.principal || loan.principalAmount || loan.amount || loan.loan_amount || 0;
-                      const processedAmount = calculation?.disbursal?.amount || loan.disbursal_amount || loan.disbursalAmount || principal;
+                      
+                      // Use processed values if available (frozen at processing time), otherwise calculate
+                      const processedAmount = loan.processed_amount || calculation?.disbursal?.amount || loan.disbursal_amount || loan.disbursalAmount || principal;
                       const disbursedDate = loan.disbursedDate || loan.disbursed_at;
                       
-                      // Calculate exhausted period (days since disbursement)
+                      // Use processed values if available (frozen at processing time), otherwise calculate
+                      const isProcessed = loan.processed_at || loan.processedDate;
+                      
+                      // Exhausted period - use processed value if available, otherwise calculate
                       let exhaustedPeriod = 'N/A';
-                      if (disbursedDate) {
+                      if (isProcessed && loan.exhausted_period_days !== null && loan.exhausted_period_days !== undefined) {
+                        exhaustedPeriod = `${loan.exhausted_period_days} days`;
+                      } else if (disbursedDate) {
                         const disbursed = new Date(disbursedDate);
                         const current = new Date();
                         const days = Math.max(1, Math.floor((current.getTime() - disbursed.getTime()) / (1000 * 60 * 60 * 24)));
                         exhaustedPeriod = `${days} days`;
                       }
 
-                      // Calculate due date
+                      // Due date - use processed value if available, otherwise calculate
                       let dueDate = null;
-                      if (calculation?.interest?.repayment_date) {
+                      if (isProcessed && loan.processed_due_date) {
+                        dueDate = loan.processed_due_date;
+                      } else if (calculation?.interest?.repayment_date) {
                         dueDate = calculation.interest.repayment_date;
                       } else if (disbursedDate && calculation?.interest?.days) {
                         const due = new Date(disbursedDate);
@@ -4328,27 +4465,40 @@ export function UserProfileDetail() {
                       // Calculate DPD
                       const dpd = dueDate ? calculateDPD(disbursedDate || '', dueDate) : 0;
 
-                      // Calculate penalty
-                      const penaltyData = calculatePenalty(principal, dpd);
+                      // Penalty - use processed value if available, otherwise calculate
+                      let penaltyData = { penalty: 0, gst: 0, total: 0 };
+                      if (isProcessed && loan.processed_penalty !== null && loan.processed_penalty !== undefined) {
+                        penaltyData.total = loan.processed_penalty;
+                      } else {
+                        penaltyData = calculatePenalty(principal, dpd);
+                      }
 
-                      // Calculate interest till current date
+                      // Calculate interest till current date (always calculate, not frozen)
                       const interestTillDate = disbursedDate && calculation?.interest?.rate_per_day
                         ? calculateInterestTillDate(principal, calculation.interest.rate_per_day, disbursedDate)
                         : 0;
 
-                      // Processing fee
-                      const processingFee = calculation?.totals?.disbursalFee || loan.processingFee || 0;
+                      // Processing fee - use processed value if available, otherwise calculate
+                      const processingFee = isProcessed && loan.processed_p_fee !== null 
+                        ? loan.processed_p_fee 
+                        : (calculation?.totals?.disbursalFee || loan.processingFee || 0);
                       const processingFeeGST = calculation?.totals?.disbursalFeeGST || 0;
 
-                      // Post service fee (repayable fees)
-                      const postServiceFee = calculation?.totals?.repayableFee || 0;
+                      // Post service fee - use processed value if available, otherwise calculate
+                      const postServiceFee = isProcessed && loan.processed_post_service_fee !== null
+                        ? loan.processed_post_service_fee
+                        : (calculation?.totals?.repayableFee || 0);
                       const postServiceFeeGST = calculation?.totals?.repayableFeeGST || 0;
 
-                      // Total GST on processing fee and post service fee
-                      const totalGSTOnFees = processingFeeGST + postServiceFeeGST;
+                      // Total GST - use processed value if available, otherwise calculate
+                      const totalGSTOnFees = isProcessed && loan.processed_gst !== null
+                        ? loan.processed_gst
+                        : (processingFeeGST + postServiceFeeGST);
 
-                      // Total interest for full tenure
-                      const totalInterestFullTenure = calculation?.interest?.amount || loan.interest || 0;
+                      // Total interest for full tenure - use processed value if available, otherwise calculate
+                      const totalInterestFullTenure = isProcessed && loan.processed_interest !== null
+                        ? loan.processed_interest
+                        : (calculation?.interest?.amount || loan.interest || 0);
 
                       // Calculate total amount: principal + post service fee + gst on post service fee + interest balance till current date + penalty if any + gst on penalty
                       const totalAmount = principal + postServiceFee + postServiceFeeGST + interestTillDate + penaltyData.total;
@@ -4391,7 +4541,7 @@ export function UserProfileDetail() {
                             {shortLoanId}
                           </td>
                           <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {processedDate ? formatDate(processedDate) : 'N/A'}
+                            {hasProcessedDate ? formatDate(processedDate) : 'N/A'}
                           </td>
                           <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
                             {loanExtensionAvailedDate !== 'N/A' ? formatDate(loanExtensionAvailedDate) : 'N/A'}
@@ -7206,29 +7356,64 @@ export function UserProfileDetail() {
               </button>
             </div>
 
-            <form className="space-y-4">
+            <form 
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleAddReference(e);
+              }}
+            >
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Name *</label>
                 <input
                   type="text"
                   value={newReference.name}
-                  onChange={(e) => setNewReference({ ...newReference, name: e.target.value })}
+                  onChange={(e) => {
+                    setNewReference({ ...newReference, name: e.target.value });
+                    if (referenceErrors.name) {
+                      setReferenceErrors({ ...referenceErrors, name: '' });
+                    }
+                  }}
                   placeholder="Enter name"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
+                  className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 ${
+                    referenceErrors.name 
+                      ? 'border-red-500 focus:ring-red-500' 
+                      : 'border-gray-300 focus:ring-blue-500'
+                  }`}
                 />
+                {referenceErrors.name && (
+                  <p className="mt-1 text-sm text-red-600">{referenceErrors.name}</p>
+                )}
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Phone *</label>
                 <input
                   type="tel"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={10}
                   value={newReference.phone}
-                  onChange={(e) => setNewReference({ ...newReference, phone: e.target.value })}
-                  placeholder="Enter phone number"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
+                  onChange={(e) => {
+                    // Only allow numeric input
+                    const value = e.target.value.replace(/\D/g, '');
+                    // Limit to 10 digits
+                    const limitedValue = value.slice(0, 10);
+                    setNewReference({ ...newReference, phone: limitedValue });
+                    if (referenceErrors.phone) {
+                      setReferenceErrors({ ...referenceErrors, phone: '' });
+                    }
+                  }}
+                  placeholder="Enter phone number (10 digits)"
+                  className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 ${
+                    referenceErrors.phone 
+                      ? 'border-red-500 focus:ring-red-500' 
+                      : 'border-gray-300 focus:ring-blue-500'
+                  }`}
                 />
+                {referenceErrors.phone && (
+                  <p className="mt-1 text-sm text-red-600">{referenceErrors.phone}</p>
+                )}
               </div>
 
               <div>
@@ -7236,18 +7421,32 @@ export function UserProfileDetail() {
                 <input
                   type="text"
                   value={newReference.relation}
-                  onChange={(e) => setNewReference({ ...newReference, relation: e.target.value })}
+                  onChange={(e) => {
+                    setNewReference({ ...newReference, relation: e.target.value });
+                    if (referenceErrors.relation) {
+                      setReferenceErrors({ ...referenceErrors, relation: '' });
+                    }
+                  }}
                   placeholder="Enter relationship"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
+                  className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 ${
+                    referenceErrors.relation 
+                      ? 'border-red-500 focus:ring-red-500' 
+                      : 'border-gray-300 focus:ring-blue-500'
+                  }`}
                 />
+                {referenceErrors.relation && (
+                  <p className="mt-1 text-sm text-red-600">{referenceErrors.relation}</p>
+                )}
               </div>
 
               {/* Action Buttons */}
               <div className="flex gap-3 pt-4">
                 <button
-                  type="button"
-                  onClick={handleAddReference}
+                  type="submit"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleAddReference(e as any);
+                  }}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
                 >
                   Add Reference
@@ -7257,6 +7456,7 @@ export function UserProfileDetail() {
                   onClick={() => {
                     setShowAddReferenceModal(false);
                     setNewReference({ name: '', phone: '', relation: '' });
+                    setReferenceErrors({ name: '', phone: '', relation: '' });
                   }}
                   className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
                 >
@@ -8400,6 +8600,42 @@ export function UserProfileDetail() {
                 <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-semibold rounded">
                   Score: {getUserData('creditScore')}
                 </span>
+                {(() => {
+                  // Get E-NACH status from latest loan
+                  const loans = getArray('loans');
+                  const latestLoan = loans && loans.length > 0 ? loans[0] : null;
+                  const enachStatus = latestLoan?.enach_status || null;
+                  
+                  const getEnachStatusDisplay = (status: string | null | undefined) => {
+                    if (!status) return 'N/A';
+                    const statusMap: { [key: string]: string } = {
+                      'ACTIVE': 'Success',
+                      'INITIALIZED': 'Initialized',
+                      'BANK_APPROVAL_PENDING': 'Bank Approval Pending',
+                      'FAILED': 'Failed',
+                      'CANCELLED': 'Cancelled',
+                      'pending': 'Pending',
+                      'registered': 'Registered',
+                      'active': 'Active',
+                      'failed': 'Failed',
+                      'cancelled': 'Cancelled'
+                    };
+                    return statusMap[status] || status;
+                  };
+                  
+                  const displayStatus = getEnachStatusDisplay(enachStatus);
+                  
+                  return (
+                    <span className={`px-2 py-1 text-xs font-semibold rounded ${
+                      displayStatus === 'Success' || displayStatus === 'Active' ? 'bg-green-100 text-green-800' :
+                      displayStatus === 'Cancelled' || displayStatus === 'Failed' ? 'bg-red-100 text-red-800' :
+                      displayStatus === 'Bank Approval Pending' || displayStatus === 'Initialized' || displayStatus === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      E-NACH Status: {displayStatus}
+                    </span>
+                  );
+                })()}
               </div>
             </div>
           </div>

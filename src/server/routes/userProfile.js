@@ -3,6 +3,7 @@ const { authenticateAdmin } = require('../middleware/auth');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { validateRequest } = require('../middleware/validation');
 const { getPresignedUrl } = require('../services/s3Service');
+const { getLoanCalculation } = require('../utils/loanCalculations');
 const router = express.Router();
 
 // Get user profile with all related data
@@ -50,18 +51,31 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // Get loan applications for this user
+    // Get loan applications for this user with e-nach status
     const applications = await executeQuery(`
       SELECT 
-        id, application_number, loan_amount, loan_purpose, 
-        tenure_months, status, rejection_reason, 
-        approved_by, approved_at, disbursed_at, created_at, updated_at,
-        processing_fee_percent, interest_percent_per_day, 
-        processing_fee, total_interest, total_repayable, plan_snapshot,
-        disbursal_amount
-      FROM loan_applications 
-      WHERE user_id = ?
-      ORDER BY created_at DESC
+        la.id, la.application_number, la.loan_amount, la.loan_purpose, 
+        la.tenure_months, la.status, la.rejection_reason, 
+        la.approved_by, la.approved_at, la.disbursed_at, la.created_at, la.updated_at,
+        la.processing_fee_percent, la.interest_percent_per_day, 
+        la.processing_fee, la.total_interest, la.total_repayable, la.plan_snapshot,
+        la.disbursal_amount, la.processed_at,
+        la.processed_amount, la.exhausted_period_days, la.processed_p_fee,
+        la.processed_post_service_fee, la.processed_gst, la.processed_interest,
+        la.processed_penalty, la.processed_due_date,
+        es.status as enach_status
+      FROM loan_applications la
+      LEFT JOIN (
+        SELECT es1.loan_application_id, es1.status
+        FROM enach_subscriptions es1
+        WHERE es1.id = (
+          SELECT MAX(es2.id)
+          FROM enach_subscriptions es2
+          WHERE es2.loan_application_id = es1.loan_application_id
+        )
+      ) es ON la.id = es.loan_application_id
+      WHERE la.user_id = ?
+      ORDER BY la.created_at DESC
     `, [userId]);
 
     console.log('📋 Found applications:', applications ? applications.length : 0);
@@ -567,6 +581,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           approvedDate: app.approved_at,
           disbursedDate: app.disbursed_at,
           disbursed_at: app.disbursed_at,
+          processed_at: app.processed_at,
+          processedDate: app.processed_at, // Use processed_at for Processed Date
           emi: emi,
           tenure: app.tenure_months,
           timePeriod: app.tenure_months,
@@ -583,7 +599,17 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           statusDate: app.approved_at || app.disbursed_at || app.created_at,
           createdAt: app.created_at,
           updatedAt: app.updated_at || app.created_at,
-          plan_snapshot: app.plan_snapshot
+          plan_snapshot: app.plan_snapshot,
+          // Processed values (frozen at processing time)
+          processed_amount: app.processed_amount,
+          exhausted_period_days: app.exhausted_period_days,
+          processed_p_fee: app.processed_p_fee,
+          processed_post_service_fee: app.processed_post_service_fee,
+          processed_gst: app.processed_gst,
+          processed_interest: app.processed_interest,
+          processed_penalty: app.processed_penalty,
+          processed_due_date: app.processed_due_date,
+          enach_status: app.enach_status || null
         };
       })
     };
@@ -725,6 +751,46 @@ router.put('/:userId/loan-limit', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to update loan limit'
+    });
+  }
+});
+
+// Update user salary date (admin only)
+router.put('/:userId/salary-date', authenticateAdmin, async (req, res) => {
+  try {
+    console.log('📅 Updating salary date for user:', req.params.userId);
+    await initializeDatabase();
+    const { userId } = req.params;
+    const { salaryDate } = req.body;
+
+    if (salaryDate !== null && salaryDate !== undefined && salaryDate !== '') {
+      // Validate salary date is between 1 and 31
+      const day = parseInt(salaryDate);
+      if (isNaN(day) || day < 1 || day > 31) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Salary date must be a number between 1 and 31'
+        });
+      }
+    }
+
+    // Update user's salary date
+    await executeQuery(
+      'UPDATE users SET salary_date = ?, updated_at = NOW() WHERE id = ?',
+      [salaryDate || null, userId]
+    );
+
+    console.log('✅ Salary date updated successfully');
+    res.json({
+      status: 'success',
+      message: 'Salary date updated successfully',
+      data: { userId, salaryDate: salaryDate || null }
+    });
+  } catch (error) {
+    console.error('Update salary date error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update salary date'
     });
   }
 });
@@ -1562,10 +1628,11 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
       const loanIdInt = parseInt(loan_application_id);
       const userIdInt = parseInt(userId);
 
-      // 1. Verify loan exists (query by ID only first)
+      // 1. Verify loan exists and get full loan data
       console.log(`🔍 Verifying loan #${loanIdInt}`);
       const loans = await executeQuery(
-        'SELECT id, user_id, status FROM loan_applications WHERE id = ?',
+        `SELECT id, user_id, status, loan_amount, plan_snapshot, interest_percent_per_day, 
+         fees_breakdown, processed_at FROM loan_applications WHERE id = ?`,
         [loanIdInt]
       );
 
@@ -1577,22 +1644,68 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
         if (loan.user_id == userIdInt || loan.user_id == userId) {
           console.log(`✅ Loan ownership confirmed. Current status: ${loan.status}`);
 
-          // 2. Update loan status
-          console.log(`Attempting to update loan status to account_manager...`);
-          const updateResult = await executeQuery(`
-               UPDATE loan_applications 
-               SET 
-                 status = 'account_manager',
-                 disbursed_at = NOW(),
-                 updated_at = NOW()
-               WHERE id = ?
-             `, [loanIdInt]);
+          // Check if already processed
+          if (loan.processed_at) {
+            console.log(`⚠️ Loan #${loanIdInt} already processed at ${loan.processed_at}`);
+          } else {
+            // 2. Get loan calculation to save all values
+            let calculatedValues = null;
+            try {
+              calculatedValues = await getLoanCalculation(loanIdInt);
+              console.log(`📊 Got loan calculation for loan #${loanIdInt}`);
+            } catch (calcError) {
+              console.error(`❌ Error getting loan calculation:`, calcError);
+              // Continue with update even if calculation fails
+            }
 
-          console.log('Update result:', updateResult);
+            // 3. Calculate values to save
+            const processedAmount = calculatedValues?.disbursal?.amount || loan.disbursal_amount || null;
+            const exhaustedPeriodDays = 0; // At processing time, it's day 0
+            const pFee = calculatedValues?.totals?.disbursalFee || loan.processing_fee || null;
+            const postServiceFee = calculatedValues?.totals?.repayableFee || null;
+            const gst = (calculatedValues?.totals?.disbursalFeeGST || 0) + (calculatedValues?.totals?.repayableFeeGST || 0);
+            const interest = calculatedValues?.interest?.amount || loan.total_interest || null;
+            const penalty = 0; // No penalty at processing time
+            const dueDate = calculatedValues?.interest?.repayment_date 
+              ? new Date(calculatedValues.interest.repayment_date).toISOString().split('T')[0]
+              : null;
+
+            // 4. Update loan status and save calculated values
+            console.log(`Attempting to update loan status to account_manager with calculated values...`);
+            const updateResult = await executeQuery(`
+                 UPDATE loan_applications 
+                 SET 
+                   status = 'account_manager',
+                   disbursed_at = NOW(),
+                   processed_at = NOW(),
+                   processed_amount = ?,
+                   exhausted_period_days = ?,
+                   processed_p_fee = ?,
+                   processed_post_service_fee = ?,
+                   processed_gst = ?,
+                   processed_interest = ?,
+                   processed_penalty = ?,
+                   processed_due_date = ?,
+                   updated_at = NOW()
+                 WHERE id = ?
+               `, [
+                 processedAmount,
+                 exhaustedPeriodDays,
+                 pFee,
+                 postServiceFee,
+                 gst || null,
+                 interest,
+                 penalty,
+                 dueDate,
+                 loanIdInt
+               ]);
+
+            console.log('Update result:', updateResult);
+            console.log(`✅ Updated loan #${loanIdInt} status to account_manager and saved calculated values`);
+          }
 
           loanStatusUpdated = true;
           newStatus = 'account_manager';
-          console.log(`✅ Updated loan #${loanIdInt} status to account_manager`);
         } else {
           console.warn(`❌ Loan #${loanIdInt} belongs to user ${loan.user_id}, not requested user ${userId}`);
         }
