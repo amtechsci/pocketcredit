@@ -31,13 +31,8 @@ const initializePool = () => {
   if (!pool) {
     pool = mysql.createPool(dbConfig);
     
-    // Set MySQL session timezone for each new connection
     pool.on('connection', async (connection) => {
-      try {
-        await connection.execute("SET time_zone = '+05:30'");
-      } catch (error) {
-        console.warn('⚠️  Failed to set MySQL timezone:', error.message);
-      }
+      console.log('🔌 New database connection established');
     });
     
     console.log('✅ MySQL connection pool initialized');

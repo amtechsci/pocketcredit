@@ -176,23 +176,74 @@ export const RepaymentSchedulePage = () => {
   }
 
   const calculations = kfsData.calculations || {};
+  const planData = kfsData.plan || {};
+  
+  // Debug: Log to check data structure
+  console.log('KFS Data:', {
+    planData,
+    loanData: loanData,
+    repayment: kfsData.repayment,
+    planType: planData.plan_type,
+    loanPlanType: loanData.plan_type,
+    hasRepaymentSchedule: !!kfsData.repayment?.schedule,
+    scheduleLength: kfsData.repayment?.schedule?.length
+  });
+  
+  // Check multiple possible locations for plan_type
+  const planType = planData.plan_type || 
+                   loanData.plan_type || 
+                   loanData.plan_snapshot?.plan_type ||
+                   (kfsData.repayment?.schedule && kfsData.repayment.schedule.length > 1 ? 'multi_emi' : null) ||
+                   'single';
+  const isMultiEmi = planType === 'multi_emi';
+  const repaymentSchedule = kfsData.repayment?.schedule || [];
+  
+  // Also check if we have multiple EMIs in schedule (fallback detection)
+  const hasMultipleEmis = repaymentSchedule.length > 1;
+  const shouldShowMultiEmi = isMultiEmi || hasMultipleEmis;
 
   // Calculate derived values
-  const disbursedDate = loanData.disbursed_at ? new Date(loanData.disbursed_at) : new Date();
   const currentDate = new Date(); // Use current date
-
-  // Exhausted Days Calculation - match backend calculation exactly
-  // Set both dates to midnight for accurate day calculation
-  const disbursedDateMidnight = new Date(disbursedDate);
-  disbursedDateMidnight.setHours(0, 0, 0, 0);
   const currentDateMidnight = new Date(currentDate);
   currentDateMidnight.setHours(0, 0, 0, 0);
-  const diffTime = Math.abs(currentDateMidnight.getTime() - disbursedDateMidnight.getTime());
-  let exhaustedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  // Ensure at least 1 day if loan was disbursed today
-  if (exhaustedDays === 0) {
-    exhaustedDays = 1;
+  
+  // Use processed_at ONLY for exhausted days calculation
+  const processedDate = loanData.processed_at ? new Date(loanData.processed_at) : null;
+  
+  if (!loanData.processed_at) {
+    console.warn('⚠️ processed_at is not available for loan, cannot calculate exhausted days accurately');
   }
+
+  // Exhausted Days Calculation - based on processed_at only
+  let exhaustedDays = 1; // Default to 1 if processed_at is not available
+  
+  if (processedDate) {
+    // Set processed date to midnight for accurate day calculation
+    const processedDateMidnight = new Date(processedDate);
+    processedDateMidnight.setHours(0, 0, 0, 0);
+    
+    // Calculate difference in days (current date - processed date)
+    const diffTime = currentDateMidnight.getTime() - processedDateMidnight.getTime();
+    const daysDiff = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    
+    // Exhausted days should be at least 1 if loan was processed today or in the past
+    // If future date (shouldn't happen), use 1 as minimum
+    exhaustedDays = Math.max(1, daysDiff + 1);
+  }
+  
+  // Debug logging
+  console.log('Exhausted Days Calculation (using processed_at only):', {
+    processed_at: loanData.processed_at,
+    processedDate: processedDate ? processedDate.toISOString().split('T')[0] : 'N/A',
+    currentDate: currentDate.toISOString().split('T')[0],
+    calculatedDays: exhaustedDays,
+    note: processedDate ? 'Calculated from processed_at' : 'Using default (1 day) - processed_at not available'
+  });
+  
+  // For due date calculation, still use disbursed_at or processed_at
+  const disbursedDate = processedDate || (loanData.disbursed_at ? new Date(loanData.disbursed_at) : new Date());
+  const disbursedDateMidnight = new Date(disbursedDate);
+  disbursedDateMidnight.setHours(0, 0, 0, 0);
 
   // Determine Due Date
   // Logic: Disbursement Date + Loan Term
@@ -275,104 +326,395 @@ export const RepaymentSchedulePage = () => {
           <p className="text-sm sm:text-base text-gray-600">Clear your loan fast to unlock higher limits</p>
         </div>
 
-        {/* Outstanding & Due Date Card */}
-        <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
-          <CardContent className="p-4 sm:p-6 space-y-4">
-            {/* Total Outstanding */}
-            <div className="text-center py-4 sm:py-6 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
-              <p className="text-xs sm:text-sm text-gray-600 mb-2 font-medium">Total Outstanding till today</p>
-              <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-gray-900 mb-2">
-                {formatCurrency(calculations.total_repayable || 0)}
-              </h1>
-              <p className="text-xs sm:text-sm text-gray-500">
-                Due date: {formatDate(dueDate.toISOString())}
-              </p>
-            </div>
-
-            {/* Default Status */}
-            {isDefaulted && (
-              <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg animate-pulse">
-                <p className="text-red-600 font-bold text-base sm:text-lg uppercase tracking-wide">
-                  ⚠ DEFAULTED ({daysDelayed} days delayed)
+        {/* Single Payment Plan - Current Page */}
+        {!shouldShowMultiEmi && (
+          <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
+            <CardContent className="p-4 sm:p-6 space-y-4">
+              {/* Total Outstanding */}
+              <div className="text-center py-4 sm:py-6 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
+                <p className="text-xs sm:text-sm text-gray-600 mb-2 font-medium">Total Outstanding till today</p>
+                <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-gray-900 mb-2">
+                  {formatCurrency(calculations.total_repayable || 0)}
+                </h1>
+                <p className="text-xs sm:text-sm text-gray-500">
+                  Due date: {formatDate(dueDate.toISOString())}
                 </p>
-                <p className="text-xs sm:text-sm text-red-500 mt-1">Immediate action required</p>
               </div>
-            )}
 
-            {/* Action Buttons */}
-            <div className="space-y-3 pt-4 border-t border-gray-200">
-              <Button
-                className="w-full h-12 sm:h-14 text-base sm:text-lg font-bold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all transform hover:scale-[1.02]"
-                onClick={async () => {
-                  try {
-                    toast.loading('Creating payment order...');
+              {/* Default Status */}
+              {isDefaulted && (
+                <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg animate-pulse">
+                  <p className="text-red-600 font-bold text-base sm:text-lg uppercase tracking-wide">
+                    ⚠ DEFAULTED ({daysDelayed} days delayed)
+                  </p>
+                  <p className="text-xs sm:text-sm text-red-500 mt-1">Immediate action required</p>
+                </div>
+              )}
 
-                    const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
-                    const amount = calculations.total_repayable;
-
-                    if (!loanId || !amount) {
-                      toast.error('Unable to process payment');
-                      return;
-                    }
-
-                    const response = await apiService.createPaymentOrder(loanId, amount);
-
-                    if (response.success && response.data?.paymentSessionId) {
-                      toast.success('Opening payment gateway...');
-
-                      try {
-                        const isProduction = response.data.checkoutUrl?.includes('payments.cashfree.com') && 
-                                           !response.data.checkoutUrl?.includes('payments-test');
-                        
-                        const cashfree = await load({ 
-                          mode: isProduction ? "production" : "sandbox"
-                        });
-
-                        if (cashfree) {
-                          cashfree.checkout({
-                            paymentSessionId: response.data.paymentSessionId
-                          });
-                        } else {
-                          throw new Error('Failed to load Cashfree SDK');
-                        }
-                      } catch (sdkError: any) {
-                        console.error('Cashfree SDK error:', sdkError);
-                        toast.error('Failed to open payment gateway. Please try again.');
-                        
-                        if (response.data.checkoutUrl) {
-                          window.location.href = response.data.checkoutUrl;
-                        } else {
-                          throw new Error('No payment session available');
-                        }
-                      }
-                    } else {
-                      toast.error(response.message || 'Failed to create payment order');
-                    }
-                  } catch (error: any) {
-                    console.error('Payment error:', error);
-                    toast.error(error.message || 'Failed to initiate payment');
-                  }
-                }}
-              >
-                Repay Now
-              </Button>
-
-              {/* Extend Loan Tenure Button */}
-              {canExtend && (
+              {/* Action Buttons */}
+              <div className="space-y-3 pt-4 border-t border-gray-200">
                 <Button
-                  variant="outline"
-                  className="w-full h-12 border-2 border-blue-600 text-blue-600 hover:bg-blue-50 font-semibold"
-                  onClick={() => {
-                    toast.info('Tenure extension feature coming soon');
+                  className="w-full h-12 sm:h-14 text-base sm:text-lg font-bold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all transform hover:scale-[1.02]"
+                  onClick={async () => {
+                    try {
+                      toast.loading('Creating payment order...');
+
+                      const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
+                      const amount = calculations.total_repayable;
+
+                      if (!loanId || !amount) {
+                        toast.error('Unable to process payment');
+                        return;
+                      }
+
+                      const response = await apiService.createPaymentOrder(loanId, amount);
+
+                      if (response.success && response.data?.paymentSessionId) {
+                        toast.success('Opening payment gateway...');
+
+                        try {
+                          const isProduction = response.data.checkoutUrl?.includes('payments.cashfree.com') && 
+                                             !response.data.checkoutUrl?.includes('payments-test');
+                          
+                          const cashfree = await load({ 
+                            mode: isProduction ? "production" : "sandbox"
+                          });
+
+                          if (cashfree) {
+                            cashfree.checkout({
+                              paymentSessionId: response.data.paymentSessionId
+                            });
+                          } else {
+                            throw new Error('Failed to load Cashfree SDK');
+                          }
+                        } catch (sdkError: any) {
+                          console.error('Cashfree SDK error:', sdkError);
+                          toast.error('Failed to open payment gateway. Please try again.');
+                          
+                          if (response.data.checkoutUrl) {
+                            window.location.href = response.data.checkoutUrl;
+                          } else {
+                            throw new Error('No payment session available');
+                          }
+                        }
+                      } else {
+                        toast.error(response.message || 'Failed to create payment order');
+                      }
+                    } catch (error: any) {
+                      console.error('Payment error:', error);
+                      toast.error(error.message || 'Failed to initiate payment');
+                    }
                   }}
                 >
-                  <TrendingUp className="w-4 h-4 mr-2" />
-                  Extend your loan tenure
+                  Repay Now
                 </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+
+                {/* Extend Loan Tenure Button */}
+                {canExtend && (
+                  <Button
+                    variant="outline"
+                    className="w-full h-12 border-2 border-blue-600 text-blue-600 hover:bg-blue-50 font-semibold"
+                    onClick={() => {
+                      toast.info('Tenure extension feature coming soon');
+                    }}
+                  >
+                    <TrendingUp className="w-4 h-4 mr-2" />
+                    Extend your loan tenure
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Multi-EMI Plan - Preclose Section */}
+        {shouldShowMultiEmi && (
+          <>
+            <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
+              <CardContent className="p-4 sm:p-6 space-y-4">
+                <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Preclose it today</h3>
+                
+                {/* Calculate preclose amount: principal + interest till today + post service fee (1 time) + gst */}
+                {(() => {
+                  const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
+                  
+                  // Calculate interest till today based on exhausted days
+                  // interest_percent_per_day is a decimal (e.g., 0.001 = 0.1% per day)
+                  const interestRatePerDay = planData.interest_percent_per_day || 
+                                            calculations.interest?.rate_per_day ||
+                                            (calculations.interest?.amount && calculations.interest?.days && principal > 0
+                                              ? calculations.interest.amount / (calculations.interest.days * principal)
+                                              : 0.001); // Default 0.1% per day
+                  
+                  // Interest = Principal * Rate * Days
+                  const interestTillToday = principal * interestRatePerDay * exhaustedDays;
+                  
+                  // For preclose, use post service fee ONCE (not multiplied by EMI count)
+                  // Post Service Fee is 10% of principal (fixed)
+                  const emiCount = planData.emi_count || 1;
+                  const POST_SERVICE_FEE_PERCENT = 10; // 10% fixed
+                  const GST_RATE = 0.18; // 18% GST
+                  
+                  let postServiceFeeBase = 0;
+                  
+                  // Try to get from first EMI in schedule (this is the base fee per EMI)
+                  if (repaymentSchedule.length > 0 && repaymentSchedule[0].post_service_fee) {
+                    postServiceFeeBase = repaymentSchedule[0].post_service_fee;
+                  } else if (calculations.totals?.repayableFee) {
+                    // If repayableFee is already multiplied by EMI count, divide it back
+                    postServiceFeeBase = emiCount > 1 
+                      ? calculations.totals.repayableFee / emiCount 
+                      : calculations.totals.repayableFee;
+                  }
+                  
+                  // If still 0, calculate as 10% of principal (fallback)
+                  if (postServiceFeeBase === 0) {
+                    postServiceFeeBase = (principal * POST_SERVICE_FEE_PERCENT) / 100;
+                  }
+                  
+                  const postServiceFee = postServiceFeeBase;
+                  
+                  // Calculate GST on post service fee (18% of fee)
+                  let gstOnPostServiceFee = 0;
+                  if (repaymentSchedule.length > 0 && repaymentSchedule[0].gst_on_post_service_fee) {
+                    gstOnPostServiceFee = repaymentSchedule[0].gst_on_post_service_fee;
+                  } else if (calculations.totals?.repayableFeeGST) {
+                    gstOnPostServiceFee = emiCount > 1
+                      ? calculations.totals.repayableFeeGST / emiCount
+                      : calculations.totals.repayableFeeGST;
+                  }
+                  
+                  // If still 0, calculate as 18% of post service fee (fallback)
+                  if (gstOnPostServiceFee === 0 && postServiceFee > 0) {
+                    gstOnPostServiceFee = postServiceFee * GST_RATE;
+                  }
+                  
+                  const precloseAmount = principal + interestTillToday + postServiceFee + gstOnPostServiceFee;
+                  
+                  // Debug logging
+                  console.log('Preclose Calculation:', {
+                    principal,
+                    interestRatePerDay,
+                    exhaustedDays,
+                    interestTillToday,
+                    postServiceFeeBase: calculations.totals?.repayableFee,
+                    postServiceFee,
+                    gstBase: calculations.totals?.repayableFeeGST,
+                    gstOnPostServiceFee,
+                    emiCount,
+                    firstEmiFee: repaymentSchedule[0]?.post_service_fee,
+                    precloseAmount
+                  });
+                  
+                  return (
+                    <>
+                      <div className="text-center py-4 sm:py-6 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
+                        <p className="text-xs sm:text-sm text-gray-600 mb-2 font-medium">Preclose Amount</p>
+                        <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-gray-900 mb-2">
+                          {formatCurrency(precloseAmount)}
+                        </h1>
+                        <div className="text-xs sm:text-sm text-gray-500 mt-2 space-y-1">
+                          <p>Principal: {formatCurrency(principal)}</p>
+                          <p>Interest (till today, {exhaustedDays} days @ {(interestRatePerDay * 100).toFixed(4)}%/day): {formatCurrency(interestTillToday)}</p>
+                          <p>Post Service Fee (1 time): {formatCurrency(postServiceFee)}</p>
+                          <p>GST on Post Service Fee: {formatCurrency(gstOnPostServiceFee)}</p>
+                        </div>
+                      </div>
+
+                      <Button
+                        className="w-full h-12 sm:h-14 text-base sm:text-lg font-bold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all transform hover:scale-[1.02]"
+                        onClick={async () => {
+                          try {
+                            toast.loading('Creating payment order...');
+
+                            const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
+
+                            if (!loanId || !precloseAmount) {
+                              toast.error('Unable to process payment');
+                              return;
+                            }
+
+                            const response = await apiService.createPaymentOrder(loanId, precloseAmount);
+
+                            if (response.success && response.data?.paymentSessionId) {
+                              toast.success('Opening payment gateway...');
+
+                              try {
+                                const isProduction = response.data.checkoutUrl?.includes('payments.cashfree.com') && 
+                                                   !response.data.checkoutUrl?.includes('payments-test');
+                                
+                                const cashfree = await load({ 
+                                  mode: isProduction ? "production" : "sandbox"
+                                });
+
+                                if (cashfree) {
+                                  cashfree.checkout({
+                                    paymentSessionId: response.data.paymentSessionId
+                                  });
+                                } else {
+                                  throw new Error('Failed to load Cashfree SDK');
+                                }
+                              } catch (sdkError: any) {
+                                console.error('Cashfree SDK error:', sdkError);
+                                toast.error('Failed to open payment gateway. Please try again.');
+                                
+                                if (response.data.checkoutUrl) {
+                                  window.location.href = response.data.checkoutUrl;
+                                } else {
+                                  throw new Error('No payment session available');
+                                }
+                              }
+                            } else {
+                              toast.error(response.message || 'Failed to create payment order');
+                            }
+                          } catch (error: any) {
+                            console.error('Payment error:', error);
+                            toast.error(error.message || 'Failed to initiate payment');
+                          }
+                        }}
+                      >
+                        Repay Now
+                      </Button>
+                    </>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+
+            {/* EMI List */}
+            {repaymentSchedule.length > 0 && (
+              <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
+                <CardContent className="p-4 sm:p-6">
+                  <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">EMI Schedule</h3>
+                  <div className="space-y-3">
+                    {repaymentSchedule.map((emi: any, index: number) => {
+                      const emiDate = new Date(emi.due_date);
+                      emiDate.setHours(0, 0, 0, 0);
+                      const daysUntilDue = Math.ceil((emiDate.getTime() - currentDateMidnight.getTime()) / (1000 * 60 * 60 * 24));
+                      const isOverdue = daysUntilDue < 0;
+                      const isDueToday = daysUntilDue === 0;
+                      
+                      const getOrdinal = (n: number) => {
+                        const s = ["th", "st", "nd", "rd"];
+                        const v = n % 100;
+                        return n + (s[(v - 20) % 10] || s[v] || s[0]);
+                      };
+
+                      return (
+                        <div
+                          key={emi.instalment_no || index}
+                          className={`p-4 rounded-lg border-2 ${
+                            isOverdue
+                              ? 'bg-red-50 border-red-200'
+                              : isDueToday
+                              ? 'bg-yellow-50 border-yellow-200'
+                              : 'bg-gray-50 border-gray-200'
+                          }`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <span className="text-base sm:text-lg font-bold text-gray-900">
+                                  {getOrdinal(emi.instalment_no || index + 1)} EMI
+                                </span>
+                                {isOverdue && (
+                                  <span className="text-xs font-semibold text-red-600 bg-red-100 px-2 py-1 rounded">
+                                    Overdue
+                                  </span>
+                                )}
+                                {isDueToday && (
+                                  <span className="text-xs font-semibold text-yellow-600 bg-yellow-100 px-2 py-1 rounded">
+                                    Due Today
+                                  </span>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 text-sm">
+                                <div>
+                                  <p className="text-gray-500">EMI Date</p>
+                                  <p className="font-semibold text-gray-900">{formatDate(emi.due_date)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-gray-500">Due in</p>
+                                  <p className={`font-semibold ${isOverdue ? 'text-red-600' : isDueToday ? 'text-yellow-600' : 'text-gray-900'}`}>
+                                    {isOverdue
+                                      ? `${Math.abs(daysUntilDue)} days ago`
+                                      : isDueToday
+                                      ? 'Today'
+                                      : `${daysUntilDue} days`}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-lg sm:text-xl font-bold text-gray-900 mr-2">
+                                {formatCurrency(emi.instalment_amount || 0)}
+                              </p>
+                              <Button
+                                className="bg-blue-600 hover:bg-blue-700 text-white"
+                                onClick={async () => {
+                                  try {
+                                    toast.loading('Creating payment order...');
+
+                                    const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
+                                    const amount = emi.instalment_amount || 0;
+
+                                    if (!loanId || !amount) {
+                                      toast.error('Unable to process payment');
+                                      return;
+                                    }
+
+                                    const response = await apiService.createPaymentOrder(loanId, amount);
+
+                                    if (response.success && response.data?.paymentSessionId) {
+                                      toast.success('Opening payment gateway...');
+
+                                      try {
+                                        const isProduction = response.data.checkoutUrl?.includes('payments.cashfree.com') && 
+                                                           !response.data.checkoutUrl?.includes('payments-test');
+                                        
+                                        const cashfree = await load({ 
+                                          mode: isProduction ? "production" : "sandbox"
+                                        });
+
+                                        if (cashfree) {
+                                          cashfree.checkout({
+                                            paymentSessionId: response.data.paymentSessionId
+                                          });
+                                        } else {
+                                          throw new Error('Failed to load Cashfree SDK');
+                                        }
+                                      } catch (sdkError: any) {
+                                        console.error('Cashfree SDK error:', sdkError);
+                                        toast.error('Failed to open payment gateway. Please try again.');
+                                        
+                                        if (response.data.checkoutUrl) {
+                                          window.location.href = response.data.checkoutUrl;
+                                        } else {
+                                          throw new Error('No payment session available');
+                                        }
+                                      }
+                                    } else {
+                                      toast.error(response.message || 'Failed to create payment order');
+                                    }
+                                  } catch (error: any) {
+                                    console.error('Payment error:', error);
+                                    toast.error(error.message || 'Failed to initiate payment');
+                                  }
+                                }}
+                              >
+                                Pay Now
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </>
+        )}
 
         {/* Loan Progression Stages - Offer Section */}
         <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">

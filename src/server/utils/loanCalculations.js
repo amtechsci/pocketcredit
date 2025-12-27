@@ -45,7 +45,7 @@ function getNextSalaryDate(startDate, targetDay) {
   let month = normalizedStartDate.getMonth();
   let day = targetDay;
 
-  // Create date for this month's salary date (at midday to avoid timezone shifts)
+  // Create date for this month's salary date
   let salaryDate = new Date(year, month, day);
   salaryDate.setHours(12, 0, 0, 0);
 
@@ -91,7 +91,7 @@ function getSalaryDateForMonth(startDate, targetDay, monthOffset = 0) {
     year -= 1;
   }
 
-  // Try to create date with target day (at midday to avoid timezone shifts)
+  // Try to create date with target day
   let salaryDate = new Date(year, month, targetDay);
   salaryDate.setHours(12, 0, 0, 0);
 

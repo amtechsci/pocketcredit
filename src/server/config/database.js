@@ -43,12 +43,6 @@ const initializeDatabase = async () => {
       // Add connection pool event handlers for monitoring
       pool.on('connection', async (connection) => {
         console.log('🔌 New database connection established');
-        // Set MySQL session timezone to Asia/Kolkata
-        try {
-          await connection.execute("SET time_zone = '+05:30'");
-        } catch (error) {
-          console.warn('⚠️  Failed to set MySQL timezone:', error.message);
-        }
       });
       
       pool.on('acquire', (connection) => {
@@ -159,13 +153,6 @@ const getValidatedConnection = async (maxRetries = 3) => {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const connection = await currentPool.getConnection();
-      
-      // Set MySQL session timezone to Asia/Kolkata
-      try {
-        await connection.execute("SET time_zone = '+05:30'");
-      } catch (error) {
-        console.warn('⚠️  Failed to set MySQL timezone:', error.message);
-      }
       
       // Validate the connection
       const isValid = await validateConnection(connection);

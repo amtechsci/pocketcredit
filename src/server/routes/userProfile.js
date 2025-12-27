@@ -1586,6 +1586,14 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
       });
     }
 
+    // Validate reference_number (UTR) is required
+    if (!reference_number || reference_number.trim() === '') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Reference / UTR number is required'
+      });
+    }
+
     // Insert transaction into database
     const query = `
       INSERT INTO transactions (

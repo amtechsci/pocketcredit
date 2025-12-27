@@ -8,8 +8,7 @@ const pdfService = require('../services/pdfService');
 const emailService = require('../services/emailService');
 
 /**
- * Format date to YYYY-MM-DD in local timezone (not UTC)
- * This prevents timezone shifts when converting to ISO string
+ * Format date to YYYY-MM-DD
  */
 function formatDateLocal(date) {
   const year = date.getFullYear();
@@ -50,6 +49,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         la.*,
         la.fees_breakdown,
         la.disbursal_amount,
+        la.processed_at,
         la.user_id,
         u.first_name, u.last_name, u.email, u.phone, u.date_of_birth,
         u.gender, u.marital_status
@@ -262,6 +262,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         principal_amount: loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0,
         disbursal_amount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
         disbursed_at: loan.disbursed_at || null,
+        processed_at: loan.processed_at || null,
         loan_term_days: (() => {
           // Calculate loan term days based on EMI count for EMI loans
           const emiCount = planData.emi_count || null;
@@ -1197,7 +1198,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
             allEmiDates.push(emiDate);
           }
           
-          // Debug: Log corrected EMI dates (using local timezone format)
+          // Debug: Log corrected EMI dates
           console.log('📅 Corrected EMI Dates:', allEmiDates.map(d => formatDateLocal(d)));
           
           // Update firstDueDate to match the first EMI date for consistency
@@ -1266,7 +1267,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           
           // Store period details for debugging
           // Note: emiDate is from allEmiDates array which uses corrected dates
-          // Use local timezone format to avoid UTC conversion issues
+          // Use date format for EMI dates
           emiPeriodDetails.push({
             period: i + 1,
             previousDate: formatDateLocal(previousDate),

@@ -148,6 +148,15 @@ export function UserProfileDetail() {
     templateId: ''
   });
 
+  // Helper to get current date string (moved before useState to avoid hoisting issues)
+  const getCurrentDateForForm = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const [transactionForm, setTransactionForm] = useState({
     amount: '',
     transactionType: '',
@@ -156,7 +165,7 @@ export function UserProfileDetail() {
     category: 'loan',
     paymentMethod: 'net_banking',
     referenceNumber: '',
-    transactionDate: new Date().toISOString().split('T')[0],
+    transactionDate: getCurrentDateForForm(),
     status: 'completed',
     transactionTime: '',
     additionalNotes: ''
@@ -164,7 +173,14 @@ export function UserProfileDetail() {
 
   const transactionTypeOptions = [
     { value: 'loan_disbursement', label: 'Loan Disbursement' },
-    { value: 'emi_payment', label: 'EMI Payment' },
+    { value: '1st_emi_paid', label: '1st EMI paid' },
+    { value: '2nd_emi_paid', label: '2nd EMI paid' },
+    { value: '3rd_emi_paid', label: '3rd EMI paid' },
+    { value: '4th_emi_paid', label: '4th EMI paid' },
+    { value: 'loan_extension_1st', label: 'Loan extension 1st' },
+    { value: 'loan_extension_2nd', label: 'Loan extension 2nd' },
+    { value: 'loan_extension_3rd', label: 'Loan extension 3rd' },
+    { value: 'loan_extension_4th', label: 'Loan extension 4th' },
     { value: 'settlement', label: 'Settlement' },
     { value: 'full_payment', label: 'Full Payment' },
     { value: 'part_payment', label: 'Part Payment' }
@@ -940,6 +956,12 @@ export function UserProfileDetail() {
         return;
       }
 
+      // Require UTR/reference number
+      if (!transactionForm.referenceNumber || transactionForm.referenceNumber.trim() === '') {
+        alert('Please enter a UTR / Reference number');
+        return;
+      }
+
       const transactionData = {
         amount: parseFloat(transactionForm.amount),
         type: transactionForm.transactionType, // Backend expects "type" or "transaction_type"
@@ -973,8 +995,9 @@ export function UserProfileDetail() {
           category: 'loan',
           paymentMethod: 'bank_transfer',
           referenceNumber: '',
-          transactionDate: new Date().toISOString().split('T')[0],
+          transactionDate: getCurrentDateForForm(),
           status: 'completed',
+          transactionTime: '',
           additionalNotes: ''
         });
 
@@ -1739,27 +1762,37 @@ export function UserProfileDetail() {
     }).format(numAmount);
   };
 
-  const formatDate = (dateString: string) => {
-    if (!dateString) return 'N/A';
+  // Helper function to get current date as YYYY-MM-DD string (server timezone - no conversion)
+  const getCurrentDateString = (): string => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const formatDate = (dateString: string | null | undefined) => {
+    if (!dateString || dateString === 'null' || dateString === 'undefined' || dateString === '') return 'N/A';
     
-    // Handle MySQL datetime format: "2025-12-25 23:19:50"
-    // Extract just the date part to avoid timezone conversion issues
+    // Extract date part from datetime string (e.g., "2025-12-25 23:19:50" -> "2025-12-25")
+    let datePart = String(dateString);
     if (typeof dateString === 'string' && dateString.includes(' ')) {
-      const datePart = dateString.split(' ')[0]; // Get "2025-12-25"
-      const [year, month, day] = datePart.split('-');
-      if (year && month && day) {
-        // Create date in local timezone using date components (not parsing string)
-        const d = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-        if (!isNaN(d.getTime())) {
-          return d.toLocaleDateString('en-IN');
-        }
-      }
+      datePart = dateString.split(' ')[0];
     }
     
-    // Fallback to original parsing for ISO dates or other formats
-    const d = new Date(dateString);
-    if (isNaN(d.getTime())) return 'N/A';
-    return d.toLocaleDateString('en-IN');
+    // Handle ISO date format: "2025-12-25" or "2025-12-25T00:00:00.000Z"
+    if (datePart.includes('T')) {
+      datePart = datePart.split('T')[0];
+    }
+    
+    // Format as DD/MM/YYYY (Indian format) - no timezone conversion, just string manipulation
+    const parts = datePart.split('-');
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      return `${day}/${month}/${year}`;
+    }
+    
+    return datePart; // Return as-is if format is unexpected
   };
 
   // Use real data with fallback to mock data
@@ -2060,7 +2093,7 @@ export function UserProfileDetail() {
                           {doc.document_type || 'Document'}
                         </p>
                         <p className="text-xs text-gray-500">
-                          {new Date(doc.created_at).toLocaleDateString()}
+                          {formatDate(doc.created_at)}
                         </p>
                       </div>
                     </div>
@@ -2517,7 +2550,7 @@ export function UserProfileDetail() {
                   {userData.loginHistory.slice(0, 10).map((login: any, index: number) => (
                     <tr key={index} className="hover:bg-gray-50">
                       <td className="px-3 py-2 whitespace-nowrap text-gray-900">
-                        {login.login_time ? new Date(login.login_time).toLocaleString('en-IN') : 'N/A'}
+                        {login.login_time ? formatDate(login.login_time) : 'N/A'}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap text-gray-900 font-mono text-xs">
                         {login.ip_address || 'N/A'}
@@ -3617,7 +3650,7 @@ export function UserProfileDetail() {
                             {account.transactions.slice(0, 5).map((txn: any, tIndex: number) => (
                               <tr key={tIndex} className="hover:bg-gray-50">
                                 <td className="px-6 py-3 whitespace-nowrap">
-                                  {txn.date ? new Date(txn.date).toLocaleDateString('en-IN') : '-'}
+                                  {txn.date ? formatDate(txn.date) : '-'}
                                 </td>
                                 <td className="px-6 py-3">
                                   <div className="max-w-xs truncate" title={txn.narration}>
@@ -4092,7 +4125,7 @@ export function UserProfileDetail() {
                                           <div className="text-xs text-gray-600 mb-2">
                                             <p>File: {doc.file_name}</p>
                                             <p>Size: {(doc.file_size / 1024 / 1024).toFixed(2)} MB</p>
-                                            <p>Uploaded: {new Date(doc.uploaded_at).toLocaleDateString()}</p>
+                                            <p>Uploaded: {formatDate(doc.uploaded_at)}</p>
                                           </div>
                                           <button
                                             onClick={async () => {
@@ -4190,14 +4223,49 @@ export function UserProfileDetail() {
     );
   };
 
-  // Helper function to calculate DPD (Days Past Due)
-  const calculateDPD = (disbursedDate: string, dueDate: string | null, currentDate: Date = new Date()) => {
+  // Helper function to parse date string to YYYY-MM-DD format (no timezone conversion)
+  const parseDateString = (dateStr: string | Date): string => {
+    if (!dateStr) return '';
+    if (dateStr instanceof Date) {
+      // If it's already a Date object, format it as YYYY-MM-DD
+      const year = dateStr.getFullYear();
+      const month = String(dateStr.getMonth() + 1).padStart(2, '0');
+      const day = String(dateStr.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    // Extract date part from datetime string
+    const str = String(dateStr);
+    if (str.includes(' ')) {
+      return str.split(' ')[0];
+    }
+    if (str.includes('T')) {
+      return str.split('T')[0];
+    }
+    return str;
+  };
+
+  // Helper function to calculate days difference between two dates (no timezone conversion)
+  const daysDifference = (date1: string, date2: string): number => {
+    const d1 = parseDateString(date1);
+    const d2 = parseDateString(date2);
+    if (!d1 || !d2) return 0;
+    
+    const [y1, m1, day1] = d1.split('-').map(Number);
+    const [y2, m2, day2] = d2.split('-').map(Number);
+    
+    // Simple date difference calculation
+    const date1Obj = new Date(y1, m1 - 1, day1);
+    const date2Obj = new Date(y2, m2 - 1, day2);
+    const diff = Math.floor((date2Obj.getTime() - date1Obj.getTime()) / (1000 * 60 * 60 * 24));
+    return diff;
+  };
+
+
+  // Helper function to calculate DPD (Days Past Due) - no timezone conversion
+  const calculateDPD = (disbursedDate: string, dueDate: string | null, currentDate?: string) => {
     if (!dueDate) return 0;
-    const due = new Date(dueDate);
-    due.setHours(0, 0, 0, 0);
-    const current = new Date(currentDate);
-    current.setHours(0, 0, 0, 0);
-    const diff = Math.floor((current.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+    const current = currentDate || getCurrentDateString();
+    const diff = daysDifference(dueDate, current);
     return diff > 0 ? diff : 0;
   };
 
@@ -4220,14 +4288,11 @@ export function UserProfileDetail() {
     return { penalty, gst, total: penalty + gst };
   };
 
-  // Helper function to calculate interest till current date
-  const calculateInterestTillDate = (principal: number, ratePerDay: number, disbursedDate: string, currentDate: Date = new Date()) => {
+  // Helper function to calculate interest till current date - no timezone conversion
+  const calculateInterestTillDate = (principal: number, ratePerDay: number, disbursedDate: string, currentDate?: string) => {
     if (!disbursedDate) return 0;
-    const disbursed = new Date(disbursedDate);
-    disbursed.setHours(0, 0, 0, 0);
-    const current = new Date(currentDate);
-    current.setHours(0, 0, 0, 0);
-    const days = Math.max(1, Math.floor((current.getTime() - disbursed.getTime()) / (1000 * 60 * 60 * 24)));
+    const current = currentDate || getCurrentDateString();
+    const days = Math.max(1, daysDifference(disbursedDate, current));
     return principal * ratePerDay * days;
   };
 
@@ -4440,11 +4505,15 @@ export function UserProfileDetail() {
                       }
 
                       // Calculate derived values
-                      // Processed Date: Use processed_at if available (when loan was actually processed/disbursed)
-                      // Otherwise use approved_at or disbursed_at as fallback
-                      const processedDate = loan.processed_at || loan.processedDate || loan.disbursed_at || loan.disbursedDate || loan.approved_at || loan.approvedDate || null;
+                      // Processed Date: ONLY use processed_at (when loan was actually processed/disbursed)
+                      // Do NOT fallback to other dates - if not processed, show N/A
+                      const processedDate = (loan.processed_at && loan.processed_at !== 'null' && loan.processed_at !== 'undefined' && loan.processed_at !== '')
+                        ? loan.processed_at
+                        : (loan.processedDate && loan.processedDate !== 'null' && loan.processedDate !== 'undefined' && loan.processedDate !== '')
+                        ? loan.processedDate
+                        : null;
                       // Explicitly check for null/undefined/empty string to avoid showing incorrect dates
-                      const hasProcessedDate = processedDate && processedDate !== 'null' && processedDate !== 'undefined' && processedDate !== '';
+                      const hasProcessedDate = processedDate !== null && processedDate !== undefined && processedDate !== '' && processedDate !== 'null' && processedDate !== 'undefined';
                       
                       const principal = calculation?.principal || loan.principalAmount || loan.amount || loan.loan_amount || 0;
                       
@@ -4460,9 +4529,7 @@ export function UserProfileDetail() {
                       if (isProcessed && loan.exhausted_period_days !== null && loan.exhausted_period_days !== undefined) {
                         exhaustedPeriod = `${loan.exhausted_period_days} days`;
                       } else if (disbursedDate) {
-                        const disbursed = new Date(disbursedDate);
-                        const current = new Date();
-                        const days = Math.max(1, Math.floor((current.getTime() - disbursed.getTime()) / (1000 * 60 * 60 * 24)));
+                        const days = Math.max(1, daysDifference(disbursedDate, getCurrentDateString()));
                         exhaustedPeriod = `${days} days`;
                       }
 
@@ -4471,14 +4538,16 @@ export function UserProfileDetail() {
                       if (isProcessed && loan.processed_due_date) {
                         dueDate = loan.processed_due_date;
                       } else if (calculation?.interest?.repayment_date) {
-                        dueDate = calculation.interest.repayment_date;
+                        dueDate = parseDateString(calculation.interest.repayment_date);
                       } else if (disbursedDate && calculation?.interest?.days) {
-                        const due = new Date(disbursedDate);
-                        due.setDate(due.getDate() + calculation.interest.days);
-                        dueDate = due.toISOString().split('T')[0];
+                        // Add days to disbursed date without timezone conversion
+                        const disbursedDateStr = parseDateString(disbursedDate);
+                        const [year, month, day] = disbursedDateStr.split('-').map(Number);
+                        const dueDateObj = new Date(year, month - 1, day + calculation.interest.days);
+                        dueDate = `${dueDateObj.getFullYear()}-${String(dueDateObj.getMonth() + 1).padStart(2, '0')}-${String(dueDateObj.getDate()).padStart(2, '0')}`;
                       }
 
-                      // Calculate DPD
+                      // Calculate DPD (no timezone conversion)
                       const dpd = dueDate ? calculateDPD(disbursedDate || '', dueDate) : 0;
 
                       // Penalty - use processed value if available, otherwise calculate
@@ -4489,9 +4558,9 @@ export function UserProfileDetail() {
                         penaltyData = calculatePenalty(principal, dpd);
                       }
 
-                      // Calculate interest till current date (always calculate, not frozen)
+                      // Calculate interest till current date (always calculate, not frozen) - no timezone conversion
                       const interestTillDate = disbursedDate && calculation?.interest?.rate_per_day
-                        ? calculateInterestTillDate(principal, calculation.interest.rate_per_day, disbursedDate)
+                        ? calculateInterestTillDate(principal, calculation.interest.rate_per_day, disbursedDate, getCurrentDateString())
                         : 0;
 
                       // Processing fee - use processed value if available, otherwise calculate
@@ -5858,7 +5927,7 @@ export function UserProfileDetail() {
             </div>
             <div>
               <span className="text-gray-600">Report Date:</span>
-              <span className="ml-2">{checked_at ? new Date(checked_at).toLocaleString('en-IN') : 'N/A'}</span>
+              <span className="ml-2">{checked_at ? formatDate(checked_at) : 'N/A'}</span>
             </div>
           </div>
         </div>
@@ -6430,20 +6499,25 @@ export function UserProfileDetail() {
                     <td className="px-3 py-4 whitespace-nowrap">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                         transaction.transaction_type === 'loan_disbursement' ? 'bg-purple-100 text-purple-800' :
-                        transaction.transaction_type === 'emi_payment' ? 'bg-blue-100 text-blue-800' :
+                        transaction.transaction_type?.startsWith('emi_paid') ? 'bg-blue-100 text-blue-800' :
+                        transaction.transaction_type?.startsWith('loan_extension') ? 'bg-indigo-100 text-indigo-800' :
                         transaction.transaction_type === 'settlement' ? 'bg-yellow-100 text-yellow-800' :
                         transaction.transaction_type === 'full_payment' ? 'bg-green-100 text-green-800' :
                         transaction.transaction_type === 'part_payment' ? 'bg-teal-100 text-teal-800' :
                         'bg-gray-100 text-gray-800'
                         }`}>
-                        {transaction.transaction_type?.replace('_', ' ').toUpperCase()}
+                        {transaction.transaction_type?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                       </span>
                     </td>
                     <td className={`px-3 py-4 whitespace-nowrap text-sm font-semibold ${
-                      ['emi_payment', 'full_payment', 'part_payment', 'settlement'].includes(transaction.transaction_type) ? 'text-green-600' :
+                      transaction.transaction_type?.startsWith('emi_paid') || 
+                      transaction.transaction_type?.startsWith('loan_extension') ||
+                      ['full_payment', 'part_payment', 'settlement'].includes(transaction.transaction_type) ? 'text-green-600' :
                       ['loan_disbursement'].includes(transaction.transaction_type) ? 'text-red-600' : 'text-gray-900'
                       }`}>
-                      {['emi_payment', 'full_payment', 'part_payment', 'settlement'].includes(transaction.transaction_type) ? '+' : '-'}
+                      {transaction.transaction_type?.startsWith('emi_paid') || 
+                       transaction.transaction_type?.startsWith('loan_extension') ||
+                       ['full_payment', 'part_payment', 'settlement'].includes(transaction.transaction_type) ? '+' : '-'}
                       {formatCurrency(transaction.amount)}
                     </td>
                     <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -7511,7 +7585,7 @@ export function UserProfileDetail() {
                         ...prev,
                         transactionType: type,
                         // Auto-set category based on type
-                        category: type === 'loan_disbursement' || type === 'emi_payment' ? 'loan' : 'other'
+                        category: type === 'loan_disbursement' || type.startsWith('emi_paid') || type.startsWith('loan_extension') ? 'loan' : 'other'
                       }));
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -7595,13 +7669,16 @@ export function UserProfileDetail() {
 
                 {/* Reference Number */}
                 <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Reference / UTR No.</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Reference / UTR No. <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="text"
                     value={transactionForm.referenceNumber}
                     onChange={(e) => setTransactionForm({ ...transactionForm, referenceNumber: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     placeholder="e.g. UPI12345678"
+                    required
                   />
                 </div>
               </div>
