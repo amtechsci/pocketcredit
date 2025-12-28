@@ -247,9 +247,10 @@ class AdminApiService {
   }
 
   async uploadUserDocument(userId: string, formData: FormData): Promise<ApiResponse<any>> {
-    const response = await axios.post(`/api/user-profile/${userId}/documents/upload`, formData, {
+    const token = localStorage.getItem('adminToken');
+    const response = await axios.post(`/api/admin/user-profile/${userId}/documents/upload`, formData, {
       headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`,
+        'Authorization': `Bearer ${token}`,
         'Content-Type': 'multipart/form-data'
       }
     });
@@ -1178,9 +1179,11 @@ class AdminApiService {
     url: string;
     expires_in: number;
   }>> {
+    const token = localStorage.getItem('adminToken');
+    // Use the user endpoint (admin can access it with admin token)
     const response = await axios.get(`/api/loan-documents/${documentId}/url`, {
       headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        'Authorization': `Bearer ${token}`
       }
     });
     return response.data;

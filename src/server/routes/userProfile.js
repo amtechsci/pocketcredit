@@ -2,7 +2,7 @@ const express = require('express');
 const { authenticateAdmin } = require('../middleware/auth');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { validateRequest } = require('../middleware/validation');
-const { getPresignedUrl } = require('../services/s3Service');
+const { getPresignedUrl, uploadStudentDocument } = require('../services/s3Service');
 const { getLoanCalculation } = require('../utils/loanCalculations');
 const router = express.Router();
 
@@ -286,6 +286,40 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       console.error('Error fetching KYC documents:', e);
     }
 
+    // Fetch Loan Application Documents for this user
+    let loanApplicationDocuments = [];
+    try {
+      const loanDocsQuery = `
+        SELECT 
+          id, document_type as type, document_name as title,
+          file_name as fileName, s3_key, mime_type, file_size as fileSize,
+          upload_status as status, verification_notes as description, 
+          verified_at as verifiedDate, uploaded_at as createdAt,
+          loan_application_id
+        FROM loan_application_documents
+        WHERE user_id = ?
+        ORDER BY uploaded_at DESC
+      `;
+      const loanDocsResult = await executeQuery(loanDocsQuery, [userId]);
+
+      // Generate presigned URLs for documents
+      loanApplicationDocuments = await Promise.all((loanDocsResult || []).map(async (doc) => {
+        try {
+          if (doc.s3_key) {
+            const url = await getPresignedUrl(doc.s3_key, 3600); // 1 hour expiry
+            return { ...doc, url };
+          }
+          return { ...doc, url: null };
+        } catch (err) {
+          console.error(`Failed to generate URL for doc ${doc.id}:`, err);
+          return { ...doc, url: null };
+        }
+      }));
+    } catch (e) {
+      console.error('Error fetching loan application documents:', e);
+      loanApplicationDocuments = [];
+    }
+
     // Fetch user_info from multiple sources (for multi-source of truth)
     let userInfoRecords = [];
     try {
@@ -522,7 +556,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       // All employment records
       allEmployment: employment || [],
       // Default values for data not yet in MySQL
-      documents: [],
+      documents: loanApplicationDocuments,
       bankDetails: bankDetails,
       bankInfo: bankInfo, // Added for frontend compatibility
       references: references || [],
@@ -1475,7 +1509,8 @@ router.post('/:userId/documents/upload', authenticateAdmin, upload.single('docum
     console.log('📄 Uploading document for user:', req.params.userId);
     await initializeDatabase();
     const { userId } = req.params;
-    const { documentType, documentTitle, description } = req.body;
+    const { documentType, documentTitle, description, loanApplicationId } = req.body;
+    const adminId = req.admin ? (req.admin.id || req.admin.userId) : null;
 
     if (!req.file) {
       return res.status(400).json({
@@ -1491,9 +1526,94 @@ router.post('/:userId/documents/upload', authenticateAdmin, upload.single('docum
       });
     }
 
-    // For now, we'll store document info in memory since table doesn't exist yet
-    // In production, you would upload to S3 and store metadata in database
-    console.log('✅ Document uploaded successfully:', {
+    // Get loan_application_id - use provided one or get the most recent loan application
+    let loanApplicationIdToUse = loanApplicationId ? parseInt(loanApplicationId) : null;
+    
+    if (!loanApplicationIdToUse) {
+      // Get the most recent loan application for this user
+      const recentLoanApp = await executeQuery(`
+        SELECT id FROM loan_applications 
+        WHERE user_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `, [userId]);
+      
+      if (recentLoanApp && recentLoanApp.length > 0) {
+        loanApplicationIdToUse = recentLoanApp[0].id;
+      } else {
+        return res.status(400).json({
+          status: 'error',
+          message: 'No loan application found for this user. Please create a loan application first.'
+        });
+      }
+    }
+
+    // Verify the loan application belongs to this user
+    const loanAppCheck = await executeQuery(`
+      SELECT id FROM loan_applications 
+      WHERE id = ? AND user_id = ?
+    `, [loanApplicationIdToUse, userId]);
+    
+    if (!loanAppCheck || loanAppCheck.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Loan application not found or does not belong to this user'
+      });
+    }
+
+    // Upload to S3 - using uploadStudentDocument helper for consistency
+    let uploadResult;
+    try {
+      uploadResult = await uploadStudentDocument(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype,
+        parseInt(userId),
+        documentType
+      );
+    } catch (uploadError) {
+      console.error('S3 upload error:', uploadError);
+      return res.status(500).json({
+        status: 'error',
+        message: `Failed to upload file to storage: ${uploadError.message}`
+      });
+    }
+
+    if (!uploadResult || !uploadResult.success || !uploadResult.key) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to upload file to storage - upload result invalid'
+      });
+    }
+
+    // Store document metadata in loan_application_documents table
+    const insertQuery = `
+      INSERT INTO loan_application_documents (
+        loan_application_id, user_id, document_name, document_type, file_name, file_path, 
+        s3_key, s3_bucket, file_size, mime_type, 
+        upload_status, verification_notes, verified_by, uploaded_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'uploaded', ?, ?, NOW())
+    `;
+
+    const fileUrl = uploadResult.url || (uploadResult.bucket ? `https://${uploadResult.bucket}.s3.amazonaws.com/${uploadResult.key}` : '');
+
+    const insertResult = await executeQuery(insertQuery, [
+      loanApplicationIdToUse,
+      parseInt(userId),
+      documentTitle, // document_name
+      documentType,  // document_type
+      req.file.originalname,
+      fileUrl,
+      uploadResult.key,
+      uploadResult.bucket || null,
+      req.file.size,
+      req.file.mimetype,
+      description || null, // verification_notes
+      adminId ? parseInt(adminId) : null
+    ]);
+
+    console.log('✅ Document uploaded and saved successfully:', {
+      documentId: insertResult.insertId,
       fileName: req.file.originalname,
       fileSize: req.file.size,
       documentType,
@@ -1504,20 +1624,24 @@ router.post('/:userId/documents/upload', authenticateAdmin, upload.single('docum
       status: 'success',
       message: 'Document uploaded successfully',
       data: { 
+        id: insertResult.insertId,
         userId, 
         documentType, 
         documentTitle,
         fileName: req.file.originalname,
         fileSize: req.file.size,
-        description: description || null
+        description: description || null,
+        s3_key: uploadResult.key
       }
     });
 
   } catch (error) {
     console.error('Upload document error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       status: 'error',
-      message: error.message || 'Failed to upload document'
+      message: error.message || 'Failed to upload document',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });

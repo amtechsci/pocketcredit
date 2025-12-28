@@ -61,6 +61,7 @@ import AdminApp from './AdminApp';
 
 import { Toaster } from './components/ui/sonner';
 import { PendingDocumentNotification } from './components/PendingDocumentNotification';
+import { DocumentRequiredGuard } from './components/DocumentRequiredGuard';
 
 // Layout component for pages with header and footer
 function LayoutWithHeaderFooter({ children }: { children: React.ReactNode }) {
@@ -76,12 +77,15 @@ function LayoutWithHeaderFooter({ children }: { children: React.ReactNode }) {
 }
 
 // Layout component for dashboard pages (no header/footer)
+// Enforces document upload requirement if admin has requested documents
 function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen w-full">
-      <PendingDocumentNotification />
-      {children}
-    </div>
+    <DocumentRequiredGuard>
+      <div className="min-h-screen w-full">
+        <PendingDocumentNotification />
+        {children}
+      </div>
+    </DocumentRequiredGuard>
   );
 }
 

@@ -292,24 +292,16 @@ router.get('/:applicationId', authenticateAdmin, async (req, res) => {
   }
 });
 
-// GET /api/loan-documents/:id/url - Get presigned URL for document
-router.get('/:id/url', requireAuth, async (req, res) => {
+// GET /api/admin/loan-documents/:id/url - Get presigned URL for document (Admin)
+router.get('/:id/url', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
-    const userId = req.userId;
     const documentId = req.params.id;
 
-    if (!userId) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Authentication required'
-      });
-    }
-
-    // Get document and verify ownership
+    // Get document (admin can access any document)
     const documents = await executeQuery(
-      'SELECT s3_key, user_id FROM loan_application_documents WHERE id = ? AND user_id = ?',
-      [documentId, userId]
+      'SELECT s3_key, user_id FROM loan_application_documents WHERE id = ?',
+      [documentId]
     );
 
     if (!documents || documents.length === 0) {

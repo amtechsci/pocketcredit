@@ -120,7 +120,7 @@ export function PendingDocumentNotification() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => navigate('/loan-documents')}
+              onClick={() => navigate('/loan-application/upload-documents')}
               className="px-4 py-1.5 bg-white text-yellow-600 rounded-md hover:bg-yellow-50 text-sm font-medium flex items-center gap-2 transition-colors"
             >
               <FileText className="w-4 h-4" />

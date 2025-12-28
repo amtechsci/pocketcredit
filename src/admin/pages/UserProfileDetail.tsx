@@ -53,6 +53,7 @@ export function UserProfileDetail() {
   const [documentTitle, setDocumentTitle] = useState('');
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [documentDescription, setDocumentDescription] = useState('');
+  const [uploadingDocument, setUploadingDocument] = useState(false);
   const [showAddBankModal, setShowAddBankModal] = useState(false);
   const [showEditBankModal, setShowEditBankModal] = useState(false);
   const [editingBankId, setEditingBankId] = useState<string | null>(null);
@@ -2659,11 +2660,45 @@ export function UserProfileDetail() {
                 {/* Admin Actions */}
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
-                    <button className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm px-3 py-1.5 border border-blue-200 rounded-md hover:bg-blue-50">
+                    <button 
+                      onClick={() => {
+                        if (doc.url) {
+                          window.open(doc.url, '_blank');
+                        } else {
+                          alert('Document URL not available. Please refresh the page.');
+                        }
+                      }}
+                      disabled={!doc.url}
+                      className={`flex items-center gap-1 text-sm px-3 py-1.5 border rounded-md transition-colors ${
+                        doc.url 
+                          ? 'text-blue-600 hover:text-blue-800 border-blue-200 hover:bg-blue-50' 
+                          : 'text-gray-400 border-gray-200 cursor-not-allowed'
+                      }`}
+                    >
                       <Eye className="w-4 h-4" />
                       View
                     </button>
-                    <button className="flex items-center gap-1 text-green-600 hover:text-green-800 text-sm px-3 py-1.5 border border-green-200 rounded-md hover:bg-green-50">
+                    <button 
+                      onClick={() => {
+                        if (doc.url) {
+                          const link = document.createElement('a');
+                          link.href = doc.url;
+                          link.download = doc.fileName || 'document';
+                          link.target = '_blank';
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                        } else {
+                          alert('Document URL not available. Please refresh the page.');
+                        }
+                      }}
+                      disabled={!doc.url}
+                      className={`flex items-center gap-1 text-sm px-3 py-1.5 border rounded-md transition-colors ${
+                        doc.url 
+                          ? 'text-green-600 hover:text-green-800 border-green-200 hover:bg-green-50' 
+                          : 'text-gray-400 border-gray-200 cursor-not-allowed'
+                      }`}
+                    >
                       <Download className="w-4 h-4" />
                       Download
                     </button>
@@ -7059,7 +7094,10 @@ export function UserProfileDetail() {
                 <select
                   value={documentType}
                   onChange={(e) => setDocumentType(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={uploadingDocument}
+                  className={`w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    uploadingDocument ? 'bg-gray-100 cursor-not-allowed' : ''
+                  }`}
                   required
                 >
                   <option value="">Select Document Type</option>
@@ -7082,7 +7120,10 @@ export function UserProfileDetail() {
                   value={documentTitle}
                   onChange={(e) => setDocumentTitle(e.target.value)}
                   placeholder="Enter document title"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={uploadingDocument}
+                  className={`w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    uploadingDocument ? 'bg-gray-100 cursor-not-allowed' : ''
+                  }`}
                   required
                 />
               </div>
@@ -7096,6 +7137,7 @@ export function UserProfileDetail() {
                     accept=".pdf,.jpg,.jpeg,.png"
                     className="hidden"
                     id="document-upload"
+                    disabled={uploadingDocument}
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) {
@@ -7106,7 +7148,7 @@ export function UserProfileDetail() {
                       }
                     }}
                   />
-                  <label htmlFor="document-upload" className="cursor-pointer">
+                  <label htmlFor="document-upload" className={uploadingDocument ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}>
                     <div className="flex flex-col items-center">
                       <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mb-4">
                         <FileText className="w-6 h-6 text-blue-600" />
@@ -7129,7 +7171,10 @@ export function UserProfileDetail() {
                   onChange={(e) => setDocumentDescription(e.target.value)}
                   placeholder="Add any additional notes about this document"
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={uploadingDocument}
+                  className={`w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    uploadingDocument ? 'bg-gray-100 cursor-not-allowed' : ''
+                  }`}
                 />
               </div>
 
@@ -7137,7 +7182,10 @@ export function UserProfileDetail() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Priority Level</label>
                 <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={uploadingDocument}
+                  className={`w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    uploadingDocument ? 'bg-gray-100 cursor-not-allowed' : ''
+                  }`}
                 >
                   <option value="normal">Normal</option>
                   <option value="high">High</option>
@@ -7149,6 +7197,7 @@ export function UserProfileDetail() {
               <div className="flex gap-3 pt-4">
                 <button
                   type="submit"
+                  disabled={uploadingDocument}
                   onClick={async (e) => {
                     e.preventDefault();
                     if (!documentType || !documentTitle || !documentFile) {
@@ -7156,6 +7205,7 @@ export function UserProfileDetail() {
                       return;
                     }
 
+                    setUploadingDocument(true);
                     try {
                       const formData = new FormData();
                       formData.append('document', documentFile);
@@ -7164,6 +7214,8 @@ export function UserProfileDetail() {
                       if (documentDescription) {
                         formData.append('description', documentDescription);
                       }
+                      // loanApplicationId is optional - backend will use most recent if not provided
+                      // We can add a selector later if needed
 
                       const response = await adminApiService.uploadUserDocument(params.userId!, formData);
                       if (response.status === 'success') {
@@ -7173,6 +7225,7 @@ export function UserProfileDetail() {
                         setDocumentTitle('');
                         setDocumentFile(null);
                         setDocumentDescription('');
+                        setUploadingDocument(false);
                         // Refresh user data
                         const profileResponse = await adminApiService.getUserProfile(params.userId!);
                         if (profileResponse.status === 'success') {
@@ -7184,22 +7237,41 @@ export function UserProfileDetail() {
                     } catch (error: any) {
                       console.error('Error uploading document:', error);
                       alert('Error uploading document: ' + (error.message || 'Unknown error'));
+                    } finally {
+                      setUploadingDocument(false);
                     }
                   }}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                  className={`flex-1 px-4 py-2 rounded-md transition-colors flex items-center justify-center gap-2 ${
+                    uploadingDocument
+                      ? 'bg-blue-400 text-white cursor-not-allowed'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
                 >
-                  Upload Document
+                  {uploadingDocument ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    'Upload Document'
+                  )}
                 </button>
                 <button
                   type="button"
+                  disabled={uploadingDocument}
                   onClick={() => {
                     setShowUploadNewModal(false);
                     setDocumentType('');
                     setDocumentTitle('');
                     setDocumentFile(null);
                     setDocumentDescription('');
+                    setUploadingDocument(false);
                   }}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+                  className={`px-4 py-2 rounded-md transition-colors ${
+                    uploadingDocument
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      : 'bg-gray-300 text-gray-700 hover:bg-gray-400'
+                  }`}
                 >
                   Cancel
                 </button>

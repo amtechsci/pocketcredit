@@ -287,6 +287,7 @@ app.use('/api/loan-documents', loanApplicationDocumentsRoutes);
 
 // Admin route for loan documents
 const { authenticateAdmin } = require('./middleware/auth');
+const { getPresignedUrl } = require('./services/s3Service');
 const adminLoanDocumentsRouter = express.Router();
 adminLoanDocumentsRouter.get('/:applicationId', authenticateAdmin, async (req, res) => {
   try {
