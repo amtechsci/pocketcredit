@@ -763,7 +763,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
             console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDate)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
             if (daysToNextSalary < minDuration) {
-              nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+              nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
               console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
             }
             
@@ -1650,7 +1650,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
             const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
             console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDate)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
             if (daysToNextSalary < minDuration) {
-              nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+              nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
               console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
             }
             
