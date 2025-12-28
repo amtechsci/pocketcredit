@@ -26,13 +26,13 @@ router.get('/pending', requireAuth, async (req, res) => {
 
       // Query for pending loan applications (including all new statuses)
       const applications = await executeQuery(
-        `SELECT DISTINCT
+        `SELECT 
           la.id,
           la.application_number,
           la.loan_amount,
           la.loan_purpose,
           la.status,
-          la.created_at
+          DATE_FORMAT(la.created_at, '%Y-%m-%d %H:%i:%s') as created_at
         FROM loan_applications la
         WHERE la.user_id = ? AND la.status IN ('submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'cleared')
         ORDER BY la.created_at DESC
@@ -47,7 +47,7 @@ router.get('/pending', requireAuth, async (req, res) => {
         loan_amount: parseFloat(app.loan_amount) || 0,
         loan_purpose: app.loan_purpose || 'Not specified',
         status: app.status || 'submitted',
-        created_at: app.created_at ? new Date(app.created_at).toISOString() : new Date().toISOString(),
+        created_at: app.created_at || null, // Already formatted as IST string from SQL
         days_pending: 0 // Simplified calculation
       }));
 

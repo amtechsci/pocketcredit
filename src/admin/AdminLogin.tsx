@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Shield, Eye, EyeOff } from 'lucide-react';
-import { Logo } from '../components/Logo';
 import { adminApiService } from '../services/adminApi';
 import type { AdminUser } from '../AdminApp';
 
@@ -14,31 +13,6 @@ export function AdminLogin({ onLogin }: AdminLoginProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-
-  // Demo admin users
-  const demoUsers: AdminUser[] = [
-    {
-      id: 'admin1',
-      name: 'Sarah Johnson',
-      email: 'admin@pocketcredit.com',
-      role: 'superadmin',
-      permissions: ['*']
-    },
-    {
-      id: 'manager1',
-      name: 'Raj Patel',
-      email: 'manager@pocketcredit.com',
-      role: 'manager',
-      permissions: ['approve_loans', 'reject_loans', 'view_users', 'edit_loans']
-    },
-    {
-      id: 'officer1',
-      name: 'Priya Singh',
-      email: 'officer@pocketcredit.com',
-      role: 'officer',
-      permissions: ['view_loans', 'view_users', 'add_notes']
-    }
-  ];
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,24 +115,6 @@ export function AdminLogin({ onLogin }: AdminLoginProps) {
               {isLoading ? 'Signing In...' : 'Sign In'}
             </button>
           </form>
-
-          <div className="mt-8">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h3 className="text-sm font-semibold text-blue-800 mb-2">Demo Credentials:</h3>
-              <div className="space-y-1 text-sm">
-                <div className="text-blue-700">Email: admin@pocketcredit.com</div>
-                <div className="text-blue-700">Password: admin123</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Security Note */}
-          <div className="mt-6">
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-center">
-              <Shield className="w-4 h-4 text-red-600 mr-2" />
-              <span className="text-sm text-red-700">Admin access only - All activities are logged</span>
-            </div>
-          </div>
         </div>
       </div>
     </div>

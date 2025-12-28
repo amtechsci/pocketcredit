@@ -23,6 +23,16 @@ export const LoanApplicationConfirmation: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [agreed, setAgreed] = useState(false);
 
+  // Format date
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleDateString('en-IN', { 
+      day: 'numeric', 
+      month: 'short', 
+      year: 'numeric' 
+    });
+  };
+
   if (!loanAmount || !selectedPlan || !calculation) {
     // Redirect back if required data is missing
     React.useEffect(() => {
@@ -176,7 +186,7 @@ export const LoanApplicationConfirmation: React.FC = () => {
                   {calculation.emi_details.schedule.map((emi: any) => (
                     <div key={emi.emi_number} className="flex justify-between text-sm">
                       <span className="text-gray-600">
-                        EMI {emi.emi_number} - {new Date(emi.due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        EMI {emi.emi_number} - {formatDate(emi.due_date)}
                       </span>
                       <span className="font-semibold text-gray-900">{formatCurrency(emi.emi_amount)}</span>
                     </div>
@@ -189,7 +199,7 @@ export const LoanApplicationConfirmation: React.FC = () => {
                 <div className="bg-gray-50 rounded-lg p-4">
                   <p className="text-sm text-gray-700">
                     Full repayment of <strong className="text-blue-600">{formatCurrency(calculation.total_repayable)}</strong> is due on{' '}
-                    <strong>{new Date(calculation.emi_details.repayment_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>
+                    <strong>{formatDate(calculation.emi_details.repayment_date)}</strong>
                   </p>
                 </div>
               </div>

@@ -466,11 +466,19 @@ export function DynamicDashboardPage() {
 
   // Format date
   const formatDate = (dateString: string) => {
+    if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString('en-IN', {
       year: 'numeric',
       month: 'short',
       day: 'numeric'
     });
+  };
+
+  // Format application number to short format (PLL + last 4 digits)
+  const formatAppNumber = (appNumber: string) => {
+    if (!appNumber) return 'N/A';
+    const last4 = appNumber.slice(-4);
+    return `PLL${last4}`;
   };
 
   // Get credit score category
@@ -1178,7 +1186,7 @@ export function DynamicDashboardPage() {
                           <div className="flex justify-between items-start mb-3 lg:mb-4">
                             <div className="flex-1 min-w-0">
                               <h4 className="text-sm lg:text-lg font-semibold truncate">{application.loan_purpose || 'Personal Loan'}</h4>
-                              <p className="text-gray-600 text-xs lg:text-sm truncate">App: {application.application_number}</p>
+                              <p className="text-gray-600 text-xs lg:text-sm truncate">App: {formatAppNumber(application.application_number)}</p>
                             </div>
                             <Badge
                               variant="secondary"
@@ -1275,7 +1283,7 @@ export function DynamicDashboardPage() {
                           <div className="flex justify-between items-start mb-4">
                             <div>
                               <h4 className="text-lg font-semibold">{loan.loan_purpose || 'Personal Loan'}</h4>
-                              <p className="text-gray-600 text-sm">Application: {loan.application_number}</p>
+                              <p className="text-gray-600 text-sm">Application: {formatAppNumber(loan.application_number)}</p>
                             </div>
                             <Badge
                               variant="secondary"

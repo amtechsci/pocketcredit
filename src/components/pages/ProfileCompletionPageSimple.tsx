@@ -48,6 +48,112 @@ const ProfileCompletionPageSimple = () => {
   const stepUpdatedRef = useRef(false);
   const digitapCalledRef = useRef(false);
 
+  // Helper functions to convert date formats
+  const convertDDMMYYYYtoYYYYMMDD = (ddmmyyyy: string): string => {
+    // Input format: DD/MM/YYYY
+    // Output format: YYYY-MM-DD
+    if (!ddmmyyyy) return '';
+    const parts = ddmmyyyy.split('/');
+    if (parts.length !== 3) return '';
+    const [day, month, year] = parts;
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  };
+
+  const convertYYYYMMDDtoDDMMYYYY = (yyyymmdd: string): string => {
+    // Input format: YYYY-MM-DD
+    // Output format: DD/MM/YYYY
+    if (!yyyymmdd) return '';
+    const parts = yyyymmdd.split('-');
+    if (parts.length !== 3) return '';
+    const [year, month, day] = parts;
+    return `${day}/${month}/${year}`;
+  };
+
+  const validateDateFormat = (date: string): { valid: boolean; error: string } => {
+    // Validate DD/MM/YYYY format
+    const regex = /^\d{2}\/\d{2}\/\d{4}$/;
+    if (!regex.test(date)) {
+      return { valid: false, error: 'Please enter date in DD/MM/YYYY format' };
+    }
+    
+    const [day, month, year] = date.split('/').map(Number);
+    
+    // Check valid ranges
+    if (month < 1 || month > 12) {
+      return { valid: false, error: 'Month must be between 01 and 12' };
+    }
+    
+    if (day < 1 || day > 31) {
+      return { valid: false, error: 'Day must be between 01 and 31' };
+    }
+    
+    if (year < 1900 || year > new Date().getFullYear()) {
+      return { valid: false, error: 'Please enter a valid year' };
+    }
+    
+    // Check if date is valid (handles things like 31/02/2024)
+    const dateObj = new Date(year, month - 1, day);
+    if (dateObj.getFullYear() !== year || 
+        dateObj.getMonth() !== month - 1 || 
+        dateObj.getDate() !== day) {
+      return { valid: false, error: 'This date does not exist in the calendar' };
+    }
+    
+    return { valid: true, error: '' };
+  };
+
+  const formatDateInput = (input: string): string => {
+    // Remove all non-numeric characters
+    const numbers = input.replace(/\D/g, '');
+    
+    // Limit to 8 digits (DDMMYYYY)
+    const limited = numbers.slice(0, 8);
+    
+    // Add slashes automatically
+    let formatted = '';
+    if (limited.length > 0) {
+      formatted = limited.slice(0, 2); // DD
+      if (limited.length >= 3) {
+        formatted += '/' + limited.slice(2, 4); // MM
+      }
+      if (limited.length >= 5) {
+        formatted += '/' + limited.slice(4, 8); // YYYY
+      }
+    }
+    
+    return formatted;
+  };
+
+  const handleEmploymentDOBChange = (value: string) => {
+    const formatted = formatDateInput(value);
+    setEmploymentQuickCheckData(prev => ({ ...prev, date_of_birth: formatted }));
+    
+    // Only validate if user has entered the full format
+    if (formatted.length === 10) {
+      const validation = validateDateFormat(formatted);
+      setDobError(validation.error);
+    } else if (formatted.length > 0 && formatted.length < 10) {
+      setDobError('Please complete the date (DD/MM/YYYY)');
+    } else {
+      setDobError('');
+    }
+  };
+
+  const handleStudentDOBChange = (value: string) => {
+    const formatted = formatDateInput(value);
+    setStudentFormData(prev => ({ ...prev, date_of_birth: formatted }));
+    
+    // Only validate if user has entered the full format
+    if (formatted.length === 10) {
+      const validation = validateDateFormat(formatted);
+      setStudentDobError(validation.error);
+    } else if (formatted.length > 0 && formatted.length < 10) {
+      setStudentDobError('Please complete the date (DD/MM/YYYY)');
+    } else {
+      setStudentDobError('');
+    }
+  };
+
   const [basicFormData, setBasicFormData] = useState<BasicProfileForm>({
     full_name: '',
     pan_number: '',
@@ -97,6 +203,10 @@ const ProfileCompletionPageSimple = () => {
   }>>([]);
   const [loadingIncomeRanges, setLoadingIncomeRanges] = useState(false);
 
+  // Date validation error states
+  const [dobError, setDobError] = useState('');
+  const [studentDobError, setStudentDobError] = useState('');
+
   // Initialize current step from user data
   useEffect(() => {
     // Don't reset step if profile is already completed
@@ -124,10 +234,8 @@ const ProfileCompletionPageSimple = () => {
 
       let formattedDOB = '';
       if (user.date_of_birth) {
-        const dobDate = new Date(user.date_of_birth);
-        if (!isNaN(dobDate.getTime())) {
-          formattedDOB = dobDate.toISOString().split('T')[0];
-        }
+        // Convert backend format (YYYY-MM-DD) to display format (DD/MM/YYYY)
+        formattedDOB = convertYYYYMMDDtoDDMMYYYY(user.date_of_birth);
       }
 
       setBasicFormData({
@@ -138,6 +246,22 @@ const ProfileCompletionPageSimple = () => {
         longitude: lng,
         date_of_birth: formattedDOB,
       });
+
+      // Also initialize employment quick check data if it exists
+      if (user.date_of_birth) {
+        setEmploymentQuickCheckData(prev => ({
+          ...prev,
+          date_of_birth: convertYYYYMMDDtoDDMMYYYY(user.date_of_birth)
+        }));
+      }
+
+      // Initialize student form data if it exists
+      if (user.employment_type === 'student' && user.date_of_birth) {
+        setStudentFormData(prev => ({
+          ...prev,
+          date_of_birth: convertYYYYMMDDtoDDMMYYYY(user.date_of_birth)
+        }));
+      }
     }
   }, [user?.id]);
 
@@ -420,7 +544,18 @@ const ProfileCompletionPageSimple = () => {
           return;
         }
 
-        const dob = new Date(employmentQuickCheckData.date_of_birth);
+        // Validate date format
+        const dobValidation = validateDateFormat(employmentQuickCheckData.date_of_birth);
+        if (!dobValidation.valid) {
+          toast.error(dobValidation.error);
+          setDobError(dobValidation.error);
+          setLoading(false);
+          return;
+        }
+
+        // Convert DD/MM/YYYY to YYYY-MM-DD for age calculation
+        const dobFormatted = convertDDMMYYYYtoYYYYMMDD(employmentQuickCheckData.date_of_birth);
+        const dob = new Date(dobFormatted);
         const today = new Date();
         const age = today.getFullYear() - dob.getFullYear() -
           ((today.getMonth() < dob.getMonth() ||
@@ -435,7 +570,7 @@ const ProfileCompletionPageSimple = () => {
         submitData.income_range = employmentQuickCheckData.income_range;
         submitData.eligible_loan_amount = employmentQuickCheckData.eligible_loan_amount;
         submitData.payment_mode = employmentQuickCheckData.payment_mode;
-        submitData.date_of_birth = employmentQuickCheckData.date_of_birth;
+        submitData.date_of_birth = dobFormatted; // Send in YYYY-MM-DD format to backend
       }
 
       const response = await apiService.saveEmploymentQuickCheck(submitData);
@@ -525,6 +660,14 @@ const ProfileCompletionPageSimple = () => {
   const handleStudentCollegeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Validate date format
+    const dobValidation = validateDateFormat(studentFormData.date_of_birth);
+    if (!dobValidation.valid) {
+      toast.error(dobValidation.error);
+      setStudentDobError(dobValidation.error);
+      return;
+    }
+
     // Validate all required documents are uploaded
     if (!uploadedDocs.college_id_front) {
       toast.error('Please upload the front side of your college ID card');
@@ -541,7 +684,12 @@ const ProfileCompletionPageSimple = () => {
 
     setLoading(true);
     try {
-      const response = await apiService.updateStudentProfile(studentFormData);
+      // Convert date format before sending to backend
+      const formattedData = {
+        ...studentFormData,
+        date_of_birth: convertDDMMYYYYtoYYYYMMDD(studentFormData.date_of_birth)
+      };
+      const response = await apiService.updateStudentProfile(formattedData);
 
       if (response.status === 'success' && response.data) {
         // Check if hold was applied due to age
@@ -708,15 +856,18 @@ const ProfileCompletionPageSimple = () => {
                         <Label htmlFor="date_of_birth">Date of Birth *</Label>
                         <Input
                           id="date_of_birth"
-                          type="date"
+                          type="text"
+                          placeholder="dd/mm/yyyy"
                           value={employmentQuickCheckData.date_of_birth}
-                          onChange={(e) => setEmploymentQuickCheckData(prev => ({ ...prev, date_of_birth: e.target.value }))}
-                          max={new Date(new Date().setFullYear(new Date().getFullYear() - 18)).toISOString().split('T')[0]}
-                          min={new Date(new Date().setFullYear(new Date().getFullYear() - 65)).toISOString().split('T')[0]}
+                          onChange={(e) => handleEmploymentDOBChange(e.target.value)}
                           required
-                          className="h-11"
+                          className={`h-11 ${dobError ? 'border-red-500' : ''}`}
                         />
-                        <p className="text-xs text-gray-500">You must be at least 18 years old</p>
+                        {dobError ? (
+                          <p className="text-xs text-red-600">{dobError}</p>
+                        ) : (
+                          <p className="text-xs text-gray-500">You must be at least 18 years old</p>
+                        )}
                       </div>
                     </>
                   )}
@@ -858,17 +1009,20 @@ const ProfileCompletionPageSimple = () => {
                     <Label htmlFor="student_dob">Date of Birth *</Label>
                     <Input
                       id="student_dob"
-                      type="date"
+                      type="text"
+                      placeholder="dd/mm/yyyy"
                       value={studentFormData.date_of_birth}
-                      onChange={(e) => setStudentFormData(prev => ({ ...prev, date_of_birth: e.target.value }))}
-                      max={new Date(new Date().setFullYear(new Date().getFullYear() - 18)).toISOString().split('T')[0]}
-                      min={new Date(new Date().setFullYear(new Date().getFullYear() - 30)).toISOString().split('T')[0]}
+                      onChange={(e) => handleStudentDOBChange(e.target.value)}
                       required
-                      className="h-11 w-full"
+                      className={`h-11 w-full ${studentDobError ? 'border-red-500' : ''}`}
                     />
-                    <p className="text-xs text-gray-600">
-                      You must be at least 19 years old to apply as a student
-                    </p>
+                    {studentDobError ? (
+                      <p className="text-xs text-red-600">{studentDobError}</p>
+                    ) : (
+                      <p className="text-xs text-gray-600">
+                        You must be at least 19 years old to apply as a student
+                      </p>
+                    )}
                   </div>
                 </div>
 

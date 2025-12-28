@@ -114,17 +114,8 @@ function AdminAccessPage() {
               href="/"
               className="w-full px-6 py-2 rounded-lg transition-colors touch-manipulation border border-gray-300 text-gray-700 hover:bg-gray-50 inline-block"
             >
-              Back to Home
-            </a>
-          </div>
-          <div className="mt-6 pt-4 border-t text-left">
-            <p className="text-sm font-medium text-gray-700 mb-2">Demo Credentials:</p>
-            <div className="space-y-1 text-xs text-gray-600">
-              <div>Super Admin: admin@pocketcredit.com</div>
-              <div>Manager: manager@pocketcredit.com</div>
-              <div>Officer: officer@pocketcredit.com</div>
-              <div className="mt-2">Password: <code className="bg-gray-100 px-1 rounded">admin123</code></div>
-            </div>
+            Back to Home
+          </a>
           </div>
         </div>
       </div>

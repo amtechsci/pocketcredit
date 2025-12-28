@@ -255,10 +255,10 @@ const findApplicationsByUserId = async (userId) => {
         la.emi_amount,
         la.status,
         la.rejection_reason,
-        la.approved_at,
-        la.disbursed_at,
-        la.created_at,
-        la.updated_at
+        DATE_FORMAT(la.approved_at, '%Y-%m-%d %H:%i:%s') as approved_at,
+        DATE_FORMAT(la.disbursed_at, '%Y-%m-%d %H:%i:%s') as disbursed_at,
+        DATE_FORMAT(la.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+        DATE_FORMAT(la.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
       FROM loan_applications la
       WHERE la.user_id = ?
       ORDER BY la.created_at DESC
@@ -401,6 +401,8 @@ const hasPendingApplications = async (userId) => {
  * @returns {Object} Application summary
  */
 const getApplicationSummary = (application) => {
+  // Dates are already formatted as strings from SQL query (IST timezone)
+  // No need for conversion since server, DB, and users are all in IST
   return {
     id: application.id,
     application_number: application.application_number,

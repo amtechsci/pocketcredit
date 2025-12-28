@@ -3821,6 +3821,12 @@ export function UserProfileDetail() {
     const appliedLoans = getArray('loans'); // Show all loans, no status filter
 
     const handleEdit = (loan: any) => {
+      // Prevent editing if loan has been processed (account_manager or cleared status)
+      if (['account_manager', 'cleared'].includes(loan.status)) {
+        alert('Cannot edit loan details - this loan has been processed and is frozen per the Loan Calculation Rulebook.');
+        return;
+      }
+      
       setEditingLoan(loan.id);
       setEditValues({
         principalAmount: loan.principalAmount || loan.amount || 0,
@@ -3998,7 +4004,7 @@ export function UserProfileDetail() {
                               ) : (
                                 <div className="flex items-center gap-2">
                                   <span>{calculation ? formatCurrency(calculation.principal) : isLoading ? '...' : formatCurrency(loan.principalAmount || loan.amount || 0)}</span>
-                                  {canEditUsers && (
+                                  {canEditUsers && !['account_manager', 'cleared'].includes(loan.status) && (
                                     <button
                                       onClick={() => handleEdit(loan)}
                                       className="text-blue-600 hover:text-blue-800"
@@ -4006,6 +4012,9 @@ export function UserProfileDetail() {
                                     >
                                       <Edit className="w-3 h-3" />
                                     </button>
+                                  )}
+                                  {canEditUsers && ['account_manager', 'cleared'].includes(loan.status) && (
+                                    <span className="text-xs text-gray-400 ml-2" title="Cannot edit - loan has been processed">🔒</span>
                                   )}
                                 </div>
                               )}
@@ -4024,20 +4033,22 @@ export function UserProfileDetail() {
                               ) : (
                                 <div className="flex items-center gap-2">
                                   <span className="text-gray-400">{planCode}</span>
-                                  <button
-                                    onClick={() => {
-                                      setEditingLoanPlanId(loanId);
-                                      setSelectedLoanPlanId(null);
-                                      setShowLoanPlanModal(true);
-                                    }}
-                                    className="text-xs text-blue-600 hover:text-blue-800 underline"
-                                    title="Assign loan plan"
-                                  >
-                                    Assign Plan
-                                  </button>
+                                  {!['account_manager', 'cleared'].includes(loan.status) && (
+                                    <button
+                                      onClick={() => {
+                                        setEditingLoanPlanId(loanId);
+                                        setSelectedLoanPlanId(null);
+                                        setShowLoanPlanModal(true);
+                                      }}
+                                      className="text-xs text-blue-600 hover:text-blue-800 underline"
+                                      title="Assign loan plan"
+                                    >
+                                      Assign Plan
+                                    </button>
+                                  )}
                                 </div>
                               )}
-                              {planId && (
+                              {planId && !['account_manager', 'cleared'].includes(loan.status) && (
                                 <button
                                   onClick={() => {
                                     setEditingLoanPlanId(loanId);
@@ -4049,6 +4060,9 @@ export function UserProfileDetail() {
                                 >
                                   Change
                                 </button>
+                              )}
+                              {planId && ['account_manager', 'cleared'].includes(loan.status) && (
+                                <span className="ml-2 text-xs text-gray-400" title="Cannot change plan - loan has been processed">🔒</span>
                               )}
                             </td>
 

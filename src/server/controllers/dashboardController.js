@@ -2,7 +2,7 @@ const { executeQuery } = require('../config/database');
 
 // Simple in-memory cache for dashboard data
 const dashboardCache = new Map();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL = 0; // Disabled - loan data needs real-time updates
 
 // Helper function to get cached data or fetch fresh data
 const getCachedOrFetch = async (key, fetchFunction, ttl = CACHE_TTL) => {

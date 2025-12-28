@@ -89,7 +89,7 @@ export const DigilockerKYCPage: React.FC = () => {
                 // No PAN document found - but check if employment details are already completed
                 // If employment is completed, user has already progressed past KYC, so skip PAN requirement
                 try {
-                  const employmentResponse = await apiService.getEmploymentStatus(applicationId);
+                  const employmentResponse = await apiService.getEmploymentDetailsStatus();
                   if (employmentResponse.status === 'success' && employmentResponse.data?.completed) {
                     console.log('✅ Employment details completed - skipping PAN requirement');
                     // Employment completed means user already passed this step - proceed to next
@@ -117,7 +117,12 @@ export const DigilockerKYCPage: React.FC = () => {
               }
             } catch (panError) {
               console.error('Error checking PAN document:', panError);
-              // Continue to next step even if PAN check fails
+              // If PAN check fails (e.g., API authentication error), show manual PAN input
+              console.log('⚠️ PAN check failed - showing manual PAN input');
+              setShowPanInput(true);
+              setChecking(false);
+              toast.info('Please enter your PAN number to complete verification');
+              return;
             }
           }
           

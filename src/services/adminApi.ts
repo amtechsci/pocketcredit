@@ -6,7 +6,7 @@ export interface AdminLoginResponse {
     id: string;
     name: string;
     email: string;
-    role: string;
+    role: 'superadmin' | 'manager' | 'officer';
     permissions: string[];
   };
   token: string;
@@ -98,7 +98,7 @@ class AdminApiService {
       }
     );
 
-    // Add response interceptor for debugging
+    // Add response interceptor for debugging and auth handling
     this.api.interceptors.response.use(
       (response: AxiosResponse) => {
         console.log('Admin API Response:', response.status, response.config.url);
@@ -106,6 +106,38 @@ class AdminApiService {
       },
       (error) => {
         console.error('Admin API Response Error:', error.response?.data || error.message);
+        
+        // Handle authentication errors
+        if (error.response) {
+          const status = error.response.status;
+          const message = error.response.data?.message || '';
+          
+          // Check for auth-related errors
+          if (
+            status === 401 || 
+            status === 403 || 
+            message.toLowerCase().includes('invalid') && message.toLowerCase().includes('token') ||
+            message.toLowerCase().includes('expired') && message.toLowerCase().includes('token') ||
+            message.toLowerCase().includes('access token required') ||
+            message.toLowerCase().includes('admin not found') ||
+            message.toLowerCase().includes('admin access required')
+          ) {
+            console.log('Authentication error detected, clearing credentials and redirecting to login');
+            
+            // Clear authentication data
+            this.token = null;
+            this.clearAuthHeader();
+            localStorage.removeItem('adminToken');
+            localStorage.removeItem('adminUser');
+            
+            // Redirect to admin login page
+            // Use setTimeout to avoid blocking the error handling
+            setTimeout(() => {
+              window.location.href = '/admin/login';
+            }, 100);
+          }
+        }
+        
         return Promise.reject(error);
       }
     );
@@ -119,6 +151,38 @@ class AdminApiService {
   // Clear authorization header
   private clearAuthHeader() {
     delete this.api.defaults.headers.common['Authorization'];
+  }
+
+  // Handle authentication errors and redirect to login
+  private handleAuthError(error: any) {
+    if (error.response) {
+      const status = error.response.status;
+      const message = error.response.data?.message || '';
+      
+      // Check for auth-related errors
+      if (
+        status === 401 || 
+        status === 403 || 
+        message.toLowerCase().includes('invalid') && message.toLowerCase().includes('token') ||
+        message.toLowerCase().includes('expired') && message.toLowerCase().includes('token') ||
+        message.toLowerCase().includes('access token required') ||
+        message.toLowerCase().includes('admin not found') ||
+        message.toLowerCase().includes('admin access required')
+      ) {
+        console.log('Authentication error detected in direct axios call, clearing credentials and redirecting to login');
+        
+        // Clear authentication data
+        this.token = null;
+        this.clearAuthHeader();
+        localStorage.removeItem('adminToken');
+        localStorage.removeItem('adminUser');
+        
+        // Redirect to admin login page
+        setTimeout(() => {
+          window.location.href = '/admin/login';
+        }, 100);
+      }
+    }
   }
 
   // Generic API request method
@@ -247,14 +311,19 @@ class AdminApiService {
   }
 
   async uploadUserDocument(userId: string, formData: FormData): Promise<ApiResponse<any>> {
-    const token = localStorage.getItem('adminToken');
-    const response = await axios.post(`/api/admin/user-profile/${userId}/documents/upload`, formData, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'multipart/form-data'
-      }
-    });
-    return response.data;
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.post(`/api/admin/user-profile/${userId}/documents/upload`, formData, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async updateDocumentStatus(userId: string, documentId: string, status: string, rejectionReason?: string): Promise<ApiResponse<any>> {
@@ -993,22 +1062,32 @@ class AdminApiService {
 
   // Validation APIs - using direct axios calls since these routes are not under /api/admin
   async getValidationOptions(type?: string): Promise<ApiResponse<any>> {
-    const endpoint = type ? `/api/validation/options/${type}` : '/api/validation/options';
-    const response = await axios.get(endpoint, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
+    try {
+      const endpoint = type ? `/api/validation/options/${type}` : '/api/validation/options';
+      const response = await axios.get(endpoint, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async addValidationOption(data: { name: string; type: string }): Promise<ApiResponse<any>> {
-    const response = await axios.post('/api/validation/options', data, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
+    try {
+      const response = await axios.post('/api/validation/options', data, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async submitValidationAction(data: {
@@ -1018,52 +1097,77 @@ class AdminApiService {
     actionDetails: any;
     adminId: string;
   }): Promise<ApiResponse<any>> {
-    const response = await axios.post('/api/validation/submit', data, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
+    try {
+      const response = await axios.post('/api/validation/submit', data, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async getValidationHistory(userId: number, loanApplicationId?: number): Promise<ApiResponse<any>> {
-    const params = loanApplicationId ? `?loanApplicationId=${loanApplicationId}` : '';
-    const response = await axios.get(`/api/validation/history/${userId}${params}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
+    try {
+      const params = loanApplicationId ? `?loanApplicationId=${loanApplicationId}` : '';
+      const response = await axios.get(`/api/validation/history/${userId}${params}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async getValidationStatus(userId: number, loanApplicationId?: number): Promise<ApiResponse<any>> {
-    const params = loanApplicationId ? `?loanApplicationId=${loanApplicationId}` : '';
-    const response = await axios.get(`/api/validation/status/${userId}${params}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
+    try {
+      const params = loanApplicationId ? `?loanApplicationId=${loanApplicationId}` : '';
+      const response = await axios.get(`/api/validation/status/${userId}${params}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async updateValidationStatus(userId: number, data: any): Promise<ApiResponse<any>> {
-    const response = await axios.put(`/api/validation/status/${userId}`, data, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
+    try {
+      const response = await axios.put(`/api/validation/status/${userId}`, data, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   // Loan Calculations API
 
   async updateLoanCalculation(loanId: number, data: { processing_fee_percent?: number; interest_percent_per_day?: number }): Promise<ApiResponse<any>> {
-    const response = await axios.put(`/api/loan-calculations/${loanId}`, data, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
+    try {
+      const response = await axios.put(`/api/loan-calculations/${loanId}`, data, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async updateLoanAmount(applicationId: string, data: { loan_amount?: number; principalAmount?: number }): Promise<ApiResponse<any>> {
@@ -1074,82 +1178,122 @@ class AdminApiService {
   }
 
   async calculateLoanPreview(data: { loan_amount: number; processing_fee_percent: number; interest_percent_per_day: number; days: number }): Promise<ApiResponse<any>> {
-    const response = await axios.post('/api/loan-calculations/calculate', data, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
+    try {
+      const response = await axios.post('/api/loan-calculations/calculate', data, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async getLoanDays(loanId: number): Promise<ApiResponse<any>> {
-    const response = await axios.get(`/api/loan-calculations/${loanId}/days`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
+    try {
+      const response = await axios.get(`/api/loan-calculations/${loanId}/days`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   // KFS (Key Facts Statement) API
   async getKFS(loanId: number): Promise<ApiResponse<any>> {
-    const response = await axios.get(`/api/kfs/${loanId}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
+    try {
+      const response = await axios.get(`/api/kfs/${loanId}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async generateKFSPDF(loanId: number, htmlContent: string): Promise<Blob> {
-    const response = await axios.post(`/api/kfs/${loanId}/generate-pdf`, { htmlContent }, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      },
-      responseType: 'blob'
-    });
-    return response.data;
+    try {
+      const response = await axios.post(`/api/kfs/${loanId}/generate-pdf`, { htmlContent }, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        },
+        responseType: 'blob'
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async downloadBankStatementExcel(txnId: string): Promise<Blob> {
-    const response = await axios.post('/api/bank-statement/download-excel', { txn_id: txnId }, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      },
-      responseType: 'blob'
-    });
-    return response.data;
+    try {
+      const response = await axios.post('/api/bank-statement/download-excel', { txn_id: txnId }, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        },
+        responseType: 'blob'
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async emailKFSPDF(loanId: number, htmlContent: string, recipientEmail: string, recipientName: string): Promise<ApiResponse<any>> {
-    const response = await axios.post(`/api/kfs/${loanId}/email-pdf`, {
-      htmlContent,
-      recipientEmail,
-      recipientName
-    }, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
+    try {
+      const response = await axios.post(`/api/kfs/${loanId}/email-pdf`, {
+        htmlContent,
+        recipientEmail,
+        recipientName
+      }, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async getUserCreditAnalytics(userId: number): Promise<ApiResponse<any>> {
-    const response = await axios.get(`/api/admin/users/${userId}/credit-analytics`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
+    try {
+      const response = await axios.get(`/api/admin/users/${userId}/credit-analytics`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async performCreditCheck(userId: number): Promise<ApiResponse<any>> {
-    const response = await axios.post(`/api/admin/users/${userId}/perform-credit-check`, {}, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
+    try {
+      const response = await axios.post(`/api/admin/users/${userId}/perform-credit-check`, {}, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   // Loan Application Documents API
@@ -1167,26 +1311,36 @@ class AdminApiService {
       verification_notes?: string;
     }>;
   }>> {
-    const response = await axios.get(`/api/admin/loan-documents/${loanApplicationId}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
-      }
-    });
-    return response.data;
+    try {
+      const response = await axios.get(`/api/admin/loan-documents/${loanApplicationId}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async getLoanDocumentUrl(documentId: number): Promise<ApiResponse<{
     url: string;
     expires_in: number;
   }>> {
-    const token = localStorage.getItem('adminToken');
-    // Use the user endpoint (admin can access it with admin token)
-    const response = await axios.get(`/api/loan-documents/${documentId}/url`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
-    return response.data;
+    try {
+      const token = localStorage.getItem('adminToken');
+      // Use the user endpoint (admin can access it with admin token)
+      const response = await axios.get(`/api/loan-documents/${documentId}/url`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 
   async search(query: string): Promise<ApiResponse<any>> {
