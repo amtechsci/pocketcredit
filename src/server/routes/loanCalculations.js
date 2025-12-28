@@ -170,6 +170,27 @@ router.put('/:loanId', authenticateAdmin, async (req, res) => {
       });
     }
     
+    // Check if loan is already processed
+    const [loans] = await db.execute(
+      'SELECT processed_at FROM loan_applications WHERE id = ?',
+      [loanId]
+    );
+    
+    if (!loans || loans.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan not found'
+      });
+    }
+    
+    // Prevent calculation parameter changes if loan is already processed
+    if (loans[0].processed_at) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot update calculation parameters after loan has been processed. Parameters are frozen at processing time.'
+      });
+    }
+    
     const updates = {};
     
     if (processing_fee_percent !== undefined) {

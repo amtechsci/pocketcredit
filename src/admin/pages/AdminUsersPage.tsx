@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAdmin } from '../context/AdminContext';
 import { adminApiService } from '../../services/adminApi';
 import { 
@@ -37,16 +37,25 @@ interface User {
 
 export function AdminUsersPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { currentUser } = useAdmin();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  // Get status from URL query params, default to 'all'
+  const urlStatus = searchParams.get('status') || 'all';
+  const [statusFilter, setStatusFilter] = useState(urlStatus);
   const [sortBy, setSortBy] = useState('createdAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [totalUsers, setTotalUsers] = useState(0);
+
+  // Update status filter when URL changes
+  useEffect(() => {
+    const urlStatus = searchParams.get('status') || 'all';
+    setStatusFilter(urlStatus);
+  }, [searchParams]);
 
   // Fetch users data
   const fetchUsers = useCallback(async () => {
@@ -263,6 +272,32 @@ export function AdminUsersPage() {
               }`}
             >
               Pending
+            </button>
+            <button
+              onClick={() => {
+                navigate('/admin/users?status=on_hold');
+                handleStatusFilter('on_hold');
+              }}
+              className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
+                statusFilter === 'on_hold' || statusFilter === 'hold'
+                  ? 'bg-red-100 text-red-700 border border-red-200'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Hold
+            </button>
+            <button
+              onClick={() => {
+                navigate('/admin/users?status=deleted');
+                handleStatusFilter('deleted');
+              }}
+              className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
+                statusFilter === 'deleted'
+                  ? 'bg-gray-800 text-white border border-gray-900'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Delete
             </button>
           </div>
         </div>

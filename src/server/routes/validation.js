@@ -9,7 +9,7 @@ router.get('/options/:type', authenticateAdmin, async (req, res) => {
   try {
     const { type } = req.params;
     
-    if (!['need_document', 'not_process', 'process', 'cancel'].includes(type)) {
+    if (!['need_document', 'not_process', 'process', 'cancel', 're_process', 'unhold', 'delete'].includes(type)) {
       return res.status(400).json({
         status: 'error',
         message: 'Invalid validation type'
@@ -80,7 +80,7 @@ router.post('/options', authenticateAdmin, async (req, res) => {
       });
     }
 
-    if (!['need_document', 'not_process', 'process', 'cancel'].includes(type)) {
+    if (!['need_document', 'not_process', 'process', 'cancel', 're_process', 'unhold', 'delete'].includes(type)) {
       return res.status(400).json({
         status: 'error',
         message: 'Invalid validation type'
@@ -137,7 +137,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       });
     }
 
-    if (!['need_document', 'process', 'not_process', 'cancel'].includes(actionType)) {
+    if (!['need_document', 'process', 'not_process', 'cancel', 're_process', 'unhold', 'delete'].includes(actionType)) {
       return res.status(400).json({
         status: 'error',
         message: 'Invalid action type'
@@ -185,8 +185,9 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // Update user status if action is cancel with hold
+    // Handle different action types for user status updates
     if (actionType === 'cancel' && actionDetails.holdUser === 'yes') {
+      // Cancel with hold (existing logic)
       let userStatus = 'on_hold';
       let holdUntilDate = null;
       
@@ -204,6 +205,90 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
          SET status = ?, hold_until_date = ?, updated_at = CURRENT_TIMESTAMP 
          WHERE id = ?`,
         [userStatus, holdUntilDate, userId]
+      );
+    } else if (actionType === 'not_process') {
+      // Not process: Hold permanently (lifetime hold)
+      await executeQuery(
+        `UPDATE users 
+         SET status = 'on_hold', hold_until_date = NULL, application_hold_reason = COALESCE(application_hold_reason, 'Profile temporarily locked'), updated_at = CURRENT_TIMESTAMP 
+         WHERE id = ?`,
+        [userId]
+      );
+    } else if (actionType === 're_process') {
+      // Re-process: Hold for 45 days (cooling period)
+      const holdUntilDate = new Date();
+      holdUntilDate.setDate(holdUntilDate.getDate() + 45);
+      
+      await executeQuery(
+        `UPDATE users 
+         SET status = 'on_hold', hold_until_date = ?, application_hold_reason = COALESCE(application_hold_reason, 'Profile under cooling period'), updated_at = CURRENT_TIMESTAMP 
+         WHERE id = ?`,
+        [holdUntilDate, userId]
+      );
+    } else if (actionType === 'unhold') {
+      // Unhold: Move from hold to active status
+      await executeQuery(
+        `UPDATE users 
+         SET status = 'active', hold_until_date = NULL, updated_at = CURRENT_TIMESTAMP 
+         WHERE id = ?`,
+        [userId]
+      );
+    } else if (actionType === 'delete') {
+      // Delete: Mark user as deleted and purge data (except primary number, PAN, Aadhar, loan data)
+      // First, mark user as deleted
+      await executeQuery(
+        `UPDATE users 
+         SET status = 'deleted', updated_at = CURRENT_TIMESTAMP 
+         WHERE id = ?`,
+        [userId]
+      );
+
+      // Get user's primary phone, PAN, and Aadhar before deletion
+      const userData = await executeQuery(
+        `SELECT phone, pan_number, aadhar_number FROM users WHERE id = ?`,
+        [userId]
+      );
+      
+      const primaryPhone = userData[0]?.phone || null;
+      const panNumber = userData[0]?.pan_number || null;
+      const aadharNumber = userData[0]?.aadhar_number || null;
+
+      // Delete user data except primary number, PAN, Aadhar, and loan data
+      // Delete addresses
+      await executeQuery(`DELETE FROM addresses WHERE user_id = ?`, [userId]);
+      
+      // Delete bank details (but keep loan-related bank info if exists in loan_applications)
+      await executeQuery(`DELETE FROM bank_details WHERE user_id = ?`, [userId]);
+      
+      // Delete references
+      await executeQuery(`DELETE FROM \`references\` WHERE user_id = ?`, [userId]);
+      
+      // Delete student documents (keep loan documents)
+      await executeQuery(`DELETE FROM student_documents WHERE user_id = ?`, [userId]);
+      
+      // Delete KYC verifications
+      await executeQuery(`DELETE FROM kyc_verifications WHERE user_id = ?`, [userId]);
+      
+      // Delete user notes
+      await executeQuery(`DELETE FROM user_notes WHERE user_id = ?`, [userId]);
+      
+      // Delete user follow-ups
+      await executeQuery(`DELETE FROM user_follow_ups WHERE user_id = ?`, [userId]);
+      
+      // Delete bank statements (except those linked to loans)
+      await executeQuery(`DELETE FROM user_bank_statements WHERE user_id = ?`, [userId]);
+      
+      // Clear user profile data but keep primary identifiers
+      await executeQuery(
+        `UPDATE users 
+         SET first_name = NULL, last_name = NULL, email = NULL, 
+             date_of_birth = NULL, gender = NULL, marital_status = NULL,
+             employment_type = NULL, company_name = NULL, designation = NULL,
+             monthly_income = NULL, work_experience = NULL, profile_completion_step = 0,
+             graduation_status = NULL, loan_limit = 0, credit_score = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [userId]
       );
     }
 

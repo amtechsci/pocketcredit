@@ -56,8 +56,10 @@ router.get('/', authenticateAdmin, async (req, res) => {
 
     // Status filter
     if (status && status !== 'all') {
+      // Map 'hold' to 'on_hold' for backward compatibility
+      const statusValue = status === 'hold' ? 'on_hold' : status;
       whereConditions.push('u.status = ?');
-      queryParams.push(status);
+      queryParams.push(statusValue);
     }
 
     // Add WHERE clause if conditions exist

@@ -136,15 +136,131 @@ export function DynamicDashboardPage() {
       setLoading(true);
       setError(null);
 
-      // First check if user has an application under review
+      // Priority-based routing: Check applications in priority order
       try {
         const applicationsResponse = await apiService.getLoanApplications();
         if (applicationsResponse.success && applicationsResponse.data && applicationsResponse.data.applications) {
-          const underReviewApp = applicationsResponse.data.applications.find(
+          const applications = applicationsResponse.data.applications;
+
+          // PRIORITY 1: Check for pending documents (need_document action)
+          // Check if any application has pending documents requested by admin
+          for (const app of applications) {
+            try {
+              // Check validation history for need_document actions
+              const validationResponse = await apiService.request('GET', `/validation/user/history?loanApplicationId=${app.id}`, {});
+              if (validationResponse.status === 'success' && validationResponse.data) {
+                const documentActions = validationResponse.data.filter(
+                  (action: any) => action.action_type === 'need_document' && action.loan_application_id === app.id
+                );
+                
+                if (documentActions.length > 0) {
+                  const latestAction = documentActions[0];
+                  const documents = latestAction.action_details?.documents || [];
+                  
+                  // Check if all documents are uploaded
+                  if (documents.length > 0) {
+                    const docsResponse = await apiService.getLoanDocuments(app.id);
+                    if (docsResponse.success || docsResponse.status === 'success') {
+                      const uploadedDocs = docsResponse.data?.documents || [];
+                      const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+                      
+                      const allUploaded = documents.every((doc: string) => {
+                        const normalizedDoc = normalize(doc);
+                        return uploadedDocs.some((uploaded: any) => {
+                          const normalizedUploaded = normalize(uploaded.document_name || '');
+                          return normalizedDoc === normalizedUploaded ||
+                                 normalizedDoc.includes(normalizedUploaded) ||
+                                 normalizedUploaded.includes(normalizedDoc);
+                        });
+                      });
+                      
+                      if (!allUploaded) {
+                        console.log('📄 Found pending documents, redirecting to upload page');
+                        navigate(`/loan-application/upload-documents?applicationId=${app.id}`);
+                        return;
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (valError) {
+              console.error('Error checking validation history:', valError);
+              // Continue to next check
+            }
+          }
+
+          // PRIORITY 2: Check for pre-disbursal statuses (follow_up, ready_for_disbursement, etc.)
+          const preDisbursalApp = applications.find(
+            (app: any) => ['follow_up', 'ready_for_disbursement'].includes(app.status)
+          );
+          if (preDisbursalApp) {
+            // Check if it has pending documents first
+            try {
+              const validationResponse = await apiService.request('GET', `/validation/user/history?loanApplicationId=${preDisbursalApp.id}`, {});
+              if (validationResponse.status === 'success' && validationResponse.data) {
+                const documentActions = validationResponse.data.filter(
+                  (action: any) => action.action_type === 'need_document' && action.loan_application_id === preDisbursalApp.id
+                );
+                if (documentActions.length > 0) {
+                  const latestAction = documentActions[0];
+                  const documents = latestAction.action_details?.documents || [];
+                  if (documents.length > 0) {
+                    // Check if all uploaded
+                    const docsResponse = await apiService.getLoanDocuments(preDisbursalApp.id);
+                    if (docsResponse.success || docsResponse.status === 'success') {
+                      const uploadedDocs = docsResponse.data?.documents || [];
+                      const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+                      const allUploaded = documents.every((doc: string) => {
+                        const normalizedDoc = normalize(doc);
+                        return uploadedDocs.some((uploaded: any) => {
+                          const normalizedUploaded = normalize(uploaded.document_name || '');
+                          return normalizedDoc === normalizedUploaded ||
+                                 normalizedDoc.includes(normalizedUploaded) ||
+                                 normalizedUploaded.includes(normalizedDoc);
+                        });
+                      });
+                      if (!allUploaded) {
+                        navigate(`/loan-application/upload-documents?applicationId=${preDisbursalApp.id}`);
+                        return;
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (err) {
+              // Continue
+            }
+            // If no pending documents, show under review or appropriate page
+            if (preDisbursalApp.status === 'follow_up') {
+              navigate('/application-under-review');
+              return;
+            }
+          }
+
+          // PRIORITY 3: Check for post-disbursal (disbursal status)
+          const disbursalApp = applications.find(
+            (app: any) => app.status === 'disbursal'
+          );
+          if (disbursalApp) {
+            navigate(`/post-disbursal?applicationId=${disbursalApp.id}`);
+            return;
+          }
+
+          // PRIORITY 4: Check for account_manager status - redirect to repayment schedule
+          const accountManagerApp = applications.find(
+            (app: any) => app.status === 'account_manager'
+          );
+          if (accountManagerApp) {
+            console.log('🔄 Found account_manager loan, redirecting to repayment schedule');
+            navigate(`/repayment-schedule?applicationId=${accountManagerApp.id}`);
+            return;
+          }
+
+          // PRIORITY 5: Check for under_review or submitted status
+          const underReviewApp = applications.find(
             (app: any) => app.status === 'under_review' || app.status === 'submitted'
           );
           if (underReviewApp) {
-            // Redirect to under review page
             navigate('/application-under-review');
             return;
           }
@@ -157,6 +273,17 @@ export function DynamicDashboardPage() {
       const response = await apiService.getDashboardSummary();
 
       if (response.status === 'success' && response.data) {
+        // Check if user is deleted
+        if ((response.data as any).deleted) {
+          // Show deleted message and prevent any actions
+          setDashboardData({
+            ...response.data,
+            user: (response.data as any).user || {}
+          } as DashboardData);
+          setCanApplyForLoan(false);
+          return;
+        }
+        
         setDashboardData(response.data);
 
         // Check if user can apply for new loan
@@ -968,7 +1095,7 @@ export function DynamicDashboardPage() {
             {dashboardData.hold_info && <HoldBanner holdInfo={dashboardData.hold_info} />}
 
             {/* Eligibility Status Check */}
-            {userData.eligibility_status === 'not_eligible' && (
+            {dashboardData.user?.eligibility_status === 'not_eligible' && (
               <div className="mb-6 p-6 bg-red-50 border border-red-200 rounded-lg">
                 <div className="flex items-start">
                   <AlertCircle className="w-6 h-6 text-red-600 mt-1 mr-3" />

@@ -141,13 +141,29 @@ const fetchDashboardData = async (userId) => {
 
   const user = users[0];
   
+  // Check if user is deleted
+  if (user.status === 'deleted') {
+    // Return deleted status - frontend will show message
+    return {
+      user: {
+        id: user.id,
+        name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'User',
+        phone: user.phone,
+        email: user.email || '',
+        status: 'deleted'
+      },
+      deleted: true,
+      deleted_message: 'Your profile is purged in our system. Thank you.'
+    };
+  }
+  
   // Check if user is on hold and prepare hold information
   let holdInfo = null;
   if (user.status === 'on_hold') {
     holdInfo = {
       is_on_hold: true,
       hold_reason: user.application_hold_reason,
-      hold_type: user.hold_until_date ? 'temporary' : 'permanent'
+      hold_type: user.hold_until_date ? 'cooling_period' : 'permanent' // Use cooling_period for temporary holds (re-process)
     };
     
     if (user.hold_until_date) {

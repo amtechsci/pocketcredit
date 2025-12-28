@@ -506,6 +506,16 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
 
     const loan = applicationResult[0];
 
+    // Prevent status changes to pre-processing statuses if loan is already processed
+    // Once processed, loan can only move to: account_manager, cleared, active, closed, defaulted
+    const preProcessingStatuses = ['submitted', 'under_review', 'disbursement_ready', 'ready_for_disbursement'];
+    if (loan.processed_at && preProcessingStatuses.includes(status)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Cannot change loan status to a pre-processing status after loan has been processed. Loan is frozen at processing time.'
+      });
+    }
+
     // Build update query
     let updateQuery = 'UPDATE loan_applications SET status = ?, updated_at = NOW()';
     let updateParams = [status];
@@ -542,9 +552,113 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
         const gst = (calculatedValues?.totals?.disbursalFeeGST || 0) + (calculatedValues?.totals?.repayableFeeGST || 0);
         const interest = calculatedValues?.interest?.amount || loan.total_interest || null;
         const penalty = 0; // No penalty at processing time
-        const dueDate = calculatedValues?.interest?.repayment_date 
-          ? new Date(calculatedValues.interest.repayment_date).toISOString().split('T')[0]
-          : null;
+        
+        // Calculate processed_due_date - single date for single payment, JSON array for multi-EMI
+        let processedDueDate = null;
+        try {
+          // Parse plan snapshot to check if it's multi-EMI
+          let planSnapshot = {};
+          try {
+            planSnapshot = typeof loan.plan_snapshot === 'string'
+              ? JSON.parse(loan.plan_snapshot)
+              : loan.plan_snapshot || {};
+          } catch (e) {
+            console.error('Error parsing plan_snapshot:', e);
+          }
+          
+          const emiCount = planSnapshot.emi_count || null;
+          const isMultiEmi = emiCount && emiCount > 1;
+          
+          if (isMultiEmi) {
+            // Multi-EMI: Generate all EMI dates and store as JSON array
+            const { getNextSalaryDate, getSalaryDateForMonth } = require('../utils/loanCalculations');
+            const { executeQuery: execQuery } = require('../config/database');
+            
+            // Get user salary date
+            const userResult = await execQuery('SELECT salary_date FROM users WHERE id = ?', [loan.user_id]);
+            const userSalaryDate = userResult[0]?.salary_date || null;
+            
+            // Calculate base date (disbursement date or today)
+            const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+            baseDate.setHours(0, 0, 0, 0);
+            
+            // Generate all EMI dates
+            const allEmiDates = [];
+            
+            if (planSnapshot.emi_frequency === 'monthly' && planSnapshot.calculate_by_salary_date && userSalaryDate) {
+              // Salary-based monthly EMIs
+              const salaryDate = parseInt(userSalaryDate);
+              if (salaryDate >= 1 && salaryDate <= 31) {
+                let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
+                
+                // Check if duration is less than minimum days
+                const minDuration = planSnapshot.repayment_days || 15;
+                const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+                if (daysToNextSalary < minDuration) {
+                  nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+                }
+                
+                // Ensure nextSalaryDate matches the salary date exactly
+                const firstEmiYear = nextSalaryDate.getFullYear();
+                const firstEmiMonth = nextSalaryDate.getMonth();
+                let correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, salaryDate);
+                correctedFirstEmiDate.setHours(0, 0, 0, 0);
+                if (correctedFirstEmiDate.getDate() !== salaryDate) {
+                  const lastDay = new Date(firstEmiYear, firstEmiMonth + 1, 0).getDate();
+                  correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, Math.min(salaryDate, lastDay));
+                  correctedFirstEmiDate.setHours(0, 0, 0, 0);
+                }
+                nextSalaryDate = correctedFirstEmiDate;
+                
+                // Generate all EMI dates
+                for (let i = 0; i < emiCount; i++) {
+                  const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
+                  allEmiDates.push(emiDate.toISOString().split('T')[0]); // Store as YYYY-MM-DD
+                }
+              }
+            } else {
+              // Non-salary-based EMIs
+              const firstDueDate = calculatedValues?.interest?.repayment_date 
+                ? new Date(calculatedValues.interest.repayment_date)
+                : (() => {
+                    const dueDate = new Date(baseDate);
+                    dueDate.setDate(dueDate.getDate() + (planSnapshot.repayment_days || 15));
+                    dueDate.setHours(0, 0, 0, 0);
+                    return dueDate;
+                  })();
+              
+              const daysPerEmi = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
+              const daysBetween = daysPerEmi[planSnapshot.emi_frequency] || 30;
+              
+              for (let i = 0; i < emiCount; i++) {
+                const emiDate = new Date(firstDueDate);
+                if (planSnapshot.emi_frequency === 'monthly') {
+                  emiDate.setMonth(emiDate.getMonth() + i);
+                } else {
+                  emiDate.setDate(emiDate.getDate() + (i * daysBetween));
+                }
+                emiDate.setHours(0, 0, 0, 0);
+                allEmiDates.push(emiDate.toISOString().split('T')[0]); // Store as YYYY-MM-DD
+              }
+            }
+            
+            // Store as JSON array for multi-EMI
+            processedDueDate = JSON.stringify(allEmiDates);
+          } else {
+            // Single payment: Store as single date string
+            processedDueDate = calculatedValues?.interest?.repayment_date 
+              ? new Date(calculatedValues.interest.repayment_date).toISOString().split('T')[0]
+              : null;
+          }
+        } catch (dueDateError) {
+          console.error('Error calculating processed_due_date:', dueDateError);
+          // Fallback to single date
+          processedDueDate = calculatedValues?.interest?.repayment_date 
+            ? new Date(calculatedValues.interest.repayment_date).toISOString().split('T')[0]
+            : null;
+        }
+        
+        const dueDate = processedDueDate; // Use the calculated processedDueDate
 
         updateQuery += `, processed_at = NOW(), 
           processed_amount = ?,
@@ -565,7 +679,7 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
           gst || null,
           interest,
           penalty,
-          dueDate
+          processedDueDate
         );
         
         console.log(`✅ Saving calculated values for loan #${applicationId} when changing to account_manager`);
@@ -611,12 +725,20 @@ router.put('/:applicationId/amount', authenticateAdmin, async (req, res) => {
       });
     }
 
-    // Check if application exists
-    const applicationResult = await executeQuery('SELECT id, user_id FROM loan_applications WHERE id = ?', [applicationId]);
+    // Check if application exists and if it's already processed
+    const applicationResult = await executeQuery('SELECT id, user_id, processed_at FROM loan_applications WHERE id = ?', [applicationId]);
     if (applicationResult.length === 0) {
       return res.status(404).json({
         status: 'error',
         message: 'Application not found'
+      });
+    }
+
+    // Prevent amount changes if loan is already processed
+    if (applicationResult[0].processed_at) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Cannot change loan amount after loan has been processed. Loan amount is frozen at processing time.'
       });
     }
 

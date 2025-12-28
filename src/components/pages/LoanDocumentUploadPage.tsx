@@ -25,15 +25,23 @@ export const LoanDocumentUploadPage = () => {
       return;
     }
 
-    // Get application ID from location state or URL params
+    // Get application ID from URL params, location state, or fetch latest
+    const urlParams = new URLSearchParams(location.search);
+    const urlAppId = urlParams.get('applicationId');
     const stateAppId = (location.state as any)?.applicationId;
-    if (stateAppId) {
-      setApplicationId(stateAppId);
-      fetchRequiredDocuments(stateAppId);
-    } else {
-      // Try to get from user's latest loan application
-      fetchLatestLoanApplication();
+    const appId = urlAppId || stateAppId;
+    
+    if (appId) {
+      const id = parseInt(appId);
+      if (!isNaN(id)) {
+        setApplicationId(id);
+        fetchRequiredDocuments(id);
+        return;
+      }
     }
+    
+    // Try to get from user's latest loan application
+    fetchLatestLoanApplication();
   }, [isAuthenticated, navigate, location]);
 
   const fetchLatestLoanApplication = async () => {
@@ -223,30 +231,57 @@ export const LoanDocumentUploadPage = () => {
   };
 
   const handleDocumentUpload = async (documentName: string, documentData: any) => {
-    setUploadedDocuments(prev => ({
-      ...prev,
-      [documentName]: documentData
-    }));
-    toast.success(`${documentName} uploaded successfully!`);
+    if (!applicationId) return;
     
     // Refresh the documents list to ensure we have the latest data
-    if (applicationId) {
-      try {
-        const docsResponse = await apiService.getLoanDocuments(applicationId);
-        console.log('📄 Documents response (after upload):', docsResponse);
-        if ((docsResponse.success || docsResponse.status === 'success') && docsResponse.data?.documents) {
-          const uploadedDocsMap: { [key: string]: any } = {};
-          docsResponse.data.documents.forEach((doc: any) => {
+    try {
+      const docsResponse = await apiService.getLoanDocuments(applicationId);
+      console.log('📄 Documents response (after upload):', docsResponse);
+      if ((docsResponse.success || docsResponse.status === 'success') && docsResponse.data?.documents) {
+        const uploadedDocsMap: { [key: string]: any } = {};
+        
+        // Helper function to normalize document names for matching
+        const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normalizedDocName = normalize(documentName);
+        
+        docsResponse.data.documents.forEach((doc: any) => {
+          const normalizedDoc = normalize(doc.document_name || '');
+          // Match by exact name or normalized comparison
+          if (normalizedDoc === normalizedDocName || 
+              normalizedDoc.includes(normalizedDocName) || 
+              normalizedDocName.includes(normalizedDoc)) {
+            uploadedDocsMap[documentName] = doc;
+            // Also map by actual document name from backend
             uploadedDocsMap[doc.document_name] = doc;
-            console.log(`✅ Found uploaded document: ${doc.document_name}`);
-          });
-          setUploadedDocuments(uploadedDocsMap);
-        } else {
-          console.log('⚠️ No documents found after upload');
-        }
-      } catch (error) {
-        console.log('Could not refresh documents list:', error);
+          } else {
+            uploadedDocsMap[doc.document_name] = doc;
+          }
+          console.log(`✅ Found uploaded document: ${doc.document_name}`);
+        });
+        
+        setUploadedDocuments(prev => ({
+          ...prev,
+          ...uploadedDocsMap,
+          [documentName]: documentData || uploadedDocsMap[documentName]
+        }));
+        
+        toast.success(`${documentName} uploaded successfully!`);
+      } else {
+        // Fallback: use the documentData directly
+        setUploadedDocuments(prev => ({
+          ...prev,
+          [documentName]: documentData
+        }));
+        toast.success(`${documentName} uploaded successfully!`);
       }
+    } catch (error) {
+      console.error('Could not refresh documents list:', error);
+      // Fallback: use the documentData directly
+      setUploadedDocuments(prev => ({
+        ...prev,
+        [documentName]: documentData
+      }));
+      toast.success(`${documentName} uploaded successfully!`);
     }
   };
 
@@ -256,33 +291,58 @@ export const LoanDocumentUploadPage = () => {
       return;
     }
 
-    // Check if all required documents are uploaded
-    const missingDocuments = requiredDocuments.filter(
-      doc => !uploadedDocuments[doc]
-    );
-
-    if (missingDocuments.length > 0) {
-      toast.error(`Please upload all required documents: ${missingDocuments.join(', ')}`);
-      return;
-    }
-
     try {
       setSubmitting(true);
       
-      // Submit all uploaded documents
-      // Note: This would need a backend API endpoint to save document uploads for loan application
-      // For now, we'll just show success and update status
+      // Refresh documents list to verify all are uploaded
+      const docsResponse = await apiService.getLoanDocuments(applicationId);
       
-      toast.success('All documents uploaded successfully! Your application will be reviewed.');
-      
-      // Redirect to dashboard after 2 seconds
-      setTimeout(() => {
-        navigate('/dashboard');
-      }, 2000);
+      if (docsResponse.success || docsResponse.status === 'success') {
+        const uploadedDocs = docsResponse.data?.documents || [];
+        const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+        
+        // Check if all required documents are uploaded
+        const missingDocuments: string[] = [];
+        
+        requiredDocuments.forEach((requiredDoc: string) => {
+          const normalizedRequired = normalize(requiredDoc);
+          const isUploaded = uploadedDocs.some((uploaded: any) => {
+            const normalizedUploaded = normalize(uploaded.document_name || '');
+            return normalizedRequired === normalizedUploaded ||
+                   normalizedRequired.includes(normalizedUploaded) ||
+                   normalizedUploaded.includes(normalizedRequired) ||
+                   (normalizedRequired.includes('aadhar') && normalizedUploaded.includes('aadhaar')) ||
+                   (normalizedRequired.includes('aadhaar') && normalizedUploaded.includes('aadhar')) ||
+                   (normalizedRequired.includes('pan') && normalizedUploaded.includes('pan'));
+          });
+          
+          if (!isUploaded) {
+            missingDocuments.push(requiredDoc);
+          }
+        });
+
+        if (missingDocuments.length > 0) {
+          toast.error(`Please upload all required documents: ${missingDocuments.join(', ')}`);
+          setSubmitting(false);
+          return;
+        }
+        
+        // All documents are uploaded
+        toast.success('All documents uploaded successfully! Your application will be reviewed.');
+        
+        // Redirect to application under review page
+        setTimeout(() => {
+          navigate('/application-under-review', { 
+            state: { applicationId: applicationId } 
+          });
+        }, 1500);
+      } else {
+        toast.error('Failed to verify documents. Please try again.');
+        setSubmitting(false);
+      }
     } catch (error) {
       console.error('Error submitting documents:', error);
       toast.error('Failed to submit documents. Please try again.');
-    } finally {
       setSubmitting(false);
     }
   };
@@ -392,7 +452,7 @@ export const LoanDocumentUploadPage = () => {
                   </Button>
                   <Button
                     onClick={handleSubmit}
-                    disabled={submitting || requiredDocuments.some(doc => !uploadedDocuments[doc])}
+                    disabled={submitting}
                     className="bg-blue-600 hover:bg-blue-700"
                   >
                     {submitting ? (

@@ -4,3 +4,4 @@ src/server/.env
 src/build/
 src/dist/
 node_modules
+src/log

@@ -79,6 +79,83 @@ export function SimplifiedLoanApplicationPage() {
   useEffect(() => {
     const checkLoanEligibility = async () => {
       try {
+        // Priority-based checks: First check applications for any active loan status
+        try {
+          const applicationsResponse = await apiService.getLoanApplications();
+          if (applicationsResponse.success && applicationsResponse.data && applicationsResponse.data.applications) {
+            const applications = applicationsResponse.data.applications;
+
+            // PRIORITY 1: Check for pending documents
+            for (const app of applications) {
+              try {
+                const validationResponse = await apiService.request('GET', `/validation/user/history?loanApplicationId=${app.id}`, {});
+                if (validationResponse.status === 'success' && validationResponse.data) {
+                  const documentActions = validationResponse.data.filter(
+                    (action: any) => action.action_type === 'need_document' && action.loan_application_id === app.id
+                  );
+                  if (documentActions.length > 0) {
+                    const latestAction = documentActions[0];
+                    const documents = latestAction.action_details?.documents || [];
+                    if (documents.length > 0) {
+                      const docsResponse = await apiService.getLoanDocuments(app.id);
+                      if (docsResponse.success || docsResponse.status === 'success') {
+                        const uploadedDocs = docsResponse.data?.documents || [];
+                        const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+                        const allUploaded = documents.every((doc: string) => {
+                          const normalizedDoc = normalize(doc);
+                          return uploadedDocs.some((uploaded: any) => {
+                            const normalizedUploaded = normalize(uploaded.document_name || '');
+                            return normalizedDoc === normalizedUploaded ||
+                                   normalizedDoc.includes(normalizedUploaded) ||
+                                   normalizedUploaded.includes(normalizedDoc);
+                          });
+                        });
+                        if (!allUploaded) {
+                          navigate(`/loan-application/upload-documents?applicationId=${app.id}`);
+                          return;
+                        }
+                      }
+                    }
+                  }
+                }
+              } catch (valError) {
+                // Continue
+              }
+            }
+
+            // PRIORITY 2: Check for pre-disbursal
+            const preDisbursalApp = applications.find(
+              (app: any) => ['follow_up', 'ready_for_disbursement'].includes(app.status)
+            );
+            if (preDisbursalApp) {
+              navigate('/application-under-review');
+              return;
+            }
+
+            // PRIORITY 3: Check for post-disbursal
+            const disbursalApp = applications.find(
+              (app: any) => app.status === 'disbursal'
+            );
+            if (disbursalApp) {
+              navigate(`/post-disbursal?applicationId=${disbursalApp.id}`);
+              return;
+            }
+
+            // PRIORITY 4: Check for account_manager status
+            const accountManagerApp = applications.find(
+              (app: any) => app.status === 'account_manager'
+            );
+            if (accountManagerApp) {
+              console.log('🔄 Found account_manager loan, redirecting to repayment schedule');
+              navigate(`/repayment-schedule?applicationId=${accountManagerApp.id}`);
+              return;
+            }
+          }
+        } catch (appError) {
+          console.error('Error checking applications:', appError);
+          // Continue to check eligibility
+        }
+
         const response = await apiService.getDashboardSummary();
         if (response.data && (response.data as any).loan_status) {
           const loanStatus = (response.data as any).loan_status;

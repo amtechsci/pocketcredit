@@ -208,40 +208,49 @@ export const RepaymentSchedulePage = () => {
   currentDateMidnight.setHours(0, 0, 0, 0);
   
   // Use processed_at ONLY for exhausted days calculation
-  const processedDate = loanData.processed_at ? new Date(loanData.processed_at) : null;
+  // IMPORTANT: Extract date portion only (YYYY-MM-DD) to avoid timezone issues
+  // Per rulebook: Server is in IST, calculate from date only, ignore time
+  let processedDateMidnight = null;
+  if (loanData.processed_at) {
+    // Extract date portion from ISO string (e.g., "2025-12-25T23:19:50.000Z" -> "2025-12-25")
+    const processedDateStr = loanData.processed_at.split('T')[0]; // Get YYYY-MM-DD part
+    processedDateMidnight = new Date(processedDateStr + 'T00:00:00'); // Create date at midnight local time
+    processedDateMidnight.setHours(0, 0, 0, 0); // Ensure it's exactly midnight
+  }
   
   if (!loanData.processed_at) {
     console.warn('⚠️ processed_at is not available for loan, cannot calculate exhausted days accurately');
   }
 
   // Exhausted Days Calculation - based on processed_at only
+  // Per rulebook: Use inclusive counting - Math.ceil((end - start) / msPerDay) + 1
   let exhaustedDays = 1; // Default to 1 if processed_at is not available
   
-  if (processedDate) {
-    // Set processed date to midnight for accurate day calculation
-    const processedDateMidnight = new Date(processedDate);
-    processedDateMidnight.setHours(0, 0, 0, 0);
-    
-    // Calculate difference in days (current date - processed date)
+  if (processedDateMidnight) {
+    // Calculate difference in days using inclusive counting
+    // Formula: Math.ceil((end - start) / msPerDay) + 1
     const diffTime = currentDateMidnight.getTime() - processedDateMidnight.getTime();
-    const daysDiff = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    const daysDiff = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
     
     // Exhausted days should be at least 1 if loan was processed today or in the past
-    // If future date (shouldn't happen), use 1 as minimum
-    exhaustedDays = Math.max(1, daysDiff + 1);
+    exhaustedDays = Math.max(1, daysDiff);
   }
   
   // Debug logging
   console.log('Exhausted Days Calculation (using processed_at only):', {
     processed_at: loanData.processed_at,
-    processedDate: processedDate ? processedDate.toISOString().split('T')[0] : 'N/A',
+    processedDateStr: processedDateMidnight ? loanData.processed_at.split('T')[0] : 'N/A',
+    processedDateMidnight: processedDateMidnight ? processedDateMidnight.toISOString().split('T')[0] : 'N/A',
     currentDate: currentDate.toISOString().split('T')[0],
+    currentDateMidnight: currentDateMidnight.toISOString().split('T')[0],
+    diffTime: processedDateMidnight ? (currentDateMidnight.getTime() - processedDateMidnight.getTime()) : 'N/A',
+    diffDays: processedDateMidnight ? ((currentDateMidnight.getTime() - processedDateMidnight.getTime()) / (1000 * 60 * 60 * 24)) : 'N/A',
     calculatedDays: exhaustedDays,
-    note: processedDate ? 'Calculated from processed_at' : 'Using default (1 day) - processed_at not available'
+    note: processedDateMidnight ? 'Calculated from processed_at (date only, ignoring time/timezone)' : 'Using default (1 day) - processed_at not available'
   });
   
   // For due date calculation, still use disbursed_at or processed_at
-  const disbursedDate = processedDate || (loanData.disbursed_at ? new Date(loanData.disbursed_at) : new Date());
+  const disbursedDate = processedDateMidnight || (loanData.disbursed_at ? new Date(loanData.disbursed_at.split('T')[0] + 'T00:00:00') : new Date());
   const disbursedDateMidnight = new Date(disbursedDate);
   disbursedDateMidnight.setHours(0, 0, 0, 0);
 
@@ -268,38 +277,19 @@ export const RepaymentSchedulePage = () => {
   const canExtend = currentDateMidnight >= dMinus5 && currentDateMidnight <= dPlus15;
 
   // Calculate loan progression stages
-  // Get user's monthly income and current loan limit
-  const monthlyIncome = kfsData?.borrower?.employment?.monthly_income || 
-                        (user as any)?.monthly_net_income || 
-                        loanData.sanctioned_amount || 
-                        0;
-  const currentLimit = (user as any)?.loan_limit || loanData.sanctioned_amount || 0;
-  const nextLimit = monthlyIncome > 0 ? Math.round(monthlyIncome * 1.5) : Math.max(currentLimit * 2, 100000); // 1.5 * salary or 2x current (min 1L)
+  // Get user's current loan limit
+  const currentLimit = (user as any)?.loan_limit || loanData.sanctioned_amount || loanData.loan_amount || 0;
   
-  // Determine current stage (1-7) based on current limit
-  // Stage progression: 5k, 10k, 20k, 30k, 50k, 75k, 1.5*salary
-  const stageLimits = [
-    5000,
-    10000,
-    20000,
-    30000,
-    50000,
-    75000,
-    nextLimit
-  ];
+  // Create 10 stages, each being a multiple of current loan limit
+  // Stage 1 = 1x, Stage 2 = 2x, ..., Stage 10 = 10x
+  const stageLimits = Array.from({ length: 10 }, (_, i) => currentLimit * (i + 1));
   
+  // Determine current stage (1-10) based on current limit
+  // User is always on stage 1 (their current limit)
   let currentStage = 1;
-  for (let i = 0; i < stageLimits.length; i++) {
-    if (currentLimit >= stageLimits[i]) {
-      currentStage = i + 1;
-    } else {
-      break;
-    }
-  }
   
-  // Get current and next stage amounts
-  const currentStageAmount = stageLimits[currentStage - 1] || currentLimit;
-  const nextStageAmount = stageLimits[currentStage] || nextLimit;
+  // Calculate next limit for header message (stage 10 limit)
+  const nextLimit = stageLimits[9]; // 10x current limit
 
   // Generate short loan ID format: PLL + last 4 digits
   const getShortLoanId = () => {
@@ -438,16 +428,53 @@ export const RepaymentSchedulePage = () => {
                 {(() => {
                   const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
                   
-                  // Calculate interest till today based on exhausted days
-                  // interest_percent_per_day is a decimal (e.g., 0.001 = 0.1% per day)
-                  const interestRatePerDay = planData.interest_percent_per_day || 
-                                            calculations.interest?.rate_per_day ||
-                                            (calculations.interest?.amount && calculations.interest?.days && principal > 0
-                                              ? calculations.interest.amount / (calculations.interest.days * principal)
-                                              : 0.001); // Default 0.1% per day
+                  // For processed loans, use processed_interest from database (updated by cron)
+                  // Per rulebook: Use processed_* values for processed loans, not recalculated values
+                  let interestTillToday = 0;
+                  let interestDays = exhaustedDays;
+                  let interestRatePerDay = planData.interest_percent_per_day || 
+                                      calculations.interest?.rate_per_day ||
+                                      (calculations.interest?.amount && calculations.interest?.days && principal > 0
+                                        ? calculations.interest.amount / (calculations.interest.days * principal)
+                                        : 0.001); // Default 0.1% per day
                   
-                  // Interest = Principal * Rate * Days
-                  const interestTillToday = principal * interestRatePerDay * exhaustedDays;
+                  if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
+                    // Use processed_interest from database (already calculated by cron)
+                    interestTillToday = parseFloat(loanData.processed_interest || 0);
+                    // Calculate days from processed_at to today for display
+                    // Extract date portion only to avoid timezone issues
+                    const processedDateStr = loanData.processed_at.split('T')[0]; // Get YYYY-MM-DD part
+                    const processedDate = new Date(processedDateStr + 'T00:00:00');
+                    processedDate.setHours(0, 0, 0, 0);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    interestDays = Math.ceil((today.getTime() - processedDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                    console.log('Using processed_interest from database:', {
+                      processed_interest: interestTillToday,
+                      processed_at: loanData.processed_at,
+                      processedDate: processedDate.toISOString().split('T')[0],
+                      today: today.toISOString().split('T')[0],
+                      interestDays: interestDays,
+                      diffMs: today.getTime() - processedDate.getTime(),
+                      diffDays: (today.getTime() - processedDate.getTime()) / (1000 * 60 * 60 * 24)
+                    });
+                  } else {
+                    // Calculate interest till today based on exhausted days (for non-processed loans)
+                    // But if loan is processed, use the same days calculation as above
+                    if (loanData.processed_at) {
+                      // For processed loans, recalculate days even if processed_interest is 0/null
+                      // Extract date portion only to avoid timezone issues
+                      const processedDateStr = loanData.processed_at.split('T')[0]; // Get YYYY-MM-DD part
+                      const processedDate = new Date(processedDateStr + 'T00:00:00');
+                      processedDate.setHours(0, 0, 0, 0);
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      interestDays = Math.ceil((today.getTime() - processedDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                      console.log('Recalculating days for processed loan (processed_interest is 0/null):', interestDays);
+                    }
+                    // Interest = Principal * Rate * Days
+                    interestTillToday = principal * interestRatePerDay * interestDays;
+                  }
                   
                   // For preclose, use post service fee ONCE (not multiplied by EMI count)
                   // Post Service Fee is 10% of principal (fixed)
@@ -515,7 +542,7 @@ export const RepaymentSchedulePage = () => {
                         </h1>
                         <div className="text-xs sm:text-sm text-gray-500 mt-2 space-y-1">
                           <p>Principal: {formatCurrency(principal)}</p>
-                          <p>Interest (till today, {exhaustedDays} days @ {(interestRatePerDay * 100).toFixed(4)}%/day): {formatCurrency(interestTillToday)}</p>
+                          <p>Interest (till today, {interestDays} days @ {(interestRatePerDay * 100).toFixed(4)}%/day): {formatCurrency(interestTillToday)}</p>
                           <p>Post Service Fee (1 time): {formatCurrency(postServiceFee)}</p>
                           <p>GST on Post Service Fee: {formatCurrency(gstOnPostServiceFee)}</p>
                         </div>
@@ -719,14 +746,14 @@ export const RepaymentSchedulePage = () => {
         {/* Loan Progression Stages - Offer Section */}
         <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
           <CardContent className="p-4 sm:p-6">
-            {/* Stage 01 - Current */}
-            <div className="relative mb-4 sm:mb-6">
-              <div className="flex items-start gap-3 sm:gap-4">
+            {/* Stage 1 - Current */}
+            <div className="relative">
+              <div className="flex items-center gap-3 sm:gap-4">
                 <div className="flex flex-col items-center flex-shrink-0">
                   <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
                     <span className="text-white font-bold text-sm sm:text-base">01</span>
                   </div>
-                  <div className="w-0.5 h-16 sm:h-20 bg-gray-300 mt-2"></div>
+                  {/* <div className="w-0.5 h-12 sm:h-16 bg-gray-300 mt-2"></div> */}
                 </div>
                 <div className="flex-1 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 sm:p-5 border-2 border-blue-200 relative">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -739,7 +766,7 @@ export const RepaymentSchedulePage = () => {
                         </span>
                       </div>
                       <p className="text-lg sm:text-2xl font-bold text-gray-900 mb-1">
-                        {formatCurrency(currentStageAmount)}
+                        {formatCurrency(stageLimits[0])}
                       </p>
                       <p className="text-xs sm:text-sm text-gray-600">Your Current limit</p>
                     </div>
@@ -754,9 +781,24 @@ export const RepaymentSchedulePage = () => {
               </div>
             </div>
 
-            {/* Stage 02 - Next */}
+            {/* Dots in between */}
             <div className="relative">
               <div className="flex items-start gap-3 sm:gap-4">
+                <div className="flex flex-col items-center flex-shrink-0 ml-2">
+                  <div className="flex flex-col items-center gap-1.5 sm:gap-2 my-6">
+                    <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+                    <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+                    <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+                  </div>
+                  {/* <div className="w-0.5 h-12 sm:h-16 bg-gray-300"></div> */}
+                </div>
+                <div className="flex-1"></div>
+              </div>
+            </div>
+
+            {/* Stage 10 - Final */}
+            <div className="relative">
+              <div className="flex items-center gap-3 sm:gap-4">
                 <div className="flex flex-col items-center flex-shrink-0">
                   <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-300 flex items-center justify-center">
                     <Lock className="w-5 h-5 sm:w-6 sm:h-6 text-gray-500" />
@@ -766,11 +808,11 @@ export const RepaymentSchedulePage = () => {
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs sm:text-sm font-semibold text-gray-600 bg-gray-100 px-2 py-1 rounded">Stage 02</span>
+                        <span className="text-xs sm:text-sm font-semibold text-gray-600 bg-gray-100 px-2 py-1 rounded">Stage 10</span>
                         <Lock className="w-4 h-4 text-gray-400" />
                       </div>
                       <p className="text-lg sm:text-2xl font-bold text-gray-700 mb-1">
-                        {formatCurrency(nextStageAmount)}
+                        {formatCurrency(stageLimits[9])}
                       </p>
                       <p className="text-xs sm:text-sm text-gray-600">Your Next limit</p>
                     </div>

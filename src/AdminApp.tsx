@@ -99,6 +99,26 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                   Users
                 </button>
                 <button
+                  onClick={() => navigate('/admin/users?status=on_hold')}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    location.search === '?status=on_hold'
+                      ? 'bg-red-100 text-red-700' 
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  Hold
+                </button>
+                <button
+                  onClick={() => navigate('/admin/users?status=deleted')}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    location.search === '?status=deleted'
+                      ? 'bg-gray-800 text-white' 
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  Delete
+                </button>
+                <button
                   onClick={() => navigate('/admin/activity-logs')}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     isActive('/admin/activity-logs') 

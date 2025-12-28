@@ -389,6 +389,15 @@ export function UserProfileDetail() {
         case 'process':
           actionDetails = { message: 'Application moved to disbursal status' };
           break;
+        case 're_process':
+          actionDetails = { message: 'Profile moved to cooling period (45 days)' };
+          break;
+        case 'unhold':
+          actionDetails = { message: 'Profile unhold - moved to active status' };
+          break;
+        case 'delete':
+          actionDetails = { message: 'Profile deleted (data purged except primary number, PAN, Aadhar, and loan data)' };
+          break;
         case 'cancel':
           actionDetails = {
             cancelLoan: true,
@@ -4922,6 +4931,9 @@ export function UserProfileDetail() {
                     <option value="need_document">Need Document</option>
                     <option value="process">Process</option>
                     <option value="not_process">Not Process</option>
+                    <option value="re_process">Re-process</option>
+                    <option value="unhold">Unhold</option>
+                    <option value="delete">Delete</option>
                     <option value="cancel">Cancel</option>
                   </select>
                 </div>
@@ -5070,6 +5082,59 @@ export function UserProfileDetail() {
                           )}
                         </div>
                       )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Re-process Section */}
+                {selectedAction === 're_process' && (
+                  <div>
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+                      <div className="flex items-center">
+                        <AlertCircle className="w-5 h-5 text-yellow-600 mr-2" />
+                        <span className="text-sm font-medium text-yellow-800">
+                          This will hold the profile for 45 days (cooling period). User will see: "Your profile is under cooling period (We will update you once you are eligible)"
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Unhold Section */}
+                {selectedAction === 'unhold' && (
+                  <div>
+                    <div className="bg-green-50 border border-green-200 rounded-md p-4">
+                      <div className="flex items-center">
+                        <CheckCircle className="w-5 h-5 text-green-600 mr-2" />
+                        <span className="text-sm font-medium text-green-800">
+                          This will move the profile from hold status to normal active status
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Delete Section */}
+                {selectedAction === 'delete' && (
+                  <div>
+                    <div className="bg-red-50 border border-red-200 rounded-md p-4">
+                      <div className="flex items-start">
+                        <AlertCircle className="w-5 h-5 text-red-600 mr-2 mt-0.5" />
+                        <div>
+                          <span className="text-sm font-medium text-red-800 block mb-2">
+                            Warning: This will permanently delete all user data except:
+                          </span>
+                          <ul className="text-sm text-red-700 list-disc list-inside space-y-1">
+                            <li>Primary phone number</li>
+                            <li>PAN number</li>
+                            <li>Aadhar number</li>
+                            <li>All loan data</li>
+                          </ul>
+                          <span className="text-sm font-medium text-red-800 block mt-2">
+                            User will see: "Your profile is purged in our system. Thank you."
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -8606,23 +8671,37 @@ export function UserProfileDetail() {
                     <span className="ml-2 text-sm font-normal text-gray-500">({getUserData('clid')})</span>
                   )}
                 </h1>
-                {getUserData('profileStatus') && (
-                  <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                    getUserData('profileStatus') === 'submitted' ? 'bg-blue-100 text-blue-800' :
-                    getUserData('profileStatus') === 'under_review' ? 'bg-yellow-100 text-yellow-800' :
-                    getUserData('profileStatus') === 'follow_up' ? 'bg-orange-100 text-orange-800' :
-                    getUserData('profileStatus') === 'disbursal' ? 'bg-purple-100 text-purple-800' :
-                    getUserData('profileStatus') === 'ready_for_disbursement' ? 'bg-indigo-100 text-indigo-800' :
-                    getUserData('profileStatus') === 'account_manager' ? 'bg-green-100 text-green-800' :
-                    getUserData('profileStatus') === 'cleared' ? 'bg-gray-100 text-gray-800' :
-                    getUserData('profileStatus') === 'hold' || getUserData('status') === 'on_hold' ? 'bg-red-100 text-red-800' :
-                    'bg-gray-100 text-gray-800'
-                  }`}>
-                    {getUserData('profileStatus') === 'account_manager' && getUserData('assignedManager') 
-                      ? `Account Manager: ${getUserData('assignedManager')}`
-                      : getUserData('profileStatus')?.replace(/_/g, ' ').toUpperCase() || 'ACTIVE'}
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {getUserData('profileStatus') && (
+                    <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                      getUserData('profileStatus') === 'submitted' ? 'bg-blue-100 text-blue-800' :
+                      getUserData('profileStatus') === 'under_review' ? 'bg-yellow-100 text-yellow-800' :
+                      getUserData('profileStatus') === 'follow_up' ? 'bg-orange-100 text-orange-800' :
+                      getUserData('profileStatus') === 'disbursal' ? 'bg-purple-100 text-purple-800' :
+                      getUserData('profileStatus') === 'ready_for_disbursement' ? 'bg-indigo-100 text-indigo-800' :
+                      getUserData('profileStatus') === 'account_manager' ? 'bg-green-100 text-green-800' :
+                      getUserData('profileStatus') === 'cleared' ? 'bg-gray-100 text-gray-800' :
+                      getUserData('profileStatus') === 'hold' || getUserData('status') === 'on_hold' ? 'bg-red-100 text-red-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {getUserData('profileStatus') === 'account_manager' && getUserData('assignedManager') 
+                        ? `Account Manager: ${getUserData('assignedManager')}`
+                        : getUserData('profileStatus')?.replace(/_/g, ' ').toUpperCase() || 'ACTIVE'}
+                    </span>
+                  )}
+                  {/* Hold Status Badge */}
+                  {(getUserData('status') === 'on_hold' || getUserData('status') === 'hold') && (
+                    <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800 border border-red-300">
+                      HOLD
+                    </span>
+                  )}
+                  {/* Delete Status Badge */}
+                  {getUserData('status') === 'deleted' && (
+                    <span className="px-2 py-1 text-xs font-semibold rounded-full bg-gray-800 text-white border border-gray-900">
+                      DELETE
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="flex items-center gap-4 text-sm text-gray-600">
                 {getUserData('clid') && <span>CLID: {getUserData('clid')}</span>}

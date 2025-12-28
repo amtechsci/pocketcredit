@@ -23,27 +23,58 @@ export function HoldBanner({ holdInfo }: HoldBannerProps) {
 
   const isPermanent = holdInfo.hold_type === 'permanent';
   const isExpired = holdInfo.is_expired;
+  const isCoolingPeriod = holdInfo.hold_type === 'cooling_period' || (holdInfo.hold_until && !isPermanent);
 
   return (
     <div className="mb-6">
       {isPermanent ? (
-        // Permanent Hold - Red
+        // Permanent Hold (Not Process) - Red
         <Alert variant="destructive" className="border-red-500 bg-red-50">
           <XCircle className="h-5 w-5" />
           <AlertTitle className="text-lg font-semibold">
-            Application Permanently On Hold
+            Your profile is temporarily locked
           </AlertTitle>
           <AlertDescription className="mt-2 space-y-2">
             <p className="text-sm">
-              Your loan application has been placed on permanent hold.
+              We will update you if it's unlocked.
             </p>
-            <div className="bg-white/50 p-3 rounded border border-red-200">
-              <p className="text-sm font-medium">Reason:</p>
-              <p className="text-sm">{holdInfo.hold_reason}</p>
-            </div>
-            <p className="text-xs text-red-700 mt-2">
-              Please contact support if you have any questions about this hold.
+            {holdInfo.hold_reason && (
+              <div className="bg-white/50 p-3 rounded border border-red-200">
+                <p className="text-sm font-medium">Reason:</p>
+                <p className="text-sm">{holdInfo.hold_reason}</p>
+              </div>
+            )}
+          </AlertDescription>
+        </Alert>
+      ) : isCoolingPeriod && !isExpired ? (
+        // Cooling Period (Re-process) - Orange/Yellow
+        <Alert className="border-orange-500 bg-orange-50">
+          <Clock className="h-5 w-5 text-orange-600" />
+          <AlertTitle className="text-lg font-semibold text-orange-900">
+            Your profile is under cooling period
+          </AlertTitle>
+          <AlertDescription className="mt-2 space-y-3">
+            <p className="text-sm text-orange-800">
+              We will update you once you are eligible.
             </p>
+            {holdInfo.hold_until_formatted && (
+              <div className="flex items-center justify-between bg-white/70 p-3 rounded border border-orange-200">
+                <div>
+                  <p className="text-xs text-orange-700">Eligible After:</p>
+                  <p className="text-sm font-semibold text-orange-900">
+                    {holdInfo.hold_until_formatted}
+                  </p>
+                </div>
+                {holdInfo.remaining_days !== undefined && (
+                  <div className="text-right">
+                    <p className="text-xs text-orange-700">Remaining Days:</p>
+                    <p className="text-2xl font-bold text-orange-600">
+                      {holdInfo.remaining_days}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </AlertDescription>
         </Alert>
       ) : isExpired ? (

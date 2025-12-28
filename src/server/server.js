@@ -85,6 +85,7 @@ const validationRoutes = require('./routes/validation');
 const loanCalculationsRoutes = require('./routes/loanCalculations');
 const kfsRoutes = require('./routes/kfs');
 const postDisbursalRoutes = require('./routes/postDisbursal');
+const cronManagerRoutes = require('./routes/cronManager');
 const { activityLoggerMiddleware } = require('./middleware/activityLogger');
 const activityProcessor = require('./workers/activityProcessor');
 
@@ -245,6 +246,7 @@ app.use('/api/employment-quick-check', employmentQuickCheckRoutes);
 app.use('/api/loan-plans', loanPlansRoutes);
 app.use('/api/validation', validationRoutes);
 app.use('/api/admin/loan-calculations', loanCalculationsRoutes);
+app.use('/api/admin/cron', cronManagerRoutes);
 app.use('/api/kfs', kfsRoutes);
 app.use('/api/post-disbursal', postDisbursalRoutes);
 
@@ -445,6 +447,12 @@ const startServer = async () => {
 
     // Start activity processor
     await activityProcessor.start();
+
+    // Register and start cron jobs
+    const { registerJobs } = require('./jobs');
+    const cronManager = require('./services/cronManager');
+    await registerJobs();
+    await cronManager.start();
 
     // Start the server
     app.listen(PORT, () => {

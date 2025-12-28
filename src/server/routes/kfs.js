@@ -43,13 +43,21 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     }
 
     // Use the same KFS generation logic as admin endpoint
-    // Fetch full loan application details
+    // Fetch full loan application details including processed data
     const fullLoans = await executeQuery(`
       SELECT 
         la.*,
         la.fees_breakdown,
         la.disbursal_amount,
         la.processed_at,
+        la.processed_amount,
+        la.processed_interest,
+        la.processed_penalty,
+        la.processed_p_fee,
+        la.processed_post_service_fee,
+        la.processed_gst,
+        la.processed_due_date,
+        la.last_calculated_at,
         la.user_id,
         u.first_name, u.last_name, u.email, u.phone, u.date_of_birth,
         u.gender, u.marital_status
@@ -158,21 +166,36 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     // Check if we should use actual exhausted days (for repayment schedule) or planned days (for KFS/Agreement)
     const useActualDays = req.query.useActualDays === 'true' || req.query.useActualDays === true;
     
-    // Calculate actual exhausted days from disbursement date to today (only if requested)
+    // Calculate actual exhausted days from processed_at (for processed loans) or disbursed_at to today (only if requested)
+    // Per rulebook: For processed loans, use processed_at as base date
     let actualExhaustedDays = null;
-    if (useActualDays && loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)) {
-      const disbursedDate = new Date(loan.disbursed_at);
+    if (useActualDays && loan.processed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)) {
+      // For processed loans, use processed_at as per rulebook
+      const processedDate = new Date(loan.processed_at);
       const currentDate = new Date();
       // Set both dates to midnight for accurate day calculation
-      disbursedDate.setHours(0, 0, 0, 0);
+      processedDate.setHours(0, 0, 0, 0);
       currentDate.setHours(0, 0, 0, 0);
-      const diffTime = Math.abs(currentDate.getTime() - disbursedDate.getTime());
-      actualExhaustedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      // Ensure at least 1 day if loan was disbursed today
-      if (actualExhaustedDays === 0) {
+      // Use inclusive counting: Math.ceil((end - start) / msPerDay) + 1
+      const diffTime = currentDate.getTime() - processedDate.getTime();
+      actualExhaustedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+      // Ensure at least 1 day
+      if (actualExhaustedDays < 1) {
         actualExhaustedDays = 1;
       }
-      console.log(`📅 Using actual exhausted days: ${actualExhaustedDays} (from ${disbursedDate.toISOString().split('T')[0]} to ${currentDate.toISOString().split('T')[0]})`);
+      console.log(`📅 Using actual exhausted days: ${actualExhaustedDays} (from processed_at ${processedDate.toISOString().split('T')[0]} to ${currentDate.toISOString().split('T')[0]})`);
+    } else if (useActualDays && loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)) {
+      // Fallback to disbursed_at if processed_at not available (shouldn't happen for processed loans)
+      const disbursedDate = new Date(loan.disbursed_at);
+      const currentDate = new Date();
+      disbursedDate.setHours(0, 0, 0, 0);
+      currentDate.setHours(0, 0, 0, 0);
+      const diffTime = currentDate.getTime() - disbursedDate.getTime();
+      actualExhaustedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+      if (actualExhaustedDays < 1) {
+        actualExhaustedDays = 1;
+      }
+      console.log(`📅 Using actual exhausted days: ${actualExhaustedDays} (from disbursed_at ${disbursedDate.toISOString().split('T')[0]} to ${currentDate.toISOString().split('T')[0]})`);
     } else {
       console.log(`📅 Using planned repayment days (for KFS/Agreement documents)`);
     }
@@ -199,8 +222,35 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       customDays: actualExhaustedDays  // Only override with actual exhausted days if useActualDays=true
     };
 
-    // Calculate loan values using actual exhausted days (not plan days) for interest calculation
-    const loanValues = calculateCompleteLoanValues(loanData, planData, userData, calculationOptions);
+    // For processed loans, use processed_interest from database (updated by cron) instead of recalculating
+    // Per rulebook: For processed loans, use processed_* values, not live calculations
+    let loanValues;
+    if (loan.processed_at && useActualDays) {
+      // Use processed data for processed loans
+      const processedPrincipal = parseFloat(loan.processed_amount || loanData.loan_amount || 0);
+      const processedInterest = parseFloat(loan.processed_interest || 0);
+      const processedPenalty = parseFloat(loan.processed_penalty || 0);
+      
+      // Still calculate fees and other values, but use processed interest
+      loanValues = calculateCompleteLoanValues(loanData, planData, userData, calculationOptions);
+      
+      // Override interest with processed_interest (updated by cron)
+      if (loanValues.interest) {
+        loanValues.interest.amount = processedInterest;
+        // Calculate days from processed_at to today for display
+        const processedDate = new Date(loan.processed_at);
+        processedDate.setHours(0, 0, 0, 0);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const daysFromProcessed = Math.ceil((today.getTime() - processedDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        loanValues.interest.days = daysFromProcessed;
+      }
+      
+      console.log(`📊 Using processed_interest: ₹${processedInterest} (from database, updated by cron)`);
+    } else {
+      // Calculate loan values using actual exhausted days (not plan days) for interest calculation
+      loanValues = calculateCompleteLoanValues(loanData, planData, userData, calculationOptions);
+    }
 
     // Parse fees breakdown if it's a JSON string
     let feesBreakdown = [];
@@ -263,6 +313,14 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         disbursal_amount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
         disbursed_at: loan.disbursed_at || null,
         processed_at: loan.processed_at || null,
+        processed_amount: loan.processed_amount || null,
+        processed_interest: loan.processed_interest || null,
+        processed_penalty: loan.processed_penalty || null,
+        processed_p_fee: loan.processed_p_fee || null,
+        processed_post_service_fee: loan.processed_post_service_fee || null,
+        processed_gst: loan.processed_gst || null,
+        processed_due_date: loan.processed_due_date || null,
+        last_calculated_at: loan.last_calculated_at || null,
         loan_term_days: (() => {
           // Calculate loan term days based on EMI count for EMI loans
           const emiCount = planData.emi_count || null;
@@ -460,28 +518,61 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         if (emiCount > 1) {
           const interestRatePerDay = loanValues.interest?.rate_per_day || planData.interest_percent_per_day || (interest / (principal * days));
           
-          // Generate all EMI dates - recalculate from base date for salary-based loans to ensure accuracy
+          // Generate all EMI dates - always recalculate from processed_at for processed loans
+          // (stored processed_due_date may have been calculated from disbursed_at, so we recalculate)
           let allEmiDates = [];
           if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
             const salaryDate = parseInt(userData.salary_date);
             if (salaryDate >= 1 && salaryDate <= 31) {
-              // Recalculate first EMI date from base date to ensure it matches salary date exactly
-              const baseDateForEmi = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+              // For processed loans, use processed_at as base date (per rulebook)
+              // For non-processed loans, use disbursed_at
+              let baseDateForEmi;
+              if (loan.processed_at) {
+                // Extract date portion only to avoid timezone issues
+                // Handle both string and Date object formats
+                let processedDateStr;
+                if (typeof loan.processed_at === 'string') {
+                  // Handle MySQL datetime format: "2025-12-25 23:19:50" or ISO format: "2025-12-25T23:19:50.000Z"
+                  if (loan.processed_at.includes('T')) {
+                    processedDateStr = loan.processed_at.split('T')[0];
+                  } else if (loan.processed_at.includes(' ')) {
+                    processedDateStr = loan.processed_at.split(' ')[0];
+                  } else {
+                    processedDateStr = loan.processed_at.substring(0, 10);
+                  }
+                } else if (loan.processed_at instanceof Date) {
+                  processedDateStr = loan.processed_at.toISOString().split('T')[0];
+                } else {
+                  // Fallback: try to convert to Date first
+                  const processedDate = new Date(loan.processed_at);
+                  processedDateStr = processedDate.toISOString().split('T')[0];
+                }
+                // Parse date components directly to avoid timezone issues
+                // processedDateStr is in format "YYYY-MM-DD"
+                const [year, month, day] = processedDateStr.split('-').map(Number);
+                baseDateForEmi = new Date(year, month - 1, day); // month is 0-indexed
+                console.log(`📅 Using processed_at as base date for EMI calculation: ${processedDateStr}`);
+              } else {
+                baseDateForEmi = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+              }
               baseDateForEmi.setHours(0, 0, 0, 0);
               let nextSalaryDate = getNextSalaryDate(baseDateForEmi, salaryDate);
               
               // Check if duration is less than minimum days
               const minDuration = planData.repayment_days || 15;
-              const daysToNextSalary = Math.ceil((nextSalaryDate - baseDateForEmi) / (1000 * 60 * 60 * 24)) + 1;
+              const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDateForEmi.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+              console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDateForEmi)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
               if (daysToNextSalary < minDuration) {
                 nextSalaryDate = getSalaryDateForMonth(baseDateForEmi, salaryDate, 1);
+                console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
               }
               
-              // Generate all EMI dates from the corrected first salary date
+              // Generate all EMI dates from the first salary date
               for (let i = 0; i < emiCount; i++) {
                 const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
                 allEmiDates.push(emiDate);
               }
+              console.log(`📅 Generated ${allEmiDates.length} EMI dates: ${allEmiDates.map(d => formatDateLocal(d)).join(', ')}`);
             }
           } else {
             // Calculate first due date for non-salary date plans
@@ -529,7 +620,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             for (let i = 0; i < emiCount; i++) {
               // allEmiDates contains Date objects, ensure we work with Date objects
               const emiDate = allEmiDates[i] instanceof Date ? allEmiDates[i] : new Date(allEmiDates[i]);
-              emiDate.setHours(12, 0, 0, 0);
+              emiDate.setHours(0, 0, 0, 0);
               
               // Calculate days for this EMI period
               // First period (disbursement to first EMI): inclusive, add +1
@@ -537,13 +628,13 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               let previousDate;
               if (i === 0) {
                 previousDate = new Date(baseDate);
-                previousDate.setHours(12, 0, 0, 0);
+                previousDate.setHours(0, 0, 0, 0);
               } else {
                 // Start from day AFTER previous EMI date
                 const prevEmiDate = allEmiDates[i - 1] instanceof Date ? allEmiDates[i - 1] : new Date(allEmiDates[i - 1]);
                 previousDate = new Date(prevEmiDate);
                 previousDate.setDate(previousDate.getDate() + 1);
-                previousDate.setHours(12, 0, 0, 0);
+                previousDate.setHours(0, 0, 0, 0);
               }
               const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
               
@@ -630,37 +721,60 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         let allEmiDates = [];
         if (isMultiEmi && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
           const salaryDate = parseInt(userData.salary_date);
+          console.log(`📅 EMI Calculation Debug - salaryDate: ${salaryDate}, processed_at: ${loan.processed_at}, disbursed_at: ${loan.disbursed_at}`);
           if (salaryDate >= 1 && salaryDate <= 31) {
-            // Calculate base date (first EMI date)
-            const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+            // For processed loans, use processed_at as base date (per rulebook)
+            // For non-processed loans, use disbursed_at
+            let baseDate;
+            if (loan.processed_at) {
+              // Extract date portion only to avoid timezone issues
+              // Handle both string and Date object formats
+              let processedDateStr;
+              if (typeof loan.processed_at === 'string') {
+                // Handle MySQL datetime format: "2025-12-25 23:19:50" or ISO format: "2025-12-25T23:19:50.000Z"
+                if (loan.processed_at.includes('T')) {
+                  processedDateStr = loan.processed_at.split('T')[0];
+                } else if (loan.processed_at.includes(' ')) {
+                  processedDateStr = loan.processed_at.split(' ')[0];
+                } else {
+                  processedDateStr = loan.processed_at.substring(0, 10);
+                }
+              } else if (loan.processed_at instanceof Date) {
+                processedDateStr = loan.processed_at.toISOString().split('T')[0];
+              } else {
+                // Fallback: try to convert to Date first
+                const processedDate = new Date(loan.processed_at);
+                processedDateStr = processedDate.toISOString().split('T')[0];
+              }
+              // Parse date components directly to avoid timezone issues
+              // processedDateStr is in format "YYYY-MM-DD"
+              const [year, month, day] = processedDateStr.split('-').map(Number);
+              baseDate = new Date(year, month - 1, day); // month is 0-indexed
+              console.log(`📅 Using processed_at as base date for EMI calculation: ${processedDateStr} (parsed as ${formatDateLocal(baseDate)})`);
+            } else {
+              baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+              console.log(`📅 Using disbursed_at as base date: ${formatDateLocal(baseDate)}`);
+            }
             baseDate.setHours(0, 0, 0, 0);
             let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
             
             // Check if duration is less than minimum days
             const minDuration = planData.repayment_days || 15;
-            const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+            const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+            console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDate)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
             if (daysToNextSalary < minDuration) {
               nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+              console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
             }
             
-            // Ensure nextSalaryDate matches the salary date exactly (correct if getNextSalaryDate returned wrong date)
-            const firstEmiYear = nextSalaryDate.getFullYear();
-            const firstEmiMonth = nextSalaryDate.getMonth();
-            let correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, salaryDate);
-            correctedFirstEmiDate.setHours(0, 0, 0, 0);
-            // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
-            if (correctedFirstEmiDate.getDate() !== salaryDate) {
-              const lastDay = new Date(firstEmiYear, firstEmiMonth + 1, 0).getDate();
-              correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, Math.min(salaryDate, lastDay));
-              correctedFirstEmiDate.setHours(0, 0, 0, 0);
-            }
-            nextSalaryDate = correctedFirstEmiDate;
-            
-            // Generate all EMI dates
+            // Generate all EMI dates from the first salary date
             for (let i = 0; i < emiCount; i++) {
               const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
               allEmiDates.push(formatDateLocal(emiDate));
             }
+            console.log(`📅 Generated ${allEmiDates.length} EMI dates: ${allEmiDates.join(', ')}`);
+          } else {
+            console.log(`⚠️ Invalid salary date: ${salaryDate}`);
           }
         } else if (isMultiEmi) {
           // For non-salary date Multi-EMI, calculate based on frequency
@@ -705,13 +819,13 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           
           let outstandingPrincipal = principal;
           const baseDateForSchedule = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
-          baseDateForSchedule.setHours(12, 0, 0, 0);
+          baseDateForSchedule.setHours(0, 0, 0, 0);
           
           for (let i = 0; i < emiCount; i++) {
             // Get EMI date (handle both Date objects and strings)
             const emiDateStr = allEmiDates[i];
             const emiDate = emiDateStr instanceof Date ? new Date(emiDateStr) : new Date(emiDateStr);
-            emiDate.setHours(12, 0, 0, 0);
+            emiDate.setHours(0, 0, 0, 0);
             
             // Calculate days for this period
             let previousDate;
@@ -722,7 +836,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               const prevEmiDate = prevEmiDateStr instanceof Date ? new Date(prevEmiDateStr) : new Date(prevEmiDateStr);
               previousDate = new Date(prevEmiDate);
               previousDate.setDate(previousDate.getDate() + 1);
-              previousDate.setHours(12, 0, 0, 0);
+              previousDate.setHours(0, 0, 0, 0);
             }
             
             const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
@@ -833,6 +947,23 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
 
     console.log('✅ KFS data generated successfully for user');
 
+    // If loan is processed and has PDF, return PDF URL instead of regenerating
+    if (loan.processed_at && loan.kfs_pdf_url) {
+      const { getPresignedUrl } = require('../services/s3Service');
+      try {
+        const pdfUrl = await getPresignedUrl(loan.kfs_pdf_url, 7 * 24 * 60 * 60); // 7 days
+        return res.json({
+          success: true,
+          data: kfsData,
+          pdf_url: pdfUrl,
+          is_processed: true
+        });
+      } catch (error) {
+        console.error('Error getting presigned URL for KFS PDF:', error);
+        // Continue with normal response
+      }
+    }
+
     res.json({
       success: true,
       data: kfsData
@@ -852,6 +983,11 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
  * GET /api/kfs/:loanId
  * Generate KFS (Key Facts Statement) data for a loan (Admin only)
  */
+// Internal helper to check if request is from internal call
+const isInternalCall = (req) => {
+  return req.headers['x-internal-call'] === 'true' || req.query.internal === 'true';
+};
+
 router.get('/:loanId', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
@@ -1167,39 +1303,57 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
         const salaryDate = parseInt(userData.salary_date);
         if (salaryDate >= 1 && salaryDate <= 31) {
-          // Recalculate first EMI date from base date to ensure it matches salary date exactly
-          const baseDateForEmi = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
-          baseDateForEmi.setHours(0, 0, 0, 0);
-          let nextSalaryDate = getNextSalaryDate(baseDateForEmi, salaryDate);
+              // For processed loans, use processed_at as base date (per rulebook)
+              // For non-processed loans, use disbursed_at
+              let baseDateForEmi;
+              if (loan.processed_at) {
+                // Extract date portion only to avoid timezone issues
+                // Handle both string and Date object formats
+                let processedDateStr;
+                if (typeof loan.processed_at === 'string') {
+                  // Handle MySQL datetime format: "2025-12-25 23:19:50" or ISO format: "2025-12-25T23:19:50.000Z"
+                  if (loan.processed_at.includes('T')) {
+                    processedDateStr = loan.processed_at.split('T')[0];
+                  } else if (loan.processed_at.includes(' ')) {
+                    processedDateStr = loan.processed_at.split(' ')[0];
+                  } else {
+                    processedDateStr = loan.processed_at.substring(0, 10);
+                  }
+                } else if (loan.processed_at instanceof Date) {
+                  processedDateStr = loan.processed_at.toISOString().split('T')[0];
+                } else {
+                  // Fallback: try to convert to Date first
+                  const processedDate = new Date(loan.processed_at);
+                  processedDateStr = processedDate.toISOString().split('T')[0];
+                }
+                // Parse date components directly to avoid timezone issues
+                // processedDateStr is in format "YYYY-MM-DD"
+                const [year, month, day] = processedDateStr.split('-').map(Number);
+                baseDateForEmi = new Date(year, month - 1, day); // month is 0-indexed
+                console.log(`📅 Using processed_at as base date for EMI calculation: ${processedDateStr}`);
+              } else {
+                baseDateForEmi = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+              }
+              baseDateForEmi.setHours(0, 0, 0, 0);
+              let nextSalaryDate = getNextSalaryDate(baseDateForEmi, salaryDate);
+              
+              // Check if duration is less than minimum days
+              const minDuration = planData.repayment_days || 15;
+              const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDateForEmi.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+              console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDateForEmi)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
+              if (daysToNextSalary < minDuration) {
+                nextSalaryDate = getSalaryDateForMonth(baseDateForEmi, salaryDate, 1);
+                console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
+              }
           
-          // Check if duration is less than minimum days
-          const minDuration = planData.repayment_days || 15;
-          const daysToNextSalary = Math.ceil((nextSalaryDate - baseDateForEmi) / (1000 * 60 * 60 * 24)) + 1;
-          if (daysToNextSalary < minDuration) {
-            nextSalaryDate = getSalaryDateForMonth(baseDateForEmi, salaryDate, 1);
-          }
-          
-          // Ensure nextSalaryDate matches the salary date exactly (correct if getNextSalaryDate returned wrong date)
-          const firstEmiYear = nextSalaryDate.getFullYear();
-          const firstEmiMonth = nextSalaryDate.getMonth();
-          let correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, salaryDate);
-          correctedFirstEmiDate.setHours(12, 0, 0, 0);
-          // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
-          if (correctedFirstEmiDate.getDate() !== salaryDate) {
-            const lastDay = new Date(firstEmiYear, firstEmiMonth + 1, 0).getDate();
-            correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, Math.min(salaryDate, lastDay));
-            correctedFirstEmiDate.setHours(12, 0, 0, 0);
-          }
-          nextSalaryDate = correctedFirstEmiDate;
-          
-          // Generate all EMI dates from the corrected first salary date
+          // Generate all EMI dates from the first salary date
           for (let i = 0; i < emiCount; i++) {
             const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
             allEmiDates.push(emiDate);
           }
           
-          // Debug: Log corrected EMI dates
-          console.log('📅 Corrected EMI Dates:', allEmiDates.map(d => formatDateLocal(d)));
+          // Debug: Log generated EMI dates
+          console.log('📅 Generated EMI Dates:', allEmiDates.map(d => formatDateLocal(d)));
           
           // Update firstDueDate to match the first EMI date for consistency
           firstDueDate = allEmiDates[0];
@@ -1238,7 +1392,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         for (let i = 0; i < emiCount; i++) {
           // allEmiDates contains Date objects, ensure we work with Date objects
           const emiDate = allEmiDates[i] instanceof Date ? allEmiDates[i] : new Date(allEmiDates[i]);
-          emiDate.setHours(12, 0, 0, 0);
+          emiDate.setHours(0, 0, 0, 0);
           
           // Calculate days for this EMI period
           // First period (disbursement to first EMI): inclusive, add +1
@@ -1246,13 +1400,13 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           let previousDate;
           if (i === 0) {
             previousDate = new Date(baseDate);
-            previousDate.setHours(12, 0, 0, 0);
+            previousDate.setHours(0, 0, 0, 0);
           } else {
             // Start from day AFTER previous EMI date
             const prevEmiDate = allEmiDates[i - 1] instanceof Date ? allEmiDates[i - 1] : new Date(allEmiDates[i - 1]);
             previousDate = new Date(prevEmiDate);
             previousDate.setDate(previousDate.getDate() + 1);
-            previousDate.setHours(12, 0, 0, 0);
+            previousDate.setHours(0, 0, 0, 0);
           }
           const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
           
@@ -1457,42 +1611,50 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         if (isMultiEmi && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
           const salaryDate = parseInt(userData.salary_date);
           if (salaryDate >= 1 && salaryDate <= 31) {
-            // Calculate base date (first EMI date)
-            const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+            // For processed loans, use processed_at as base date (per rulebook)
+            // For non-processed loans, use disbursed_at
+            let baseDate;
+            if (loan.processed_at) {
+              // Extract date portion only to avoid timezone issues
+              // Handle both string and Date object formats
+              let processedDateStr;
+                if (typeof loan.processed_at === 'string') {
+                  // Handle MySQL datetime format: "2025-12-25 23:19:50" or ISO format: "2025-12-25T23:19:50.000Z"
+                  if (loan.processed_at.includes('T')) {
+                    processedDateStr = loan.processed_at.split('T')[0];
+                  } else if (loan.processed_at.includes(' ')) {
+                    processedDateStr = loan.processed_at.split(' ')[0];
+                  } else {
+                    processedDateStr = loan.processed_at.substring(0, 10);
+                  }
+                } else if (loan.processed_at instanceof Date) {
+                processedDateStr = loan.processed_at.toISOString().split('T')[0];
+              } else {
+                // Fallback: try to convert to Date first
+                const processedDate = new Date(loan.processed_at);
+                processedDateStr = processedDate.toISOString().split('T')[0];
+              }
+              // Parse date components directly to avoid timezone issues
+              // processedDateStr is in format "YYYY-MM-DD"
+              const [year, month, day] = processedDateStr.split('-').map(Number);
+              baseDate = new Date(year, month - 1, day); // month is 0-indexed
+              console.log(`📅 Using processed_at as base date for EMI calculation: ${processedDateStr}`);
+            } else {
+              baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+            }
             baseDate.setHours(0, 0, 0, 0);
             let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
             
             // Check if duration is less than minimum days
             const minDuration = planData.repayment_days || 15;
-            const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+            const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+            console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDate)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
             if (daysToNextSalary < minDuration) {
               nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+              console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
             }
             
-            // Ensure nextSalaryDate matches the salary date exactly (correct if getNextSalaryDate returned wrong date)
-            const firstEmiYear = nextSalaryDate.getFullYear();
-            const firstEmiMonth = nextSalaryDate.getMonth();
-            let correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, salaryDate);
-            correctedFirstEmiDate.setHours(12, 0, 0, 0);
-            // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
-            if (correctedFirstEmiDate.getDate() !== salaryDate) {
-              const lastDay = new Date(firstEmiYear, firstEmiMonth + 1, 0).getDate();
-              correctedFirstEmiDate = new Date(firstEmiYear, firstEmiMonth, Math.min(salaryDate, lastDay));
-              correctedFirstEmiDate.setHours(12, 0, 0, 0);
-            }
-            nextSalaryDate = correctedFirstEmiDate;
-            
-            // Debug: Log salary date and corrected first EMI date for repayment schedule
-            console.log('📅 Repayment Schedule - Date Calculation:', {
-              salaryDate,
-              disbursementDate: baseDate.toISOString().split('T')[0],
-              nextSalaryDateBeforeCorrection: getNextSalaryDate(baseDate, salaryDate).toISOString().split('T')[0],
-              correctedFirstEmiDate: formatDateLocal(correctedFirstEmiDate),
-              firstEmiYear,
-              firstEmiMonth: firstEmiMonth + 1 // +1 because getMonth() returns 0-11
-            });
-            
-            // Generate all EMI dates from the corrected first salary date
+            // Generate all EMI dates from the first salary date
             for (let i = 0; i < emiCount; i++) {
               const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
               allEmiDates.push(formatDateLocal(emiDate));
@@ -1540,13 +1702,13 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           
           let outstandingPrincipal = principal;
           const baseDateForSchedule = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
-          baseDateForSchedule.setHours(12, 0, 0, 0);
+          baseDateForSchedule.setHours(0, 0, 0, 0);
           
           for (let i = 0; i < emiCount; i++) {
             // Get EMI date (handle both Date objects and strings)
             const emiDateStr = allEmiDates[i];
             const emiDate = emiDateStr instanceof Date ? new Date(emiDateStr) : new Date(emiDateStr);
-            emiDate.setHours(12, 0, 0, 0);
+            emiDate.setHours(0, 0, 0, 0);
             
             // Calculate days for this period
             let previousDate;
@@ -1557,7 +1719,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
               const prevEmiDate = prevEmiDateStr instanceof Date ? new Date(prevEmiDateStr) : new Date(prevEmiDateStr);
               previousDate = new Date(prevEmiDate);
               previousDate.setDate(previousDate.getDate() + 1);
-              previousDate.setHours(12, 0, 0, 0);
+              previousDate.setHours(0, 0, 0, 0);
             }
             
             const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
@@ -1679,6 +1841,23 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     };
 
     console.log('✅ KFS data generated successfully');
+
+    // If loan is processed and has PDF, return PDF URL
+    if (loan.processed_at && loan.kfs_pdf_url) {
+      const { getPresignedUrl } = require('../services/s3Service');
+      try {
+        const pdfUrl = await getPresignedUrl(loan.kfs_pdf_url, 7 * 24 * 60 * 60); // 7 days
+        return res.json({
+          success: true,
+          data: kfsData,
+          pdf_url: pdfUrl,
+          is_processed: true
+        });
+      } catch (error) {
+        console.error('Error getting presigned URL for KFS PDF:', error);
+        // Continue with normal response
+      }
+    }
 
     res.json({
       success: true,

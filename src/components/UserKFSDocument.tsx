@@ -38,6 +38,13 @@ export function UserKFSDocument({ loanId }: UserKFSDocumentProps) {
       setLoading(true);
       const response = await apiService.getKFS(loanId);
       if (response.success && response.data) {
+        // Check if loan is processed and has PDF URL
+        if (response.is_processed && response.pdf_url) {
+          // Redirect to PDF viewer instead of showing KFS page
+          window.open(response.pdf_url, '_blank');
+          setError('KFS PDF is being opened in a new window');
+          return;
+        }
         setKfsData(response.data);
       } else {
         setError('Failed to load KFS data');

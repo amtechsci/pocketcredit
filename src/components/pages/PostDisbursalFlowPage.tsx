@@ -201,18 +201,38 @@ export const PostDisbursalFlowPage = () => {
 
       if (isSuccess && progressData) {
         setProgress(progressData);
-        const savedStep = progressData.current_step || (progressData as any).post_disbursal_step || 1;
-
-        // If step 6 is completed (agreement_signed) OR step is 7 or higher (all steps done)
-        if ((savedStep >= 6 && progressData.agreement_signed) || savedStep >= 7) {
-          setCurrentStep(6);
-          setLoading(false);
-          return;
+        
+        // Determine step based on individual columns, NOT current_step
+        // This allows admin to reset individual steps (e.g., enach_done = 0) without resetting all steps
+        let determinedStep = 1;
+        
+        if (!progressData.enach_done) {
+          determinedStep = 1; // Step 1: eNACH
+        } else if (!progressData.selfie_captured) {
+          determinedStep = 2; // Step 2: Selfie Capture
+        } else if (!progressData.selfie_verified) {
+          determinedStep = 2; // Still on selfie step if not verified
+        } else if (!progressData.references_completed) {
+          determinedStep = 3; // Step 3: References
+        } else if (!progressData.kfs_viewed) {
+          determinedStep = 4; // Step 4: KFS View
+        } else if (!progressData.agreement_signed) {
+          determinedStep = 5; // Step 5: Agreement Sign
+        } else {
+          determinedStep = 6; // Step 6: Confirmation (all done)
         }
-
-        // Cap the step to max 6
-        const validStep = Math.min(savedStep, 6);
-        setCurrentStep(validStep);
+        
+        console.log('🎯 Determined step based on columns:', {
+          enach_done: progressData.enach_done,
+          selfie_captured: progressData.selfie_captured,
+          selfie_verified: progressData.selfie_verified,
+          references_completed: progressData.references_completed,
+          kfs_viewed: progressData.kfs_viewed,
+          agreement_signed: progressData.agreement_signed,
+          determinedStep
+        });
+        
+        setCurrentStep(determinedStep);
         setLoading(false);
       } else {
         setCurrentStep(1);
@@ -248,16 +268,16 @@ export const PostDisbursalFlowPage = () => {
   };
 
   const handleStepComplete = async (stepNumber: number, stepData: Partial<PostDisbursalProgress>) => {
-    const saved = await saveProgress({
-      ...stepData,
-      current_step: stepNumber + 1
-    });
+    // Save progress with the step data (don't increment current_step - we determine it from columns)
+    const saved = await saveProgress(stepData);
 
     if (saved) {
-      if (stepNumber < 6) {
+      // Re-fetch progress to get updated step based on columns
+      if (applicationId) {
+        await fetchProgress(applicationId);
+      } else if (stepNumber < 6) {
+        // Fallback: manually advance if we can't fetch
         setCurrentStep(stepNumber + 1);
-      } else if (stepNumber === 6) {
-        setCurrentStep(6);
       }
     }
   };
@@ -748,45 +768,6 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
         </CardContent>
       </Card>
 
-      {/* Authentication Mode Selection */}
-      {bankDetails && (
-        <Card className="border-gray-300">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <CreditCard className="w-5 h-5 text-blue-600" />
-              Authentication Mode
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <Label htmlFor="auth-mode" className="text-sm font-medium text-gray-700">
-                Select how you want to authenticate the e-NACH mandate
-              </Label>
-              <Select value={authMode} onValueChange={setAuthMode}>
-                <SelectTrigger id="auth-mode" className="w-full">
-                  <SelectValue placeholder="Select authentication mode" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="net_banking">Net Banking</SelectItem>
-                  <SelectItem value="debit_card">Debit Card</SelectItem>
-                  <SelectItem value="aadhaar">Aadhaar</SelectItem>
-                </SelectContent>
-              </Select>
-              <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
-                <p className="text-xs text-blue-800">
-                  <strong>Net Banking:</strong> Authenticate using your bank's net banking credentials
-                </p>
-                <p className="text-xs text-blue-800 mt-1">
-                  <strong>Debit Card:</strong> Authenticate using your debit card details
-                </p>
-                <p className="text-xs text-blue-800 mt-1">
-                  <strong>Aadhaar:</strong> Authenticate using your Aadhaar number and OTP
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Show existing subscription status if any */}
       {existingSubscription && (
@@ -923,6 +904,105 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
           </div>
         </div>
       </div>
+
+      {/* Authentication Mode Selection - Moved to end */}
+      {bankDetails && (
+        <Card className="border-gray-300">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <CreditCard className="w-5 h-5 text-blue-600" />
+              Select Authentication Method
+            </CardTitle>
+            <p className="text-sm text-gray-600 mt-1">
+              Choose how you want to authenticate the e-NACH mandate
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {/* Net Banking Option */}
+              <label
+                className={`flex items-start gap-4 p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                  authMode === 'net_banking'
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 bg-white hover:border-gray-300'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="auth-mode"
+                  value="net_banking"
+                  checked={authMode === 'net_banking'}
+                  onChange={(e) => setAuthMode(e.target.value)}
+                  className="mt-1 w-4 h-4 text-blue-600 focus:ring-blue-500"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Building2 className="w-5 h-5 text-blue-600" />
+                    <span className="font-semibold text-gray-900">Net Banking</span>
+                  </div>
+                  <p className="text-sm text-gray-600">
+                    Authenticate using your bank's net banking credentials
+                  </p>
+                </div>
+              </label>
+
+              {/* Debit Card Option */}
+              <label
+                className={`flex items-start gap-4 p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                  authMode === 'debit_card'
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 bg-white hover:border-gray-300'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="auth-mode"
+                  value="debit_card"
+                  checked={authMode === 'debit_card'}
+                  onChange={(e) => setAuthMode(e.target.value)}
+                  className="mt-1 w-4 h-4 text-blue-600 focus:ring-blue-500"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <CreditCard className="w-5 h-5 text-blue-600" />
+                    <span className="font-semibold text-gray-900">Debit Card</span>
+                  </div>
+                  <p className="text-sm text-gray-600">
+                    Authenticate using your debit card details
+                  </p>
+                </div>
+              </label>
+
+              {/* Aadhaar Option */}
+              <label
+                className={`flex items-start gap-4 p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                  authMode === 'aadhaar'
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 bg-white hover:border-gray-300'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="auth-mode"
+                  value="aadhaar"
+                  checked={authMode === 'aadhaar'}
+                  onChange={(e) => setAuthMode(e.target.value)}
+                  className="mt-1 w-4 h-4 text-blue-600 focus:ring-blue-500"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <CreditCard className="w-5 h-5 text-blue-600" />
+                    <span className="font-semibold text-gray-900">Aadhaar Card</span>
+                  </div>
+                  <p className="text-sm text-gray-600">
+                    Authenticate using your Aadhaar number and OTP
+                  </p>
+                </div>
+              </label>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex justify-end gap-4">
         <Button
