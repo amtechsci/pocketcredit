@@ -546,7 +546,7 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
 
         // Calculate values to save
         const processedAmount = calculatedValues?.disbursal?.amount || loan.disbursal_amount || null;
-        const exhaustedPeriodDays = 0; // At processing time, it's day 0
+        const exhaustedPeriodDays = 1; // At processing time, it's day 1 (inclusive counting)
         const pFee = calculatedValues?.totals?.disbursalFee || loan.processing_fee || null;
         const postServiceFee = calculatedValues?.totals?.repayableFee || null;
         const gst = (calculatedValues?.totals?.disbursalFeeGST || 0) + (calculatedValues?.totals?.repayableFeeGST || 0);

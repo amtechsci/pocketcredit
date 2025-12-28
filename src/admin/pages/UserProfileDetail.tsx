@@ -4568,12 +4568,21 @@ export function UserProfileDetail() {
                       // Use processed values if available (frozen at processing time), otherwise calculate
                       const isProcessed = loan.processed_at || loan.processedDate;
                       
-                      // Exhausted period - use processed value if available, otherwise calculate
+                      // Exhausted period - calculate from processed_at or disbursed_at
+                      // Per rulebook: Use inclusive counting (day 1 = processing day)
                       let exhaustedPeriod = 'N/A';
-                      if (isProcessed && loan.exhausted_period_days !== null && loan.exhausted_period_days !== undefined) {
+                      if (isProcessed && (loan.exhausted_period_days === null || loan.exhausted_period_days === undefined || loan.exhausted_period_days === 0)) {
+                        // If processed but no exhausted_period_days value (or it's 0), calculate from processed_at
+                        const processedDateForCalc = loan.processed_at || loan.processedDate;
+                        if (processedDateForCalc) {
+                          const days = Math.max(1, daysDifference(processedDateForCalc, getCurrentDateString()) + 1); // +1 for inclusive counting
+                          exhaustedPeriod = `${days} days`;
+                        }
+                      } else if (isProcessed && loan.exhausted_period_days > 0) {
+                        // Use stored value if it's greater than 0 (from new loans)
                         exhaustedPeriod = `${loan.exhausted_period_days} days`;
                       } else if (disbursedDate) {
-                        const days = Math.max(1, daysDifference(disbursedDate, getCurrentDateString()));
+                        const days = Math.max(1, daysDifference(disbursedDate, getCurrentDateString()) + 1); // +1 for inclusive counting
                         exhaustedPeriod = `${days} days`;
                       }
 

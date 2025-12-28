@@ -1777,9 +1777,17 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
           console.log(`✅ Loan ownership confirmed. Current status: ${loan.status}`);
 
           // Check if already processed
-          if (loan.processed_at) {
-            console.log(`⚠️ Loan #${loanIdInt} already processed at ${loan.processed_at}`);
+          // Check if loan needs processing or re-processing
+          const needsProcessing = !loan.processed_at || 
+                                  !loan.processed_amount || 
+                                  loan.processed_amount <= 0;
+          
+          if (loan.processed_at && !needsProcessing) {
+            console.log(`⚠️ Loan #${loanIdInt} already processed at ${loan.processed_at} with valid values`);
           } else {
+            if (loan.processed_at && needsProcessing) {
+              console.log(`🔄 Re-processing loan #${loanIdInt} (missing processed values)`);
+            }
             // 2. Get loan calculation to save all values
             let calculatedValues = null;
             try {
@@ -1792,7 +1800,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
             // 3. Calculate values to save
             const processedAmount = calculatedValues?.disbursal?.amount || loan.disbursal_amount || null;
-            const exhaustedPeriodDays = 0; // At processing time, it's day 0
+            const exhaustedPeriodDays = 1; // At processing time, it's day 1 (inclusive counting)
             const pFee = calculatedValues?.totals?.disbursalFee || loan.processing_fee || null;
             const postServiceFee = calculatedValues?.totals?.repayableFee || null;
             const gst = (calculatedValues?.totals?.disbursalFeeGST || 0) + (calculatedValues?.totals?.repayableFeeGST || 0);

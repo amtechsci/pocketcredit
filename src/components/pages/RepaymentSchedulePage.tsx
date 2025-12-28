@@ -284,10 +284,6 @@ export const RepaymentSchedulePage = () => {
   // Stage 1 = 1x, Stage 2 = 2x, ..., Stage 10 = 10x
   const stageLimits = Array.from({ length: 10 }, (_, i) => currentLimit * (i + 1));
   
-  // Determine current stage (1-10) based on current limit
-  // User is always on stage 1 (their current limit)
-  let currentStage = 1;
-  
   // Calculate next limit for header message (stage 10 limit)
   const nextLimit = stageLimits[9]; // 10x current limit
 
@@ -320,16 +316,88 @@ export const RepaymentSchedulePage = () => {
         {!shouldShowMultiEmi && (
           <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
             <CardContent className="p-4 sm:p-6 space-y-4">
-              {/* Total Outstanding */}
-              <div className="text-center py-4 sm:py-6 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
-                <p className="text-xs sm:text-sm text-gray-600 mb-2 font-medium">Total Outstanding till today</p>
-                <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-gray-900 mb-2">
-                  {formatCurrency(calculations.total_repayable || 0)}
-                </h1>
-                <p className="text-xs sm:text-sm text-gray-500">
-                  Due date: {formatDate(dueDate.toISOString())}
-                </p>
-              </div>
+              {/* Preclose Section - Similar to Multi-EMI */}
+              <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Preclose it today</h3>
+              
+              {/* Calculate preclose amount */}
+              {(() => {
+                const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
+                
+                // Calculate interest till today
+                let interestTillToday = 0;
+                let interestDays = exhaustedDays;
+                let interestRatePerDay = planData.interest_percent_per_day || 
+                                    calculations.interest?.rate_per_day ||
+                                    (calculations.interest?.amount && calculations.interest?.days && principal > 0
+                                      ? calculations.interest.amount / (calculations.interest.days * principal)
+                                      : 0.001); // Default 0.1% per day
+                
+                if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
+                  // Use processed_interest from database
+                  interestTillToday = parseFloat(loanData.processed_interest || 0);
+                  const processedDateStr = loanData.processed_at.split('T')[0];
+                  const processedDate = new Date(processedDateStr + 'T00:00:00');
+                  processedDate.setHours(0, 0, 0, 0);
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  interestDays = Math.ceil((today.getTime() - processedDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                } else {
+                  interestTillToday = principal * interestRatePerDay * exhaustedDays;
+                }
+                
+                // Get post service fee and GST
+                const postServiceFee = repaymentSchedule[0]?.post_service_fee || 
+                                     calculations.fees?.post_service_fee || 
+                                     (calculations.total_repayable - principal - interestTillToday - (calculations.fees?.gst || 0)) || 0;
+                const gstOnPostServiceFee = repaymentSchedule[0]?.gst_on_post_service_fee || 
+                                           (postServiceFee * 0.18) || 0;
+                
+                const precloseAmount = principal + interestTillToday + postServiceFee + gstOnPostServiceFee;
+                
+                return (
+                  <>
+                    <div className="text-center py-4 sm:py-6 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
+                      <p className="text-xs sm:text-sm text-gray-600 mb-2 font-medium">Preclose Amount</p>
+                      <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-gray-900 mb-2">
+                        {formatCurrency(precloseAmount)}
+                      </h1>
+                      <div className="text-xs sm:text-sm text-gray-600 space-y-1 mt-3">
+                        <p>Principal: {formatCurrency(principal)}</p>
+                        <p>Interest (till today, {interestDays} days @ {(interestRatePerDay * 100).toFixed(4)}%/day): {formatCurrency(interestTillToday)}</p>
+                        <p>Post Service Fee (1 time): {formatCurrency(postServiceFee)}</p>
+                        <p>GST on Post Service Fee: {formatCurrency(gstOnPostServiceFee)}</p>
+                      </div>
+                    </div>
+                    
+                    {/* Due Date Display */}
+                    {(() => {
+                      const dueDate = kfsData.repayment?.first_due_date || loanData.processed_due_date;
+                      if (dueDate) {
+                        const dueDateObj = new Date(dueDate);
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        dueDateObj.setHours(0, 0, 0, 0);
+                        const daysRemaining = Math.ceil((dueDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                        const isOverdue = daysRemaining < 0;
+                        const isDueToday = daysRemaining === 0;
+                        
+                        return (
+                          <div className="bg-blue-50 rounded-lg p-3 sm:p-4 mt-4">
+                            <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">Due Date</p>
+                            <p className="text-lg sm:text-2xl font-bold text-gray-900 mb-1">
+                              {dueDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </p>
+                            <p className={`text-xs sm:text-sm font-medium ${isOverdue ? 'text-red-600' : isDueToday ? 'text-yellow-600' : 'text-blue-600'}`}>
+                              {isOverdue ? `Overdue by ${Math.abs(daysRemaining)} days` : isDueToday ? 'Due Today!' : `Due in ${daysRemaining} days`}
+                            </p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </>
+                );
+              })()}
 
               {/* Default Status */}
               {isDefaulted && (
