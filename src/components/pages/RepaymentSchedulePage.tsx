@@ -74,6 +74,8 @@ export const RepaymentSchedulePage = () => {
     }
   };
 
+  const [completedLoansCount, setCompletedLoansCount] = useState(0);
+
   const fetchLoanData = async (loanId: number) => {
     try {
       setLoading(true);
@@ -87,6 +89,21 @@ export const RepaymentSchedulePage = () => {
         setLoanData(kfsResponse.data.loan);
       } else {
         setError('Failed to load loan data. Please try again later.');
+      }
+
+      // Fetch user's completed loans count to determine current stage
+      try {
+        const loansResponse = await apiService.getPendingLoanApplications();
+        if (loansResponse.success && loansResponse.data?.applications) {
+          // Count loans that are cleared (completed)
+          const clearedLoans = loansResponse.data.applications.filter(
+            (app: any) => app.status === 'cleared'
+          );
+          setCompletedLoansCount(clearedLoans.length);
+        }
+      } catch (err) {
+        console.error('Error fetching completed loans count:', err);
+        // Continue with default 0 if error
       }
     } catch (err: any) {
       console.error('Error fetching loan data:', err);
@@ -276,16 +293,27 @@ export const RepaymentSchedulePage = () => {
   dPlus15.setDate(dPlus15.getDate() + 15);
   const canExtend = currentDateMidnight >= dMinus5 && currentDateMidnight <= dPlus15;
 
-  // Calculate loan progression stages
+  // Calculate loan progression stages based on completed loans count
   // Get user's current loan limit
   const currentLimit = (user as any)?.loan_limit || loanData.sanctioned_amount || loanData.loan_amount || 0;
   
-  // Create 10 stages, each being a multiple of current loan limit
-  // Stage 1 = 1x, Stage 2 = 2x, ..., Stage 10 = 10x
-  const stageLimits = Array.from({ length: 10 }, (_, i) => currentLimit * (i + 1));
+  // Determine current loan number (completed + 1 for current loan)
+  const currentLoanNumber = completedLoansCount + 1; // 1st loan, 2nd loan, 3rd loan, etc.
   
-  // Calculate next limit for header message (stage 10 limit)
-  const nextLimit = stageLimits[9]; // 10x current limit
+  // Create stages starting from current loan number
+  // For 1st loan: stages 1-10 (1x to 10x)
+  // For 2nd loan: stages 2-10 (2x to 10x) 
+  // For 3rd loan: stages 3-10 (3x to 10x)
+  const totalStages = 10;
+  const startStage = Math.min(currentLoanNumber, totalStages); // Cap at stage 10
+  const numberOfStagesToShow = totalStages - startStage + 1; // How many stages to display
+  
+  const stageLimits = Array.from({ length: numberOfStagesToShow }, (_, i) => 
+    currentLimit * (startStage + i)
+  );
+  
+  // Calculate next limit for header message (final stage limit)
+  const nextLimit = currentLimit * totalStages; // Always show 10x for max potential
 
   // Generate short loan ID format: PLL + last 4 digits
   const getShortLoanId = () => {
@@ -814,12 +842,12 @@ export const RepaymentSchedulePage = () => {
         {/* Loan Progression Stages - Offer Section */}
         <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
           <CardContent className="p-4 sm:p-6">
-            {/* Stage 1 - Current */}
+            {/* Current Stage */}
             <div className="relative">
               <div className="flex items-center gap-3 sm:gap-4">
                 <div className="flex flex-col items-center flex-shrink-0">
                   <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
-                    <span className="text-white font-bold text-sm sm:text-base">01</span>
+                    <span className="text-white font-bold text-sm sm:text-base">{String(startStage).padStart(2, '0')}</span>
                   </div>
                   {/* <div className="w-0.5 h-12 sm:h-16 bg-gray-300 mt-2"></div> */}
                 </div>
@@ -827,7 +855,9 @@ export const RepaymentSchedulePage = () => {
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs sm:text-sm font-semibold text-blue-700 bg-blue-100 px-2 py-1 rounded">Stage 01</span>
+                        <span className="text-xs sm:text-sm font-semibold text-blue-700 bg-blue-100 px-2 py-1 rounded">
+                          Stage {String(startStage).padStart(2, '0')}
+                        </span>
                         <span className="text-xs sm:text-sm font-semibold text-orange-600 bg-orange-100 px-2 py-1 rounded flex items-center gap-1">
                           <Sparkles className="w-3 h-3" />
                           You are Here
@@ -864,7 +894,7 @@ export const RepaymentSchedulePage = () => {
               </div>
             </div>
 
-            {/* Stage 10 - Final */}
+            {/* Final Stage (Stage 10) */}
             <div className="relative">
               <div className="flex items-center gap-3 sm:gap-4">
                 <div className="flex flex-col items-center flex-shrink-0">
@@ -880,9 +910,9 @@ export const RepaymentSchedulePage = () => {
                         <Lock className="w-4 h-4 text-gray-400" />
                       </div>
                       <p className="text-lg sm:text-2xl font-bold text-gray-700 mb-1">
-                        {formatCurrency(stageLimits[9])}
+                        {formatCurrency(nextLimit)}
                       </p>
-                      <p className="text-xs sm:text-sm text-gray-600">Your Next limit</p>
+                      <p className="text-xs sm:text-sm text-gray-600">Your Ultimate limit</p>
                     </div>
                     <div className="text-right">
                       <p className="text-xs text-gray-500 mb-1">Disbursal in 2 min</p>

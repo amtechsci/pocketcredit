@@ -21,6 +21,7 @@ export const EmailVerificationPage = () => {
   const [personalSending, setPersonalSending] = useState(false);
   const [personalVerifying, setPersonalVerifying] = useState(false);
   const [personalTimer, setPersonalTimer] = useState(0);
+  const [personalResendTimer, setPersonalResendTimer] = useState(0);
 
   // Official Email State
   const [officialEmail, setOfficialEmail] = useState('');
@@ -30,6 +31,7 @@ export const EmailVerificationPage = () => {
   const [officialSending, setOfficialSending] = useState(false);
   const [officialVerifying, setOfficialVerifying] = useState(false);
   const [officialTimer, setOfficialTimer] = useState(0);
+  const [officialResendTimer, setOfficialResendTimer] = useState(0);
   const [skipOfficial, setSkipOfficial] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
@@ -85,7 +87,7 @@ export const EmailVerificationPage = () => {
     checkAndRedirect();
   }, [user?.id, refreshUser, navigate]);
 
-  // Timer countdown for personal email
+  // Timer countdown for personal email expiry
   useEffect(() => {
     if (personalTimer > 0) {
       const interval = setInterval(() => {
@@ -95,7 +97,17 @@ export const EmailVerificationPage = () => {
     }
   }, [personalTimer]);
 
-  // Timer countdown for official email
+  // Timer countdown for personal email resend
+  useEffect(() => {
+    if (personalResendTimer > 0) {
+      const interval = setInterval(() => {
+        setPersonalResendTimer((prev) => prev - 1);
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [personalResendTimer]);
+
+  // Timer countdown for official email expiry
   useEffect(() => {
     if (officialTimer > 0) {
       const interval = setInterval(() => {
@@ -104,6 +116,16 @@ export const EmailVerificationPage = () => {
       return () => clearInterval(interval);
     }
   }, [officialTimer]);
+
+  // Timer countdown for official email resend
+  useEffect(() => {
+    if (officialResendTimer > 0) {
+      const interval = setInterval(() => {
+        setOfficialResendTimer((prev) => prev - 1);
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [officialResendTimer]);
 
   const validateEmail = (email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -127,7 +149,8 @@ export const EmailVerificationPage = () => {
       
       if (response.success) {
         setPersonalOtpSent(true);
-        setPersonalTimer(30); // 30 seconds
+        setPersonalTimer(300); // 5 minutes (300 seconds)
+        setPersonalResendTimer(30); // 30 seconds cooldown for resend
         toast.success('OTP sent to your personal email. Please check your inbox and spam folder.');
       } else {
         toast.error(response.message || 'Failed to send OTP');
@@ -183,7 +206,8 @@ export const EmailVerificationPage = () => {
       
       if (response.success) {
         setOfficialOtpSent(true);
-        setOfficialTimer(30); // 30 seconds
+        setOfficialTimer(300); // 5 minutes (300 seconds)
+        setOfficialResendTimer(30); // 30 seconds cooldown for resend
         toast.success('OTP sent to your official email. Please check your inbox and spam folder.');
       } else {
         toast.error(response.message || 'Failed to send OTP');
@@ -350,22 +374,35 @@ export const EmailVerificationPage = () => {
                           {personalVerifying ? 'Verifying...' : 'Verify'}
                         </Button>
                       </div>
-                      {personalTimer > 0 && (
-                        <p className="text-xs md:text-sm text-gray-500 mt-1 flex items-center gap-1">
-                          <Clock className="w-3 h-3 md:w-4 md:h-4" />
-                          OTP expires in {formatTimer(personalTimer)}
-                        </p>
-                      )}
-                      {personalTimer === 0 && personalOtpSent && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleSendPersonalOtp}
-                          className="mt-2 text-xs md:text-sm"
-                        >
-                          Resend OTP
-                        </Button>
-                      )}
+                      <div className="flex items-center justify-between mt-2">
+                        {personalTimer > 0 && (
+                          <p className="text-xs md:text-sm text-gray-500 flex items-center gap-1">
+                            <Clock className="w-3 h-3 md:w-4 md:h-4" />
+                            OTP expires in {formatTimer(personalTimer)}
+                          </p>
+                        )}
+                        {personalTimer === 0 && (
+                          <p className="text-xs md:text-sm text-red-500 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3 md:w-4 md:h-4" />
+                            OTP has expired
+                          </p>
+                        )}
+                        {personalOtpSent && personalResendTimer === 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleSendPersonalOtp}
+                            className="text-xs md:text-sm"
+                          >
+                            Resend OTP
+                          </Button>
+                        )}
+                        {personalResendTimer > 0 && (
+                          <p className="text-xs md:text-sm text-gray-400">
+                            Resend in {personalResendTimer}s
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </>
                 )}
@@ -455,22 +492,35 @@ export const EmailVerificationPage = () => {
                           {officialVerifying ? 'Verifying...' : 'Verify'}
                         </Button>
                       </div>
-                      {officialTimer > 0 && (
-                        <p className="text-xs md:text-sm text-gray-500 mt-1 flex items-center gap-1">
-                          <Clock className="w-3 h-3 md:w-4 md:h-4" />
-                          OTP expires in {formatTimer(officialTimer)}
-                        </p>
-                      )}
-                      {officialTimer === 0 && officialOtpSent && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleSendOfficialOtp}
-                          className="mt-2 text-xs md:text-sm"
-                        >
-                          Resend OTP
-                        </Button>
-                      )}
+                      <div className="flex items-center justify-between mt-2">
+                        {officialTimer > 0 && (
+                          <p className="text-xs md:text-sm text-gray-500 flex items-center gap-1">
+                            <Clock className="w-3 h-3 md:w-4 md:h-4" />
+                            OTP expires in {formatTimer(officialTimer)}
+                          </p>
+                        )}
+                        {officialTimer === 0 && (
+                          <p className="text-xs md:text-sm text-red-500 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3 md:w-4 md:h-4" />
+                            OTP has expired
+                          </p>
+                        )}
+                        {officialOtpSent && officialResendTimer === 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleSendOfficialOtp}
+                            className="text-xs md:text-sm"
+                          >
+                            Resend OTP
+                          </Button>
+                        )}
+                        {officialResendTimer > 0 && (
+                          <p className="text-xs md:text-sm text-gray-400">
+                            Resend in {officialResendTimer}s
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </>
                 )}

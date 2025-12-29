@@ -70,7 +70,7 @@ router.post('/send', requireAuth, async (req, res) => {
 
     // Generate OTP
     const otp = generateOTP();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
     // Delete any existing unverified OTPs for this user and email
     await executeQuery(
@@ -107,7 +107,7 @@ router.post('/send', requireAuth, async (req, res) => {
           <div style="background-color: #f3f4f6; padding: 20px; text-align: center; margin: 20px 0;">
             <h1 style="color: #1f2937; font-size: 32px; letter-spacing: 5px; margin: 0;">${otp}</h1>
           </div>
-          <p>This OTP will expire in 10 minutes.</p>
+          <p>This OTP will expire in 5 minutes.</p>
           <p>If you didn't request this verification, please ignore this email.</p>
           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;" />
           <p style="color: #6b7280; font-size: 12px;">
