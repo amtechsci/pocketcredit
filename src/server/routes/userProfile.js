@@ -1718,6 +1718,24 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
       });
     }
 
+    // Validate loan disbursement - cannot disburse if already in account_manager or cleared
+    if (txType === 'loan_disbursement' && loan_application_id) {
+      const loanCheck = await executeQuery(
+        'SELECT id, status FROM loan_applications WHERE id = ?',
+        [loan_application_id]
+      );
+      
+      if (loanCheck.length > 0) {
+        const loanStatus = loanCheck[0].status;
+        if (loanStatus === 'account_manager' || loanStatus === 'cleared') {
+          return res.status(400).json({
+            status: 'error',
+            message: `Cannot disburse this loan. Loan is already in "${loanStatus}" status. The loan has already been disbursed.`
+          });
+        }
+      }
+    }
+
     // Insert transaction into database
     const query = `
       INSERT INTO transactions (
@@ -1981,12 +1999,54 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
       console.log('Skipping loan status update (conditions not met)');
     }
 
+    // Handle full_payment transaction type - mark loan as cleared
+    if (txType === 'full_payment' && loan_application_id) {
+      const loanIdInt = parseInt(loan_application_id);
+      const userIdInt = parseInt(userId);
+
+      console.log(`🔍 Processing full_payment for loan #${loanIdInt}`);
+      
+      // Verify loan exists and get loan data
+      const loans = await executeQuery(
+        'SELECT id, user_id, status FROM loan_applications WHERE id = ?',
+        [loanIdInt]
+      );
+
+      if (loans.length > 0) {
+        const loan = loans[0];
+        // Check ownership
+        if (loan.user_id == userIdInt || loan.user_id == userId) {
+          console.log(`✅ Loan ownership confirmed. Current status: ${loan.status}`);
+          
+          // Update loan status to cleared
+          await executeQuery(`
+            UPDATE loan_applications 
+            SET 
+              status = 'cleared',
+              updated_at = NOW()
+            WHERE id = ?
+          `, [loanIdInt]);
+
+          console.log(`✅ Loan #${loanIdInt} marked as cleared (full payment received)`);
+          
+          loanStatusUpdated = true;
+          newStatus = 'cleared';
+        } else {
+          console.warn(`❌ Loan #${loanIdInt} belongs to user ${loan.user_id}, not requested user ${userId}`);
+        }
+      } else {
+        console.warn(`⚠️ Loan #${loanIdInt} not found`);
+      }
+    }
+
     console.log('✅ Transaction added successfully to database');
 
     res.json({
       status: 'success',
       message: loanStatusUpdated
-        ? 'Transaction added and loan status updated to Account Manager'
+        ? (newStatus === 'cleared' 
+            ? 'Transaction added and loan marked as Cleared (fully paid)' 
+            : 'Transaction added and loan status updated to Account Manager')
         : 'Transaction added successfully',
       data: {
         transaction_id: transactionId,

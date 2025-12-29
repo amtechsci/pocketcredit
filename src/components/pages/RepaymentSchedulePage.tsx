@@ -84,9 +84,24 @@ export const RepaymentSchedulePage = () => {
       // Fetch KFS data which contains all loan calculation details
       // Use useActualDays=true for repayment schedule to calculate interest based on actual exhausted days
       const kfsResponse = await apiService.getKFS(loanId, true);
+      console.log('📊 KFS Response:', kfsResponse);
+      console.log('📊 Loan Data:', kfsResponse?.data?.loan);
+      console.log('📊 Loan Status:', kfsResponse?.data?.loan?.status);
+      
       if (kfsResponse && (kfsResponse.success || kfsResponse.status === 'success') && kfsResponse.data) {
         setKfsData(kfsResponse.data);
         setLoanData(kfsResponse.data.loan);
+        
+        // If loan is cleared, redirect to dashboard after a short delay
+        if (kfsResponse.data.loan?.status === 'cleared') {
+          console.log('✅ Loan is CLEARED, will redirect to dashboard in 3 seconds...');
+          setTimeout(() => {
+            console.log('🔄 Redirecting to dashboard now...');
+            navigate('/dashboard');
+          }, 3000); // 3 second delay to show success message
+        } else {
+          console.log('ℹ️ Loan status is:', kfsResponse.data.loan?.status, '(not cleared)');
+        }
       } else {
         setError('Failed to load loan data. Please try again later.');
       }
@@ -218,6 +233,10 @@ export const RepaymentSchedulePage = () => {
   // Also check if we have multiple EMIs in schedule (fallback detection)
   const hasMultipleEmis = repaymentSchedule.length > 1;
   const shouldShowMultiEmi = isMultiEmi || hasMultipleEmis;
+  
+  // Check if loan is cleared (fully paid)
+  const isLoanCleared = loanData?.status === 'cleared';
+  console.log('🔍 Is Loan Cleared?', isLoanCleared, '| Loan Status:', loanData?.status);
 
   // Calculate derived values
   const currentDate = new Date(); // Use current date
@@ -335,8 +354,43 @@ export const RepaymentSchedulePage = () => {
           <p className="text-sm sm:text-base text-gray-600">Clear your loan fast to unlock higher limits</p>
         </div>
 
+        {/* Loan Cleared Success Message */}
+        {isLoanCleared && (
+          <Card className="bg-gradient-to-r from-green-50 to-emerald-50 shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-green-200">
+            <CardContent className="p-6 sm:p-8 text-center">
+              <div className="flex flex-col items-center gap-4">
+                <div className="w-16 h-16 sm:w-20 sm:h-20 bg-green-500 rounded-full flex items-center justify-center">
+                  <svg className="w-10 h-10 sm:w-12 sm:h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-2xl sm:text-3xl font-bold text-green-700 mb-2">
+                    🎉 Loan Cleared Successfully!
+                  </h2>
+                  <p className="text-base sm:text-lg text-green-600 mb-4">
+                    Congratulations! You have successfully paid off this loan.
+                  </p>
+                  <p className="text-sm sm:text-base text-gray-700 mb-2">
+                    You can now apply for a higher loan amount with better terms.
+                  </p>
+                  <p className="text-xs sm:text-sm text-gray-500 italic">
+                    Redirecting to dashboard in 3 seconds...
+                  </p>
+                </div>
+                <Button
+                  onClick={() => navigate('/dashboard')}
+                  className="mt-4 bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg text-base sm:text-lg font-semibold"
+                >
+                  Go to Dashboard Now
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Single Payment Plan - Current Page */}
-        {!shouldShowMultiEmi && (
+        {!shouldShowMultiEmi && !isLoanCleared && (
           <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
             <CardContent className="p-4 sm:p-6 space-y-4">
               {/* Preclose Section - Similar to Multi-EMI */}
@@ -509,7 +563,7 @@ export const RepaymentSchedulePage = () => {
         )}
 
         {/* Multi-EMI Plan - Preclose Section */}
-        {shouldShowMultiEmi && (
+        {shouldShowMultiEmi && !isLoanCleared && (
           <>
             <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
               <CardContent className="p-4 sm:p-6 space-y-4">

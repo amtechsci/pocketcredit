@@ -966,6 +966,19 @@ export function UserProfileDetail() {
         return;
       }
 
+      // Check if trying to disburse a loan that's already in account_manager or cleared
+      if (transactionForm.transactionType === 'loan_disbursement' && transactionForm.loanApplicationId) {
+        const loan = getArray('loans')?.find((l: any) => 
+          l.id?.toString() === transactionForm.loanApplicationId || 
+          l.loanId?.toString() === transactionForm.loanApplicationId
+        );
+        
+        if (loan && (loan.status === 'account_manager' || loan.status === 'cleared')) {
+          alert(`Cannot disburse this loan. Loan is already in "${loan.status}" status. The loan has already been disbursed.`);
+          return;
+        }
+      }
+
       // Require UTR/reference number
       if (!transactionForm.referenceNumber || transactionForm.referenceNumber.trim() === '') {
         alert('Please enter a UTR / Reference number');
@@ -7781,23 +7794,63 @@ export function UserProfileDetail() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
                     <option value="">Select Loan Application (Optional normally, Required for Disbursement)</option>
-                    {/* Show ready_for_disbursement loans first */}
-                    {getArray('loans')?.filter((l: any) => l.status === 'ready_for_disbursement').map((loan: any) => (
-                      <option key={loan.id || loan.loanId} value={loan.id || loan.loanId} className="font-bold text-green-600">
-                        📦 Loan #{loan.id || loan.loanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} (Ready for Disbursement)
-                      </option>
-                    ))}
-                    <option disabled>──────────────</option>
-                    {/* Show other loans */}
-                    {getArray('loans')?.filter((l: any) => l.status !== 'ready_for_disbursement').map((loan: any) => (
-                      <option key={loan.id || loan.loanId} value={loan.id || loan.loanId}>
-                        Loan #{loan.id || loan.loanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} ({loan.status})
-                      </option>
-                    ))}
+                    {/* For loan disbursement, only show loans that are NOT already in account_manager or cleared */}
+                    {transactionForm.transactionType === 'loan_disbursement' ? (
+                      <>
+                        {/* Show ready_for_disbursement loans first */}
+                        {getArray('loans')?.filter((l: any) => l.status === 'ready_for_disbursement').map((loan: any) => (
+                          <option key={loan.id || loan.loanId} value={loan.id || loan.loanId} className="font-bold text-green-600">
+                            📦 Loan #{loan.id || loan.loanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} (Ready for Disbursement)
+                          </option>
+                        ))}
+                        {getArray('loans')?.filter((l: any) => l.status === 'ready_for_disbursement').length > 0 && 
+                         getArray('loans')?.filter((l: any) => l.status !== 'ready_for_disbursement' && l.status !== 'account_manager' && l.status !== 'cleared').length > 0 && (
+                          <option disabled>──────────────</option>
+                        )}
+                        {/* Show other loans (exclude account_manager and cleared) */}
+                        {getArray('loans')?.filter((l: any) => l.status !== 'ready_for_disbursement' && l.status !== 'account_manager' && l.status !== 'cleared').map((loan: any) => (
+                          <option key={loan.id || loan.loanId} value={loan.id || loan.loanId}>
+                            Loan #{loan.id || loan.loanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} ({loan.status})
+                          </option>
+                        ))}
+                        {/* Show already disbursed loans as disabled */}
+                        {getArray('loans')?.filter((l: any) => l.status === 'account_manager' || l.status === 'cleared').length > 0 && (
+                          <>
+                            <option disabled>─── Already Disbursed (Cannot Select) ───</option>
+                            {getArray('loans')?.filter((l: any) => l.status === 'account_manager' || l.status === 'cleared').map((loan: any) => (
+                              <option key={loan.id || loan.loanId} disabled style={{ color: '#999' }}>
+                                🚫 Loan #{loan.id || loan.loanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} ({loan.status})
+                              </option>
+                            ))}
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {/* Show ready_for_disbursement loans first */}
+                        {getArray('loans')?.filter((l: any) => l.status === 'ready_for_disbursement').map((loan: any) => (
+                          <option key={loan.id || loan.loanId} value={loan.id || loan.loanId} className="font-bold text-green-600">
+                            📦 Loan #{loan.id || loan.loanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} (Ready for Disbursement)
+                          </option>
+                        ))}
+                        <option disabled>──────────────</option>
+                        {/* Show all other loans */}
+                        {getArray('loans')?.filter((l: any) => l.status !== 'ready_for_disbursement').map((loan: any) => (
+                          <option key={loan.id || loan.loanId} value={loan.id || loan.loanId}>
+                            Loan #{loan.id || loan.loanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} ({loan.status})
+                          </option>
+                        ))}
+                      </>
+                    )}
                   </select>
                   {transactionForm.transactionType === 'loan_disbursement' && (
                     <p className="text-xs text-gray-500 mt-1">
-                      Selecting a loan here will automatically update its status to "Account Manager" after disbursement.
+                      ⚠️ You can only disburse loans that are NOT already in "Account Manager" or "Cleared" status.
+                    </p>
+                  )}
+                  {transactionForm.transactionType === 'full_payment' && (
+                    <p className="text-xs text-blue-600 mt-1">
+                      ✅ This transaction will mark the selected loan as "Cleared" (fully paid).
                     </p>
                   )}
                 </div>

@@ -150,6 +150,12 @@ export function SimplifiedLoanApplicationPage() {
               navigate(`/repayment-schedule?applicationId=${accountManagerApp.id}`);
               return;
             }
+
+            // Don't redirect if loan is cleared - user can apply for new loan
+            const clearedApp = applications.find(
+              (app: any) => app.status === 'cleared'
+            );
+            // Cleared loans allow new applications
           }
         } catch (appError) {
           console.error('Error checking applications:', appError);

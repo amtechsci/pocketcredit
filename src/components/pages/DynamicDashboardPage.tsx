@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
-import { Card } from '../ui/card';
+import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
@@ -27,7 +27,8 @@ import {
   Info,
   FileText,
   ShieldCheck,
-  Star
+  Star,
+  X
 } from 'lucide-react';
 import { DashboardHeader } from '../DashboardHeader';
 import { ApplicationFlow } from '../ApplicationFlow';
@@ -128,7 +129,10 @@ export function DynamicDashboardPage() {
   const [pendingApplications, setPendingApplications] = useState<any[]>([]);
   const [appliedLoans, setAppliedLoans] = useState<any[]>([]);
   const [runningLoans, setRunningLoans] = useState<any[]>([]);
+  const [allLoans, setAllLoans] = useState<any[]>([]); // All loans including cleared
   const [canApplyForLoan, setCanApplyForLoan] = useState(true);
+  const [selectedLoanDetails, setSelectedLoanDetails] = useState<any>(null);
+  const [showLoanDetailsModal, setShowLoanDetailsModal] = useState(false);
 
   // Load dashboard data
   const loadDashboardData = useCallback(async () => {
@@ -332,6 +336,7 @@ export function DynamicDashboardPage() {
         console.log('✅ Unique applications:', uniqueApplications);
 
         // Check for account_manager status - redirect to repayment schedule
+        // But don't redirect if the loan is already cleared
         const accountManagerApp = uniqueApplications.find((app: any) =>
           app.status === 'account_manager'
         );
@@ -340,6 +345,12 @@ export function DynamicDashboardPage() {
           navigate(`/repayment-schedule?applicationId=${accountManagerApp.id}`);
           return;
         }
+
+        // If loan is cleared, keep user on dashboard (don't redirect)
+        const clearedApp = uniqueApplications.find((app: any) =>
+          app.status === 'cleared'
+        );
+        // Cleared loans stay on dashboard - user can apply for new loan
 
         // Check for ready_for_disbursement status - show waiting message (admin needs to add transaction)
         const readyForDisbursementApp = uniqueApplications.find((app: any) =>
@@ -394,16 +405,22 @@ export function DynamicDashboardPage() {
           ['submitted', 'under_review', 'follow_up'].includes(app.status)
         );
 
+        // Running loans should NOT include cleared loans (those are completed)
         const running = uniqueApplications.filter((app: any) =>
-          ['account_manager', 'cleared', 'ready_for_disbursement'].includes(app.status)
+          ['account_manager', 'ready_for_disbursement'].includes(app.status)
         );
+
+        // All loans includes everything (for My Loans history tab)
+        const all = uniqueApplications;
 
         console.log('📝 Applied loans:', applied);
         console.log('🏃 Running loans:', running);
+        console.log('📚 All loans:', all);
 
         setPendingApplications(uniqueApplications);
         setAppliedLoans(applied);
         setRunningLoans(running);
+        setAllLoans(all);
       } else {
         console.log('❌ Response not successful:', response);
         setPendingApplications([]);
@@ -426,6 +443,7 @@ export function DynamicDashboardPage() {
       setPendingApplications([]);
       setAppliedLoans([]);
       setRunningLoans([]);
+      setAllLoans([]);
     }
   }, []);
 
@@ -783,7 +801,11 @@ export function DynamicDashboardPage() {
                   <CreditCard className="w-6 h-6 text-blue-600" />
                   Active Loans
                 </h3>
-                <Button variant="outline" size="sm">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setActiveTab('my-loans')}
+                >
                   View All
                 </Button>
               </div>
@@ -1075,7 +1097,7 @@ export function DynamicDashboardPage() {
           {/* Mobile Tab Navigation - Hidden on desktop */}
           <div className="lg:hidden bg-white border-b overflow-x-auto scrollbar-hide">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="inline-flex w-full rounded-none border-0 bg-transparent h-11">
+              <TabsList className="inline-flex w-full rounded-none border-0 bg-transparent h-11 overflow-x-auto">
                 <TabsTrigger value="overview" className="rounded-none whitespace-nowrap flex-1 text-xs px-2">Overview</TabsTrigger>
                 <TabsTrigger value="applied-loans" className="rounded-none whitespace-nowrap flex-1 text-xs px-2 relative">
                   Applied
@@ -1086,13 +1108,14 @@ export function DynamicDashboardPage() {
                   )}
                 </TabsTrigger>
                 <TabsTrigger value="loans" className="rounded-none whitespace-nowrap flex-1 text-xs px-2 relative">
-                  Loans
+                  Active
                   {runningLoans.length > 0 && (
                     <span className="absolute top-1 right-1 bg-blue-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center text-[10px]">
                       {runningLoans.length}
                     </span>
                   )}
                 </TabsTrigger>
+                <TabsTrigger value="my-loans" className="rounded-none whitespace-nowrap flex-1 text-xs px-2">My Loans</TabsTrigger>
                 <TabsTrigger value="profile" className="rounded-none whitespace-nowrap flex-1 text-xs px-2">Profile</TabsTrigger>
               </TabsList>
             </Tabs>
@@ -1355,6 +1378,139 @@ export function DynamicDashboardPage() {
                 </div>
               </TabsContent>
 
+              <TabsContent value="my-loans">
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-xl font-semibold">My Loan History</h3>
+                      <p className="text-sm text-gray-600 mt-1">View all your loans and their details</p>
+                    </div>
+                  </div>
+
+                  {/* All Loans History */}
+                  {allLoans.length > 0 ? (
+                    <div className="grid gap-4">
+                      {allLoans.map((loan) => {
+                        const isCleared = loan.status === 'cleared';
+                        const isActive = loan.status === 'account_manager';
+                        const isApplied = ['submitted', 'under_review', 'follow_up'].includes(loan.status);
+                        
+                        return (
+                          <Card key={loan.id} className={`p-4 hover:shadow-md transition-shadow ${
+                            isCleared ? 'border-l-4 border-l-green-500 bg-green-50' : 
+                            isActive ? 'border-l-4 border-l-blue-500' : 
+                            'border-l-4 border-l-yellow-500'
+                          }`}>
+                            <div className="space-y-3">
+                              {/* Header */}
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <h4 className="font-semibold text-base text-gray-900 mb-1">
+                                    {loan.loan_purpose || 'Personal'} Loan
+                                  </h4>
+                                  <p className="text-xs text-gray-500">
+                                    App: {formatAppNumber(loan.application_number)}
+                                  </p>
+                                </div>
+                                <Badge 
+                                  variant="secondary" 
+                                  className={
+                                    isCleared ? 'bg-green-100 text-green-800' : 
+                                    isActive ? 'bg-blue-100 text-blue-800' : 
+                                    'bg-yellow-100 text-yellow-800'
+                                  }
+                                >
+                                  {loan.status.replace('_', ' ').toUpperCase()}
+                                </Badge>
+                              </div>
+
+                              {/* Amount */}
+                              <div className="bg-gray-50 rounded-lg p-3">
+                                <p className="text-xs text-gray-600 mb-1">Loan Amount</p>
+                                <p className="text-2xl font-bold text-gray-900">
+                                  ₹{loan.loan_amount?.toLocaleString('en-IN') || '0'}
+                                </p>
+                              </div>
+
+                              {/* Dates */}
+                              <div className="grid grid-cols-2 gap-3 text-xs">
+                                <div>
+                                  <p className="text-gray-600 mb-1">Applied On</p>
+                                  <p className="font-medium text-gray-900">{formatDate(loan.created_at)}</p>
+                                </div>
+                                {isCleared && (
+                                  <div>
+                                    <p className="text-gray-600 mb-1">Cleared On</p>
+                                    <p className="font-medium text-green-700">{formatDate(loan.updated_at)}</p>
+                                  </div>
+                                )}
+                                {isActive && (
+                                  <div>
+                                    <p className="text-gray-600 mb-1">Disbursed On</p>
+                                    <p className="font-medium text-blue-700">
+                                      {loan.disbursed_at ? formatDate(loan.disbursed_at) : 'Pending'}
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Actions */}
+                              <div className="flex gap-2 pt-2 border-t">
+                                {isActive && (
+                                  <Button
+                                    onClick={() => navigate(`/repayment-schedule?applicationId=${loan.id}`)}
+                                    size="sm"
+                                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs"
+                                  >
+                                    View Repayment
+                                  </Button>
+                                )}
+                                {isApplied && (
+                                  <Button
+                                    onClick={() => navigate('/application-under-review')}
+                                    size="sm"
+                                    variant="outline"
+                                    className="flex-1 text-xs"
+                                  >
+                                    Track Application
+                                  </Button>
+                                )}
+                                <Button
+                                  onClick={() => {
+                                    setSelectedLoanDetails(loan);
+                                    setShowLoanDetailsModal(true);
+                                  }}
+                                  size="sm"
+                                  variant="outline"
+                                  className="flex-1 text-xs"
+                                >
+                                  View Details
+                                </Button>
+                              </div>
+                            </div>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <Card className="p-8 text-center">
+                      <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">No Loan History</h3>
+                      <p className="text-gray-600 mb-4">You haven't applied for any loans yet.</p>
+                      {canApplyForLoan && (
+                        <Button
+                          onClick={() => navigate('/loan-application')}
+                          style={{ backgroundColor: '#0052FF' }}
+                          className="text-white hover:opacity-90"
+                        >
+                          Apply for Your First Loan
+                        </Button>
+                      )}
+                    </Card>
+                  )}
+                </div>
+              </TabsContent>
+
               <TabsContent value="profile">
                 <div className="space-y-6">
                   {/* Profile Header */}
@@ -1589,6 +1745,156 @@ export function DynamicDashboardPage() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <ApplicationFlow onClose={() => setShowLoanApplication(false)} />
+          </div>
+        </div>
+      )}
+
+      {/* Loan Details Modal */}
+      {showLoanDetailsModal && selectedLoanDetails && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-bold">Loan Details</h2>
+                <p className="text-blue-100 text-sm">{formatAppNumber(selectedLoanDetails.application_number)}</p>
+              </div>
+              <button
+                onClick={() => setShowLoanDetailsModal(false)}
+                className="text-white hover:bg-white/20 rounded-full p-2 transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 space-y-6">
+              {/* Status Badge */}
+              <div className="flex justify-center">
+                <Badge 
+                  className={`text-base px-6 py-2 ${
+                    selectedLoanDetails.status === 'cleared' ? 'bg-green-500 text-white' : 
+                    selectedLoanDetails.status === 'account_manager' ? 'bg-blue-500 text-white' : 
+                    'bg-yellow-500 text-white'
+                  }`}
+                >
+                  {selectedLoanDetails.status.replace('_', ' ').toUpperCase()}
+                </Badge>
+              </div>
+
+              {/* Loan Amount Card */}
+              <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
+                <CardContent className="p-6 text-center">
+                  <p className="text-sm text-gray-600 mb-2">Loan Amount</p>
+                  <p className="text-4xl font-bold text-blue-700">
+                    ₹{selectedLoanDetails.loan_amount?.toLocaleString('en-IN') || '0'}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-2">{selectedLoanDetails.loan_purpose || 'Personal'} Loan</p>
+                </CardContent>
+              </Card>
+
+              {/* Loan Information Grid */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="text-xs text-gray-600 mb-1">Application Number</p>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {formatAppNumber(selectedLoanDetails.application_number)}
+                  </p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="text-xs text-gray-600 mb-1">Loan ID</p>
+                  <p className="text-sm font-semibold text-gray-900">#{selectedLoanDetails.id}</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="text-xs text-gray-600 mb-1">Applied On</p>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {formatDate(selectedLoanDetails.created_at)}
+                  </p>
+                </div>
+                {selectedLoanDetails.status === 'cleared' && (
+                  <div className="bg-green-50 rounded-lg p-4">
+                    <p className="text-xs text-green-700 mb-1">Cleared On</p>
+                    <p className="text-sm font-semibold text-green-900">
+                      {formatDate(selectedLoanDetails.updated_at)}
+                    </p>
+                  </div>
+                )}
+                {selectedLoanDetails.status === 'account_manager' && selectedLoanDetails.disbursed_at && (
+                  <div className="bg-blue-50 rounded-lg p-4">
+                    <p className="text-xs text-blue-700 mb-1">Disbursed On</p>
+                    <p className="text-sm font-semibold text-blue-900">
+                      {formatDate(selectedLoanDetails.disbursed_at)}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Status Message */}
+              {selectedLoanDetails.status === 'cleared' && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <CheckCircle className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-green-900 mb-1">Loan Cleared</p>
+                      <p className="text-xs text-green-700">
+                        This loan has been fully paid and closed. You can now apply for a higher loan amount.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {selectedLoanDetails.status === 'account_manager' && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-blue-900 mb-1">Active Loan</p>
+                      <p className="text-xs text-blue-700">
+                        This loan is currently active. Make timely payments to maintain a good credit score.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {['submitted', 'under_review', 'follow_up'].includes(selectedLoanDetails.status) && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <Clock className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-yellow-900 mb-1">Application Pending</p>
+                      <p className="text-xs text-yellow-700">
+                        Your application is under review. We'll notify you once it's processed.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-4 border-t">
+                {selectedLoanDetails.status === 'account_manager' && (
+                  <Button
+                    onClick={() => {
+                      setShowLoanDetailsModal(false);
+                      navigate(`/repayment-schedule?applicationId=${selectedLoanDetails.id}`);
+                    }}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    <CreditCard className="w-4 h-4 mr-2" />
+                    View Repayment
+                  </Button>
+                )}
+                <Button
+                  onClick={() => setShowLoanDetailsModal(false)}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}

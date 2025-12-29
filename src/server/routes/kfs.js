@@ -312,6 +312,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         principal_amount: loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0,
         disbursal_amount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
         disbursed_at: loan.disbursed_at || null,
+        status: loan.status, // Include loan status for frontend checks
         processed_at: loan.processed_at || null,
         processed_amount: loan.processed_amount || null,
         processed_interest: loan.processed_interest || null,
