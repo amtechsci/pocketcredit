@@ -306,11 +306,6 @@ export const RepaymentSchedulePage = () => {
   // For 3rd loan: stages 3-10 (3x to 10x)
   const totalStages = 10;
   const startStage = Math.min(currentLoanNumber, totalStages); // Cap at stage 10
-  const numberOfStagesToShow = totalStages - startStage + 1; // How many stages to display
-  
-  const stageLimits = Array.from({ length: numberOfStagesToShow }, (_, i) => 
-    currentLimit * (startStage + i)
-  );
   
   // Calculate next limit for header message (final stage limit)
   const nextLimit = currentLimit * totalStages; // Always show 10x for max potential
@@ -839,90 +834,116 @@ export const RepaymentSchedulePage = () => {
           </>
         )}
 
-        {/* Loan Progression Stages - Offer Section */}
-        <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
-          <CardContent className="p-4 sm:p-6">
-            {/* Current Stage */}
-            <div className="relative">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div className="flex flex-col items-center flex-shrink-0">
-                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
-                    <span className="text-white font-bold text-sm sm:text-base">{String(startStage).padStart(2, '0')}</span>
-                  </div>
-                  {/* <div className="w-0.5 h-12 sm:h-16 bg-gray-300 mt-2"></div> */}
-                </div>
-                <div className="flex-1 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 sm:p-5 border-2 border-blue-200 relative">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs sm:text-sm font-semibold text-blue-700 bg-blue-100 px-2 py-1 rounded">
-                          Stage {String(startStage).padStart(2, '0')}
-                        </span>
-                        <span className="text-xs sm:text-sm font-semibold text-orange-600 bg-orange-100 px-2 py-1 rounded flex items-center gap-1">
-                          <Sparkles className="w-3 h-3" />
-                          You are Here
-                        </span>
+        {/* Loan Progression Stages - Redesigned */}
+        <Card className="bg-white shadow-lg rounded-xl overflow-hidden mb-6">
+          <CardContent className="p-3 sm:p-5">
+            <div className="space-y-3">
+              {Array.from({ length: totalStages - startStage + 1 }, (_, index) => {
+                const stageNumber = startStage + index;
+                const stageLimit = currentLimit * stageNumber;
+                const isCurrentStage = index === 0;
+                const isFinalStage = stageNumber === totalStages;
+                
+                return (
+                  <div key={stageNumber} className="relative">
+                    {/* Stage Card */}
+                    <div className={`flex items-stretch gap-3 rounded-xl overflow-hidden transition-all ${
+                      isCurrentStage 
+                        ? 'bg-gradient-to-r from-blue-500 to-blue-600 shadow-md' 
+                        : 'bg-gray-100 hover:bg-gray-200'
+                    }`}>
+                      {/* Left: Stage Number Circle */}
+                      <div className={`flex items-center justify-center w-16 sm:w-20 ${
+                        isCurrentStage ? 'bg-blue-700' : 'bg-gray-200'
+                      }`}>
+                        <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center ${
+                          isCurrentStage 
+                            ? 'bg-white text-blue-600' 
+                            : 'bg-white text-gray-400'
+                        }`}>
+                          {isCurrentStage ? (
+                            <span className="text-lg sm:text-xl font-bold">
+                              {String(stageNumber).padStart(2, '0')}
+                            </span>
+                          ) : (
+                            <Lock className="w-5 h-5 sm:w-6 sm:h-6" />
+                          )}
+                        </div>
                       </div>
-                      <p className="text-lg sm:text-2xl font-bold text-gray-900 mb-1">
-                        {formatCurrency(stageLimits[0])}
-                      </p>
-                      <p className="text-xs sm:text-sm text-gray-600">Your Current limit</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-gray-500 mb-1">Loan ID</p>
-                      <p className="text-sm font-semibold text-gray-700">{shortLoanId}</p>
-                      <p className="text-xs text-gray-500 mt-2 mb-1">Exhausted days</p>
-                      <p className="text-base sm:text-lg font-bold text-gray-900">{exhaustedDays}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
 
-            {/* Dots in between */}
-            <div className="relative">
-              <div className="flex items-start gap-3 sm:gap-4">
-                <div className="flex flex-col items-center flex-shrink-0 ml-2">
-                  <div className="flex flex-col items-center gap-1.5 sm:gap-2 my-6">
-                    <div className="w-2 h-2 rounded-full bg-gray-400"></div>
-                    <div className="w-2 h-2 rounded-full bg-gray-400"></div>
-                    <div className="w-2 h-2 rounded-full bg-gray-400"></div>
-                  </div>
-                  {/* <div className="w-0.5 h-12 sm:h-16 bg-gray-300"></div> */}
-                </div>
-                <div className="flex-1"></div>
-              </div>
-            </div>
+                      {/* Right: Content */}
+                      <div className={`flex-1 py-3 pr-3 ${isCurrentStage ? 'text-white' : 'text-gray-700'}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          {/* Left Content */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className={`text-xs font-bold ${
+                                isCurrentStage ? 'text-blue-100' : 'text-gray-500'
+                              }`}>
+                                Stage {String(stageNumber).padStart(2, '0')}
+                              </span>
+                              {isCurrentStage && (
+                                <span className="flex items-center gap-1 text-[10px] font-semibold bg-orange-500 text-white px-2 py-0.5 rounded-full">
+                                  <Sparkles className="w-3 h-3" />
+                                  You are Here
+                                </span>
+                              )}
+                              {!isCurrentStage && (
+                                <span className="text-[10px] font-medium text-gray-500">Locked</span>
+                              )}
+                            </div>
+                            <div className={`text-xl sm:text-2xl font-bold mb-0.5 ${
+                              isCurrentStage ? 'text-white' : 'text-gray-900'
+                            }`}>
+                              {formatCurrency(stageLimit).replace('.00', '')}
+                            </div>
+                            <div className={`text-xs ${
+                              isCurrentStage ? 'text-blue-100' : 'text-gray-500'
+                            }`}>
+                              {isCurrentStage 
+                                ? 'Your Current limit' 
+                                : isFinalStage 
+                                ? 'Your Ultimate limit' 
+                                : 'Your Next limit'}
+                            </div>
+                          </div>
 
-            {/* Final Stage (Stage 10) */}
-            <div className="relative">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div className="flex flex-col items-center flex-shrink-0">
-                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-300 flex items-center justify-center">
-                    <Lock className="w-5 h-5 sm:w-6 sm:h-6 text-gray-500" />
-                  </div>
-                </div>
-                <div className="flex-1 bg-gray-50 rounded-xl p-4 sm:p-5 border-2 border-gray-200 relative">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs sm:text-sm font-semibold text-gray-600 bg-gray-100 px-2 py-1 rounded">Stage 10</span>
-                        <Lock className="w-4 h-4 text-gray-400" />
+                          {/* Right Content */}
+                          <div className="text-right flex-shrink-0">
+                            {isCurrentStage ? (
+                              <div className="space-y-2">
+                                <div>
+                                  <div className="text-[10px] text-blue-100 mb-0.5">Loan ID</div>
+                                  <div className="text-sm font-bold">{shortLoanId}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[10px] text-blue-100 mb-0.5">Exhausted days</div>
+                                  <div className="text-lg font-bold">{exhaustedDays}</div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="mt-1">
+                                <div className="text-[10px] text-gray-500 mb-1">Disbursal in 2 min</div>
+                                <div className="inline-flex items-center gap-1 bg-gray-300 text-gray-600 text-[10px] font-medium px-2 py-1 rounded-full">
+                                  <Lock className="w-3 h-3" />
+                                  Locked
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <p className="text-lg sm:text-2xl font-bold text-gray-700 mb-1">
-                        {formatCurrency(nextLimit)}
-                      </p>
-                      <p className="text-xs sm:text-sm text-gray-600">Your Ultimate limit</p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs text-gray-500 mb-1">Disbursal in 2 min</p>
-                      <div className="inline-block bg-gray-200 text-gray-600 text-xs px-3 py-1 rounded-full">
-                        Locked
+
+                    {/* Connector Line */}
+                    {!isFinalStage && (
+                      <div className="flex justify-start pl-8 sm:pl-10 py-2">
+                        <div className="w-0.5 h-4 bg-gray-300"></div>
                       </div>
-                    </div>
+                    )}
                   </div>
-                </div>
-              </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
