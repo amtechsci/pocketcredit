@@ -1346,6 +1346,49 @@ class AdminApiService {
   async search(query: string): Promise<ApiResponse<any>> {
     return this.request('GET', `/search?q=${encodeURIComponent(query)}`);
   }
+
+  // Policies Management
+  async getPolicies(): Promise<ApiResponse<any[]>> {
+    const response = await axios.get('/api/policies');
+    return response.data;
+  }
+
+  async getPolicy(id: number): Promise<ApiResponse<any>> {
+    const response = await axios.get(`/api/policies/${id}`);
+    return response.data;
+  }
+
+  async createPolicy(formData: FormData): Promise<ApiResponse<any>> {
+    const token = localStorage.getItem('adminToken');
+    const response = await axios.post('/api/policies', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+        'Authorization': `Bearer ${token}`
+      },
+    });
+    return response.data;
+  }
+
+  async updatePolicy(id: number, formData: FormData): Promise<ApiResponse<any>> {
+    const token = localStorage.getItem('adminToken');
+    const response = await axios.put(`/api/policies/${id}`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+        'Authorization': `Bearer ${token}`
+      },
+    });
+    return response.data;
+  }
+
+  async deletePolicy(id: number): Promise<ApiResponse<any>> {
+    const token = localStorage.getItem('adminToken');
+    const response = await axios.delete(`/api/policies/${id}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    return response.data;
+  }
 }
 
 // Export singleton instance

@@ -379,6 +379,10 @@ app.use('/api/companies', companiesRoutes);
 const creditAnalyticsRoutes = require('./routes/creditAnalytics');
 app.use('/api/credit-analytics', creditAnalyticsRoutes);
 
+// Policies management
+const policiesRoutes = require('./routes/policies');
+app.use('/api/policies', policiesRoutes);
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({

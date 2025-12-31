@@ -31,7 +31,7 @@ export function PersonalLoanPage() {
     {
       icon: CheckCircle,
       title: 'Quick Disbursal',
-      description: 'Get money in your account within 24 hours of approval',
+      description: 'Get money in your account within 15 min of approval',
       color: '#FFD700'
     },
     {
@@ -45,23 +45,18 @@ export function PersonalLoanPage() {
   const eligibilityData = [
     {
       criteria: 'Age',
-      salaried: '21 to 65 years',
-      selfEmployed: '25 to 65 years'
+      salaried: '18 to 45 years',
+      selfEmployed: '18 to 45 years'
     },
     {
       criteria: 'Min. Monthly Income',
-      salaried: '₹25,000',
-      selfEmployed: '₹30,000'
+      salaried: '₹15,000',
+      selfEmployed: '₹15,000'
     },
     {
       criteria: 'Min. CIBIL Score',
-      salaried: '650',
-      selfEmployed: '700'
-    },
-    {
-      criteria: 'Work Experience',
-      salaried: '2+ years',
-      selfEmployed: '3+ years business'
+      salaried: 'Not Required',
+      selfEmployed: 'Not Required'
     },
     {
       criteria: 'Residence',
@@ -73,62 +68,51 @@ export function PersonalLoanPage() {
   const ratesAndCharges = [
     {
       particular: 'Interest Rate',
-      charges: 'Starting at 14% p.a.',
-      description: 'Reducing balance method'
+      charges: 'Starting at 14% - 36% p.a.',
+      description: 'Fixed'
     },
     {
       particular: 'Processing Fee',
-      charges: 'Up to 3% of loan amount',
+      charges: 'Up to 14% of loan amount',
       description: 'Min. ₹999, Max. ₹5,999'
-    },
-    {
-      particular: 'Late Payment Charges',
-      charges: '2% per month',
-      description: 'On overdue amount'
-    },
-    {
-      particular: 'Foreclosure Charges',
-      charges: '2-5% of outstanding',
-      description: 'After 12 EMIs'
-    },
-    {
-      particular: 'Bounce Charges',
-      charges: '₹500 per bounce',
-      description: 'For failed EMI debit'
     }
   ];
 
   const requiredDocuments = [
-    { type: 'Identity Proof', documents: ['PAN Card (Mandatory)', 'Aadhaar Card', 'Passport', 'Voter ID'] },
-    { type: 'Address Proof', documents: ['Aadhaar Card', 'Utility Bills', 'Rent Agreement', 'Bank Statement'] },
-    { type: 'Income Proof (Salaried)', documents: ['Last 3 months salary slips', 'Bank statements (6 months)', 'Form 16 or ITR'] },
-    { type: 'Income Proof (Self-Employed)', documents: ['ITR for last 2 years', 'Bank statements (12 months)', 'Business proof documents'] }
+    { type: 'Identity Proof', documents: ['PAN Card (Mandatory)'] },
+    { type: 'Address Proof', documents: ['Aadhaar Card'] },
+    { type: 'Income Proof (Salaried)', documents: ['Bank statements (6 months)'] },
+    { type: 'Income Proof (Self-Employed)', documents: ['Bank statements (12 months)'] }
   ];
 
   const faqs = [
     {
-      question: 'What is the maximum loan amount I can get?',
-      answer: 'You can get a personal loan up to ₹10 lakhs based on your income, credit score, and repayment capacity. The exact amount will be determined after our assessment.'
+      question: 'What is the maximum loan amount I can avail?',
+      answer: 'You can apply for a loan of up to ₹3,00,000 with Pocket Credit. The sanctioned amount and tenure depend on a credit assessment. We also support borrowers with low or limited credit history to promote financial inclusion.'
     },
     {
-      question: 'How quickly can I get the loan disbursed?',
-      answer: 'Once all documents are verified and loan is approved, the amount is typically disbursed within 24 hours to your registered bank account.'
+      question: 'What repayment tenure options are available?',
+      answer: 'We offer flexible repayment tenures of up to 195 days. You may choose between a single-term repayment or EMI-based loan options.'
     },
     {
-      question: 'Can I prepay my personal loan?',
-      answer: 'Yes, you can prepay your loan after paying 12 EMIs. Prepayment charges of 2-5% of the outstanding amount may apply as per terms and conditions.'
+      question: 'Who can apply for a loan?',
+      answer: 'Any Indian citizen aged 18 years or above is eligible to apply.'
     },
     {
-      question: 'What if I have a low CIBIL score?',
-      answer: 'While we prefer a minimum CIBIL score of 650, each application is evaluated individually. Having a stable income and employment history can help improve your chances.'
+      question: 'Is a credit score mandatory to get a loan?',
+      answer: 'A credit score is not mandatory. First-time borrowers or individuals with no credit history can still avail loans. However, a higher credit score may help you get better pricing and higher loan limits.'
     },
     {
-      question: 'Is there any hidden charges?',
-      answer: 'No, we believe in complete transparency. All charges including interest rate, processing fee, and other charges are clearly mentioned upfront. There are no hidden charges.'
+      question: 'Are there any hidden charges?',
+      answer: 'No. We follow a transparent pricing policy. All applicable charges, including interest, processing fees, and other costs, are clearly disclosed upfront.'
     },
     {
-      question: 'Can I change my EMI date?',
-      answer: 'Yes, you can request to change your EMI date once during the loan tenure. The request needs to be made at least 15 days before the current EMI date.'
+      question: 'Can I repay my loan before the due date?',
+      answer: 'Yes, you can prepay your loan at any time without any prepayment charges.'
+    },
+    {
+      question: 'What are the consequences of missing a payment?',
+      answer: 'Late or missed payments may attract overdue penalties and can negatively impact your credit score, which may affect your ability to obtain loans in the future.'
     }
   ];
 
@@ -148,7 +132,7 @@ export function PersonalLoanPage() {
               {/* Trust Badge */}
               <div className="inline-flex items-center gap-2 bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full border border-blue-100 shadow-sm">
                 <Shield className="w-4 h-4 text-blue-600" />
-                <span className="text-sm font-medium text-blue-700">RBI Registered NBFC Partner</span>
+                <span className="text-sm font-medium text-blue-700">RBI Registered NBFC Platform</span>
               </div>
               
               {/* Main Headline */}
@@ -162,26 +146,26 @@ export function PersonalLoanPage() {
                     </svg>
                   </span>
                   {' '}up to{' '}
-                  <span style={{ color: '#0052FF' }}>₹10 Lakhs</span>
+                  <span style={{ color: '#0052FF' }}>₹3 Lakhs</span>
                 </h1>
                 <p className="text-lg sm:text-xl lg:text-2xl text-gray-600 leading-relaxed max-w-2xl mx-auto lg:mx-0">
                   <span className="font-semibold" style={{ color: '#06B6D4' }}>Quick approval in minutes</span>, 
-                  no collateral required, and money in your account within 24 hours.
+                  no collateral required, and money in your account within 15 min.
                 </p>
               </div>
 
               {/* Key Benefits */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 sm:gap-6 py-4">
                 <div className="text-center lg:text-left">
-                  <div className="text-2xl sm:text-3xl font-bold mb-1" style={{ color: '#0052FF' }}>₹10L</div>
+                  <div className="text-2xl sm:text-3xl font-bold mb-1" style={{ color: '#0052FF' }}>₹3L</div>
                   <div className="text-xs sm:text-sm text-gray-600">Max Amount</div>
                 </div>
                 <div className="text-center lg:text-left">
-                  <div className="text-2xl sm:text-3xl font-bold mb-1" style={{ color: '#06B6D4' }}>14%</div>
+                  <div className="text-2xl sm:text-3xl font-bold mb-1" style={{ color: '#06B6D4' }}>14%-36%</div>
                   <div className="text-xs sm:text-sm text-gray-600">Starting Rate</div>
                 </div>
                 <div className="text-center lg:text-left col-span-2 sm:col-span-1">
-                  <div className="text-2xl sm:text-3xl font-bold mb-1" style={{ color: '#0052FF' }}>24 hrs</div>
+                  <div className="text-2xl sm:text-3xl font-bold mb-1" style={{ color: '#0052FF' }}>15 min</div>
                   <div className="text-xs sm:text-sm text-gray-600">Disbursal</div>
                 </div>
               </div>
@@ -271,7 +255,7 @@ export function PersonalLoanPage() {
                       </div>
                       <div>
                         <div className="text-sm font-semibold text-gray-900">Loan Approved!</div>
-                        <div className="text-xs text-gray-600">₹5,00,000 disbursed</div>
+                        <div className="text-xs text-gray-600">₹3,00,000 disbursed</div>
                       </div>
                     </div>
                   </div>

@@ -14,6 +14,7 @@ import { SystemSettings } from './admin/pages/SystemSettings';
 import { KFSDocument } from './admin/pages/KFSDocument';
 import { LoanAgreementDocument } from './admin/pages/LoanAgreementDocument';
 import { SearchResultsPage } from './admin/pages/SearchResultsPage';
+import { PoliciesManagement } from './admin/pages/PoliciesManagement';
 import { AdminProvider } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
 
@@ -152,6 +153,18 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                 )}
                 {currentUser?.role === 'superadmin' && (
                   <button
+                    onClick={() => navigate('/admin/policies')}
+                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive('/admin/policies') 
+                        ? 'bg-blue-100 text-blue-700' 
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    Policies
+                  </button>
+                )}
+                {currentUser?.role === 'superadmin' && (
+                  <button
                     onClick={() => navigate('/admin/settings')}
                     className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                       isActive('/admin/settings') 
@@ -278,6 +291,11 @@ export default function AdminApp() {
       <Route path="settings" element={
         <ProtectedRoute>
           <AdminSettings />
+        </ProtectedRoute>
+      } />
+      <Route path="policies" element={
+        <ProtectedRoute>
+          <PoliciesManagement />
         </ProtectedRoute>
       } />
       <Route path="system-settings" element={

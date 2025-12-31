@@ -13,7 +13,6 @@ export function Footer() {
     { label: 'About Us', path: '/about' },
     { label: 'Media / Press', path: '/media' },
     { label: 'Careers', path: '/careers' },
-    { label: 'Our NBFC Partners', path: '/partners' },
   ];
 
   const legalLinks = [
@@ -27,17 +26,16 @@ export function Footer() {
   ];
 
   const contactInfo = [
-    { icon: Mail, text: 'support@pocketcredit.com' },
-    { icon: Phone, text: '1800-123-4567' },
-    { icon: MapPin, text: 'Mumbai, Maharashtra, India' },
+    { icon: Mail, text: 'support@pocketcredit.in' },
+    { icon: MapPin, text: 'Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar, MUMBAI, Maharashtra, India - 421001' },
   ];
 
   return (
     <footer className="bg-white border-t">
       <div className="container mx-auto mobile-container py-6 sm:py-8">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 sm:gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8">
           {/* Company Info */}
-          <div>
+          <div className="lg:col-span-1">
             <div className="flex items-center gap-2 mb-4">
               <div 
                 className="w-8 h-8 rounded-lg flex items-center justify-center"
@@ -50,7 +48,7 @@ export function Footer() {
               </span>
             </div>
             <p className="text-sm text-gray-600 mb-4 leading-relaxed">
-              Your trusted partner for instant personal and business loans. 
+              Your trusted platform for instant personal and business loans. 
               Get quick approval and transparent terms across India.
             </p>
             <div className="flex gap-4">
@@ -77,7 +75,7 @@ export function Footer() {
                 <li key={link.path}>
                   <Link
                     to={link.path}
-                    className="text-sm text-gray-600 hover:text-blue-600 transition-colors py-1 touch-manipulation text-left"
+                    className="text-sm text-gray-600 hover:text-blue-600 transition-colors py-1 touch-manipulation text-left inline-block"
                   >
                     {link.label}
                   </Link>
@@ -94,7 +92,7 @@ export function Footer() {
                 <li key={link.path}>
                   <Link
                     to={link.path}
-                    className="text-sm text-gray-600 hover:text-blue-600 transition-colors py-1 touch-manipulation text-left"
+                    className="text-sm text-gray-600 hover:text-blue-600 transition-colors py-1 touch-manipulation text-left inline-block"
                   >
                     {link.label}
                   </Link>
@@ -103,50 +101,44 @@ export function Footer() {
             </ul>
           </div>
 
-          {/* Contact */}
+          {/* Contact Info */}
           <div>
-            <h3 className="font-semibold mb-4" style={{ color: '#1E2A3B' }}>Contact</h3>
-            <div className="space-y-2">
+            <h3 className="font-semibold mb-4" style={{ color: '#1E2A3B' }}>Contact & Legal</h3>
+            <div className="space-y-3 mb-4">
               {contactInfo.map((contact, index) => (
                 <div key={index} className="flex items-start gap-2 text-sm text-gray-600">
                   <contact.icon className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                  <span>{contact.text}</span>
+                  <span className="break-words">{contact.text}</span>
                 </div>
               ))}
             </div>
           </div>
+        </div>
 
-          {/* Legal */}
-          <div>
-            <h3 className="font-semibold mb-4" style={{ color: '#1E2A3B' }}>Legal</h3>
-            <ul className="space-y-2">
-              {legalLinks.map((link) => (
-                <li key={link.path}>
-                  <Link
-                    to={link.path}
-                    className="text-sm text-gray-600 hover:text-blue-600 transition-colors py-1 touch-manipulation text-left"
-                  >
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
+        {/* Legal Links - Compact horizontal layout */}
+        <div className="mt-6 pt-6 border-t border-gray-200">
+          <div className="flex flex-wrap gap-x-4 gap-y-2 justify-center lg:justify-start">
+            {legalLinks.map((link, index) => (
+              <span key={link.path} className="flex items-center">
+                <Link
+                  to={link.path}
+                  className="text-xs text-gray-600 hover:text-blue-600 transition-colors"
+                >
+                  {link.label}
+                </Link>
+                {index < legalLinks.length - 1 && (
+                  <span className="text-gray-400 ml-4">|</span>
+                )}
+              </span>
+            ))}
           </div>
         </div>
 
         {/* Bottom Bar */}
-        <div className="border-t mt-4 sm:mt-6 pt-4 sm:pt-6 text-center">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
-            <div>
-              <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
-                © 2025 Pocket Credit. All rights reserved. | Loan services provided by our RBI registered NBFC partners.
-              </p>
-              <p className="text-xs text-gray-400 mt-2 leading-relaxed">
-                *Terms and conditions apply. Interest rates may vary based on credit profile and loan amount.
-              </p>
-            </div>
-            
-          </div>
+        <div className="mt-6 pt-6 border-t border-gray-200 text-center lg:text-left">
+          <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
+            © 2025 Pocket Credit. All rights reserved.
+          </p>
         </div>
       </div>
     </footer>

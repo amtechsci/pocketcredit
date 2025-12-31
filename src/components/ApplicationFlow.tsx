@@ -793,7 +793,7 @@ export function ApplicationFlow({ onNavigate }: ApplicationFlowProps) {
                     <Card className="bg-green-50 border-green-200">
                       <CardContent className="p-4 text-center">
                         <p className="text-sm text-gray-600 mb-1">Loan Amount</p>
-                        <p className="text-xl font-bold text-green-600">₹5,00,000</p>
+                        <p className="text-xl font-bold text-green-600">₹3,00,000</p>
                       </CardContent>
                     </Card>
                     

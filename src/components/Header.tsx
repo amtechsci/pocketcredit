@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Menu, X, User } from 'lucide-react';
+import { Menu, X, User, ChevronDown } from 'lucide-react';
 import { Button } from './ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle, SheetDescription } from './ui/sheet';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
 import { Logo } from './Logo';
 import { useAuth } from '../contexts/AuthContext';
 import { handleLogoClick, handleLoginClick } from '../utils/navigation';
@@ -22,6 +23,16 @@ export function Header() {
     { label: 'Contact Us', path: '/contact' },
   ];
 
+  const policyItems = [
+    { label: 'Privacy Policy', path: '/privacy' },
+    { label: 'Terms & Conditions', path: '/terms' },
+    { label: 'Fair Practice Code', path: '/fair-practice' },
+    { label: 'Fees Policy', path: '/fees-policy' },
+    { label: 'IT Policy', path: '/it-policy' },
+    { label: 'Refund & Cancellation', path: '/refund-cancellation-policy' },
+    { label: 'Grievance Redressal', path: '/grievance' },
+  ];
+
   const isActive = (path: string) => {
     return location.pathname === path;
   };
@@ -38,7 +49,7 @@ export function Header() {
           />
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-8">
+          <nav className="hidden md:flex items-center gap-6">
             {navigationItems.map((item) => (
               <Link
                 key={item.path}
@@ -52,6 +63,25 @@ export function Header() {
                 {item.label}
               </Link>
             ))}
+            
+            {/* Policies Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="px-3 py-2 text-sm font-medium text-gray-700 hover:text-blue-600 transition-colors flex items-center gap-1">
+                  Policies
+                  <ChevronDown className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                {policyItems.map((policy) => (
+                  <DropdownMenuItem key={policy.path} asChild>
+                    <Link to={policy.path} className="cursor-pointer">
+                      {policy.label}
+                    </Link>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </nav>
 
           {/* Desktop Actions */}
@@ -126,6 +156,22 @@ export function Header() {
                       {item.label}
                     </Link>
                   ))}
+                  
+                  {/* Mobile Policies Section */}
+                  <div className="border-t pt-4 mt-4">
+                    <div className="px-4 py-2 text-sm font-semibold text-gray-500">Policies</div>
+                    {policyItems.map((policy) => (
+                      <Link
+                        key={policy.path}
+                        to={policy.path}
+                        onClick={() => setIsMobileMenuOpen(false)}
+                        className="text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 rounded-lg touch-manipulation block"
+                      >
+                        {policy.label}
+                      </Link>
+                    ))}
+                  </div>
+                  
                   <div className="border-t pt-4 mt-4 space-y-3">
                     {isAuthenticated ? (
                       <div className="space-y-2">

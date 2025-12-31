@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { Users, Target, TrendingUp, Award, Shield, Heart, Zap, Building2, Calendar, MapPin } from 'lucide-react';
+import { Users, Target, TrendingUp, Award, Shield, Heart, Zap, Calendar, MapPin } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -14,7 +14,6 @@ export function AboutPage() {
   const stats = [
     { label: "Customers Served", value: "1M+", icon: Users },
     { label: "Loans Disbursed", value: "₹5,000 Cr+", icon: TrendingUp },
-    { label: "Partner NBFCs", value: "50+", icon: Building2 },
     { label: "Cities Covered", value: "500+", icon: MapPin }
   ];
 
@@ -48,33 +47,6 @@ export function AboutPage() {
       year: "2024",
       title: "Leadership",
       description: "Became India's fastest-growing digital lending platform with over 1 million satisfied customers."
-    }
-  ];
-
-  const leadership = [
-    {
-      name: "Rajesh Sharma",
-      position: "Chief Executive Officer",
-      background: "Former VP at HDFC Bank with 15+ years in financial services",
-      image: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&h=300&fit=crop&crop=face"
-    },
-    {
-      name: "Priya Patel",
-      position: "Chief Technology Officer",
-      background: "Ex-Goldman Sachs engineer, expert in fintech innovation",
-      image: "https://images.unsplash.com/photo-1494790108755-2616b612b786?w=300&h=300&fit=crop&crop=face"
-    },
-    {
-      name: "Amit Kumar",
-      position: "Chief Risk Officer", 
-      background: "20+ years in credit risk management at leading banks",
-      image: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=300&h=300&fit=crop&crop=face"
-    },
-    {
-      name: "Sneha Reddy",
-      position: "Chief Operating Officer",
-      background: "Operations expert from Flipkart, scaling digital platforms",
-      image: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=300&h=300&fit=crop&crop=face"
     }
   ];
 
@@ -244,45 +216,6 @@ export function AboutPage() {
                 </div>
               ))}
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Leadership Team */}
-      <section className="py-16 px-4" style={{ backgroundColor: 'white' }}>
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl mb-4" style={{ color: '#1E2A3B' }}>
-              Leadership Team
-            </h2>
-            <p style={{ color: '#1E2A3B' }} className="max-w-2xl mx-auto">
-              Meet the experienced leaders driving innovation and growth at Pocket Credit.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {leadership.map((leader, index) => (
-              <Card key={index} className="text-center hover:shadow-lg transition-shadow">
-                <CardContent className="p-6">
-                  <div className="w-24 h-24 mx-auto mb-4 rounded-full overflow-hidden">
-                    <ImageWithFallback
-                      src={leader.image}
-                      alt={leader.name}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <h3 className="text-lg mb-1" style={{ color: '#1E2A3B' }}>
-                    {leader.name}
-                  </h3>
-                  <div className="text-sm mb-3" style={{ color: '#0052FF' }}>
-                    {leader.position}
-                  </div>
-                  <p className="text-sm" style={{ color: '#1E2A3B' }}>
-                    {leader.background}
-                  </p>
-                </CardContent>
-              </Card>
-            ))}
           </div>
         </div>
       </section>

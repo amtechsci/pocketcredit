@@ -7,7 +7,7 @@ import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Badge } from '../ui/badge';
-import { Mail, Phone, MapPin, Clock, MessageCircle, Headphones, FileText, AlertCircle } from 'lucide-react';
+import { Mail, Phone, MapPin, Clock, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 
@@ -44,76 +44,21 @@ export function ContactPage() {
 
   const contactMethods = [
     {
-      icon: Phone,
-      title: 'Call Us',
-      description: 'Speak to our loan experts',
-      value: '1800-123-4567',
-      availability: 'Mon-Sat, 9 AM - 8 PM',
-      action: 'Call Now'
-    },
-    {
       icon: Mail,
       title: 'Email Support',
       description: 'Send us your queries',
-      value: 'support@pocketcredit.com',
+      value: 'support@pocketcredit.in',
       availability: '24/7 Response',
       action: 'Send Email'
-    },
-    {
-      icon: MessageCircle,
-      title: 'Live Chat',
-      description: 'Chat with our support team',
-      value: 'Available Now',
-      availability: 'Mon-Sat, 9 AM - 8 PM',
-      action: 'Start Chat'
-    }
-  ];
-
-  const faqCategories = [
-    {
-      title: 'Loan Application',
-      questions: [
-        { q: 'What documents do I need?', a: 'ID proof, address proof, income proof, and bank statements.' },
-        { q: 'How long does approval take?', a: 'Most applications are approved within 24-48 hours.' },
-        { q: 'What is the minimum income requirement?', a: 'Minimum monthly income of ₹25,000 for personal loans.' }
-      ]
-    },
-    {
-      title: 'Interest Rates & Fees',
-      questions: [
-        { q: 'What are current interest rates?', a: 'Personal loans start from 10.99% per annum.' },
-        { q: 'Are there any processing fees?', a: 'Processing fee ranges from 1-3% of loan amount.' },
-        { q: 'Can I prepay my loan?', a: 'Yes, with minimal or no prepayment charges after 6 months.' }
-      ]
-    },
-    {
-      title: 'Eligibility & Credit',
-      questions: [
-        { q: 'What is the minimum credit score required?', a: 'We accept applications from credit score 650 and above.' },
-        { q: 'Can I apply if I am self-employed?', a: 'Yes, we offer loans to both salaried and self-employed individuals.' },
-        { q: 'What if I have existing loans?', a: 'Existing loans are considered in our assessment process.' }
-      ]
     }
   ];
 
   const offices = [
     {
       city: 'Mumbai',
-      address: '123 Business Complex, Andheri East, Mumbai - 400069',
+      address: 'Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar, MUMBAI, Maharashtra, India - 421001',
       phone: '+91 22 1234 5678',
-      email: 'mumbai@pocketcredit.com'
-    },
-    {
-      city: 'Delhi',
-      address: '456 Corporate Tower, Connaught Place, New Delhi - 110001',
-      phone: '+91 11 1234 5678',
-      email: 'delhi@pocketcredit.com'
-    },
-    {
-      city: 'Bangalore',
-      address: '789 Tech Park, Electronic City, Bangalore - 560100',
-      phone: '+91 80 1234 5678',
-      email: 'bangalore@pocketcredit.com'
+      email: 'support@pocketcredit.in'
     }
   ];
 
@@ -129,26 +74,6 @@ export function ContactPage() {
             <p className="text-lg md:text-xl max-w-3xl mx-auto" style={{ color: '#1E2A3B' }}>
               Our loan experts are here to help you with any questions about your loan application
             </p>
-          </div>
-
-          {/* Contact Methods */}
-          <div className="max-w-6xl mx-auto mb-16">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {contactMethods.map((method, index) => (
-                <Card key={index} className="text-center hover:shadow-lg transition-shadow">
-                  <CardContent className="pt-6">
-                    <method.icon className="w-12 h-12 mx-auto mb-4" style={{ color: '#0052FF' }} />
-                    <h3 className="text-lg font-medium mb-2">{method.title}</h3>
-                    <p className="text-sm text-gray-600 mb-2">{method.description}</p>
-                    <p className="font-medium mb-2" style={{ color: '#1E2A3B' }}>{method.value}</p>
-                    <p className="text-xs text-gray-500 mb-4">{method.availability}</p>
-                    <Button size="sm" style={{ backgroundColor: '#0052FF' }}>
-                      {method.action}
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
           </div>
 
           {/* Contact Form and Office Locations */}
@@ -240,7 +165,7 @@ export function ContactPage() {
               </CardContent>
             </Card>
 
-            {/* Office Locations */}
+            {/* Office Locations and Business Hours */}
             <div className="space-y-6">
               <Card>
                 <CardHeader>
@@ -302,7 +227,7 @@ export function ContactPage() {
                     <AlertCircle className="w-4 h-4 text-blue-600 mt-0.5" />
                     <div className="text-xs text-blue-700">
                       <p className="font-medium">Emergency Support</p>
-                      <p>For urgent loan-related queries, use our 24/7 email support</p>
+                      <p>For urgent loan-related queries, use our 24/7 email support support@pocketcredit.in</p>
                     </div>
                   </div>
                 </CardContent>
@@ -310,31 +235,8 @@ export function ContactPage() {
             </div>
           </div>
 
-          {/* FAQ Section */}
-          <div className="max-w-4xl mx-auto">
-            <h2 className="text-2xl mb-8 text-center" style={{ color: '#1E2A3B' }}>
-              Frequently Asked Questions
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {faqCategories.map((category, index) => (
-                <Card key={index}>
-                  <CardHeader>
-                    <CardTitle className="text-lg">{category.title}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {category.questions.map((faq, faqIndex) => (
-                        <div key={faqIndex} className="text-sm">
-                          <p className="font-medium mb-1">{faq.q}</p>
-                          <p className="text-gray-600">{faq.a}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </div>
+          {/* Email Support */}
+         
 
           {/* CTA Section */}
           <div className="max-w-4xl mx-auto mt-16 text-center">

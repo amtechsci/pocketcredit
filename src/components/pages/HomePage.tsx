@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Shield, Clock, Award, Star, CheckCircle, CreditCard, Building, Smartphone, Users } from 'lucide-react';
+import { ArrowRight, Shield, Clock, Award, Star, CheckCircle, CreditCard, Building, Smartphone, Users, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible';
 import { EligibilityChecker } from '../EligibilityChecker';
 import { EMICalculator } from '../EMICalculator';
 import { ImageWithFallback } from '../figma/ImageWithFallback';
@@ -10,11 +11,12 @@ import { ImageWithFallback } from '../figma/ImageWithFallback';
 export function HomePage() {
   const navigate = useNavigate();
   const [activeCalculator, setActiveCalculator] = useState<'eligibility' | 'emi'>('eligibility');
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
 
   const trustMetrics = [
     { icon: Users, label: '50k+ Satisfied Users', color: '#00C49A' },
     { icon: Star, label: '4.5+ Star Rating', color: '#FFD700' },
-    { icon: Shield, label: 'ISO 27001 Certified', color: '#0052FF' },
+    { icon: Shield, label: 'RBI registered NBFC (with Reg. No: N-13.02361)', color: '#0052FF' },
   ];
 
   const howItWorksSteps = [
@@ -47,10 +49,10 @@ export function HomePage() {
   const loanProducts = [
     {
       title: 'Personal Loan',
-      description: 'Quick personal loans up to ₹10 lakhs with minimal documentation',
+      description: 'Quick personal loans up to ₹3 lakhs with minimal documentation',
       features: ['No collateral required', 'Instant approval', 'Flexible tenure'],
-      amount: 'Up to ₹10 Lakhs',
-      interest: 'Starting at 14% p.a.',
+      amount: 'Up to ₹3 Lakhs',
+      interest: 'Starting at 14% - 36% p.a.',
       path: '/personal-loan',
       image: 'https://images.unsplash.com/flagged/photo-1570607008863-da87b9deefa7?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBpbmRpYW4lMjB3b21hbiUyMHNtYXJ0cGhvbmUlMjBmaW5hbmNlfGVufDF8fHx8MTc1NzE3MzA4MHww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral'
     },
@@ -89,6 +91,37 @@ export function HomePage() {
     }
   ];
 
+  const faqs = [
+    {
+      question: 'What is the maximum loan amount I can get?',
+      answer: 'You can get a loan up to ₹3,00,000.'
+    },
+    {
+      question: 'What is the loan tenure?',
+      answer: 'The loan tenure is up to 195 days. You can choose between single-term or EMI-based repayment.'
+    },
+    {
+      question: 'Who is eligible for a loan?',
+      answer: 'Indian citizens aged 18 years and above are eligible to apply for a loan.'
+    },
+    {
+      question: 'Is credit score mandatory?',
+      answer: 'No, credit score is not mandatory. First-time borrowers are welcome to apply.'
+    },
+    {
+      question: 'Are there any hidden charges?',
+      answer: 'No, we believe in transparent pricing with no hidden charges. All fees and charges are clearly communicated upfront.'
+    },
+    {
+      question: 'Can I prepay my loan?',
+      answer: 'Yes, prepayment is allowed anytime without any charges.'
+    },
+    {
+      question: 'What happens if I miss a payment?',
+      answer: 'Late penalties will apply on missed payments and it may impact your credit score.'
+    }
+  ];
+
   return (
     <div className="min-h-screen">
       {/* Hero Section */}
@@ -119,11 +152,11 @@ export function HomePage() {
                     </svg>
                   </span>
                   {' '}up to{' '}
-                  <span style={{ color: '#0052FF' }}>₹10 Lakhs</span>
+                  <span style={{ color: '#0052FF' }}>₹3 Lakhs</span>
                 </h1>
                 <p className="text-lg sm:text-xl lg:text-2xl text-gray-600 leading-relaxed max-w-2xl mx-auto lg:mx-0">
                   <span className="font-semibold text-green-600">2-minute approval</span>, 
-                  zero paperwork, and money in your account within 24 hours.
+                  zero paperwork, and money in your account within 15 min.
                 </p>
               </div>
 
@@ -151,7 +184,7 @@ export function HomePage() {
                   style={{ backgroundColor: '#0052FF' }}
                   className="text-white hover:opacity-90 btn-mobile touch-manipulation w-full sm:w-auto text-base sm:text-lg px-8 py-4 shadow-lg hover:shadow-xl transition-all duration-300"
                 >
-                  Apply Now - Get ₹10L
+                  Apply Now - Get ₹3L
                   <ArrowRight className="ml-2 h-5 w-5" />
                 </Button>
               </div>
@@ -159,7 +192,7 @@ export function HomePage() {
               {/* Small Print */}
               <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
                 *Subject to eligibility criteria. Processing fee and other charges may apply. 
-                Loans are provided by our RBI registered NBFC partner.
+                Loans are provided by our RBI registered NBFC platform.
               </p>
             </div>
 
@@ -185,7 +218,7 @@ export function HomePage() {
                         <CheckCircle className="w-4 h-4 text-green-600" />
                       </div>
                       <div>
-                        <div className="text-sm font-bold text-green-600">₹2 lakh</div>
+                        <div className="text-sm font-bold text-green-600">₹3 lakh</div>
                         <div className="text-xs text-gray-500">Approved</div>
                       </div>
                     </div>
@@ -277,15 +310,8 @@ export function HomePage() {
         <div className="container mx-auto mobile-container">
           <div className="text-center mb-6 sm:mb-8">
             <h3 className="text-xl font-semibold mb-4" style={{ color: '#1E2A3B' }}>
-              Our RBI Registered NBFC Partner
+              Trusted Financial Platform
             </h3>
-            <div className="flex justify-center mb-8">
-              <div className="bg-gray-100 px-6 py-3 rounded-lg">
-                <span className="font-semibold" style={{ color: '#1E2A3B' }}>
-                  Trusted Financial Partner
-                </span>
-              </div>
-            </div>
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
@@ -303,15 +329,6 @@ export function HomePage() {
                 </div>
               );
             })}
-          </div>
-
-          <div className="text-center">
-            <p className="text-sm mb-4" style={{ color: '#1E2A3B' }}>As featured in</p>
-            <div className="flex justify-center items-center gap-8 opacity-60">
-              <div className="bg-gray-200 px-4 py-2 rounded">Economic Times</div>
-              <div className="bg-gray-200 px-4 py-2 rounded">Business Standard</div>
-              <div className="bg-gray-200 px-4 py-2 rounded">Mint</div>
-            </div>
           </div>
         </div>
       </section>
@@ -458,8 +475,52 @@ export function HomePage() {
         </div>
       </section>
 
-      {/* CTA Section */}
+      {/* FAQs */}
       <section className="py-16 bg-white">
+        <div className="container mx-auto px-4">
+          <div className="text-center mb-12">
+            <h2 className="text-2xl md:text-3xl font-bold mb-4" style={{ color: '#1E2A3B' }}>
+              Frequently Asked Questions
+            </h2>
+            <p className="text-lg" style={{ color: '#1E2A3B' }}>
+              Get answers to common queries about our loans
+            </p>
+          </div>
+
+          <div className="max-w-4xl mx-auto space-y-4">
+            {faqs.map((faq, index) => (
+              <Collapsible key={index} open={openFaq === index} onOpenChange={(open) => setOpenFaq(open ? index : null)}>
+                <CollapsibleTrigger asChild>
+                  <Card className="cursor-pointer hover:shadow-md transition-shadow">
+                    <CardContent className="p-4">
+                      <div className="flex justify-between items-center">
+                        <h3 className="font-medium text-left" style={{ color: '#1E2A3B' }}>
+                          {faq.question}
+                        </h3>
+                        {openFaq === index ? (
+                          <ChevronUp className="w-5 h-5 text-gray-500 flex-shrink-0 ml-4" />
+                        ) : (
+                          <ChevronDown className="w-5 h-5 text-gray-500 flex-shrink-0 ml-4" />
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <Card className="mt-2">
+                    <CardContent className="p-4 pt-0">
+                      <p className="text-gray-600 leading-relaxed">{faq.answer}</p>
+                    </CardContent>
+                  </Card>
+                </CollapsibleContent>
+              </Collapsible>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CTA Section */}
+      <section className="py-16" style={{ backgroundColor: '#F0F4F8' }}>
         <div className="container mx-auto px-4 text-center">
           <h2 className="text-2xl md:text-3xl font-bold mb-4" style={{ color: '#1E2A3B' }}>
             Ready to Get Your Loan?

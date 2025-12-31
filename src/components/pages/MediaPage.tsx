@@ -43,36 +43,7 @@ export function MediaPage() {
     }
   ];
 
-  const mediaFeatures = [
-    {
-      outlet: "Economic Times",
-      title: "How Pocket Credit is Transforming Digital Lending in India",
-      date: "2024-01-08",
-      type: "Interview",
-      image: "https://images.unsplash.com/photo-1586953208448-b95a79798f07?w=300&h=200&fit=crop"
-    },
-    {
-      outlet: "Business Standard",
-      title: "Fintech Revolution: The Rise of Quick Personal Loans",
-      date: "2023-12-15",
-      type: "Feature Story",
-      image: "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=300&h=200&fit=crop"
-    },
-    {
-      outlet: "Mint",
-      title: "Digital Lending Platforms Gain Momentum Post-Pandemic",
-      date: "2023-11-22",
-      type: "Market Analysis",
-      image: "https://images.unsplash.com/photo-1559526324-4b87b5e36e44?w=300&h=200&fit=crop"
-    },
-    {
-      outlet: "Forbes India",
-      title: "Young Entrepreneurs Driving Fintech Innovation",
-      date: "2023-10-30",
-      type: "Profile",
-      image: "https://images.unsplash.com/photo-1560472355-536de3962603?w=300&h=200&fit=crop"
-    }
-  ];
+  const mediaFeatures: any[] = [];
 
   const mediaKit = [
     {
@@ -353,29 +324,6 @@ export function MediaPage() {
         </div>
       </section>
 
-      {/* Contact Section */}
-      <section className="py-16 px-4" style={{ backgroundColor: 'white' }}>
-        <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-3xl mb-4" style={{ color: '#1E2A3B' }}>
-            Media Inquiries
-          </h2>
-          <p className="mb-8" style={{ color: '#1E2A3B' }}>
-            For press inquiries, interviews, or additional information, please contact our media relations team.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-2xl mx-auto">
-            <div>
-              <h3 className="text-lg mb-2" style={{ color: '#1E2A3B' }}>Press Inquiries</h3>
-              <p style={{ color: '#1E2A3B' }}>press@pocketcredit.in</p>
-              <p style={{ color: '#1E2A3B' }}>+91 98765 43210</p>
-            </div>
-            <div>
-              <h3 className="text-lg mb-2" style={{ color: '#1E2A3B' }}>Marketing Team</h3>
-              <p style={{ color: '#1E2A3B' }}>marketing@pocketcredit.in</p>
-              <p style={{ color: '#1E2A3B' }}>+91 98765 43211</p>
-            </div>
-          </div>
-        </div>
-      </section>
     </div>
   );
 }
