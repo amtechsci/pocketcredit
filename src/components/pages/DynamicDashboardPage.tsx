@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
@@ -133,6 +133,20 @@ export function DynamicDashboardPage() {
   const [canApplyForLoan, setCanApplyForLoan] = useState(true);
   const [selectedLoanDetails, setSelectedLoanDetails] = useState<any>(null);
   const [showLoanDetailsModal, setShowLoanDetailsModal] = useState(false);
+
+  // Combine applied loans (pre-disbursal) and running loans (account_manager) for "Active Loans" display
+  // This ensures all in-progress loans are visible to the user
+  // MUST be declared here (before any conditional returns) to satisfy Rules of Hooks
+  const activeLoansForDisplay = useMemo(() => {
+    const combined = [...appliedLoans, ...runningLoans];
+    console.log('📊 Active Loans for Display:', {
+      appliedCount: appliedLoans.length,
+      runningCount: runningLoans.length,
+      combinedCount: combined.length,
+      statuses: combined.map(l => ({ id: l.id, status: l.status, purpose: l.loan_purpose }))
+    });
+    return combined;
+  }, [appliedLoans, runningLoans]);
 
   // Load dashboard data
   const loadDashboardData = useCallback(async () => {
@@ -413,6 +427,15 @@ export function DynamicDashboardPage() {
 
         // All loans includes everything (for My Loans history tab, including cleared loans)
         const all = uniqueApplications;
+
+        console.log('🔍 Loan Categorization:', {
+          total: uniqueApplications.length,
+          applied: applied.length,
+          running: running.length,
+          allStatuses: uniqueApplications.map(a => ({ id: a.id, status: a.status })),
+          appliedStatuses: applied.map(a => ({ id: a.id, status: a.status })),
+          runningStatuses: running.map(a => ({ id: a.id, status: a.status }))
+        });
 
         setPendingApplications(uniqueApplications);
         setAppliedLoans(applied);
@@ -758,9 +781,9 @@ export function DynamicDashboardPage() {
                 </h3>
               </div>
 
-              {appliedLoans.length > 0 ? (
+              {activeLoansForDisplay.length > 0 ? (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {appliedLoans.map((loan) => (
+                  {activeLoansForDisplay.map((loan) => (
                     <Card key={loan.id} className="p-3 lg:p-6 hover:shadow-md transition-shadow">
                       <div className="flex justify-between items-start mb-3 lg:mb-4">
                         <div className="flex-1 min-w-0">
@@ -774,10 +797,11 @@ export function DynamicDashboardPage() {
                             loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
                             loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
                             loan.status === 'ready_for_disbursement' ? 'bg-green-100 text-green-800' :
+                            loan.status === 'account_manager' ? 'bg-emerald-100 text-emerald-800' :
                             'bg-gray-100 text-gray-800'
                           }`}
                         >
-                          {loan.status.replace('_', ' ')}
+                          {loan.status === 'account_manager' ? 'Active' : loan.status.replace('_', ' ')}
                         </Badge>
                       </div>
 
@@ -798,11 +822,14 @@ export function DynamicDashboardPage() {
                           {loan.status === 'under_review' && 'Under review'}
                           {loan.status === 'follow_up' && 'Info required'}
                           {loan.status === 'ready_for_disbursement' && 'Ready for disbursal'}
+                          {loan.status === 'account_manager' && 'Loan is active'}
                         </p>
                         <Button
                           onClick={() => {
                             console.log('View Details clicked for:', loan.id);
-                            if (loan.status === 'follow_up') {
+                            if (loan.status === 'account_manager') {
+                              navigate(`/repayment-schedule?applicationId=${loan.id}`);
+                            } else if (loan.status === 'follow_up') {
                               navigate('/loan-application/upload-documents', {
                                 state: { applicationId: loan.id }
                               });
@@ -816,7 +843,7 @@ export function DynamicDashboardPage() {
                           size="sm"
                           className="text-xs lg:text-sm whitespace-nowrap"
                         >
-                          {loan.status === 'follow_up' ? 'Upload Documents' : 'View'}
+                          {loan.status === 'account_manager' ? 'View Loan' : loan.status === 'follow_up' ? 'Upload Documents' : 'View'}
                         </Button>
                       </div>
                     </Card>
@@ -909,9 +936,9 @@ export function DynamicDashboardPage() {
             Active Loans
           </h3>
 
-          {appliedLoans.length > 0 ? (
+          {activeLoansForDisplay.length > 0 ? (
             <div className="space-y-3">
-              {appliedLoans.map((loan) => (
+              {activeLoansForDisplay.map((loan) => (
                 <Card key={loan.id} className="p-3 hover:shadow-md transition-shadow">
                   <div className="flex justify-between items-start mb-3">
                     <div className="flex-1 min-w-0">
@@ -925,10 +952,11 @@ export function DynamicDashboardPage() {
                         loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
                         loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
                         loan.status === 'ready_for_disbursement' ? 'bg-green-100 text-green-800' :
+                        loan.status === 'account_manager' ? 'bg-emerald-100 text-emerald-800' :
                         'bg-gray-100 text-gray-800'
                       }`}
                     >
-                      {loan.status.replace('_', ' ')}
+                      {loan.status === 'account_manager' ? 'Active' : loan.status.replace('_', ' ')}
                     </Badge>
                   </div>
 
@@ -949,11 +977,14 @@ export function DynamicDashboardPage() {
                       {loan.status === 'under_review' && 'Under review'}
                       {loan.status === 'follow_up' && 'Info required'}
                       {loan.status === 'ready_for_disbursement' && 'Ready for disbursal'}
+                      {loan.status === 'account_manager' && 'Loan is active'}
                     </p>
                     <Button
                       onClick={() => {
                         console.log('View Details clicked for:', loan.id);
-                        if (loan.status === 'follow_up') {
+                        if (loan.status === 'account_manager') {
+                          navigate(`/repayment-schedule?applicationId=${loan.id}`);
+                        } else if (loan.status === 'follow_up') {
                           navigate('/loan-application/upload-documents', {
                             state: { applicationId: loan.id }
                           });
@@ -967,7 +998,7 @@ export function DynamicDashboardPage() {
                       size="sm"
                       className="text-xs whitespace-nowrap w-full"
                     >
-                      {loan.status === 'follow_up' ? 'Upload Documents' : 'View'}
+                      {loan.status === 'account_manager' ? 'View Loan' : loan.status === 'follow_up' ? 'Upload Documents' : 'View'}
                     </Button>
                   </div>
                 </Card>

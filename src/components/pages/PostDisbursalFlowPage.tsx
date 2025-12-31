@@ -144,14 +144,53 @@ export const PostDisbursalFlowPage = () => {
 
       if (appIdParam) {
         appId = parseInt(appIdParam);
-        setApplicationId(appId);
+        
+        // STRICT GUARD: Verify loan status before allowing access
+        // Only 'disbursal' status loans can access this post-disbursal flow
+        const response = await apiService.getLoanApplications();
+        if (response.success && response.data?.applications) {
+          const app = response.data.applications.find((a: any) => a.id == appId);
+          
+          if (!app) {
+            console.warn(`❌ Application ${appId} not found. Redirecting to dashboard.`);
+            toast.error('Loan application not found');
+            navigate('/dashboard');
+            return;
+          }
 
-        // check status immediately for this ID
-        const redirected = await checkStatusAndRedirect(appId);
-        if (redirected) return; // Stop if redirecting
+          console.log(`🔒 Status guard check for App ${appId}: status='${app.status}'`);
+
+          // Only 'disbursal' status is allowed
+          if (app.status !== 'disbursal') {
+            console.warn(`⛔ Unauthorized access attempt: App ${appId} has status '${app.status}', not 'disbursal'`);
+            
+            // Redirect based on actual status
+            if (app.status === 'account_manager') {
+              console.log('➡️ Redirecting to repayment schedule (loan is in account_manager status)');
+              toast.info('This loan is already active. Redirecting...');
+              setRedirecting(true);
+              navigate(`/repayment-schedule?applicationId=${appId}`);
+              return;
+            } else {
+              console.log('➡️ Redirecting to dashboard (invalid status for post-disbursal flow)');
+              toast.error('This loan is not ready for post-disbursal steps');
+              navigate('/dashboard');
+              return;
+            }
+          }
+
+          // Status is valid - proceed
+          console.log(`✅ Access granted: App ${appId} is in 'disbursal' status`);
+          setApplicationId(appId);
+        } else {
+          console.error('Failed to fetch applications for status verification');
+          toast.error('Unable to verify loan status');
+          navigate('/dashboard');
+          return;
+        }
 
       } else {
-        // Fetch latest application with disbursal status OR account_manager status
+        // No applicationId in URL - fetch latest disbursal application
         const response = await apiService.getLoanApplications();
         if (response.success && response.data?.applications) {
           // Check for account_manager first (prioritize redirected flow)
@@ -160,6 +199,7 @@ export const PostDisbursalFlowPage = () => {
           );
 
           if (activeLoan) {
+            console.log('➡️ Found account_manager loan, redirecting to repayment schedule');
             setRedirecting(true);
             navigate(`/repayment-schedule?applicationId=${activeLoan.id}`);
             return;
@@ -169,8 +209,11 @@ export const PostDisbursalFlowPage = () => {
             (app: any) => app.status === 'disbursal'
           );
           if (disbursalApp) {
+            console.log(`✅ Found disbursal loan ${disbursalApp.id}`);
             appId = disbursalApp.id;
             setApplicationId(appId);
+          } else {
+            console.log('ℹ️ No disbursal loans found');
           }
         }
       }
@@ -179,10 +222,13 @@ export const PostDisbursalFlowPage = () => {
       // This ensures we load progress even if applicationId state hasn't updated yet
       if (appId) {
         await fetchProgress(appId);
+      } else {
+        setLoading(false);
       }
     } catch (error) {
       console.error('Error fetching application:', error);
       toast.error('Failed to load application');
+      navigate('/dashboard');
     } finally {
       // Only turn off loading if NOT redirecting
       if (!redirecting) {
