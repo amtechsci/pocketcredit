@@ -163,7 +163,8 @@ const fetchDashboardData = async (userId) => {
     holdInfo = {
       is_on_hold: true,
       hold_reason: user.application_hold_reason,
-      hold_type: user.hold_until_date ? 'cooling_period' : 'permanent' // Use cooling_period for temporary holds (re-process)
+      hold_type: user.hold_until_date ? 'cooling_period' : 'permanent', // Use cooling_period for temporary holds (re-process)
+      status: user.status
     };
     
     if (user.hold_until_date) {
@@ -180,6 +181,14 @@ const fetchDashboardData = async (userId) => {
       holdInfo.remaining_days = remainingDays > 0 ? remainingDays : 0;
       holdInfo.is_expired = remainingDays <= 0;
     }
+  } else if (user.status === 'deleted') {
+    // Handle deleted status
+    holdInfo = {
+      is_on_hold: false,
+      status: 'deleted',
+      hold_reason: 'Profile purged in our system',
+      hold_type: 'permanent'
+    };
   }
 
   // Get financial details from employment_details
@@ -276,6 +285,7 @@ const fetchDashboardData = async (userId) => {
   } : { monthly_income: 0, monthly_expenses: 0, existing_loans: 0 };
 
   // Get loan statistics from loan_applications
+  // Note: 'cleared' loans are excluded from active_loans count to allow users to apply for new loans
   const loanStatsQuery = `
     SELECT 
       COUNT(*) as total_loans,
@@ -289,6 +299,7 @@ const fetchDashboardData = async (userId) => {
   const stats = loanStats && loanStats[0] ? loanStats[0] : {};
 
   // Get active loans with details from loan_applications
+  // Cleared loans are NOT included here - they are completed and should not block new loan applications
   const activeLoansQuery = `
     SELECT 
       id,

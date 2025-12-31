@@ -401,21 +401,18 @@ export function DynamicDashboardPage() {
         }
 
         // Split applications into applied loans and running loans
+        // Applied: Pre-disbursal statuses (submitted, under_review, follow_up, ready_for_disbursement)
         const applied = uniqueApplications.filter((app: any) =>
-          ['submitted', 'under_review', 'follow_up'].includes(app.status)
+          ['submitted', 'under_review', 'follow_up', 'ready_for_disbursement'].includes(app.status)
         );
 
-        // Running loans should NOT include cleared loans (those are completed)
+        // Running loans: Only active loans with account manager (NOT cleared, NOT ready_for_disbursement)
         const running = uniqueApplications.filter((app: any) =>
-          ['account_manager', 'ready_for_disbursement'].includes(app.status)
+          app.status === 'account_manager'
         );
 
-        // All loans includes everything (for My Loans history tab)
+        // All loans includes everything (for My Loans history tab, including cleared loans)
         const all = uniqueApplications;
-
-        console.log('📝 Applied loans:', applied);
-        console.log('🏃 Running loans:', running);
-        console.log('📚 All loans:', all);
 
         setPendingApplications(uniqueApplications);
         setAppliedLoans(applied);
@@ -549,21 +546,15 @@ export function DynamicDashboardPage() {
     );
   }
 
-  const { user: userData, summary, active_loans, upcoming_payments, alerts } = dashboardData;
+  const { user: userData, summary, active_loans,  alerts } = dashboardData;
 
   // Check if user has any active or pending loans
   const hasActiveOrPendingLoans = () => {
     const hasActiveLoans = active_loans && active_loans.length > 0;
-    const hasPendingApplications = pendingApplications && pendingApplications.length > 0;
-
-    // Debug logging
-    console.log('🔍 Loan Status Check:', {
-      activeLoans: active_loans?.length || 0,
-      pendingApplications: pendingApplications?.length || 0,
-      hasActiveLoans,
-      hasPendingApplications,
-      result: hasActiveLoans || hasPendingApplications
-    });
+    // Filter out cleared loans from pendingApplications when checking if user can apply
+    const activePendingApps = pendingApplications?.filter((app: any) => app.status !== 'cleared') || [];
+    const hasPendingApplications = activePendingApps.length > 0;
+    
 
     return hasActiveLoans || hasPendingApplications;
   };
@@ -654,18 +645,7 @@ export function DynamicDashboardPage() {
                   <p className="text-3xl font-bold">{summary.active_loans}</p>
                   <p className="text-xs text-blue-200">{formatCurrency(summary.outstanding_amount)} outstanding</p>
                 </div>
-                <div className="bg-white/10 rounded-lg p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Calendar className="w-5 h-5" />
-                    <p className="text-blue-100 text-sm">Next EMI</p>
-                  </div>
-                  <p className="text-3xl font-bold">
-                    {upcoming_payments.length > 0 ? formatCurrency(upcoming_payments[0].emi_amount) : '₹0'}
-                  </p>
-                  <p className="text-xs text-blue-200">
-                    {upcoming_payments.length > 0 ? `Due ${formatDate(upcoming_payments[0].next_emi_date)}` : 'No pending'}
-                  </p>
-                </div>
+
               </>
             )}
           </div>
@@ -738,31 +718,6 @@ export function DynamicDashboardPage() {
         ))}
       </div>
 
-      {/* Applied Loan Applications - Overview */}
-      {appliedLoans.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <Clock className="w-6 h-6 text-yellow-600" />
-            <h3 className="text-lg font-semibold text-yellow-900">Applied Loan Applications</h3>
-            <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
-              {appliedLoans.length} in progress
-            </Badge>
-          </div>
-
-          <div className="text-center py-4">
-            <p className="text-gray-600 mb-4">
-              You have {appliedLoans.length} loan application{appliedLoans.length !== 1 ? 's' : ''} in progress.
-            </p>
-            <Button
-              onClick={() => setActiveTab('applied-loans')}
-              className="bg-yellow-600 hover:bg-yellow-700 text-white"
-            >
-              View All Applications
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* Running Loans - Overview */}
       {runningLoans.length > 0 && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-6">
@@ -801,76 +756,72 @@ export function DynamicDashboardPage() {
                   <CreditCard className="w-6 h-6 text-blue-600" />
                   Active Loans
                 </h3>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => setActiveTab('my-loans')}
-                >
-                  View All
-                </Button>
               </div>
 
-              {active_loans.length > 0 ? (
-                active_loans.map((loan) => (
-                  <div key={loan.id} className="border rounded-lg p-6 mb-4 hover:bg-gray-50 transition-colors">
-                    <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <h4 className="text-lg font-semibold">{loan.loan_purpose || 'Personal Loan'}</h4>
-                        <p className="text-gray-600">Loan ID: {loan.loan_number}</p>
+              {appliedLoans.length > 0 ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {appliedLoans.map((loan) => (
+                    <Card key={loan.id} className="p-3 lg:p-6 hover:shadow-md transition-shadow">
+                      <div className="flex justify-between items-start mb-3 lg:mb-4">
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-sm lg:text-lg font-semibold truncate">{loan.loan_purpose || 'Personal Loan'}</h4>
+                          <p className="text-gray-600 text-xs lg:text-sm truncate">App: {formatAppNumber(loan.application_number)}</p>
+                        </div>
+                        <Badge
+                          variant="secondary"
+                          className={`text-[10px] lg:text-xs px-1.5 lg:px-2.5 py-0.5 ${
+                            loan.status === 'submitted' ? 'bg-blue-100 text-blue-800' :
+                            loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
+                            loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
+                            loan.status === 'ready_for_disbursement' ? 'bg-green-100 text-green-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}
+                        >
+                          {loan.status.replace('_', ' ')}
+                        </Badge>
                       </div>
-                      <Badge variant="secondary" className="bg-blue-100 text-blue-800">
-                        {loan.status}
-                      </Badge>
-                    </div>
 
-                    <div className="grid grid-cols-4 gap-6 mb-6">
-                      <div>
-                        <p className="text-sm text-gray-600">Loan Amount</p>
-                        <p className="text-xl font-semibold">{formatCurrency(loan.loan_amount)}</p>
+                      <div className="grid grid-cols-2 gap-2 lg:gap-4 mb-3 lg:mb-4">
+                        <div>
+                          <p className="text-xs lg:text-sm text-gray-500">Loan Amount</p>
+                          <p className="text-sm lg:text-lg font-semibold">₹{Number(loan.loan_amount).toLocaleString()}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs lg:text-sm text-gray-500">Applied On</p>
+                          <p className="text-xs lg:text-sm font-medium">{formatDate(loan.created_at)}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-sm text-gray-600">Outstanding</p>
-                        <p className="text-xl font-semibold text-orange-600">{formatCurrency(loan.outstanding_amount)}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-600">Monthly EMI</p>
-                        <p className="text-xl font-semibold">{formatCurrency(loan.emi_amount)}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-600">Next EMI Date</p>
-                        <p className="text-xl font-semibold">{formatDate(loan.first_emi_date)}</p>
-                      </div>
-                    </div>
 
-                    <div className="mb-6">
-                      <div className="flex justify-between text-sm mb-2">
-                        <span>Progress ({loan.completed_tenure}/{loan.tenure_months} months)</span>
-                        <span>{Math.round(loan.progress_percentage)}%</span>
+                      <div className="flex flex-col lg:flex-row justify-between lg:items-center pt-3 lg:pt-4 border-t gap-2">
+                        <p className="text-[10px] lg:text-xs text-gray-500">
+                          {loan.status === 'submitted' && 'Application submitted'}
+                          {loan.status === 'under_review' && 'Under review'}
+                          {loan.status === 'follow_up' && 'Info required'}
+                          {loan.status === 'ready_for_disbursement' && 'Ready for disbursal'}
+                        </p>
+                        <Button
+                          onClick={() => {
+                            console.log('View Details clicked for:', loan.id);
+                            if (loan.status === 'follow_up') {
+                              navigate('/loan-application/upload-documents', {
+                                state: { applicationId: loan.id }
+                              });
+                            } else {
+                              navigate('/loan-application/kyc-verification', {
+                                state: { applicationId: loan.id }
+                              });
+                            }
+                          }}
+                          variant="outline"
+                          size="sm"
+                          className="text-xs lg:text-sm whitespace-nowrap"
+                        >
+                          {loan.status === 'follow_up' ? 'Upload Documents' : 'View'}
+                        </Button>
                       </div>
-                      <Progress value={loan.progress_percentage} className="h-3" />
-                    </div>
-
-                    <div className="flex gap-3">
-                      <Button
-                        className="px-6"
-                        onClick={() => navigate('/pay-emi')}
-                        style={{ backgroundColor: '#0052FF' }}
-                      >
-                        Pay EMI
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => navigate(`/loan-details/${loan.id}`)}
-                      >
-                        View Details
-                      </Button>
-                      <Button variant="outline">
-                        <Download className="w-4 h-4 mr-2" />
-                        Statement
-                      </Button>
-                    </div>
-                  </div>
-                ))
+                    </Card>
+                  ))}
+                </div>
               ) : (
                 <div className="text-center py-8">
                   <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
@@ -958,56 +909,70 @@ export function DynamicDashboardPage() {
             Active Loans
           </h3>
 
-          {active_loans.length > 0 ? (
-            active_loans.map((loan) => (
-              <div key={loan.id} className="border rounded-lg p-4 mb-4">
-                <div className="flex justify-between items-start mb-3">
-                  <div>
-                    <h4 className="font-semibold">{loan.loan_purpose || 'Personal Loan'}</h4>
-                    <p className="text-sm text-gray-600">Loan ID: {loan.loan_number}</p>
+          {appliedLoans.length > 0 ? (
+            <div className="space-y-3">
+              {appliedLoans.map((loan) => (
+                <Card key={loan.id} className="p-3 hover:shadow-md transition-shadow">
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-semibold truncate">{loan.loan_purpose || 'Personal Loan'}</h4>
+                      <p className="text-gray-600 text-xs truncate">App: {formatAppNumber(loan.application_number)}</p>
+                    </div>
+                    <Badge
+                      variant="secondary"
+                      className={`text-[10px] px-1.5 py-0.5 ${
+                        loan.status === 'submitted' ? 'bg-blue-100 text-blue-800' :
+                        loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
+                        loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
+                        loan.status === 'ready_for_disbursement' ? 'bg-green-100 text-green-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}
+                    >
+                      {loan.status.replace('_', ' ')}
+                    </Badge>
                   </div>
-                  <Badge variant="secondary" className="bg-blue-100 text-blue-800">
-                    {loan.status}
-                  </Badge>
-                </div>
 
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <p className="text-sm text-gray-600">Loan Amount</p>
-                    <p className="font-semibold">{formatCurrency(loan.loan_amount)}</p>
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <div>
+                      <p className="text-xs text-gray-500">Loan Amount</p>
+                      <p className="text-sm font-semibold">₹{Number(loan.loan_amount).toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Applied On</p>
+                      <p className="text-xs font-medium">{formatDate(loan.created_at)}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Outstanding</p>
-                    <p className="font-semibold text-orange-600">{formatCurrency(loan.outstanding_amount)}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Monthly EMI</p>
-                    <p className="font-semibold">{formatCurrency(loan.emi_amount)}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Progress</p>
-                    <p className="font-semibold">{Math.round(loan.progress_percentage)}%</p>
-                  </div>
-                </div>
 
-                <div className="flex gap-2">
-                  <Button
-                    className="flex-1"
-                    onClick={() => navigate('/pay-emi')}
-                    style={{ backgroundColor: '#0052FF' }}
-                  >
-                    Pay EMI
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => navigate('/loan-details')}
-                  >
-                    View Details
-                  </Button>
-                </div>
-              </div>
-            ))
+                  <div className="flex flex-col justify-between pt-3 border-t gap-2">
+                    <p className="text-[10px] text-gray-500">
+                      {loan.status === 'submitted' && 'Application submitted'}
+                      {loan.status === 'under_review' && 'Under review'}
+                      {loan.status === 'follow_up' && 'Info required'}
+                      {loan.status === 'ready_for_disbursement' && 'Ready for disbursal'}
+                    </p>
+                    <Button
+                      onClick={() => {
+                        console.log('View Details clicked for:', loan.id);
+                        if (loan.status === 'follow_up') {
+                          navigate('/loan-application/upload-documents', {
+                            state: { applicationId: loan.id }
+                          });
+                        } else {
+                          navigate('/loan-application/kyc-verification', {
+                            state: { applicationId: loan.id }
+                          });
+                        }
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="text-xs whitespace-nowrap w-full"
+                    >
+                      {loan.status === 'follow_up' ? 'Upload Documents' : 'View'}
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+            </div>
           ) : (
             <div className="text-center py-8">
               <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
@@ -1052,29 +1017,16 @@ export function DynamicDashboardPage() {
                 Overview
               </button>
               <button
-                onClick={() => setActiveTab('applied-loans')}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${activeTab === 'applied-loans'
-                  ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-                  }`}
-              >
-                <Clock className="w-5 h-5" />
-                Applied Loans
-                {appliedLoans.length > 0 && (
-                  <Badge className="ml-auto bg-yellow-500 text-white">{appliedLoans.length}</Badge>
-                )}
-              </button>
-              <button
-                onClick={() => setActiveTab('loans')}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${activeTab === 'loans'
+                onClick={() => setActiveTab('my-loans')}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${activeTab === 'my-loans'
                   ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
                   : 'text-gray-700 hover:bg-gray-50'
                   }`}
               >
                 <CreditCard className="w-5 h-5" />
-                Loans
-                {runningLoans.length > 0 && (
-                  <Badge className="ml-auto bg-blue-500 text-white">{runningLoans.length}</Badge>
+                My Loans
+                {allLoans.length > 0 && (
+                  <Badge className="ml-auto bg-blue-500 text-white">{allLoans.length}</Badge>
                 )}
               </button>
               <button
@@ -1099,22 +1051,6 @@ export function DynamicDashboardPage() {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="inline-flex w-full rounded-none border-0 bg-transparent h-11 overflow-x-auto">
                 <TabsTrigger value="overview" className="rounded-none whitespace-nowrap flex-1 text-xs px-2">Overview</TabsTrigger>
-                <TabsTrigger value="applied-loans" className="rounded-none whitespace-nowrap flex-1 text-xs px-2 relative">
-                  Applied
-                  {appliedLoans.length > 0 && (
-                    <span className="absolute top-1 right-1 bg-yellow-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center text-[10px]">
-                      {appliedLoans.length}
-                    </span>
-                  )}
-                </TabsTrigger>
-                <TabsTrigger value="loans" className="rounded-none whitespace-nowrap flex-1 text-xs px-2 relative">
-                  Active
-                  {runningLoans.length > 0 && (
-                    <span className="absolute top-1 right-1 bg-blue-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center text-[10px]">
-                      {runningLoans.length}
-                    </span>
-                  )}
-                </TabsTrigger>
                 <TabsTrigger value="my-loans" className="rounded-none whitespace-nowrap flex-1 text-xs px-2">My Loans</TabsTrigger>
                 <TabsTrigger value="profile" className="rounded-none whitespace-nowrap flex-1 text-xs px-2">Profile</TabsTrigger>
               </TabsList>
@@ -1151,231 +1087,6 @@ export function DynamicDashboardPage() {
 
               <TabsContent value="overview">
                 {renderOverview()}
-              </TabsContent>
-
-              <TabsContent value="applied-loans">
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-base lg:text-xl font-semibold">Applied Loans</h3>
-                      <p className="text-xs lg:text-sm text-gray-600 mt-0.5 lg:mt-1">Track your loan applications</p>
-                    </div>
-                    {canApplyForLoan && !hasActiveOrPendingLoans() && (
-                      <Button
-                        onClick={() => {
-                          console.log('Apply for a Loan button clicked');
-                          navigate('/application');
-                        }}
-                        style={{ backgroundColor: '#0052FF' }}
-                        className="text-xs lg:text-sm whitespace-nowrap"
-                        size="sm"
-                      >
-                        Apply
-                      </Button>
-                    )}
-                  </div>
-
-                  {/* Status Flow Indicator */}
-                  <Card className="p-3 lg:p-6 bg-gradient-to-r from-blue-50 to-indigo-50">
-                    <h4 className="text-xs lg:text-sm font-semibold text-gray-700 mb-3">Application Status Flow</h4>
-                    <div className="flex items-center justify-between">
-                      <div className="flex flex-col items-center">
-                        <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-blue-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">1</div>
-                        <p className="text-[10px] lg:text-xs text-center font-medium">Submitted</p>
-                      </div>
-                      <div className="flex-1 h-0.5 lg:h-1 bg-blue-300 mx-1 lg:mx-2"></div>
-                      <div className="flex flex-col items-center">
-                        <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-blue-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">2</div>
-                        <p className="text-[10px] lg:text-xs text-center font-medium">Review</p>
-                      </div>
-                      <div className="flex-1 h-0.5 lg:h-1 bg-blue-300 mx-1 lg:mx-2"></div>
-                      <div className="flex flex-col items-center">
-                        <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-yellow-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">3</div>
-                        <p className="text-[10px] lg:text-xs text-center font-medium">Follow Up</p>
-                      </div>
-                      <div className="flex-1 h-0.5 lg:h-1 bg-blue-300 mx-1 lg:mx-2"></div>
-                      <div className="flex flex-col items-center">
-                        <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-full bg-green-500 text-white flex items-center justify-center mb-1 text-xs lg:text-sm">4</div>
-                        <p className="text-[10px] lg:text-xs text-center font-medium">Disbursal</p>
-                      </div>
-                    </div>
-                  </Card>
-
-                  {/* Applied Loan Applications */}
-                  {appliedLoans.length > 0 ? (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                      {appliedLoans.map((application) => (
-                        <Card key={application.id} className="p-3 lg:p-6 hover:shadow-md transition-shadow">
-                          <div className="flex justify-between items-start mb-3 lg:mb-4">
-                            <div className="flex-1 min-w-0">
-                              <h4 className="text-sm lg:text-lg font-semibold truncate">{application.loan_purpose || 'Personal Loan'}</h4>
-                              <p className="text-gray-600 text-xs lg:text-sm truncate">App: {formatAppNumber(application.application_number)}</p>
-                            </div>
-                            <Badge
-                              variant="secondary"
-                              className={`text-[10px] lg:text-xs px-1.5 lg:px-2.5 py-0.5 ${application.status === 'submitted' ? 'bg-blue-100 text-blue-800' :
-                                application.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
-                                  application.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
-                                    application.status === 'disbursal' ? 'bg-green-100 text-green-800' :
-                                      'bg-gray-100 text-gray-800'
-                                }`}
-                            >
-                              {application.status.replace('_', ' ')}
-                            </Badge>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-2 lg:gap-4 mb-3 lg:mb-4">
-                            <div>
-                              <p className="text-xs lg:text-sm text-gray-500">Loan Amount</p>
-                              <p className="text-sm lg:text-lg font-semibold">₹{Number(application.loan_amount).toLocaleString()}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs lg:text-sm text-gray-500">Applied On</p>
-                              <p className="text-xs lg:text-sm font-medium">{formatDate(application.created_at)}</p>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col lg:flex-row justify-between lg:items-center pt-3 lg:pt-4 border-t gap-2">
-                            <p className="text-[10px] lg:text-xs text-gray-500">
-                              {application.status === 'submitted' && 'Application submitted'}
-                              {application.status === 'under_review' && 'Under review'}
-                              {application.status === 'follow_up' && 'Info required'}
-                              {application.status === 'disbursal' && 'Processing disbursal'}
-                            </p>
-                            <Button
-                              onClick={() => {
-                                console.log('View Details clicked for:', application.id);
-                                if (application.status === 'follow_up') {
-                                  // Redirect to document upload page for follow_up status
-                                  navigate('/loan-application/upload-documents', {
-                                    state: { applicationId: application.id }
-                                  });
-                                } else {
-                                  navigate('/loan-application/kyc-verification', {
-                                    state: { applicationId: application.id }
-                                  });
-                                }
-                              }}
-                              variant="outline"
-                              size="sm"
-                              className="text-xs lg:text-sm whitespace-nowrap"
-                            >
-                              {application.status === 'follow_up' ? 'Upload Documents' : 'View'}
-                            </Button>
-                          </div>
-                        </Card>
-                      ))}
-                    </div>
-                  ) : (
-                    <Card className="p-6 lg:p-8 text-center">
-                      <Clock className="w-12 h-12 lg:w-16 lg:h-16 text-gray-400 mx-auto mb-3 lg:mb-4" />
-                      <h3 className="text-base lg:text-lg font-semibold text-gray-900 mb-2">No Applied Loans</h3>
-                      <p className="text-xs lg:text-sm text-gray-600 mb-3 lg:mb-4">You don't have any loan applications in progress.</p>
-                      {canApplyForLoan && (
-                        <Button
-                          onClick={() => {
-                            console.log('Apply for a Loan button clicked');
-                            navigate('/application');
-                          }}
-                          style={{ backgroundColor: '#0052FF' }}
-                          className="text-xs lg:text-sm"
-                          size="sm"
-                        >
-                          Apply for a Loan
-                        </Button>
-                      )}
-                    </Card>
-                  )}
-                </div>
-              </TabsContent>
-
-              <TabsContent value="loans">
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-xl font-semibold">My Loans</h3>
-                      <p className="text-sm text-gray-600 mt-1">Manage your active loans with account manager</p>
-                    </div>
-                  </div>
-
-                  {/* Running Loans (Account Manager) */}
-                  {runningLoans.length > 0 ? (
-                    <div className="grid gap-6">
-                      {runningLoans.map((loan) => (
-                        <Card key={loan.id} className="p-6 hover:shadow-md transition-shadow border-l-4 border-l-green-500">
-                          <div className="flex justify-between items-start mb-4">
-                            <div>
-                              <h4 className="text-lg font-semibold">{loan.loan_purpose || 'Personal Loan'}</h4>
-                              <p className="text-gray-600 text-sm">Application: {formatAppNumber(loan.application_number)}</p>
-                            </div>
-                            <Badge
-                              variant="secondary"
-                              className={
-                                loan.status === 'account_manager' ? 'bg-green-100 text-green-800' :
-                                  loan.status === 'cleared' ? 'bg-blue-100 text-blue-800' :
-                                    'bg-gray-100 text-gray-800'
-                              }
-                            >
-                              {loan.status.replace('_', ' ')}
-                            </Badge>
-                          </div>
-
-                          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
-                            <div>
-                              <p className="text-sm text-gray-600">Loan Amount</p>
-                              <p className="text-xl font-semibold">₹{Number(loan.loan_amount).toLocaleString()}</p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-gray-600">Status</p>
-                              <p className="text-sm font-medium capitalize">{loan.status.replace('_', ' ')}</p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-gray-600">Applied On</p>
-                              <p className="text-sm font-medium">{formatDate(loan.created_at)}</p>
-                            </div>
-                          </div>
-
-                          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
-                            <div className="flex items-center gap-2 mb-2">
-                              <CheckCircle className="w-5 h-5 text-green-600" />
-                              <p className="text-sm font-semibold text-green-900">Loan with Account Manager</p>
-                            </div>
-                            <p className="text-xs text-green-700">
-                              Your loan has been assigned to an account manager. They will contact you shortly to complete the process.
-                            </p>
-                          </div>
-
-                          <div className="flex gap-3">
-                            <Button
-                              onClick={() => {
-                                console.log('View Details clicked for:', loan.id);
-                                navigate('/loan-application/kyc-verification', {
-                                  state: { applicationId: loan.id }
-                                });
-                              }}
-                              style={{ backgroundColor: '#0052FF' }}
-                            >
-                              View Details
-                            </Button>
-                            <Button
-                              variant="outline"
-                              onClick={() => navigate('/contact-support')}
-                            >
-                              Contact Support
-                            </Button>
-                          </div>
-                        </Card>
-                      ))}
-                    </div>
-                  ) : (
-                    <Card className="p-8 text-center">
-                      <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                      <h3 className="text-lg font-semibold text-gray-900 mb-2">No Running Loans</h3>
-                      <p className="text-gray-600 mb-4">You don't have any loans with account manager at the moment.</p>
-                      <p className="text-sm text-gray-500">Check the "Applied Loans" tab to track your applications in progress.</p>
-                    </Card>
-                  )}
-                </div>
               </TabsContent>
 
               <TabsContent value="my-loans">

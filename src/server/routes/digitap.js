@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/jwtAuth');
 const { checkHoldStatus } = require('../middleware/checkHoldStatus');
 const { fetchUserPrefillData, validatePANDetails } = require('../services/digitapService');
 const { saveUserInfoFromPANAPI, saveAddressFromPANAPI } = require('../services/userInfoService');
+const { compareNames } = require('../utils/nameComparison');
 
 // POST /api/digitap/prefill - Fetch user data from Digitap API
 // NOTE: No checkHoldStatus here - allow fetching data even if on hold
@@ -294,6 +295,88 @@ router.post('/validate-pan', requireAuth, checkHoldStatus, async (req, res) => {
       const nameParts = panData.name.trim().split(' ');
       first_name = nameParts[0] || '';
       last_name = nameParts.slice(1).join(' ') || '';
+    }
+
+    // Get PAN name for comparison
+    const panName = panData.name || `${first_name} ${last_name}`.trim();
+
+    // Check if user has Aadhaar name from Digilocker (for name comparison)
+    // This applies only when PAN was NOT fetched from Aadhaar API
+    const aadhaarInfo = await executeQuery(
+      `SELECT name FROM user_info 
+       WHERE user_id = ? AND source = 'digilocker' AND is_primary = 1 
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId]
+    );
+
+    // If Aadhaar name exists and PAN name is available, compare them
+    if (aadhaarInfo.length > 0 && aadhaarInfo[0].name && panName) {
+      const aadhaarName = aadhaarInfo[0].name;
+      
+      // Compare names using the utility function
+      const comparisonResult = compareNames(aadhaarName, panName);
+      const matchPercentage = comparisonResult.percentage;
+
+      console.log(`📊 Name Comparison Result:`);
+      console.log(`   Aadhaar Name: ${aadhaarName}`);
+      console.log(`   PAN Name: ${panName}`);
+      console.log(`   Match Percentage: ${matchPercentage}%`);
+      console.log(`   Details:`, JSON.stringify(comparisonResult.details, null, 2));
+
+      // Get current validation attempts
+      const userAttempts = await executeQuery(
+        `SELECT pan_validation_attempts FROM users WHERE id = ?`,
+        [userId]
+      );
+      const currentAttempts = userAttempts[0]?.pan_validation_attempts || 0;
+
+      // If match percentage is less than 50%
+      if (matchPercentage < 50) {
+        // Increment attempts counter
+        const newAttempts = currentAttempts + 1;
+        await executeQuery(
+          `UPDATE users 
+           SET pan_validation_attempts = ?, 
+               last_pan_validation_attempt = NOW() 
+           WHERE id = ?`,
+          [newAttempts, userId]
+        );
+
+        console.log(`⚠️ Name mismatch detected (${matchPercentage}%). Attempt ${newAttempts}/2`);
+
+        // If this is the 1st attempt (now newAttempts = 1), show error
+        // After 2nd attempt (newAttempts >= 2), allow to proceed
+        if (newAttempts < 2) {
+          return res.json({
+            success: false,
+            name_mismatch: true,
+            match_percentage: matchPercentage,
+            aadhaar_name: aadhaarName,
+            pan_name: panName,
+            attempts: newAttempts,
+            message: 'Kindly enter your PAN number correctly',
+            allow_retry: true
+          });
+        } else {
+          console.log(`✅ Allowing after ${newAttempts} failed attempts`);
+          // Reset attempts counter and proceed
+          await executeQuery(
+            `UPDATE users SET pan_validation_attempts = 0 WHERE id = ?`,
+            [userId]
+          );
+        }
+      } else {
+        console.log(`✅ Name match successful (${matchPercentage}%)`);
+        // Reset attempts counter on successful match
+        if (currentAttempts > 0) {
+          await executeQuery(
+            `UPDATE users SET pan_validation_attempts = 0 WHERE id = ?`,
+            [userId]
+          );
+        }
+      }
+    } else {
+      console.log(`ℹ️ Skipping name comparison (no Aadhaar data or PAN fetched from Aadhaar)`);
     }
 
     // Parse address data to extract pincode

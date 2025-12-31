@@ -471,6 +471,10 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
   let totalRepayableFee = 0; // Sum of fee amounts (without GST)
   let totalRepayableFeeGST = 0; // Sum of GST on add fees
 
+  // Get EMI count for multi-EMI plans (used to multiply add_to_total fees)
+  const emiCount = parseInt(planData.emi_count) || 1;
+  const isMultiEmi = emiCount > 1;
+
   // Calculate each fee with GST
   fees.forEach(fee => {
     const feePercent = parseFloat(fee.fee_percent || 0);
@@ -491,9 +495,22 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
       totalDisbursalFee += feeAmount;
       totalDisbursalFeeGST += gstAmount;
     } else if (fee.application_method === 'add_to_total') {
-      addToTotal.push(feeDetail);
-      totalRepayableFee += feeAmount;
-      totalRepayableFeeGST += gstAmount;
+      // For multi-EMI loans, multiply the fee by EMI count
+      const multiplier = isMultiEmi ? emiCount : 1;
+      const multipliedFeeAmount = feeAmount * multiplier;
+      const multipliedGstAmount = gstAmount * multiplier;
+      const multipliedTotalWithGST = totalWithGST * multiplier;
+      
+      addToTotal.push({
+        ...feeDetail,
+        fee_amount: multipliedFeeAmount,
+        gst_amount: multipliedGstAmount,
+        total_with_gst: multipliedTotalWithGST,
+        base_fee_amount: feeAmount, // Store base amount before multiplication
+        emi_count: emiCount
+      });
+      totalRepayableFee += multipliedFeeAmount;
+      totalRepayableFeeGST += multipliedGstAmount;
     }
   });
 
@@ -528,8 +545,9 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
   console.log(`   Principal: ₹${principal.toFixed(2)}`);
   console.log(`   Interest Rate: ${interestPercentPerDay} per day (${(interestPercentPerDay * 365 * 100).toFixed(2)}% p.a.)`);
   console.log(`   Days: ${days} (${calculationMethod})`);
+  console.log(`   EMI Count: ${emiCount} ${isMultiEmi ? '(Multi-EMI)' : '(Single Payment)'}`);
   console.log(`   Deduct Fees: ${deductFromDisbursal.length}, Total: ₹${totalDisbursalDeduction.toFixed(2)} (incl. GST)`);
-  console.log(`   Add to Total Fees: ${addToTotal.length}, Total: ₹${totalRepayableAddition.toFixed(2)} (incl. GST)`);
+  console.log(`   Add to Total Fees: ${addToTotal.length}, Total: ₹${totalRepayableAddition.toFixed(2)} (incl. GST)${isMultiEmi ? ` [Multiplied by ${emiCount}]` : ''}`);
 
   // ✅ VALIDATION 1: Interest calculated on PRINCIPAL (not disbursal)
   const interest = Math.round(principal * interestPercentPerDay * days * 100) / 100;
@@ -545,7 +563,7 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
   // ✅ VALIDATION 4: Verify fee categorization
   console.log(`✅ Fee categories verified:`);
   console.log(`   - Deduct from Disbursal: ${deductFromDisbursal.map(f => f.fee_name).join(', ') || 'None'}`);
-  console.log(`   - Add to Total: ${addToTotal.map(f => f.fee_name).join(', ') || 'None'}`);
+  console.log(`   - Add to Total: ${addToTotal.map(f => `${f.fee_name}${f.emi_count > 1 ? ` (×${f.emi_count})` : ''}`).join(', ') || 'None'}`);
 
   // Calculate total repayable
   const totalRepayable = Math.round((principal + interest + totalRepayableAddition) * 100) / 100;

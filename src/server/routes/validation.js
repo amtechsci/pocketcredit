@@ -210,10 +210,11 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       // Not process: Hold permanently (lifetime hold)
       await executeQuery(
         `UPDATE users 
-         SET status = 'on_hold', hold_until_date = NULL, application_hold_reason = COALESCE(application_hold_reason, 'Profile temporarily locked'), updated_at = CURRENT_TIMESTAMP 
+         SET status = 'on_hold', hold_until_date = NULL, application_hold_reason = 'Profile temporarily locked', updated_at = CURRENT_TIMESTAMP 
          WHERE id = ?`,
         [userId]
       );
+      console.log(`✅ User ${userId} marked as NOT PROCESS (permanent hold)`);
     } else if (actionType === 're_process') {
       // Re-process: Hold for 45 days (cooling period)
       const holdUntilDate = new Date();
@@ -221,18 +222,20 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       
       await executeQuery(
         `UPDATE users 
-         SET status = 'on_hold', hold_until_date = ?, application_hold_reason = COALESCE(application_hold_reason, 'Profile under cooling period'), updated_at = CURRENT_TIMESTAMP 
+         SET status = 'on_hold', hold_until_date = ?, application_hold_reason = 'Profile under cooling period', updated_at = CURRENT_TIMESTAMP 
          WHERE id = ?`,
         [holdUntilDate, userId]
       );
+      console.log(`✅ User ${userId} marked as RE-PROCESS (45-day hold until ${holdUntilDate.toISOString()})`);
     } else if (actionType === 'unhold') {
       // Unhold: Move from hold to active status
       await executeQuery(
         `UPDATE users 
-         SET status = 'active', hold_until_date = NULL, updated_at = CURRENT_TIMESTAMP 
+         SET status = 'active', hold_until_date = NULL, application_hold_reason = NULL, updated_at = CURRENT_TIMESTAMP 
          WHERE id = ?`,
         [userId]
       );
+      console.log(`✅ User ${userId} UNHOLD - moved to active status`);
     } else if (actionType === 'delete') {
       // Delete: Mark user as deleted and purge data (except primary number, PAN, Aadhar, loan data)
       // First, mark user as deleted
@@ -242,6 +245,8 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
          WHERE id = ?`,
         [userId]
       );
+      console.log(`✅ User ${userId} marked as DELETED`);
+      
 
       // Get user's primary phone, PAN, and Aadhar before deletion
       const userData = await executeQuery(

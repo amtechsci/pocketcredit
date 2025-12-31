@@ -10,6 +10,7 @@ interface HoldInfo {
   hold_until_formatted?: string;
   remaining_days?: number;
   is_expired?: boolean;
+  status?: string;
 }
 
 interface HoldBannerProps {
@@ -17,6 +18,27 @@ interface HoldBannerProps {
 }
 
 export function HoldBanner({ holdInfo }: HoldBannerProps) {
+  // Check if user is deleted
+  const isDeleted = holdInfo?.status === 'deleted';
+  
+  if (isDeleted) {
+    return (
+      <div className="mb-6">
+        <Alert variant="destructive" className="border-red-600 bg-red-100">
+          <XCircle className="h-5 w-5" />
+          <AlertTitle className="text-lg font-semibold">
+            Your profile is purged in our system
+          </AlertTitle>
+          <AlertDescription className="mt-2">
+            <p className="text-sm">
+              Thank you.
+            </p>
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
   if (!holdInfo || !holdInfo.is_on_hold) {
     return null;
   }

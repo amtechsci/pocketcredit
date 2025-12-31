@@ -122,6 +122,8 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       total_duration_days: planSnapshot.total_duration_days || planSnapshot.repayment_days || null,
       interest_percent_per_day: parseFloat(planSnapshot.interest_percent_per_day || loan.interest_percent_per_day || 0.001),
       calculate_by_salary_date: planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true,
+      emi_count: planSnapshot.emi_count || null,
+      emi_frequency: planSnapshot.emi_frequency || null,
       fees: planSnapshot.fees || []
     };
     

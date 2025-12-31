@@ -93,13 +93,121 @@ router.get('/progress/:applicationId', requireAuth, async (req, res) => {
       [applicationId]
     );
 
+    // Check if user has any existing active E-NACH mandates from previous loans
+    let hasActiveEnach = progress.enach_done || false;
+    
+    if (!hasActiveEnach) {
+      try {
+        const activeEnachMandates = await executeQuery(
+          `SELECT id FROM enach_subscriptions 
+           WHERE user_id = ? 
+           AND (status IN ('ACTIVE', 'AUTHENTICATED', 'BANK_APPROVAL_PENDING') 
+                OR mandate_status = 'APPROVED')
+           LIMIT 1`,
+          [userId]
+        );
+        
+        if (activeEnachMandates && activeEnachMandates.length > 0) {
+          hasActiveEnach = true;
+          console.log(`✅ User ${userId} has existing active E-NACH mandate. Auto-completing E-NACH step for loan ${applicationId}.`);
+          
+          // Update the loan application to mark enach_done = true
+          if (existingColumns.includes('enach_done')) {
+            await executeQuery(
+              'UPDATE loan_applications SET enach_done = 1 WHERE id = ?',
+              [applicationId]
+            );
+          }
+        }
+      } catch (enachCheckError) {
+        console.error('Error checking for active E-NACH mandates:', enachCheckError);
+        // Continue with current enach_done value if check fails
+      }
+    }
+
+    // Check if user has existing verified selfie from previous loans
+    let hasVerifiedSelfie = (progress.selfie_captured && progress.selfie_verified) || false;
+    
+    if (!hasVerifiedSelfie) {
+      try {
+        const existingSelfie = await executeQuery(
+          `SELECT selfie_image_url FROM loan_applications 
+           WHERE user_id = ? 
+           AND selfie_captured = 1 
+           AND selfie_verified = 1 
+           AND selfie_image_url IS NOT NULL
+           AND id != ?
+           ORDER BY updated_at DESC
+           LIMIT 1`,
+          [userId, applicationId]
+        );
+        
+        if (existingSelfie && existingSelfie.length > 0 && existingSelfie[0].selfie_image_url) {
+          hasVerifiedSelfie = true;
+          const selfieUrl = existingSelfie[0].selfie_image_url;
+          console.log(`✅ User ${userId} has existing verified selfie. Auto-completing Selfie step for loan ${applicationId}.`);
+          
+          // Update the current loan application with existing selfie and mark as verified
+          if (existingColumns.includes('selfie_captured') && existingColumns.includes('selfie_verified')) {
+            await executeQuery(
+              `UPDATE loan_applications 
+               SET selfie_image_url = ?, selfie_captured = 1, selfie_verified = 1 
+               WHERE id = ?`,
+              [selfieUrl, applicationId]
+            );
+          }
+        }
+      } catch (selfieCheckError) {
+        console.error('Error checking for existing verified selfie:', selfieCheckError);
+        // Continue with current selfie status if check fails
+      }
+    }
+
+    // Check if user has existing references (3+ refs + alternate mobile)
+    let hasCompletedReferences = progress.references_completed || false;
+    
+    if (!hasCompletedReferences) {
+      try {
+        // Check for 3 references in references table
+        const userReferences = await executeQuery(
+          'SELECT COUNT(*) as ref_count FROM `references` WHERE user_id = ?',
+          [userId]
+        );
+        
+        // Check for alternate mobile in users table
+        const userAlternate = await executeQuery(
+          'SELECT alternate_mobile FROM users WHERE id = ? AND alternate_mobile IS NOT NULL',
+          [userId]
+        );
+        
+        const hasThreeRefs = userReferences && userReferences[0] && userReferences[0].ref_count >= 3;
+        const hasAlternateMobile = userAlternate && userAlternate.length > 0 && userAlternate[0].alternate_mobile;
+        
+        if (hasThreeRefs && hasAlternateMobile) {
+          hasCompletedReferences = true;
+          console.log(`✅ User ${userId} has existing references (${userReferences[0].ref_count} refs + alternate mobile). Auto-completing References step for loan ${applicationId}.`);
+          
+          // Update the loan application to mark references_completed = true
+          if (existingColumns.includes('references_completed')) {
+            await executeQuery(
+              'UPDATE loan_applications SET references_completed = 1 WHERE id = ?',
+              [applicationId]
+            );
+          }
+        }
+      } catch (referencesCheckError) {
+        console.error('Error checking for existing references:', referencesCheckError);
+        // Continue with current references status if check fails
+      }
+    }
+
     res.json({
       success: true,
       data: {
-        enach_done: progress.enach_done || false,
-        selfie_captured: progress.selfie_captured || false,
-        selfie_verified: progress.selfie_verified || false,
-        references_completed: progress.references_completed || false,
+        enach_done: hasActiveEnach,
+        selfie_captured: hasVerifiedSelfie,
+        selfie_verified: hasVerifiedSelfie,
+        references_completed: hasCompletedReferences,
         kfs_viewed: progress.kfs_viewed || false,
         agreement_signed: progress.agreement_signed || false,
         current_step: progress.current_step || 1

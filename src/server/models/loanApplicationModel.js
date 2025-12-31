@@ -155,6 +155,29 @@ const createApplication = async (userId, applicationData) => {
       }
     }
 
+    // Check if user has any cleared loans (repeat customer) - Expedite to disbursal
+    let initialStatus = 'submitted';
+    let hasCompletedLoan = false;
+    
+    try {
+      const { executeQuery } = require('../config/database');
+      const clearedLoans = await executeQuery(
+        'SELECT id FROM loan_applications WHERE user_id = ? AND status = "cleared" LIMIT 1',
+        [userId]
+      );
+      
+      if (clearedLoans && clearedLoans.length > 0) {
+        hasCompletedLoan = true;
+        initialStatus = 'disbursal';
+        console.log(`🎉 Repeat customer detected! User ${userId} has cleared loan(s). Fast-tracking to disbursal status.`);
+      } else {
+        console.log(`📝 New customer: User ${userId} has no cleared loans. Starting with submitted status.`);
+      }
+    } catch (checkError) {
+      console.error('⚠️ Error checking for cleared loans:', checkError);
+      // Continue with 'submitted' status if check fails
+    }
+
     const query = `
       INSERT INTO loan_applications (
         user_id, application_number, loan_amount, loan_purpose,
@@ -165,7 +188,7 @@ const createApplication = async (userId, applicationData) => {
         total_repayable, late_fee_structure, emi_schedule,
         tenure_months, emi_amount,
         status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', NOW(), NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
     `;
 
     // Prepare fees_breakdown JSON (use provided fees_breakdown or construct from fees array)
@@ -201,10 +224,13 @@ const createApplication = async (userId, applicationData) => {
       late_fee_structure ? JSON.stringify(late_fee_structure) : null,
       emi_schedule ? JSON.stringify(emi_schedule) : null,
       tenure_months,
-      emi_amount
+      emi_amount,
+      initialStatus  // Use determined initial status (submitted or disbursal)
     ];
 
     const [result] = await pool.execute(query, values);
+
+    console.log(`✅ Loan application created with status: ${initialStatus}${hasCompletedLoan ? ' (Repeat customer - Expedited)' : ''}`);
 
     // Return the created application
     return await findApplicationById(result.insertId);
