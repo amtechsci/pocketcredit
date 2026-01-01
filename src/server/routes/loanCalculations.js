@@ -193,6 +193,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         
         let outstandingPrincipal = principal;
         let totalInterest = 0;
+        const schedule = [];
         
         for (let i = 0; i < emiCount; i++) {
           const emiDate = new Date(allEmiDates[i]);
@@ -222,6 +223,17 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
           console.log(`📊 EMI ${i + 1}: ${formatDate(previousDate)} to ${formatDate(emiDate)} = ${daysForPeriod} days, Outstanding ₹${outstandingPrincipal}, Interest ₹${interestForPeriod}`);
           
+          // Add to schedule
+          const instalmentAmount = Math.round((principalForThisEmi + interestForPeriod) * 100) / 100;
+          schedule.push({
+            emi_number: i + 1,
+            due_date: formatDate(emiDate),
+            principal: principalForThisEmi,
+            interest: interestForPeriod,
+            instalment_amount: instalmentAmount,
+            days: daysForPeriod
+          });
+          
           outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
         }
         
@@ -229,10 +241,25 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         
         // Update interest and total repayable
         calculation.interest.amount = totalInterest;
+        
+        console.log(`💰 Calculation breakdown:`);
+        console.log(`   Principal: ₹${principal}`);
+        console.log(`   Total Interest: ₹${totalInterest}`);
+        console.log(`   Repayable Fee: ₹${calculation.totals.repayableFee}`);
+        console.log(`   Repayable Fee GST: ₹${calculation.totals.repayableFeeGST}`);
+        
         calculation.total.repayable = principal + totalInterest + calculation.totals.repayableFee + calculation.totals.repayableFeeGST;
         calculation.total.breakdown = `Principal (₹${principal.toFixed(2)}) + Interest (₹${totalInterest.toFixed(2)}) + Repayable Fees (₹${(calculation.totals.repayableFee + calculation.totals.repayableFeeGST).toFixed(2)}) = ₹${calculation.total.repayable.toFixed(2)}`;
         
-        console.log(`📊 Multi-EMI loan ${loanId}: Recalculated interest from reducing balance: ₹${totalInterest}`);
+        console.log(`   💵 Total Repayable: ₹${calculation.total.repayable}`);
+        
+        // Add repayment schedule to calculation
+        if (!calculation.repayment) {
+          calculation.repayment = {};
+        }
+        calculation.repayment.schedule = schedule;
+        
+        console.log(`📊 Multi-EMI loan ${loanId}: Recalculated with ${schedule.length} EMI periods`);
       }
     }
     

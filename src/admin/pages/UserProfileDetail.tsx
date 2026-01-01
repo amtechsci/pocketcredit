@@ -4636,7 +4636,7 @@ export function UserProfileDetail() {
                       // Penalty - use processed value if available, otherwise calculate
                       let penaltyData = { penalty: 0, gst: 0, total: 0 };
                       if (isProcessed && loan.processed_penalty !== null && loan.processed_penalty !== undefined) {
-                        penaltyData.total = loan.processed_penalty;
+                        penaltyData.total = parseFloat(loan.processed_penalty) || 0; // Ensure it's a number
                       } else {
                         penaltyData = calculatePenalty(principal, dpd);
                       }
