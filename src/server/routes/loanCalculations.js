@@ -1,34 +1,135 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateAdmin } = require('../middleware/auth');
+const { requireAuth } = require('../middleware/jwtAuth');
 const { initializeDatabase } = require('../config/database');
 const {
   calculateTotalDays,
   calculateLoanValues,
   calculateCompleteLoanValues,
   getLoanCalculation,
-  updateLoanCalculation
+  updateLoanCalculation,
+  getNextSalaryDate,
+  getSalaryDateForMonth,
+  calculateDaysBetween,
+  formatDateToString
 } = require('../utils/loanCalculations');
 const { executeQuery } = require('../config/database');
 
 /**
+ * Middleware to allow both admin and user access
+ * Users can only access their own loans, admins can access any loan
+ */
+const authenticateLoanAccess = async (req, res, next) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Access token required'
+      });
+    }
+
+    const jwt = require('jsonwebtoken');
+    const JWT_SECRET = process.env.JWT_SECRET || 'pocket-credit-secret-key-2025';
+    
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (error) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired token'
+      });
+    }
+
+    await initializeDatabase();
+
+    // Check if admin
+    const admins = await executeQuery(
+      'SELECT id, is_active FROM admins WHERE id = ?',
+      [decoded.id]
+    );
+
+    if (admins.length > 0 && admins[0].is_active) {
+      // Admin access - allow access to any loan
+      req.admin = { id: admins[0].id };
+      return next();
+    }
+
+    // Check if user
+    const users = await executeQuery(
+      'SELECT id, status FROM users WHERE id = ?',
+      [decoded.id]
+    );
+
+    if (users.length > 0 && (users[0].status === 'active' || users[0].status === 'on_hold')) {
+      // User access - verify loan belongs to user
+      const loanId = parseInt(req.params.loanId);
+      if (isNaN(loanId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid loan ID'
+        });
+      }
+
+      const loans = await executeQuery(
+        'SELECT user_id FROM loan_applications WHERE id = ?',
+        [loanId]
+      );
+
+      if (!loans || loans.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Loan not found'
+        });
+      }
+
+      if (loans[0].user_id !== users[0].id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied. You can only access your own loans.'
+        });
+      }
+
+      req.user = users[0];
+      req.userId = users[0].id;
+      return next();
+    }
+
+    // Neither admin nor valid user
+    return res.status(403).json({
+      success: false,
+      message: 'Access denied'
+    });
+  } catch (error) {
+    console.error('Authentication error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Authentication error'
+    });
+  }
+};
+
+/**
  * GET /api/loan-calculations/:loanId
  * Get complete calculated values for a loan using centralized function
+ * Accessible to both admin and users (users can only access their own loans)
  * Query params:
  *   - customDays: Optional custom days for calculation
- *   - calculationDate: Optional date to calculate from (ISO format)
+ *   - calculationDate: Optional date to calculate from (YYYY-MM-DD format)
  */
-router.get('/:loanId', authenticateAdmin, async (req, res) => {
+router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
   try {
     await initializeDatabase();
     const loanId = parseInt(req.params.loanId);
     const customDays = req.query.customDays ? parseInt(req.query.customDays) : null;
-    const calculationDate = req.query.calculationDate ? new Date(req.query.calculationDate) : null;
-    
-    console.log(`📊 Fetching loan calculation for loan ID: ${loanId}`);
+    // Keep calculationDate as string - don't convert to Date object (avoids timezone conversion)
+    const calculationDate = req.query.calculationDate || null;
     
     if (isNaN(loanId)) {
-      console.error(`❌ Invalid loan ID: ${req.params.loanId}`);
       return res.status(400).json({
         success: false,
         message: 'Invalid loan ID'
@@ -36,9 +137,13 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     }
     
     // Fetch loan data
+    // Use DATE() function to extract date portion directly from MySQL (avoids timezone conversion)
     const loans = await executeQuery(
       `SELECT 
-        id, loan_amount, status, disbursed_at, plan_snapshot,
+        id, loan_amount, status, 
+        DATE(disbursed_at) as disbursed_at_date, disbursed_at,
+        DATE(processed_at) as processed_at_date, processed_at,
+        plan_snapshot,
         interest_percent_per_day, fees_breakdown, user_id
       FROM loan_applications 
       WHERE id = ?`,
@@ -46,15 +151,11 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     );
     
     if (!loans || loans.length === 0) {
-      console.error(`❌ Loan not found: ${loanId}`);
       return res.status(404).json({
         success: false,
         message: `Loan with ID ${loanId} not found`
       });
     }
-    
-    console.log(`✅ Loan found: ${loanId}, status: ${loans[0].status}`);
-    
     const loan = loans[0];
     
     // Parse plan snapshot
@@ -127,9 +228,51 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       fees: planSnapshot.fees || []
     };
     
+    // For processed loans, use processed_at as calculation date (not current date)
+    // This ensures interest calculation starts from the actual processing date
+    // Always convert to YYYY-MM-DD string format to avoid timezone issues and ensure consistent format
+    let finalCalculationDate = null;
+    
+    // Helper function to parse date to YYYY-MM-DD string (no timezone conversion)
+    const parseDateToStr = (dateValue) => {
+      if (!dateValue) return null;
+      if (typeof dateValue === 'string') {
+        if (dateValue.includes('T')) return dateValue.split('T')[0];
+        if (dateValue.includes(' ')) return dateValue.split(' ')[0];
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) return dateValue;
+      }
+      if (dateValue instanceof Date) {
+        // Use UTC getters to avoid local timezone issues when converting Date object to string
+        const year = dateValue.getUTCFullYear();
+        const month = String(dateValue.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(dateValue.getUTCDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+      return null;
+    };
+    
+    // Convert query parameter calculationDate to YYYY-MM-DD string if provided
+    if (calculationDate) {
+      finalCalculationDate = parseDateToStr(calculationDate);
+    }
+    
+    // For processed loans, use processed_at if no calculationDate was provided
+    // Prefer processed_at_date (from SQL DATE() function) to avoid timezone issues
+    if (!finalCalculationDate && loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+      // Use processed_at_date if available (from SQL DATE() function - no timezone conversion)
+      if (loan.processed_at_date) {
+        finalCalculationDate = loan.processed_at_date;
+      } else {
+        finalCalculationDate = parseDateToStr(loan.processed_at);
+      }
+      if (!finalCalculationDate) {
+        console.error('Invalid date format from processed_at. Expected YYYY-MM-DD, got:', loan.processed_at);
+      }
+    }
+    
     const options = {
       customDays: customDays,
-      calculationDate: calculationDate
+      calculationDate: finalCalculationDate // Pass string, not Date object
     };
     
     // Calculate using centralized function
@@ -142,47 +285,64 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       const interestRatePerDay = calculation.interest.rate_per_day;
       
       // Generate EMI dates to calculate interest per period
-      const { getNextSalaryDate, getSalaryDateForMonth } = require('../utils/loanCalculations');
-      
       let allEmiDates = [];
       let baseDate;
-      if (loan.disbursed_at) {
-        // Parse date to avoid timezone issues
-        try {
-          const d = new Date(loan.disbursed_at);
-          if (isNaN(d.getTime())) {
-            throw new Error('Invalid date');
-          }
-          // Create a new date using UTC values as local values
-          baseDate = new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0);
-        } catch (e) {
-          console.error('Error parsing disbursed_at date:', e);
-          baseDate = new Date();
-          baseDate.setHours(0, 0, 0, 0);
+      
+      // For processed loans (account_manager status), use processed_at as base date for interest calculation
+      // Otherwise use disbursed_at or current date
+      const isProcessed = loan.processed_at && ['account_manager', 'cleared'].includes(loan.status);
+      // Prioritize processed_at_date (from SQL DATE() - no timezone conversion) over processed_at Date object
+      const dateSource = isProcessed 
+        ? (loan.processed_at_date || loan.processed_at)
+        : (loan.disbursed_at_date || loan.disbursed_at || null);
+      
+      // Helper function to parse date to YYYY-MM-DD string (no timezone conversion)
+      const parseDateToStr = (dateValue) => {
+        if (!dateValue) return null;
+        if (typeof dateValue === 'string') {
+          if (dateValue.includes('T')) return dateValue.split('T')[0];
+          if (dateValue.includes(' ')) return dateValue.split(' ')[0];
+          if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) return dateValue;
         }
-      } else {
-        baseDate = new Date();
-        baseDate.setHours(0, 0, 0, 0);
+        if (dateValue instanceof Date) {
+          // Use UTC getters to avoid local timezone issues when converting Date object to string
+          const year = dateValue.getUTCFullYear();
+          const month = String(dateValue.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(dateValue.getUTCDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        }
+        return null;
+      };
+      
+      // Parse base date to string, then convert to Date for calendar arithmetic
+      let baseDateStr = null;
+      if (dateSource) {
+        baseDateStr = parseDateToStr(dateSource);
+      }
+      if (!baseDateStr) {
+        const today = new Date();
+        baseDateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
       }
       
-      console.log(`📅 Base Date (Disbursed): ${baseDate.getFullYear()}-${String(baseDate.getMonth()+1).padStart(2,'0')}-${String(baseDate.getDate()).padStart(2,'0')}`);
+      // Convert to Date object for calendar arithmetic (using parsed components)
+      const [baseYear, baseMonth, baseDay] = baseDateStr.split('-').map(Number);
+      baseDate = new Date(baseYear, baseMonth - 1, baseDay);
       
       if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
         const salaryDate = parseInt(userData.salary_date);
         if (salaryDate >= 1 && salaryDate <= 31) {
-          let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
+          let nextSalaryDate = getNextSalaryDate(baseDateStr, salaryDate);
           const minDuration = planData.repayment_days || 15;
-          const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          const nextSalaryDateStr = formatDateToString(nextSalaryDate);
+          let daysToNextSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
           if (daysToNextSalary < minDuration) {
-            nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
+            nextSalaryDate = getSalaryDateForMonth(nextSalaryDateStr, salaryDate, 1);
           }
+          const firstEmiDateStr = formatDateToString(nextSalaryDate);
           for (let i = 0; i < emiCount; i++) {
-            const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
-            emiDate.setHours(0, 0, 0, 0); // Normalize to midnight
+            const emiDate = getSalaryDateForMonth(firstEmiDateStr, salaryDate, i);
             allEmiDates.push(emiDate);
           }
-          const formatDateLocal = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-          console.log(`📅 EMI Dates: ${allEmiDates.map(formatDateLocal).join(', ')}`);
         }
       }
       
@@ -196,23 +356,24 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         const schedule = [];
         
         for (let i = 0; i < emiCount; i++) {
-          const emiDate = new Date(allEmiDates[i]);
-          emiDate.setHours(0, 0, 0, 0);
+          const emiDate = allEmiDates[i];
+          const emiDateStr = formatDateToString(emiDate);
           
-          let previousDate;
+          let previousDateStr;
           if (i === 0) {
-            previousDate = new Date(baseDate);
-            previousDate.setHours(0, 0, 0, 0);
+            previousDateStr = baseDateStr;
           } else {
-            previousDate = new Date(allEmiDates[i - 1]);
-            previousDate.setHours(0, 0, 0, 0);
-            previousDate.setDate(previousDate.getDate() + 1);
+            const prevEmiDate = allEmiDates[i - 1];
+            const prevEmiDateStr = formatDateToString(prevEmiDate);
+            // Add 1 day to previous date for inclusive counting
+            const prevDate = new Date(prevEmiDate);
+            prevDate.setDate(prevDate.getDate() + 1);
+            previousDateStr = formatDateToString(prevDate);
           }
           
-          // Calculate days difference (inclusive of both start and end dates)
-          const msPerDay = 1000 * 60 * 60 * 24;
-          const daysDiff = Math.round((emiDate.getTime() - previousDate.getTime()) / msPerDay);
-          const daysForPeriod = daysDiff + 1; // +1 for inclusive counting
+          // Calculate days difference (inclusive counting: both start and end dates count)
+          const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStr);
+          
           const principalForThisEmi = i === emiCount - 1 
             ? Math.round((principalPerEmi + remainder) * 100) / 100
             : principalPerEmi;
@@ -220,14 +381,11 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
           totalInterest += interestForPeriod;
           
-          const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-          console.log(`📊 EMI ${i + 1}: ${formatDate(previousDate)} to ${formatDate(emiDate)} = ${daysForPeriod} days, Outstanding ₹${outstandingPrincipal}, Interest ₹${interestForPeriod}`);
-          
           // Add to schedule
           const instalmentAmount = Math.round((principalForThisEmi + interestForPeriod) * 100) / 100;
           schedule.push({
             emi_number: i + 1,
-            due_date: formatDate(emiDate),
+            due_date: emiDateStr,
             principal: principalForThisEmi,
             interest: interestForPeriod,
             instalment_amount: instalmentAmount,
@@ -237,29 +395,16 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
         }
         
-        console.log(`✅ Total Interest (sum of all EMI periods): ₹${totalInterest}`);
-        
         // Update interest and total repayable
         calculation.interest.amount = totalInterest;
-        
-        console.log(`💰 Calculation breakdown:`);
-        console.log(`   Principal: ₹${principal}`);
-        console.log(`   Total Interest: ₹${totalInterest}`);
-        console.log(`   Repayable Fee: ₹${calculation.totals.repayableFee}`);
-        console.log(`   Repayable Fee GST: ₹${calculation.totals.repayableFeeGST}`);
-        
         calculation.total.repayable = principal + totalInterest + calculation.totals.repayableFee + calculation.totals.repayableFeeGST;
         calculation.total.breakdown = `Principal (₹${principal.toFixed(2)}) + Interest (₹${totalInterest.toFixed(2)}) + Repayable Fees (₹${(calculation.totals.repayableFee + calculation.totals.repayableFeeGST).toFixed(2)}) = ₹${calculation.total.repayable.toFixed(2)}`;
-        
-        console.log(`   💵 Total Repayable: ₹${calculation.total.repayable}`);
         
         // Add repayment schedule to calculation
         if (!calculation.repayment) {
           calculation.repayment = {};
         }
         calculation.repayment.schedule = schedule;
-        
-        console.log(`📊 Multi-EMI loan ${loanId}: Recalculated with ${schedule.length} EMI periods`);
       }
     }
     

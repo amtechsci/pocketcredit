@@ -3,7 +3,7 @@ const router = express.Router();
 const { authenticateAdmin } = require('../middleware/auth');
 const { requireAuth } = require('../middleware/jwtAuth');
 const { initializeDatabase, executeQuery } = require('../config/database');
-const { calculateLoanValues, calculateTotalDays, calculateCompleteLoanValues, calculateInterestDays, getNextSalaryDate, getSalaryDateForMonth } = require('../utils/loanCalculations');
+const { calculateLoanValues, calculateTotalDays, calculateCompleteLoanValues, calculateInterestDays, getNextSalaryDate, getSalaryDateForMonth, parseDateToString, getTodayString, calculateDaysBetween, formatDateToString } = require('../utils/loanCalculations');
 const pdfService = require('../services/pdfService');
 const emailService = require('../services/emailService');
 
@@ -44,9 +44,12 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
 
     // Use the same KFS generation logic as admin endpoint
     // Fetch full loan application details including processed data
+    // Use DATE() function to extract date portion directly from MySQL (avoids timezone conversion)
     const fullLoans = await executeQuery(`
       SELECT 
         la.*,
+        DATE(la.processed_at) as processed_at_date,
+        DATE(la.disbursed_at) as disbursed_at_date,
         la.fees_breakdown,
         la.disbursal_amount,
         la.processed_at,
@@ -176,84 +179,115 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     
     // Calculate actual exhausted days from processed_at (for processed loans) or disbursed_at to today (only if requested)
     // Per rulebook: For processed loans, use processed_at as base date
+    // Use string-based date calculation to avoid timezone conversion
     let actualExhaustedDays = null;
     if (useActualDays && loan.processed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)) {
       // For processed loans, use processed_at as per rulebook
-      const processedDate = parseDateSafe(loan.processed_at);
-      const currentDate = new Date();
-      // Set both dates to midnight for accurate day calculation
-      currentDate.setHours(0, 0, 0, 0);
-      // Use inclusive counting: Math.ceil((end - start) / msPerDay) + 1
-      const diffTime = currentDate.getTime() - processedDate.getTime();
-      actualExhaustedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-      // Ensure at least 1 day
-      if (actualExhaustedDays < 1) {
-        actualExhaustedDays = 1;
+      const processedDateStr = parseDateToString(loan.processed_at);
+      const currentDateStr = getTodayString();
+      if (processedDateStr) {
+        actualExhaustedDays = calculateDaysBetween(processedDateStr, currentDateStr);
+        // Ensure at least 1 day
+        if (actualExhaustedDays < 1) {
+          actualExhaustedDays = 1;
+        }
+        console.log(`📅 Using actual exhausted days: ${actualExhaustedDays} (from processed_at ${processedDateStr} to ${currentDateStr})`);
       }
-      const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      console.log(`📅 Using actual exhausted days: ${actualExhaustedDays} (from processed_at ${formatDate(processedDate)} to ${formatDate(currentDate)})`);
     } else if (useActualDays && loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)) {
       // Fallback to disbursed_at if processed_at not available (shouldn't happen for processed loans)
-      const disbursedDate = parseDateSafe(loan.disbursed_at);
-      const currentDate = new Date();
-      currentDate.setHours(0, 0, 0, 0);
-      const diffTime = currentDate.getTime() - disbursedDate.getTime();
-      actualExhaustedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-      if (actualExhaustedDays < 1) {
-        actualExhaustedDays = 1;
+      const disbursedDateStr = parseDateToString(loan.disbursed_at);
+      const currentDateStr = getTodayString();
+      if (disbursedDateStr) {
+        actualExhaustedDays = calculateDaysBetween(disbursedDateStr, currentDateStr);
+        if (actualExhaustedDays < 1) {
+          actualExhaustedDays = 1;
+        }
+        console.log(`📅 Using actual exhausted days: ${actualExhaustedDays} (from disbursed_at ${disbursedDateStr} to ${currentDateStr})`);
       }
-      console.log(`📅 Using actual exhausted days: ${actualExhaustedDays} (from disbursed_at ${disbursedDate.toISOString().split('T')[0]} to ${currentDate.toISOString().split('T')[0]})`);
     } else {
       console.log(`📅 Using planned repayment days (for KFS/Agreement documents)`);
     }
 
     // Calculate PLANNED loan term days (for due date calculation) - always use planned term, not exhausted days
     // This should be calculated from the disbursement date (or today if not disbursed) using the plan
-    const plannedTermCalculationDate = loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)
-      ? new Date(loan.disbursed_at)  // Use disbursed date for planned term calculation
-      : new Date();  // Use today for pending loans
-    // Normalize to midnight for consistent date calculations
-    plannedTermCalculationDate.setHours(0, 0, 0, 0);
-    const plannedTermResult = calculateInterestDays(planData, userData, plannedTermCalculationDate);
+    // Use string-based date parsing to avoid timezone conversion
+    const plannedTermCalculationDateStr = loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)
+      ? parseDateToString(loan.disbursed_at)  // Use disbursed date for planned term calculation (as string)
+      : getTodayString();  // Use today for pending loans
+    const plannedTermResult = calculateInterestDays(planData, userData, plannedTermCalculationDateStr);
     const plannedTermDays = plannedTermResult.days;
 
     // KFS should show the original planned loan terms for documents, but actual days for repayment schedule
-    // Use plan's repayment days calculation (could be fixed days or salary-based) unless useActualDays is true
-    const calculationDateForOptions = loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)
-      ? new Date(loan.disbursed_at)  // Use disbursed date for calculation
-      : new Date();  // Use today for pending loans
-    // Normalize to midnight for consistent date calculations
-    calculationDateForOptions.setHours(0, 0, 0, 0);
+    // IMPORTANT: For "Pay on Due Date" total amount, we need planned term days, not exhausted days
+    // useActualDays should only affect the repayment schedule display, not the total amount calculation
+    // Use string-based date parsing to avoid timezone conversion
+    // For processed loans, use processed_at; otherwise use disbursed_at
+    let calculationDateForOptionsStr;
+    if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+      // For processed loans, use processed_at_date (from SQL DATE() function) to avoid timezone issues
+      // MySQL DATE() returns as Date object, so we need to parse it using UTC getters
+      if (loan.processed_at_date) {
+        if (typeof loan.processed_at_date === 'string') {
+          calculationDateForOptionsStr = loan.processed_at_date;
+        } else if (loan.processed_at_date instanceof Date) {
+          // MySQL DATE() returns as Date object - use UTC getters to avoid timezone conversion
+          const year = loan.processed_at_date.getUTCFullYear();
+          const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
+          calculationDateForOptionsStr = `${year}-${month}-${day}`;
+        } else {
+          calculationDateForOptionsStr = parseDateToString(loan.processed_at) || getTodayString();
+        }
+      } else {
+        calculationDateForOptionsStr = parseDateToString(loan.processed_at) || getTodayString();
+      }
+    } else {
+      calculationDateForOptionsStr = getTodayString();  // Use today for pending loans
+    }
     const calculationOptions = {
-      calculationDate: calculationDateForOptions,
-      customDays: actualExhaustedDays  // Only override with actual exhausted days if useActualDays=true
+      calculationDate: calculationDateForOptionsStr,  // Pass string, not Date object
+      // DON'T use customDays (actualExhaustedDays) for total amount calculation
+      // This ensures "Pay on Due Date" uses planned term days (41 days), not exhausted days (1-2 days)
+      // customDays: null  // Let it calculate using planned term days
     };
 
-    // For processed loans, use processed_interest from database (updated by cron) instead of recalculating
+    // For processed loans, use processed_interest from database (updated by cron) if available
+    // If processed_interest is null, calculate it using the correct date handling
     // Per rulebook: For processed loans, use processed_* values, not live calculations
     let loanValues;
     if (loan.processed_at && useActualDays) {
       // Use processed data for processed loans
       const processedPrincipal = parseFloat(loan.processed_amount || loanData.loan_amount || 0);
-      const processedInterest = parseFloat(loan.processed_interest || 0);
+      const processedInterest = loan.processed_interest !== null && loan.processed_interest !== undefined 
+        ? parseFloat(loan.processed_interest) 
+        : null; // Don't default to 0, use null to indicate it should be calculated
       const processedPenalty = parseFloat(loan.processed_penalty || 0);
       
-      // Still calculate fees and other values, but use processed interest
+      // Calculate loan values (this will calculate interest correctly with fixed date handling)
       loanValues = calculateCompleteLoanValues(loanData, planData, userData, calculationOptions);
       
-      // Override interest with processed_interest (updated by cron)
+      // IMPORTANT: For "Pay on Due Date" total amount, we MUST keep planned term days (41 days)
+      // Don't override interest.days with exhausted days - that would cause wrong total amount
+      // Exhausted days are only for display, not for total amount calculation
       if (loanValues.interest) {
-        loanValues.interest.amount = processedInterest;
-        // Calculate days from processed_at to today for display
-        const processedDate = new Date(loan.processed_at);
-        processedDate.setHours(0, 0, 0, 0);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const daysFromProcessed = Math.ceil((today.getTime() - processedDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-        loanValues.interest.days = daysFromProcessed;
+        // Calculate days from processed_at to today for display only
+        const processedDateStr = parseDateToString(loan.processed_at);
+        const todayStr = getTodayString();
+        const daysFromProcessed = processedDateStr ? calculateDaysBetween(processedDateStr, todayStr) : 1;
+        
+        // Store exhausted days for display, but DON'T override interest.days (keep planned term days)
+        loanValues.interest.exhaustedDays = daysFromProcessed;
+        
+        // Only use processed_interest if it exists and is valid, but keep planned term days
+        if (processedInterest !== null && processedInterest > 0) {
+          // For display: show processed_interest, but total amount should still use planned term interest
+          console.log(`📊 processed_interest: ₹${processedInterest} (exhausted days: ${daysFromProcessed}), but total uses planned term: ₹${loanValues.interest.amount} (${loanValues.interest.days} days)`);
+        } else {
+          // processed_interest is null, use calculated interest with planned term days
+          console.log(`📊 Using calculated interest with planned term days: ₹${loanValues.interest.amount} (${loanValues.interest.days} days), exhausted days: ${daysFromProcessed}`);
+        }
+        // CRITICAL: Don't override loanValues.interest.days - keep planned term days for total amount calculation
       }
-      
-      console.log(`📊 Using processed_interest: ₹${processedInterest} (from database, updated by cron)`);
     } else {
       // Calculate loan values using actual exhausted days (not plan days) for interest calculation
       loanValues = calculateCompleteLoanValues(loanData, planData, userData, calculationOptions);
@@ -298,6 +332,42 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     }
 
     // Build KFS data structure (same as admin endpoint)
+    // Extract baseDate as string for interest calculation and schedule generation (avoids timezone issues)
+    // This needs to be at a high scope so it's accessible in both calculations and schedule sections
+    let baseDateStr;
+    if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+      // Use processed_at_date if available (from SQL DATE() - no timezone conversion)
+      if (loan.processed_at_date) {
+        if (typeof loan.processed_at_date === 'string') {
+          baseDateStr = loan.processed_at_date;
+        } else if (loan.processed_at_date instanceof Date) {
+          const year = loan.processed_at_date.getUTCFullYear();
+          const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
+          baseDateStr = `${year}-${month}-${day}`;
+        } else {
+          baseDateStr = parseDateToString(loan.processed_at) || getTodayString();
+        }
+      } else {
+        baseDateStr = parseDateToString(loan.processed_at) || getTodayString();
+      }
+    } else {
+      if (loan.disbursed_at_date) {
+        if (typeof loan.disbursed_at_date === 'string') {
+          baseDateStr = loan.disbursed_at_date;
+        } else if (loan.disbursed_at_date instanceof Date) {
+          const year = loan.disbursed_at_date.getUTCFullYear();
+          const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
+          baseDateStr = `${year}-${month}-${day}`;
+        } else {
+          baseDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
+        }
+      } else {
+        baseDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
+      }
+    }
+    
     const kfsData = {
       company: {
         name: 'Pocket Credit',
@@ -485,8 +555,54 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         // For Multi-EMI loans, calculate total interest by summing interest for each EMI period
         // Each EMI period has interest calculated on the outstanding principal for that period
         // Define baseDate for debug logging (used for both single and multi-EMI)
-        const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
-        baseDate.setHours(0, 0, 0, 0);
+        // For processed loans, use processed_at as base date; otherwise use disbursed_at
+        // This must match the base date used for EMI date generation
+        let baseDate;
+        if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+          // Use processed_at_date if available (from SQL DATE() function), otherwise parse
+          // MySQL DATE() returns as Date object, so we need to handle both string and Date
+          if (loan.processed_at_date) {
+            if (typeof loan.processed_at_date === 'string') {
+              const [year, month, day] = loan.processed_at_date.split('-').map(Number);
+              baseDate = new Date(year, month - 1, day);
+            } else if (loan.processed_at_date instanceof Date) {
+              // MySQL DATE() returns as Date object - extract UTC components and create Date in UTC
+              // This ensures the Date represents the same calendar date regardless of server timezone
+              const year = loan.processed_at_date.getUTCFullYear();
+              const month = loan.processed_at_date.getUTCMonth();
+              const day = loan.processed_at_date.getUTCDate();
+              // Use Date.UTC() to create Date in UTC, matching the original date
+              baseDate = new Date(Date.UTC(year, month, day));
+            } else {
+              const processedDateStr = parseDateToString(loan.processed_at);
+              if (processedDateStr) {
+                const [year, month, day] = processedDateStr.split('-').map(Number);
+                baseDate = new Date(year, month - 1, day);
+              } else {
+                baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+              }
+            }
+          } else {
+            const processedDateStr = parseDateToString(loan.processed_at);
+            if (processedDateStr) {
+              const [year, month, day] = processedDateStr.split('-').map(Number);
+              baseDate = new Date(year, month - 1, day);
+            } else {
+              baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+            }
+          }
+        } else {
+          baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+        }
+        if (baseDate && !isNaN(baseDate.getTime())) {
+          baseDate.setHours(0, 0, 0, 0);
+        } else {
+          baseDate = new Date();
+          baseDate.setHours(0, 0, 0, 0);
+        }
+        
+        // baseDateStr is already defined at higher scope (before kfsData object)
+        // No need to redefine it here
         
         // Initialize emiPeriodDetails for debug logging
         let emiPeriodDetails = [];
@@ -599,21 +715,33 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               const emiDate = allEmiDates[i] instanceof Date ? allEmiDates[i] : new Date(allEmiDates[i]);
               emiDate.setHours(0, 0, 0, 0);
               
-              // Calculate days for this EMI period
-              // First period (disbursement to first EMI): inclusive, add +1
-              // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
-              let previousDate;
-              if (i === 0) {
-                previousDate = new Date(baseDate);
-                previousDate.setHours(0, 0, 0, 0);
-              } else {
-                // Start from day AFTER previous EMI date
-                const prevEmiDate = allEmiDates[i - 1] instanceof Date ? allEmiDates[i - 1] : new Date(allEmiDates[i - 1]);
-                previousDate = new Date(prevEmiDate);
-                previousDate.setDate(previousDate.getDate() + 1);
-                previousDate.setHours(0, 0, 0, 0);
+              // Convert to string for accurate day calculation (no timezone issues)
+              const emiDateStr = formatDateToString(emiDate) || parseDateToString(emiDate);
+              
+          // Calculate days for this EMI period using string-based calculation
+          // First period (disbursement to first EMI): inclusive
+          // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
+          let previousDateStr;
+          if (i === 0) {
+            // Use baseDateStr (disbursement/processed date as string) directly
+            // This avoids any timezone conversion issues
+            previousDateStr = baseDateStr || getTodayString();
+          } else {
+            // Start from day AFTER previous EMI date
+            const prevEmiDate = allEmiDates[i - 1] instanceof Date ? allEmiDates[i - 1] : new Date(allEmiDates[i - 1]);
+            const prevEmiDateStr = formatDateToString(prevEmiDate) || parseDateToString(prevEmiDate);
+                if (prevEmiDateStr) {
+                  // Parse date string and add 1 day
+                  const [year, month, day] = prevEmiDateStr.split('-').map(Number);
+                  const nextDate = new Date(year, month - 1, day + 1);
+                  previousDateStr = formatDateToString(nextDate);
+                } else {
+                  previousDateStr = getTodayString();
+                }
               }
-              const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+              
+              // Use calculateDaysBetween for accurate calendar day calculation (inclusive)
+              const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStr);
               
               // Calculate principal for this EMI (add remainder to last EMI)
               const principalForThisEmi = i === emiCount - 1 
@@ -627,8 +755,8 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               // Store period details for debugging
               emiPeriodDetails.push({
                 period: i + 1,
-                previousDate: previousDate.toISOString().split('T')[0],
-                emiDate: emiDate.toISOString().split('T')[0],
+                previousDate: previousDateStr,
+                emiDate: emiDateStr,
                 daysForPeriod,
                 outstandingPrincipal: outstandingPrincipal.toFixed(2),
                 principalForThisEmi: principalForThisEmi.toFixed(2),
@@ -659,17 +787,39 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           interestCalculationDays: days,
           emiCount,
           interestRatePerDay: loanValues.interest?.rate_per_day || planData.interest_percent_per_day || (interest / (principal * days)),
-          disbursementDate: baseDate.toISOString().split('T')[0],
+      // Use baseDateStr directly to avoid timezone conversion
+      disbursementDate: baseDateStr || getTodayString(),
           emiPeriodDetails: emiCount > 1 ? emiPeriodDetails : undefined,
           apr: apr.toFixed(2),
           aprCalculation: `((${totalCharges} / ${principal}) / ${loanTermDaysForAPR}) * 36500 = ${apr.toFixed(2)}`
         });
         
+        // For single payment loans, ensure total_amount includes fees correctly (not multiplied by EMI count)
+        // Check if this is actually a single payment loan by checking plan type
+        const planType = planData.plan_type || planSnapshot?.plan_type || (emiCount > 1 ? 'multi_emi' : 'single');
+        const isActuallySinglePayment = planType === 'single' || (!emiCount || emiCount <= 1);
+        
+        let totalAmount = loanValues.total?.repayable || loanValues.totalRepayableAmount || 0;
+        
+        // If it's a single payment loan but emi_count > 1, fees were incorrectly multiplied
+        // Recalculate: principal + interest + base post service fee (NOT multiplied) + GST
+        if (isActuallySinglePayment && emiCount > 1) {
+          console.log(`⚠️ Detected single payment loan with emi_count=${emiCount}. Recalculating total_amount to fix fee multiplication...`);
+          const principalForCalc = loanValues.principal || loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0;
+          // For single payment, always use base interest (not interestForAPR which is for multi-EMI)
+          const interestForCalc = interest;
+          // For single payment, use base repayable fee (divide by emiCount to undo multiplication)
+          const baseRepayableFee = loanValues.totals?.repayableFee ? (loanValues.totals.repayableFee / emiCount) : 0;
+          const baseRepayableFeeGST = loanValues.totals?.repayableFeeGST ? (loanValues.totals.repayableFeeGST / emiCount) : 0;
+          totalAmount = Math.round((principalForCalc + interestForCalc + baseRepayableFee + baseRepayableFeeGST) * 100) / 100;
+          console.log(`✅ Recalculated total_amount for single payment: ₹${totalAmount.toFixed(2)} (Principal: ₹${principalForCalc}, Interest: ₹${interestForCalc}, Fee: ₹${baseRepayableFee}, GST: ₹${baseRepayableFeeGST}, Previous: ₹${loanValues.total?.repayable || 0})`);
+        }
+        
         return {
           principal,
           interest: emiCount > 1 ? interestForAPR : interest,
-          total_repayable: loanValues.total?.repayable || loanValues.totalRepayableAmount || 0,
-          total_amount: loanValues.total?.repayable || loanValues.totalRepayableAmount || 0,
+          total_repayable: totalAmount,
+          total_amount: totalAmount,
           disbursed_amount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
           netDisbursalAmount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
           emi: loanValues.emiAmount || 0,
@@ -782,7 +932,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         // Generate repayment schedule with all installments
         let schedule = [];
         const principal = loanValues.principal || loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0;
-        const totalRepayable = loanValues.total?.repayable || loanValues.totalRepayableAmount || 0;
+        let totalRepayable = loanValues.total?.repayable || loanValues.totalRepayableAmount || 0;
         const interest = loanValues.interest?.amount || loanValues.totalInterest || 0;
         
         if (isMultiEmi && allEmiDates.length === emiCount) {
@@ -795,8 +945,10 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           const postServiceFeeGSTPerEmi = loanValues.totals?.repayableFeeGST || 0;
           
           let outstandingPrincipal = principal;
-          const baseDateForSchedule = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
-          baseDateForSchedule.setHours(0, 0, 0, 0);
+          // For processed loans, use processed_at as base date; otherwise use disbursed_at
+          // This must match the base date used for EMI date generation and interest calculation
+          // Use baseDateStr (already calculated above) for schedule generation to avoid timezone issues
+          const baseDateStrForSchedule = baseDateStr || getTodayString();
           
           for (let i = 0; i < emiCount; i++) {
             // Get EMI date (handle both Date objects and strings)
@@ -804,19 +956,31 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             const emiDate = emiDateStr instanceof Date ? new Date(emiDateStr) : new Date(emiDateStr);
             emiDate.setHours(0, 0, 0, 0);
             
-            // Calculate days for this period
-            let previousDate;
+            // Convert to string for accurate day calculation (no timezone issues)
+            const emiDateStrFormatted = formatDateToString(emiDate) || parseDateToString(emiDate);
+            
+            // Calculate days for this period using string-based calculation
+            let previousDateStr;
             if (i === 0) {
-              previousDate = new Date(baseDateForSchedule);
+              // Use baseDateStrForSchedule directly to avoid timezone conversion
+              previousDateStr = baseDateStrForSchedule;
             } else {
+              // Start from day AFTER previous EMI date
               const prevEmiDateStr = allEmiDates[i - 1];
               const prevEmiDate = prevEmiDateStr instanceof Date ? new Date(prevEmiDateStr) : new Date(prevEmiDateStr);
-              previousDate = new Date(prevEmiDate);
-              previousDate.setDate(previousDate.getDate() + 1);
-              previousDate.setHours(0, 0, 0, 0);
+              const prevEmiDateStrFormatted = formatDateToString(prevEmiDate) || parseDateToString(prevEmiDate);
+              if (prevEmiDateStrFormatted) {
+                // Parse date string and add 1 day
+                const [year, month, day] = prevEmiDateStrFormatted.split('-').map(Number);
+                const nextDate = new Date(year, month - 1, day + 1);
+                previousDateStr = formatDateToString(nextDate);
+              } else {
+                previousDateStr = getTodayString();
+              }
             }
             
-            const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+            // Use calculateDaysBetween for accurate calendar day calculation (inclusive)
+            const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStrFormatted);
             
             // Calculate principal for this EMI
             const principalForThisEmi = i === emiCount - 1 
@@ -845,8 +1009,24 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           }
         } else {
           // Single payment loan
-          const postServiceFee = loanValues.totals?.repayableFee || 0;
-          const postServiceFeeGST = loanValues.totals?.repayableFeeGST || 0;
+          // Check if this is actually a single payment loan with incorrect emi_count
+          const planType = planData.plan_type || planSnapshot?.plan_type || (emiCount > 1 ? 'multi_emi' : 'single');
+          const isActuallySinglePayment = planType === 'single' || (!emiCount || emiCount <= 1);
+          
+          // For single payment loans, use base fees (not multiplied by EMI count)
+          let postServiceFee = loanValues.totals?.repayableFee || 0;
+          let postServiceFeeGST = loanValues.totals?.repayableFeeGST || 0;
+          
+          // If fees were incorrectly multiplied (single payment with emi_count > 1), divide back
+          if (isActuallySinglePayment && emiCount > 1) {
+            postServiceFee = postServiceFee / emiCount;
+            postServiceFeeGST = postServiceFeeGST / emiCount;
+            // Recalculate instalment_amount with corrected fees
+            const principalForInst = loanValues.principal || loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0;
+            const interestForInst = interest; // Use single payment interest
+            totalRepayable = Math.round((principalForInst + interestForInst + postServiceFee + postServiceFeeGST) * 100) / 100;
+          }
+          
           schedule.push({
             instalment_no: 1,
             outstanding_principal: principal,
@@ -899,7 +1079,16 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         ifsc_code: bankDetails.ifsc_code || 'N/A',
         account_holder_name: bankDetails.account_holder_name || 'N/A'
       } : null,
-      generated_at: new Date().toISOString(),
+      // Use processed_at date for processed loans, otherwise disbursed_at or today
+      // Format as YYYY-MM-DD string to avoid timezone conversion
+      generated_at: (() => {
+        if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+          return loan.processed_at_date || parseDateToString(loan.processed_at) || getTodayString();
+        } else if (loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)) {
+          return loan.disbursed_at_date || parseDateToString(loan.disbursed_at) || getTodayString();
+        }
+        return getTodayString();
+      })(),
 
       // Signature data (if agreement is signed)
       signature: (() => {
@@ -983,9 +1172,12 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     console.log('📄 Generating KFS for loan ID:', loanId);
 
     // Fetch loan application details including dynamic fees
+    // Use DATE() function to extract date portion directly from MySQL (avoids timezone conversion)
     const loans = await executeQuery(`
       SELECT 
         la.*,
+        DATE(la.processed_at) as processed_at_date,
+        DATE(la.disbursed_at) as disbursed_at_date,
         la.fees_breakdown,
         la.disbursal_amount,
         la.user_id,
@@ -1149,35 +1341,95 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       fees: planSnapshot.fees || []
     };
 
-    // Helper function to parse date without timezone issues
-    const parseDateSafe = (dateValue) => {
-      if (!dateValue) return new Date();
-      const d = new Date(dateValue);
-      // Create a new date using UTC values as local values to avoid timezone shift
-      return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0);
-    };
-
-    // Determine calculation date - use disbursed_at if loan is disbursed, otherwise use today
-    const calculationDate = loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)
-      ? parseDateSafe(loan.disbursed_at)
-      : new Date();
-    // Normalize to midnight for consistent date calculations
-    calculationDate.setHours(0, 0, 0, 0);
+    // Determine calculation date - use processed_at for processed loans, otherwise disbursed_at
+    // This matches the loan-calculations endpoint behavior
+    // Use string-based date parsing to avoid timezone conversion
+    let calculationDateStr = null;
+    if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+      // For processed loans, use processed_at_date (from SQL DATE() function) to avoid timezone issues
+      // MySQL DATE() returns as Date object, so we need to parse it using UTC getters
+      if (loan.processed_at_date) {
+        if (typeof loan.processed_at_date === 'string') {
+          calculationDateStr = loan.processed_at_date;
+        } else if (loan.processed_at_date instanceof Date) {
+          const year = loan.processed_at_date.getUTCFullYear();
+          const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
+          calculationDateStr = `${year}-${month}-${day}`;
+        } else {
+          calculationDateStr = parseDateToString(loan.processed_at);
+        }
+      } else {
+        calculationDateStr = parseDateToString(loan.processed_at);
+      }
+    } else if (loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)) {
+      // MySQL DATE() returns as Date object, so we need to parse it using UTC getters
+      if (loan.disbursed_at_date) {
+        if (typeof loan.disbursed_at_date === 'string') {
+          calculationDateStr = loan.disbursed_at_date;
+        } else if (loan.disbursed_at_date instanceof Date) {
+          const year = loan.disbursed_at_date.getUTCFullYear();
+          const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
+          calculationDateStr = `${year}-${month}-${day}`;
+        } else {
+          calculationDateStr = parseDateToString(loan.disbursed_at);
+        }
+      } else {
+        calculationDateStr = parseDateToString(loan.disbursed_at);
+      }
+    } else {
+      calculationDateStr = getTodayString();
+    }
 
     // Calculate PLANNED loan term days (for due date and loan_term_days) - always use planned term
-    const plannedTermCalculationDate = loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)
-      ? parseDateSafe(loan.disbursed_at)
-      : new Date();
-    // Normalize to midnight for consistent date calculations
-    plannedTermCalculationDate.setHours(0, 0, 0, 0);
-    const plannedTermResult = calculateInterestDays(planData, userData, plannedTermCalculationDate);
+    // Use processed_at for processed loans, otherwise disbursed_at
+    // Use string-based date parsing to avoid timezone conversion
+    let plannedTermCalculationDateStr = null;
+    if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+      // For processed loans, use processed_at_date (from SQL DATE() function) as base date
+      // MySQL DATE() returns as Date object, so we need to parse it using UTC getters
+      if (loan.processed_at_date) {
+        if (typeof loan.processed_at_date === 'string') {
+          plannedTermCalculationDateStr = loan.processed_at_date;
+        } else if (loan.processed_at_date instanceof Date) {
+          const year = loan.processed_at_date.getUTCFullYear();
+          const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
+          plannedTermCalculationDateStr = `${year}-${month}-${day}`;
+        } else {
+          plannedTermCalculationDateStr = parseDateToString(loan.processed_at);
+        }
+      } else {
+        plannedTermCalculationDateStr = parseDateToString(loan.processed_at);
+      }
+    } else if (loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)) {
+      // MySQL DATE() returns as Date object, so we need to parse it using UTC getters
+      if (loan.disbursed_at_date) {
+        if (typeof loan.disbursed_at_date === 'string') {
+          plannedTermCalculationDateStr = loan.disbursed_at_date;
+        } else if (loan.disbursed_at_date instanceof Date) {
+          const year = loan.disbursed_at_date.getUTCFullYear();
+          const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
+          plannedTermCalculationDateStr = `${year}-${month}-${day}`;
+        } else {
+          plannedTermCalculationDateStr = parseDateToString(loan.disbursed_at);
+        }
+      } else {
+        plannedTermCalculationDateStr = parseDateToString(loan.disbursed_at);
+      }
+    } else {
+      plannedTermCalculationDateStr = getTodayString();
+    }
+    const plannedTermResult = calculateInterestDays(planData, userData, plannedTermCalculationDateStr);
     const plannedTermDays = plannedTermResult.days;
 
     // Use centralized calculation function
     let calculations;
     try {
       calculations = calculateCompleteLoanValues(loanData, planData, userData, {
-        calculationDate: calculationDate
+        calculationDate: calculationDateStr  // Pass string, not Date object
       });
     } catch (error) {
       console.error('Error in calculateCompleteLoanValues:', error);
@@ -1283,7 +1535,48 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     // For Multi-EMI loans, calculate total interest by summing interest for each EMI period
     // Each EMI period has interest calculated on the outstanding principal for that period
     // Define baseDate for debug logging (used for both single and multi-EMI)
-    const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+    // For processed loans, use processed_at as base date; otherwise use disbursed_at
+    // This must match the base date used for EMI date generation
+    // Extract date as string first to avoid timezone issues, then convert to Date only when needed
+    let baseDateStr;
+    if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+      // Use processed_at_date if available (from SQL DATE() function), otherwise parse
+      // MySQL DATE() returns as Date object, so we need to handle both string and Date
+      if (loan.processed_at_date) {
+        if (typeof loan.processed_at_date === 'string') {
+          baseDateStr = loan.processed_at_date;
+        } else if (loan.processed_at_date instanceof Date) {
+          // MySQL DATE() returns as Date object - extract UTC components as string
+          const year = loan.processed_at_date.getUTCFullYear();
+          const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
+          baseDateStr = `${year}-${month}-${day}`;
+        } else {
+          baseDateStr = parseDateToString(loan.processed_at) || getTodayString();
+        }
+      } else {
+        baseDateStr = parseDateToString(loan.processed_at) || getTodayString();
+      }
+    } else {
+      if (loan.disbursed_at_date) {
+        if (typeof loan.disbursed_at_date === 'string') {
+          baseDateStr = loan.disbursed_at_date;
+        } else if (loan.disbursed_at_date instanceof Date) {
+          const year = loan.disbursed_at_date.getUTCFullYear();
+          const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
+          baseDateStr = `${year}-${month}-${day}`;
+        } else {
+          baseDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
+        }
+      } else {
+        baseDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
+      }
+    }
+    
+    // Convert string to Date for calendar arithmetic (using parsed components to avoid timezone shift)
+    const [year, month, day] = baseDateStr.split('-').map(Number);
+    const baseDate = new Date(year, month - 1, day);
     baseDate.setHours(0, 0, 0, 0);
     
     // Initialize emiPeriodDetails for debug logging
@@ -1389,21 +1682,33 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           const emiDate = allEmiDates[i] instanceof Date ? allEmiDates[i] : new Date(allEmiDates[i]);
           emiDate.setHours(0, 0, 0, 0);
           
-          // Calculate days for this EMI period
-          // First period (disbursement to first EMI): inclusive, add +1
+          // Convert to string for accurate day calculation (no timezone issues)
+          const emiDateStr = formatDateToString(emiDate) || parseDateToString(emiDate);
+          
+          // Calculate days for this EMI period using string-based calculation
+          // First period (disbursement to first EMI): inclusive
           // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
-          let previousDate;
+          let previousDateStr;
           if (i === 0) {
-            previousDate = new Date(baseDate);
-            previousDate.setHours(0, 0, 0, 0);
+            // Use baseDateStr (disbursement/processed date as string) directly
+            // This avoids any timezone conversion issues
+            previousDateStr = baseDateStr || getTodayString();
           } else {
             // Start from day AFTER previous EMI date
             const prevEmiDate = allEmiDates[i - 1] instanceof Date ? allEmiDates[i - 1] : new Date(allEmiDates[i - 1]);
-            previousDate = new Date(prevEmiDate);
-            previousDate.setDate(previousDate.getDate() + 1);
-            previousDate.setHours(0, 0, 0, 0);
+            const prevEmiDateStr = formatDateToString(prevEmiDate) || parseDateToString(prevEmiDate);
+            if (prevEmiDateStr) {
+              // Parse date string and add 1 day
+              const [year, month, day] = prevEmiDateStr.split('-').map(Number);
+              const nextDate = new Date(year, month - 1, day + 1);
+              previousDateStr = formatDateToString(nextDate);
+            } else {
+              previousDateStr = getTodayString();
+            }
           }
-          const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          
+          // Use calculateDaysBetween for accurate calendar day calculation (inclusive)
+          const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStr);
           
           // Calculate principal for this EMI (add remainder to last EMI)
           const principalForThisEmi = i === emiCount - 1 
@@ -1419,8 +1724,8 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           // Use date format for EMI dates
           emiPeriodDetails.push({
             period: i + 1,
-            previousDate: formatDateLocal(previousDate),
-            emiDate: formatDateLocal(emiDate),
+            previousDate: previousDateStr,
+            emiDate: emiDateStr,
             daysForPeriod,
             outstandingPrincipal: outstandingPrincipal.toFixed(2),
             principalForThisEmi: principalForThisEmi.toFixed(2),
@@ -1450,7 +1755,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       interestCalculationDays: days,
       emiCount,
       interestRatePerDay: calculations.interest.rate_per_day || (interest / (principal * days)),
-      disbursementDate: baseDate.toISOString().split('T')[0],
+      disbursementDate: baseDateStr || getTodayString(),
       emiPeriodDetails: emiCount > 1 ? emiPeriodDetails : undefined,
       apr: apr.toFixed(2),
       aprCalculation: `((${totalCharges} / ${principal}) / ${loanTermDaysForAPR}) * 36500 = ${apr.toFixed(2)}`
@@ -1683,8 +1988,10 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           const postServiceFeeGSTPerEmi = calculations.totals.repayableFeeGST || 0;
           
           let outstandingPrincipal = principal;
-          const baseDateForSchedule = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
-          baseDateForSchedule.setHours(0, 0, 0, 0);
+          // For processed loans, use processed_at as base date; otherwise use disbursed_at
+          // This must match the base date used for EMI date generation and interest calculation
+          // Use baseDateStr (already calculated above) for schedule generation to avoid timezone issues
+          const baseDateStrForSchedule = baseDateStr || getTodayString();
           
           for (let i = 0; i < emiCount; i++) {
             // Get EMI date (handle both Date objects and strings)
@@ -1692,19 +1999,31 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
             const emiDate = emiDateStr instanceof Date ? new Date(emiDateStr) : new Date(emiDateStr);
             emiDate.setHours(0, 0, 0, 0);
             
-            // Calculate days for this period
-            let previousDate;
+            // Convert to string for accurate day calculation (no timezone issues)
+            const emiDateStrFormatted = formatDateToString(emiDate) || parseDateToString(emiDate);
+            
+            // Calculate days for this period using string-based calculation
+            let previousDateStr;
             if (i === 0) {
-              previousDate = new Date(baseDateForSchedule);
+              // Use baseDateStrForSchedule directly to avoid timezone conversion
+              previousDateStr = baseDateStrForSchedule;
             } else {
+              // Start from day AFTER previous EMI date
               const prevEmiDateStr = allEmiDates[i - 1];
               const prevEmiDate = prevEmiDateStr instanceof Date ? new Date(prevEmiDateStr) : new Date(prevEmiDateStr);
-              previousDate = new Date(prevEmiDate);
-              previousDate.setDate(previousDate.getDate() + 1);
-              previousDate.setHours(0, 0, 0, 0);
+              const prevEmiDateStrFormatted = formatDateToString(prevEmiDate) || parseDateToString(prevEmiDate);
+              if (prevEmiDateStrFormatted) {
+                // Parse date string and add 1 day
+                const [year, month, day] = prevEmiDateStrFormatted.split('-').map(Number);
+                const nextDate = new Date(year, month - 1, day + 1);
+                previousDateStr = formatDateToString(nextDate);
+              } else {
+                previousDateStr = getTodayString();
+              }
             }
             
-            const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+            // Use calculateDaysBetween for accurate calendar day calculation (inclusive)
+            const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStrFormatted);
             
             // Calculate principal for this EMI
             const principalForThisEmi = i === emiCount - 1 
@@ -1798,7 +2117,16 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       },
 
       // Generated metadata
-      generated_at: new Date().toISOString(),
+      // Use processed_at date for processed loans, otherwise disbursed_at or today
+      // Format as YYYY-MM-DD string to avoid timezone conversion
+      generated_at: (() => {
+        if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+          return loan.processed_at_date || parseDateToString(loan.processed_at) || getTodayString();
+        } else if (loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)) {
+          return loan.disbursed_at_date || parseDateToString(loan.disbursed_at) || getTodayString();
+        }
+        return getTodayString();
+      })(),
       generated_by: req.admin?.id || 'system',
 
       // Signature data (if agreement is signed)

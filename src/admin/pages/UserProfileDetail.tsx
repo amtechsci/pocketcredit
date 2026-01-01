@@ -4644,9 +4644,12 @@ export function UserProfileDetail() {
                       }
 
                       // Calculate interest for full tenure (till due date, not till today)
-                      // For multi-EMI loans, sum interest from schedule; for single payment, use calculation.interest.amount
+                      // For multi-EMI loans, prioritize backend-calculated total_interest to avoid timezone issues
                       let interestTillDate = 0;
-                      if (calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 1) {
+                      if (calculation?.interest?.total_interest !== undefined && calculation?.interest?.total_interest !== null) {
+                        // Use backend-calculated total_interest (avoids timezone issues in schedule calculation)
+                        interestTillDate = calculation.interest.total_interest;
+                      } else if (calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 1) {
                         // Multi-EMI loan: Sum interest from all EMI periods in the schedule
                         interestTillDate = calculation.repayment.schedule.reduce((sum: number, emi: any) => sum + (emi.interest || 0), 0);
                       } else {
@@ -4683,10 +4686,13 @@ export function UserProfileDetail() {
                         : (processingFeeGST + postServiceFeeGST);
 
                       // Total interest for full tenure - use processed value if available, otherwise calculate
-                      // For multi-EMI, use the same schedule-based calculation as interestTillDate
+                      // For multi-EMI, prioritize backend-calculated total_interest to avoid timezone issues
                       let totalInterestFullTenure;
                       if (isProcessed && loan.processed_interest !== null) {
                         totalInterestFullTenure = loan.processed_interest;
+                      } else if (calculation?.interest?.total_interest !== undefined && calculation?.interest?.total_interest !== null) {
+                        // Use backend-calculated total_interest (avoids timezone issues in schedule calculation)
+                        totalInterestFullTenure = calculation.interest.total_interest;
                       } else if (calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 1) {
                         // Multi-EMI loan: Sum interest from all EMI periods in the schedule
                         totalInterestFullTenure = calculation.repayment.schedule.reduce((sum: number, emi: any) => sum + (emi.interest || 0), 0);

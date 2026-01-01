@@ -245,7 +245,8 @@ app.use('/api/eligibility', eligibilityRoutes);
 app.use('/api/employment-quick-check', employmentQuickCheckRoutes);
 app.use('/api/loan-plans', loanPlansRoutes);
 app.use('/api/validation', validationRoutes);
-app.use('/api/admin/loan-calculations', loanCalculationsRoutes);
+app.use('/api/loan-calculations', loanCalculationsRoutes); // Accessible to both admin and users (with proper auth)
+app.use('/api/admin/loan-calculations', loanCalculationsRoutes); // Keep for backward compatibility
 app.use('/api/admin/cron', cronManagerRoutes);
 app.use('/api/kfs', kfsRoutes);
 app.use('/api/post-disbursal', postDisbursalRoutes);

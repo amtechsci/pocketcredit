@@ -88,7 +88,26 @@ export const RepaymentSchedulePage = () => {
       console.log('📊 Loan Data:', kfsResponse?.data?.loan);
       console.log('📊 Loan Status:', kfsResponse?.data?.loan?.status);
       
+      // Fetch loan calculation using unified API (same as admin)
+      let calculationResponse = null;
+      try {
+        calculationResponse = await apiService.getLoanCalculation(loanId);
+        console.log('📊 Calculation Response:', calculationResponse);
+      } catch (calcError) {
+        console.error('Error fetching loan calculation:', calcError);
+        // Continue with KFS data if calculation API fails
+      }
+      
       if (kfsResponse && (kfsResponse.success || kfsResponse.status === 'success') && kfsResponse.data) {
+        // Override calculations with unified API response if available (more accurate)
+        if (calculationResponse && calculationResponse.success && calculationResponse.data) {
+          // Use calculation API data which has correct date handling - this is the source of truth
+          kfsResponse.data.calculations = calculationResponse.data;
+          console.log('✅ Using calculation API data (correct date handling):', calculationResponse.data);
+        } else {
+          console.log('⚠️ Using KFS calculations (may have date issues):', kfsResponse.data.calculations);
+        }
+        
         setKfsData(kfsResponse.data);
         setLoanData(kfsResponse.data.loan);
         
@@ -589,17 +608,20 @@ export const RepaymentSchedulePage = () => {
                 const isProcessed = loanData.processed_at || loanData.processedDate;
                 const disbursedDate = loanData.disbursed_at || loanData.disbursedDate;
                 
-                // PRIORITY 1: Use authoritative total_repayable from database (same as Admin uses)
-                // This is the single source of truth stored in loan_applications.total_repayable
+                // PRIORITY 1: Use calculation API value (most accurate, uses correct date handling)
+                // PRIORITY 2: Use database total_repayable (may be outdated if calculated before date fix)
+                // PRIORITY 3: Calculate manually as fallback
                 let totalAmount = 0;
+                const calcTotalAmount = calculations.total?.repayable || calculations.total_amount || calculations.total_repayable || 0;
                 const dbTotalRepayable = loanData.total_repayable ? parseFloat(loanData.total_repayable) : 0;
-                const calcTotalAmount = calculations.total_amount || calculations.total?.repayable || calculations.total_repayable || 0;
                 
-                // Use database value first (most authoritative), then calculation API value, then calculate
-                if (dbTotalRepayable && dbTotalRepayable > principal) {
-                  totalAmount = dbTotalRepayable;
-                } else if (calcTotalAmount && calcTotalAmount > principal) {
+                // Use calculation API value first (most accurate), then database value, then calculate
+                if (calcTotalAmount && calcTotalAmount > principal) {
                   totalAmount = calcTotalAmount;
+                  console.log('✅ Using calculation API total:', calcTotalAmount);
+                } else if (dbTotalRepayable && dbTotalRepayable > principal) {
+                  totalAmount = dbTotalRepayable;
+                  console.log('⚠️ Using database total (may be outdated):', dbTotalRepayable);
                 } else {
                   // PRIORITY 2: Fallback to calculation if backend value not available
                   // Post service fee - use processed value if available, otherwise calculate

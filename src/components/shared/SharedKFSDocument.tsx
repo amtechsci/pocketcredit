@@ -34,7 +34,30 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
     const formatDate = (dateString: string) => {
         if (!dateString || dateString === 'N/A') return 'N/A';
         try {
-            return new Date(dateString).toLocaleDateString('en-IN', {
+            // Handle YYYY-MM-DD format (from backend) - parse without timezone conversion
+            if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+                const [year, month, day] = dateString.split('-');
+                return `${day}/${month}/${year}`;
+            }
+            // Handle ISO datetime strings - extract date part and parse without timezone conversion
+            if (typeof dateString === 'string' && dateString.includes('T')) {
+                const datePart = dateString.split('T')[0];
+                if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+                    const [year, month, day] = datePart.split('-');
+                    return `${day}/${month}/${year}`;
+                }
+            }
+            // Handle MySQL datetime format (YYYY-MM-DD HH:mm:ss)
+            if (typeof dateString === 'string' && dateString.includes(' ')) {
+                const datePart = dateString.split(' ')[0];
+                if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+                    const [year, month, day] = datePart.split('-');
+                    return `${day}/${month}/${year}`;
+                }
+            }
+            // Fallback to Date object parsing (may have timezone issues, but better than nothing)
+            const date = new Date(dateString);
+            return date.toLocaleDateString('en-IN', {
                 day: '2-digit',
                 month: '2-digit',
                 year: 'numeric'
@@ -42,63 +65,6 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
         } catch {
             return dateString;
         }
-    };
-
-    // Calculate total interest and total repayable for Multi-EMI loans
-    const calculateTotalInterestAndRepayable = () => {
-        const principal = kfsData.loan.sanctioned_amount || kfsData.calculations.principal || 0;
-        const emiCount = kfsData.loan.emi_count || 1;
-        const interestCalculationDays = kfsData.interest?.calculation_days || kfsData.calculations?.interest?.days || 0;
-        const interestRatePerDay = kfsData.interest?.rate_per_day || (kfsData.calculations.interest || 0) / (principal * interestCalculationDays || 1);
-        
-        const postServiceFeePerEmi = (kfsData.fees.total_add_to_total || 0) / emiCount;
-        const postServiceFeeGSTPerEmi = Math.round(postServiceFeePerEmi * 0.18);
-        const postServiceFeeWithGSTPerEmi = postServiceFeePerEmi + postServiceFeeGSTPerEmi;
-        
-        let totalInterest = kfsData.calculations.interest || 0;
-        let totalRepayable = kfsData.calculations.total_repayable || 0;
-        
-        // For Multi-EMI loans, recalculate total interest and total repayable
-        if (emiCount > 1 && kfsData.repayment?.all_emi_dates && Array.isArray(kfsData.repayment.all_emi_dates) && kfsData.repayment.all_emi_dates.length === emiCount) {
-            const disbursedDate = kfsData.loan.disbursed_at ? new Date(kfsData.loan.disbursed_at) : new Date();
-            disbursedDate.setHours(0, 0, 0, 0);
-            
-            const principalPerEmi = Math.floor(principal / emiCount * 100) / 100;
-            const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
-            
-            let outstandingPrincipal = principal;
-            totalInterest = 0;
-            totalRepayable = 0;
-            
-            for (let i = 0; i < emiCount; i++) {
-                const emiDate = new Date(kfsData.repayment.all_emi_dates[i]);
-                emiDate.setHours(0, 0, 0, 0);
-                
-                let previousDate;
-                if (i === 0) {
-                    previousDate = disbursedDate;
-                } else {
-                    previousDate = new Date(kfsData.repayment.all_emi_dates[i - 1]);
-                    previousDate.setDate(previousDate.getDate() + 1);
-                }
-                previousDate.setHours(0, 0, 0, 0);
-                const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                
-                const principalForThisEmi = i === emiCount - 1 
-                    ? Math.round((principalPerEmi + remainder) * 100) / 100
-                    : principalPerEmi;
-                
-                const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
-                totalInterest += interestForPeriod;
-                
-                const instalmentAmount = principalForThisEmi + interestForPeriod + postServiceFeeWithGSTPerEmi;
-                totalRepayable += instalmentAmount;
-                
-                outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
-            }
-        }
-        
-        return { totalInterest, totalRepayable };
     };
 
     const calculateAPR = () => {
@@ -691,7 +657,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         <tr>
                             <td className="border border-black p-2">5</td>
                             <td className="border border-black p-2">Total Interest Amount to be charged during the entire tenor of the loan as per the rate prevailing on sanction date (in Rupees)</td>
-                            <td className="border border-black p-2">{formatCurrency(calculateTotalInterestAndRepayable().totalInterest)}</td>
+                            <td className="border border-black p-2">{formatCurrency(kfsData.interest?.total_interest || kfsData.calculations?.interest || 0)}</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2">6</td>
@@ -728,7 +694,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         <tr>
                             <td className="border border-black p-2">8</td>
                             <td className="border border-black p-2">Total amount to be paid by the borrower (in Rupees)</td>
-                            <td className="border border-black p-2">{formatCurrency(calculateTotalInterestAndRepayable().totalRepayable)}</td>
+                            <td className="border border-black p-2">{formatCurrency(kfsData.calculations?.total_repayable || 0)}</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2">9</td>
@@ -784,97 +750,40 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                     </thead>
                     <tbody>
                         {(() => {
-                            const principal = kfsData.loan.sanctioned_amount || kfsData.calculations.principal || 0;
-                            const emiCount = kfsData.loan.emi_count || 1;
-                            const interestCalculationDays = kfsData.interest?.calculation_days || kfsData.calculations?.interest?.days || 0;
-                            const interestRatePerDay = kfsData.interest?.rate_per_day || (kfsData.calculations.interest || 0) / (principal * interestCalculationDays || 1);
-                            
-                            const postServiceFeePerEmi = (kfsData.fees.total_add_to_total || 0) / emiCount;
-                            const postServiceFeeGSTPerEmi = Math.round(postServiceFeePerEmi * 0.18);
-                            const postServiceFeeWithGSTPerEmi = postServiceFeePerEmi + postServiceFeeGSTPerEmi;
-                            
-                            // For Multi-EMI loans, show each EMI as a separate row
-                            if (emiCount > 1 && kfsData.repayment?.all_emi_dates && Array.isArray(kfsData.repayment.all_emi_dates) && kfsData.repayment.all_emi_dates.length === emiCount) {
-                                const disbursedDate = kfsData.loan.disbursed_at ? new Date(kfsData.loan.disbursed_at) : new Date();
-                                disbursedDate.setHours(0, 0, 0, 0);
-                                
-                                // Calculate principal distribution (handle cases where it doesn't divide evenly)
-                                // For 3 EMIs: 33.33%, 33.33%, 33.34% (or ₹3,333.33, ₹3,333.33, ₹3,333.34)
-                                // For 4 EMIs: 25%, 25%, 25%, 25% (or ₹2,500 each)
-                                const principalPerEmi = Math.floor(principal / emiCount * 100) / 100; // Round to 2 decimals
-                                const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
-                                
-                                let outstandingPrincipal = principal;
-                                const rows = [];
-                                
-                                for (let i = 0; i < emiCount; i++) {
-                                    const emiDate = new Date(kfsData.repayment.all_emi_dates[i]);
-                                    emiDate.setHours(0, 0, 0, 0);
-                                    
-                                    // Calculate days for this EMI period
-                                    // First period (disbursement to first EMI): inclusive, add +1
-                                    // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
-                                    let previousDate;
-                                    if (i === 0) {
-                                        previousDate = disbursedDate;
-                                    } else {
-                                        // Start from day AFTER previous EMI date
-                                        previousDate = new Date(kfsData.repayment.all_emi_dates[i - 1]);
-                                        previousDate.setDate(previousDate.getDate() + 1);
-                                    }
-                                    previousDate.setHours(0, 0, 0, 0);
-                                    const daysForPeriod = i === 0 
-                                        ? Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
-                                        : Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                                    
-                                    // Calculate principal for this EMI (add remainder to last EMI)
-                                    const principalForThisEmi = i === emiCount - 1 
-                                        ? Math.round((principalPerEmi + remainder) * 100) / 100
-                                        : principalPerEmi;
-                                    
-                                    // Calculate interest for this period on outstanding principal
-                                    const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
-                                    
-                                    // Calculate instalment for this EMI
-                                    const instalmentAmount = principalForThisEmi + interestForPeriod + postServiceFeeWithGSTPerEmi;
-                                    
-                                    rows.push(
-                                        <tr key={i}>
-                                            <td className="border border-black p-2 text-center">{i + 1}</td>
-                                            <td className="border border-black p-2">{formatCurrency(outstandingPrincipal)}</td>
-                                            <td className="border border-black p-2">{formatCurrency(principalForThisEmi)}</td>
-                                            <td className="border border-black p-2">
-                                                {Math.round(interestForPeriod)}+{Math.round(postServiceFeeWithGSTPerEmi)}
-                                            </td>
-                                            <td className="border border-black p-2">{formatCurrency(instalmentAmount)}</td>
-                                        </tr>
-                                    );
-                                    
-                                    // Reduce outstanding principal for next period
-                                    outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
-                                }
-                                
-                                return rows;
-                            } else {
-                                // Single payment loan - show single row
-                                const totalInterest = kfsData.calculations.interest || 0;
-                                const postServiceFee = kfsData.fees.total_add_to_total || 0;
-                                const postServiceFeeGST = Math.round(postServiceFee * 0.18);
-                                const postServiceFeeWithGST = postServiceFee + postServiceFeeGST;
-                                const instalmentAmount = principal + totalInterest + postServiceFee + postServiceFeeGST;
-                                
-                                return (
-                                    <tr>
-                                        <td className="border border-black p-2 text-center">1</td>
-                                        <td className="border border-black p-2">{formatCurrency(principal)}</td>
-                                        <td className="border border-black p-2">{formatCurrency(principal)}</td>
+                            // Use backend-calculated schedule if available (avoids timezone issues)
+                            if (kfsData.repayment?.schedule && Array.isArray(kfsData.repayment.schedule) && kfsData.repayment.schedule.length > 0) {
+                                return kfsData.repayment.schedule.map((emi: any, index: number) => (
+                                    <tr key={index}>
+                                        <td className="border border-black p-2 text-center">{emi.instalment_no || (index + 1)}</td>
+                                        <td className="border border-black p-2">{formatCurrency(emi.outstanding_principal || 0)}</td>
+                                        <td className="border border-black p-2">{formatCurrency(emi.principal || 0)}</td>
                                         <td className="border border-black p-2">
-                                            {Math.round(totalInterest)}+{Math.round(postServiceFeeWithGST)}
+                                            {Math.round(emi.interest || 0)}+{Math.round((emi.post_service_fee || 0) + (emi.gst_on_post_service_fee || 0))}
                                         </td>
-                                        <td className="border border-black p-2">{formatCurrency(instalmentAmount)}</td>
+                                        <td className="border border-black p-2">{formatCurrency(emi.instalment_amount || 0)}</td>
                                     </tr>
-                                );
+                                ));
                             }
+                            
+                            // Fallback: Single payment loan using backend values
+                            const principal = kfsData.loan.sanctioned_amount || kfsData.calculations.principal || 0;
+                            const totalInterest = kfsData.calculations.interest || 0;
+                            const postServiceFee = kfsData.fees.total_add_to_total || 0;
+                            const postServiceFeeGST = Math.round(postServiceFee * 0.18);
+                            const postServiceFeeWithGST = postServiceFee + postServiceFeeGST;
+                            const instalmentAmount = principal + totalInterest + postServiceFee + postServiceFeeGST;
+                            
+                            return (
+                                <tr>
+                                    <td className="border border-black p-2 text-center">1</td>
+                                    <td className="border border-black p-2">{formatCurrency(principal)}</td>
+                                    <td className="border border-black p-2">{formatCurrency(principal)}</td>
+                                    <td className="border border-black p-2">
+                                        {Math.round(totalInterest)}+{Math.round(postServiceFeeWithGST)}
+                                    </td>
+                                    <td className="border border-black p-2">{formatCurrency(instalmentAmount)}</td>
+                                </tr>
+                            );
                         })()}
                     </tbody>
                 </table>

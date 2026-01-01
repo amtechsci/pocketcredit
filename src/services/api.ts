@@ -1260,6 +1260,25 @@ class ApiService {
   }
 
   /**
+   * Get loan calculation (same API used by admin and user)
+   * @param loanId - Loan application ID
+   * @param options - Optional calculation options
+   */
+  async getLoanCalculation(loanId: number, options?: {
+    customDays?: number;
+    calculationDate?: string;
+  }): Promise<ApiResponse<any>> {
+    const params: any = {};
+    if (options?.customDays !== undefined) {
+      params.customDays = options.customDays;
+    }
+    if (options?.calculationDate) {
+      params.calculationDate = options.calculationDate;
+    }
+    return this.request('GET', `/loan-calculations/${loanId}`, undefined, params);
+  }
+
+  /**
    * eNACH Subscription APIs
    */
 

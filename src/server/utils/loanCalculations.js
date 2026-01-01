@@ -6,6 +6,122 @@
 const GST_RATE = 0.18; // 18% GST
 
 /**
+ * Parse MySQL datetime string or Date object to YYYY-MM-DD format (no timezone conversion)
+ * @param {string|Date} dateValue - Date value from MySQL or Date object
+ * @returns {string|null} Date string in YYYY-MM-DD format, or null if invalid
+ */
+function parseDateToString(dateValue) {
+  if (!dateValue) return null;
+  
+  // If already a string, extract date portion directly (no timezone conversion)
+  if (typeof dateValue === 'string') {
+    // Handle MySQL datetime format: "2025-12-15 15:00:00"
+    if (dateValue.includes(' ')) {
+      return dateValue.split(' ')[0];
+    }
+    // Handle ISO format: "2025-12-15T15:00:00.000Z"
+    if (dateValue.includes('T')) {
+      return dateValue.split('T')[0];
+    }
+    // Already YYYY-MM-DD format
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+      return dateValue;
+    }
+  }
+  
+  // If Date object, extract date components
+  // Since server is in IST and MySQL stores dates in IST, use local date components
+  // This matches the calendar date as stored in MySQL
+  if (dateValue instanceof Date) {
+    // Check if date is valid
+    if (isNaN(dateValue.getTime())) {
+      return null;
+    }
+    
+    // Use local date components (server is in IST, so this matches MySQL calendar date)
+    // This is correct because:
+    // 1. MySQL stores "2026-01-01 15:00:00" in IST
+    // 2. Server is in IST timezone
+    // 3. Date object created from MySQL datetime will have local time representation
+    // 4. getFullYear(), getMonth(), getDate() return local date components
+    const year = dateValue.getFullYear();
+    const month = String(dateValue.getMonth() + 1).padStart(2, '0');
+    const day = String(dateValue.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  
+  return null;
+}
+
+/**
+ * Get today's date as YYYY-MM-DD string (no timezone conversion)
+ * @returns {string} Today's date in YYYY-MM-DD format
+ */
+function getTodayString() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Calculate calendar day difference between two dates (inclusive)
+ * @param {string} startDateStr - Start date in YYYY-MM-DD format
+ * @param {string} endDateStr - End date in YYYY-MM-DD format
+ * @returns {number} Number of days (inclusive, both start and end count)
+ */
+function calculateDaysBetween(startDateStr, endDateStr) {
+  if (!startDateStr || !endDateStr) return 0;
+  
+  // Parse date strings to components
+  const [startYear, startMonth, startDay] = startDateStr.split('-').map(Number);
+  const [endYear, endMonth, endDay] = endDateStr.split('-').map(Number);
+  
+  // Create Date objects from components (no timezone conversion)
+  const startDate = new Date(startYear, startMonth - 1, startDay);
+  const endDate = new Date(endYear, endMonth - 1, endDay);
+  
+  // Calculate difference in milliseconds
+  const diffInMs = endDate - startDate;
+  const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+  
+  // Add 1 for inclusive counting (both start and end dates count)
+  return diffInDays + 1;
+}
+
+/**
+ * Parse YYYY-MM-DD string to Date object components (for calendar arithmetic only)
+ * @param {string} dateStr - Date string in YYYY-MM-DD format
+ * @returns {Object|null} Object with {year, month, day} or null if invalid
+ */
+function parseDateComponents(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  
+  return {
+    year: parseInt(match[1], 10),
+    month: parseInt(match[2], 10) - 1, // JavaScript months are 0-indexed
+    day: parseInt(match[3], 10)
+  };
+}
+
+/**
+ * Format Date object to YYYY-MM-DD string (using local components, no timezone conversion)
+ * @param {Date} date - Date object
+ * @returns {string} Date string in YYYY-MM-DD format
+ */
+function formatDateToString(date) {
+  if (!date || !(date instanceof Date)) return null;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * Calculate total days from disbursement date to today (inclusive)
  * @param {string|Date} disbursedDate - The date when loan was disbursed
  * @returns {number} Total number of days (inclusive)
@@ -15,56 +131,76 @@ function calculateTotalDays(disbursedDate) {
     return 0;
   }
 
-  // Get only the date part, ignore time
-  const startDate = new Date(disbursedDate);
-  startDate.setHours(0, 0, 0, 0);
+  // Parse to YYYY-MM-DD string (no timezone conversion)
+  const startDateStr = parseDateToString(disbursedDate);
+  if (!startDateStr) {
+    return 0;
+  }
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Get today as YYYY-MM-DD string
+  const todayStr = getTodayString();
 
-  // Calculate difference in days
-  const diffInMs = today - startDate;
-  const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
-
-  // Add 1 to include both start and end date (inclusive counting)
-  return diffInDays + 1;
+  // Calculate calendar day difference (inclusive)
+  return calculateDaysBetween(startDateStr, todayStr);
 }
 
 /**
  * Get next valid salary date based on target day
- * @param {Date} startDate - Starting date
+ * @param {string|Date} startDate - Starting date (YYYY-MM-DD string or Date object)
  * @param {number} targetDay - Day of month (1-31)
- * @returns {Date} Next valid salary date
+ * @returns {Date} Next valid salary date (Date object for calendar arithmetic)
  */
 function getNextSalaryDate(startDate, targetDay) {
-  // Normalize startDate to midnight (00:00:00) for consistent comparison
-  const normalizedStartDate = new Date(startDate);
-  normalizedStartDate.setHours(0, 0, 0, 0);
+  // Parse start date to components (no timezone conversion)
+  let startDateStr;
+  if (typeof startDate === 'string') {
+    startDateStr = startDate;
+  } else if (startDate instanceof Date) {
+    startDateStr = formatDateToString(startDate);
+  } else {
+    startDateStr = getTodayString();
+  }
   
-  let year = normalizedStartDate.getFullYear();
-  let month = normalizedStartDate.getMonth();
+  const startComponents = parseDateComponents(startDateStr);
+  if (!startComponents) {
+    // Fallback to today if parsing fails
+    startDateStr = getTodayString();
+    const todayComponents = parseDateComponents(startDateStr);
+    if (!todayComponents) {
+      // Ultimate fallback - use current date
+      const today = new Date();
+      startComponents = {
+        year: today.getFullYear(),
+        month: today.getMonth(),
+        day: today.getDate()
+      };
+    } else {
+      startComponents = todayComponents;
+    }
+  }
+  
+  let year = startComponents.year;
+  let month = startComponents.month; // Already 0-indexed
   let day = targetDay;
 
-  // Create date for this month's salary date
+  // Create date for this month's salary date (using local timezone, no conversion)
   let salaryDate = new Date(year, month, day);
-  salaryDate.setHours(0, 0, 0, 0);
+  const startDateObj = new Date(startComponents.year, startComponents.month, startComponents.day);
 
   // If salary date has passed or is today, move to next month
-  if (salaryDate <= normalizedStartDate) {
+  if (salaryDate <= startDateObj) {
     month += 1;
     if (month > 11) {
       month = 0;
       year += 1;
     }
     salaryDate = new Date(year, month, day);
-    salaryDate.setHours(0, 0, 0, 0);
   }
 
   // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
   if (salaryDate.getDate() !== day) {
     const lastDay = new Date(year, month + 1, 0).getDate();
     salaryDate = new Date(year, month, Math.min(day, lastDay));
-    salaryDate.setHours(0, 0, 0, 0);
   }
 
   return salaryDate;
@@ -72,14 +208,42 @@ function getNextSalaryDate(startDate, targetDay) {
 
 /**
  * Get salary date for a specific month offset from start date
- * @param {Date} startDate - Starting date
+ * @param {string|Date} startDate - Starting date (YYYY-MM-DD string or Date object)
  * @param {number} targetDay - Day of month (1-31)
  * @param {number} monthOffset - Number of months to add (0 = current month, 1 = next month, etc.)
- * @returns {Date} Salary date for the specified month
+ * @returns {Date} Salary date for the specified month (Date object for calendar arithmetic)
  */
 function getSalaryDateForMonth(startDate, targetDay, monthOffset = 0) {
-  let year = startDate.getFullYear();
-  let month = startDate.getMonth() + monthOffset;
+  // Parse start date to components (no timezone conversion)
+  let startDateStr;
+  if (typeof startDate === 'string') {
+    startDateStr = startDate;
+  } else if (startDate instanceof Date) {
+    startDateStr = formatDateToString(startDate);
+  } else {
+    startDateStr = getTodayString();
+  }
+  
+  const startComponents = parseDateComponents(startDateStr);
+  if (!startComponents) {
+    // Fallback to today if parsing fails
+    startDateStr = getTodayString();
+    const todayComponents = parseDateComponents(startDateStr);
+    if (!todayComponents) {
+      // Ultimate fallback - use current date
+      const today = new Date();
+      startComponents = {
+        year: today.getFullYear(),
+        month: today.getMonth(),
+        day: today.getDate()
+      };
+    } else {
+      startComponents = todayComponents;
+    }
+  }
+  
+  let year = startComponents.year;
+  let month = startComponents.month + monthOffset; // Already 0-indexed
   
   // Handle year rollover
   while (month > 11) {
@@ -91,15 +255,13 @@ function getSalaryDateForMonth(startDate, targetDay, monthOffset = 0) {
     year -= 1;
   }
 
-  // Try to create date with target day
+  // Try to create date with target day (using local timezone, no conversion)
   let salaryDate = new Date(year, month, targetDay);
-  salaryDate.setHours(0, 0, 0, 0);
 
   // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day of month
   if (salaryDate.getDate() !== targetDay) {
     const lastDay = new Date(year, month + 1, 0).getDate();
     salaryDate = new Date(year, month, Math.min(targetDay, lastDay));
-    salaryDate.setHours(0, 0, 0, 0);
   }
 
   return salaryDate;
@@ -109,13 +271,29 @@ function getSalaryDateForMonth(startDate, targetDay, monthOffset = 0) {
  * Calculate days for interest based on plan type and salary date
  * @param {Object} planData - Plan data
  * @param {Object} userData - User data
- * @param {Date} calculationDate - Date to calculate from (default: today)
+ * @param {string|Date} calculationDate - Date to calculate from (YYYY-MM-DD string or Date, default: today)
  * @returns {Object} Days calculation result
  */
-function calculateInterestDays(planData, userData, calculationDate = new Date()) {
-  const today = new Date(calculationDate);
-  today.setHours(0, 0, 0, 0);
-
+function calculateInterestDays(planData, userData, calculationDate = null) {
+  // Parse calculation date to YYYY-MM-DD string (no timezone conversion)
+  let todayStr;
+  if (calculationDate) {
+    todayStr = parseDateToString(calculationDate);
+  }
+  if (!todayStr) {
+    todayStr = getTodayString();
+  }
+  
+  // Convert to Date object for calendar arithmetic (using parsed components)
+  const todayComponents = parseDateComponents(todayStr);
+  if (!todayComponents) {
+    todayStr = getTodayString();
+    const fallbackComponents = parseDateComponents(todayStr);
+    const today = new Date(fallbackComponents.year, fallbackComponents.month, fallbackComponents.day);
+    return calculateInterestDays(planData, userData, formatDateToString(today));
+  }
+  const today = new Date(todayComponents.year, todayComponents.month, todayComponents.day);
+  
   let days = planData.repayment_days || planData.total_duration_days || 15;
   let calculationMethod = 'fixed';
   let repaymentDate = null;
@@ -127,26 +305,30 @@ function calculateInterestDays(planData, userData, calculationDate = new Date())
     if (salaryDate >= 1 && salaryDate <= 31) {
       if (planData.plan_type === 'single') {
         // Single payment plan: calculate to next salary date or extend if duration is less
-        let nextSalaryDate = getNextSalaryDate(today, salaryDate);
+        let nextSalaryDate = getNextSalaryDate(todayStr, salaryDate);
 
         // Calculate days from today to next salary date (INCLUSIVE)
         // Start day is counted as day 1
         // Example: Dec 14 to Jan 4 = 22 days (Dec 14 is day 1)
-        let daysToNextSalary = Math.ceil((nextSalaryDate - today) / (1000 * 60 * 60 * 24)) + 1;
+        const nextSalaryDateStr = formatDateToString(nextSalaryDate);
+        let daysToNextSalary = calculateDaysBetween(todayStr, nextSalaryDateStr);
 
         // If days to next salary date is less than required duration, extend to following month
         if (daysToNextSalary < days) {
           // Keep adding months until we reach or exceed the required duration
-          let targetSalaryDate = new Date(nextSalaryDate);
+          let targetSalaryDate = nextSalaryDate;
           let daysToTarget = daysToNextSalary;
 
           while (daysToTarget < days) {
-            targetSalaryDate = getNextSalaryDate(
-              new Date(targetSalaryDate.getFullYear(), targetSalaryDate.getMonth() + 1, 1),
-              salaryDate
-            );
-            // INCLUSIVE counting: add 1 to include start day
-            daysToTarget = Math.ceil((targetSalaryDate - today) / (1000 * 60 * 60 * 24)) + 1;
+            // Move to next month
+            const targetYear = targetSalaryDate.getFullYear();
+            const targetMonth = targetSalaryDate.getMonth() + 1;
+            const nextMonthStart = new Date(targetYear, targetMonth, 1);
+            const nextMonthStartStr = formatDateToString(nextMonthStart);
+            
+            targetSalaryDate = getNextSalaryDate(nextMonthStartStr, salaryDate);
+            const targetSalaryDateStr = formatDateToString(targetSalaryDate);
+            daysToTarget = calculateDaysBetween(todayStr, targetSalaryDateStr);
           }
 
           days = daysToTarget;
@@ -159,16 +341,18 @@ function calculateInterestDays(planData, userData, calculationDate = new Date())
         calculationMethod = 'salary_date';
       } else if (planData.plan_type === 'multi_emi' && planData.emi_frequency === 'monthly') {
         // Multi-EMI plan with monthly frequency: calculate first EMI date
-        let nextSalaryDate = getNextSalaryDate(today, salaryDate);
+        let nextSalaryDate = getNextSalaryDate(todayStr, salaryDate);
         
         // Calculate days from today to next salary date (INCLUSIVE)
-        let daysToNextSalary = Math.ceil((nextSalaryDate - today) / (1000 * 60 * 60 * 24)) + 1;
+        const nextSalaryDateStr = formatDateToString(nextSalaryDate);
+        let daysToNextSalary = calculateDaysBetween(todayStr, nextSalaryDateStr);
 
         // If days to next salary date is less than required duration (minimum days), extend to following month
         if (daysToNextSalary < days) {
           // Move to next month's salary date
-          nextSalaryDate = getSalaryDateForMonth(today, salaryDate, 1);
-          daysToNextSalary = Math.ceil((nextSalaryDate - today) / (1000 * 60 * 60 * 24)) + 1;
+          nextSalaryDate = getSalaryDateForMonth(todayStr, salaryDate, 1);
+          const nextSalaryDateStr2 = formatDateToString(nextSalaryDate);
+          daysToNextSalary = calculateDaysBetween(todayStr, nextSalaryDateStr2);
         }
 
         // For Multi-EMI, the repayment date is the first EMI date
@@ -179,17 +363,16 @@ function calculateInterestDays(planData, userData, calculationDate = new Date())
           const targetYear = nextSalaryDate.getFullYear();
           const targetMonth = nextSalaryDate.getMonth();
           nextSalaryDate = new Date(targetYear, targetMonth, salaryDate);
-          nextSalaryDate.setHours(0, 0, 0, 0);
           
           // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day
           if (nextSalaryDate.getDate() !== salaryDate) {
             const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
             nextSalaryDate = new Date(targetYear, targetMonth, Math.min(salaryDate, lastDay));
-            nextSalaryDate.setHours(0, 0, 0, 0);
           }
           
           // Recalculate days after correction
-          daysToNextSalary = Math.ceil((nextSalaryDate - today) / (1000 * 60 * 60 * 24)) + 1;
+          const nextSalaryDateStr3 = formatDateToString(nextSalaryDate);
+          daysToNextSalary = calculateDaysBetween(todayStr, nextSalaryDateStr3);
         }
 
         // For Multi-EMI, the repayment date is the first EMI date
@@ -471,15 +654,17 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
   let totalRepayableFee = 0; // Sum of fee amounts (without GST)
   let totalRepayableFeeGST = 0; // Sum of GST on add fees
 
-  // Get EMI count for multi-EMI plans (used to multiply add_to_total fees)
+  // Get EMI count and determine if this is a multi-EMI loan
   const emiCount = parseInt(planData.emi_count) || 1;
-  const isMultiEmi = emiCount > 1;
+  // FIXED: Check plan_type instead of emiCount to correctly identify multi-EMI loans
+  const planType = planData.plan_type || 'single';
+  const isMultiEmi = planType === 'multi_emi';
 
   // Calculate each fee with GST
   fees.forEach(fee => {
     const feePercent = parseFloat(fee.fee_percent || 0);
-    const feeAmount = Math.round((principal * feePercent) / 100 * 100) / 100; // Round to 2 decimals
-    const gstAmount = Math.round(feeAmount * GST_RATE * 100) / 100; // Round to 2 decimals
+    const feeAmount = Math.round((principal * feePercent) / 100 * 100) / 100;
+    const gstAmount = Math.round(feeAmount * GST_RATE * 100) / 100;
     const totalWithGST = Math.round((feeAmount + gstAmount) * 100) / 100;
 
     const feeDetail = {
@@ -495,7 +680,7 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
       totalDisbursalFee += feeAmount;
       totalDisbursalFeeGST += gstAmount;
     } else if (fee.application_method === 'add_to_total') {
-      // For multi-EMI loans, multiply the fee by EMI count
+      // Only multiply fees for actual multi-EMI loans (plan_type === 'multi_emi')
       const multiplier = isMultiEmi ? emiCount : 1;
       const multipliedFeeAmount = feeAmount * multiplier;
       const multipliedGstAmount = gstAmount * multiplier;
@@ -506,7 +691,7 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
         fee_amount: multipliedFeeAmount,
         gst_amount: multipliedGstAmount,
         total_with_gst: multipliedTotalWithGST,
-        base_fee_amount: feeAmount, // Store base amount before multiplication
+        base_fee_amount: feeAmount,
         emi_count: emiCount
       });
       totalRepayableFee += multipliedFeeAmount;
@@ -535,49 +720,28 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
       repaymentDate: null
     };
   } else {
-    daysResult = calculateInterestDays(planData, userData, options.calculationDate || new Date());
+    // Parse calculation date to string (no timezone conversion)
+    const calcDateStr = options.calculationDate ? parseDateToString(options.calculationDate) : null;
+    daysResult = calculateInterestDays(planData, userData, calcDateStr || getTodayString());
   }
 
   const { days, calculationMethod, repaymentDate } = daysResult;
-
-  // Log calculation inputs for debugging
-  console.log('💡 Loan Calculation Inputs:');
-  console.log(`   Principal: ₹${principal.toFixed(2)}`);
-  console.log(`   Interest Rate: ${interestPercentPerDay} per day (${(interestPercentPerDay * 365 * 100).toFixed(2)}% p.a.)`);
-  console.log(`   Days: ${days} (${calculationMethod})`);
-  console.log(`   EMI Count: ${emiCount} ${isMultiEmi ? '(Multi-EMI)' : '(Single Payment)'}`);
-  console.log(`   Deduct Fees: ${deductFromDisbursal.length}, Total: ₹${totalDisbursalDeduction.toFixed(2)} (incl. GST)`);
-  console.log(`   Add to Total Fees: ${addToTotal.length}, Total: ₹${totalRepayableAddition.toFixed(2)} (incl. GST)${isMultiEmi ? ` [Multiplied by ${emiCount}]` : ''}`);
-
-  // ✅ VALIDATION 1: Interest calculated on PRINCIPAL (not disbursal)
+  
+  // Calculate interest on principal
   const interest = Math.round(principal * interestPercentPerDay * days * 100) / 100;
-  console.log(`✅ Interest calculated on PRINCIPAL: ₹${principal.toFixed(2)} × ${interestPercentPerDay} × ${days} = ₹${interest.toFixed(2)}`);
-
-  // ✅ VALIDATION 2: Verify GST is included in all fees
-  const totalGST = totalDisbursalFeeGST + totalRepayableFeeGST;
-  console.log(`✅ GST (18%) included: ₹${totalGST.toFixed(2)}`);
-
-  // ✅ VALIDATION 3: Verify days calculation
-  console.log(`✅ Days validated: ${days} days using ${calculationMethod} method`);
-
-  // ✅ VALIDATION 4: Verify fee categorization
-  console.log(`✅ Fee categories verified:`);
-  console.log(`   - Deduct from Disbursal: ${deductFromDisbursal.map(f => f.fee_name).join(', ') || 'None'}`);
-  console.log(`   - Add to Total: ${addToTotal.map(f => `${f.fee_name}${f.emi_count > 1 ? ` (×${f.emi_count})` : ''}`).join(', ') || 'None'}`);
 
   // Calculate total repayable
   const totalRepayable = Math.round((principal + interest + totalRepayableAddition) * 100) / 100;
 
   // Build calculation explanation strings
   const disbursalCalculation = `Principal (₹${principal.toFixed(2)}) - Deduct Fees (₹${totalDisbursalDeduction.toFixed(2)}) = ₹${disbursalAmount.toFixed(2)}`;
-
   const totalBreakdown = `Principal (₹${principal.toFixed(2)}) + Interest (₹${interest.toFixed(2)}) + Repayable Fees (₹${totalRepayableAddition.toFixed(2)}) = ₹${totalRepayable.toFixed(2)}`;
 
-  // Log final calculation results
-  console.log('📊 Final Calculation Results:');
-  console.log(`   Disbursal: ₹${disbursalAmount.toFixed(2)} (customer receives)`);
-  console.log(`   Total Repayable: ₹${totalRepayable.toFixed(2)} (customer pays back)`);
-  console.log(`   Effective Cost: ₹${(totalRepayable - disbursalAmount).toFixed(2)}`);
+  // Format calculation date (no timezone conversion)
+  const calculationDateStr = options.calculationDate ? parseDateToString(options.calculationDate) : getTodayString();
+  
+  // Format repayment date (no timezone conversion)
+  const repaymentDateStr = repaymentDate ? formatDateToString(repaymentDate) : null;
 
   return {
     principal: principal,
@@ -602,8 +766,8 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
       days: days,
       rate_per_day: interestPercentPerDay,
       calculation_method: calculationMethod,
-      calculation_date: options.calculationDate || new Date(),
-      repayment_date: repaymentDate
+      calculation_date: calculationDateStr,
+      repayment_date: repaymentDateStr
     },
     total: {
       repayable: totalRepayable,
@@ -620,6 +784,12 @@ module.exports = {
   calculateCompleteLoanValues,
   getLoanCalculation,
   updateLoanCalculation,
-  calculateInterestDays
+  calculateInterestDays,
+  // Helper functions for string-based date handling
+  parseDateToString,
+  getTodayString,
+  calculateDaysBetween,
+  parseDateComponents,
+  formatDateToString
 };
 
