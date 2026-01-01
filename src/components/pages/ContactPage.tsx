@@ -95,6 +95,7 @@ export function ContactPage() {
                         id="name"
                         value={formData.name}
                         onChange={(e) => handleInputChange('name', e.target.value)}
+                        className="border border-gray-300"
                         required
                       />
                     </div>
@@ -105,6 +106,7 @@ export function ContactPage() {
                         type="tel"
                         value={formData.phone}
                         onChange={(e) => handleInputChange('phone', e.target.value)}
+                        className="border border-gray-300"
                         required
                       />
                     </div>
@@ -117,6 +119,7 @@ export function ContactPage() {
                       type="email"
                       value={formData.email}
                       onChange={(e) => handleInputChange('email', e.target.value)}
+                      className="border border-gray-300"
                       required
                     />
                   </div>
@@ -124,7 +127,7 @@ export function ContactPage() {
                   <div>
                     <Label htmlFor="category">Inquiry Category</Label>
                     <Select onValueChange={(value) => handleInputChange('category', value)} required>
-                      <SelectTrigger>
+                      <SelectTrigger className="border border-gray-300">
                         <SelectValue placeholder="Select category" />
                       </SelectTrigger>
                       <SelectContent>
@@ -143,6 +146,7 @@ export function ContactPage() {
                       id="subject"
                       value={formData.subject}
                       onChange={(e) => handleInputChange('subject', e.target.value)}
+                      className="border border-gray-300"
                       required
                     />
                   </div>
@@ -154,6 +158,7 @@ export function ContactPage() {
                       rows={4}
                       value={formData.message}
                       onChange={(e) => handleInputChange('message', e.target.value)}
+                      className="border border-gray-300"
                       required
                     />
                   </div>

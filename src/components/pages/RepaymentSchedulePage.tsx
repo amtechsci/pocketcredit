@@ -422,14 +422,12 @@ export const RepaymentSchedulePage = () => {
                   interestTillToday = principal * interestRatePerDay * exhaustedDays;
                 }
                 
-                // Get post service fee and GST
-                const postServiceFee = repaymentSchedule[0]?.post_service_fee || 
-                                     calculations.fees?.post_service_fee || 
-                                     (calculations.total_repayable - principal - interestTillToday - (calculations.fees?.gst || 0)) || 0;
-                const gstOnPostServiceFee = repaymentSchedule[0]?.gst_on_post_service_fee || 
-                                           (postServiceFee * 0.18) || 0;
+                // Pre-close fee: 10% of principal + 18% GST (NO post service fee for pre-close)
+                const preCloseFeePercent = 10;
+                const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
+                const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
                 
-                const precloseAmount = principal + interestTillToday + postServiceFee + gstOnPostServiceFee;
+                const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
                 
                 return (
                   <>
@@ -441,8 +439,8 @@ export const RepaymentSchedulePage = () => {
                       <div className="text-xs sm:text-sm text-gray-600 space-y-1 mt-3">
                         <p>Principal: {formatCurrency(principal)}</p>
                         <p>Interest (till today, {interestDays} days @ {(interestRatePerDay * 100).toFixed(4)}%/day): {formatCurrency(interestTillToday)}</p>
-                        <p>Post Service Fee (1 time): {formatCurrency(postServiceFee)}</p>
-                        <p>GST on Post Service Fee: {formatCurrency(gstOnPostServiceFee)}</p>
+                        <p>Pre-close Fee ({preCloseFeePercent}%): {formatCurrency(preCloseFee)}</p>
+                        <p>GST on Pre-close Fee: {formatCurrency(preCloseFeeGST)}</p>
                       </div>
                     </div>
                     
@@ -621,47 +619,12 @@ export const RepaymentSchedulePage = () => {
                     interestTillToday = principal * interestRatePerDay * interestDays;
                   }
                   
-                  // For preclose, use post service fee ONCE (not multiplied by EMI count)
-                  // Post Service Fee is 10% of principal (fixed)
-                  const emiCount = planData.emi_count || 1;
-                  const POST_SERVICE_FEE_PERCENT = 10; // 10% fixed
-                  const GST_RATE = 0.18; // 18% GST
+                  // Pre-close fee: 10% of principal + 18% GST (NO post service fee for pre-close)
+                  const preCloseFeePercent = 10;
+                  const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
+                  const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
                   
-                  let postServiceFeeBase = 0;
-                  
-                  // Try to get from first EMI in schedule (this is the base fee per EMI)
-                  if (repaymentSchedule.length > 0 && repaymentSchedule[0].post_service_fee) {
-                    postServiceFeeBase = repaymentSchedule[0].post_service_fee;
-                  } else if (calculations.totals?.repayableFee) {
-                    // If repayableFee is already multiplied by EMI count, divide it back
-                    postServiceFeeBase = emiCount > 1 
-                      ? calculations.totals.repayableFee / emiCount 
-                      : calculations.totals.repayableFee;
-                  }
-                  
-                  // If still 0, calculate as 10% of principal (fallback)
-                  if (postServiceFeeBase === 0) {
-                    postServiceFeeBase = (principal * POST_SERVICE_FEE_PERCENT) / 100;
-                  }
-                  
-                  const postServiceFee = postServiceFeeBase;
-                  
-                  // Calculate GST on post service fee (18% of fee)
-                  let gstOnPostServiceFee = 0;
-                  if (repaymentSchedule.length > 0 && repaymentSchedule[0].gst_on_post_service_fee) {
-                    gstOnPostServiceFee = repaymentSchedule[0].gst_on_post_service_fee;
-                  } else if (calculations.totals?.repayableFeeGST) {
-                    gstOnPostServiceFee = emiCount > 1
-                      ? calculations.totals.repayableFeeGST / emiCount
-                      : calculations.totals.repayableFeeGST;
-                  }
-                  
-                  // If still 0, calculate as 18% of post service fee (fallback)
-                  if (gstOnPostServiceFee === 0 && postServiceFee > 0) {
-                    gstOnPostServiceFee = postServiceFee * GST_RATE;
-                  }
-                  
-                  const precloseAmount = principal + interestTillToday + postServiceFee + gstOnPostServiceFee;
+                  const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
                   
                   // Debug logging
                   console.log('Preclose Calculation:', {
@@ -669,12 +632,8 @@ export const RepaymentSchedulePage = () => {
                     interestRatePerDay,
                     exhaustedDays,
                     interestTillToday,
-                    postServiceFeeBase: calculations.totals?.repayableFee,
-                    postServiceFee,
-                    gstBase: calculations.totals?.repayableFeeGST,
-                    gstOnPostServiceFee,
-                    emiCount,
-                    firstEmiFee: repaymentSchedule[0]?.post_service_fee,
+                    preCloseFee,
+                    preCloseFeeGST,
                     precloseAmount
                   });
                   
@@ -688,8 +647,8 @@ export const RepaymentSchedulePage = () => {
                         <div className="text-xs sm:text-sm text-gray-500 mt-2 space-y-1">
                           <p>Principal: {formatCurrency(principal)}</p>
                           <p>Interest (till today, {interestDays} days @ {(interestRatePerDay * 100).toFixed(4)}%/day): {formatCurrency(interestTillToday)}</p>
-                          <p>Post Service Fee (1 time): {formatCurrency(postServiceFee)}</p>
-                          <p>GST on Post Service Fee: {formatCurrency(gstOnPostServiceFee)}</p>
+                          <p>Pre-close Fee ({preCloseFeePercent}%): {formatCurrency(preCloseFee)}</p>
+                          <p>GST on Pre-close Fee: {formatCurrency(preCloseFeeGST)}</p>
                         </div>
                       </div>
 

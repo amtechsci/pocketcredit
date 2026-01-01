@@ -163,6 +163,14 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       salary_date: userSalaryDate
     };
 
+    // Helper function to parse date without timezone issues
+    const parseDateSafe = (dateValue) => {
+      if (!dateValue) return new Date();
+      const d = new Date(dateValue);
+      // Create a new date using UTC values as local values to avoid timezone shift
+      return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0);
+    };
+
     // Check if we should use actual exhausted days (for repayment schedule) or planned days (for KFS/Agreement)
     const useActualDays = req.query.useActualDays === 'true' || req.query.useActualDays === true;
     
@@ -171,10 +179,9 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     let actualExhaustedDays = null;
     if (useActualDays && loan.processed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)) {
       // For processed loans, use processed_at as per rulebook
-      const processedDate = new Date(loan.processed_at);
+      const processedDate = parseDateSafe(loan.processed_at);
       const currentDate = new Date();
       // Set both dates to midnight for accurate day calculation
-      processedDate.setHours(0, 0, 0, 0);
       currentDate.setHours(0, 0, 0, 0);
       // Use inclusive counting: Math.ceil((end - start) / msPerDay) + 1
       const diffTime = currentDate.getTime() - processedDate.getTime();
@@ -183,12 +190,12 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       if (actualExhaustedDays < 1) {
         actualExhaustedDays = 1;
       }
-      console.log(`📅 Using actual exhausted days: ${actualExhaustedDays} (from processed_at ${processedDate.toISOString().split('T')[0]} to ${currentDate.toISOString().split('T')[0]})`);
+      const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      console.log(`📅 Using actual exhausted days: ${actualExhaustedDays} (from processed_at ${formatDate(processedDate)} to ${formatDate(currentDate)})`);
     } else if (useActualDays && loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)) {
       // Fallback to disbursed_at if processed_at not available (shouldn't happen for processed loans)
-      const disbursedDate = new Date(loan.disbursed_at);
+      const disbursedDate = parseDateSafe(loan.disbursed_at);
       const currentDate = new Date();
-      disbursedDate.setHours(0, 0, 0, 0);
       currentDate.setHours(0, 0, 0, 0);
       const diffTime = currentDate.getTime() - disbursedDate.getTime();
       actualExhaustedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
@@ -1142,17 +1149,25 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       fees: planSnapshot.fees || []
     };
 
+    // Helper function to parse date without timezone issues
+    const parseDateSafe = (dateValue) => {
+      if (!dateValue) return new Date();
+      const d = new Date(dateValue);
+      // Create a new date using UTC values as local values to avoid timezone shift
+      return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0);
+    };
+
     // Determine calculation date - use disbursed_at if loan is disbursed, otherwise use today
     const calculationDate = loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)
-      ? new Date(loan.disbursed_at)
+      ? parseDateSafe(loan.disbursed_at)
       : new Date();
     // Normalize to midnight for consistent date calculations
     calculationDate.setHours(0, 0, 0, 0);
 
     // Calculate PLANNED loan term days (for due date and loan_term_days) - always use planned term
     const plannedTermCalculationDate = loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)
-      ? new Date(loan.disbursed_at)  // Use disbursed date for planned term calculation
-      : new Date();  // Use today for pending loans
+      ? parseDateSafe(loan.disbursed_at)
+      : new Date();
     // Normalize to midnight for consistent date calculations
     plannedTermCalculationDate.setHours(0, 0, 0, 0);
     const plannedTermResult = calculateInterestDays(planData, userData, plannedTermCalculationDate);

@@ -4626,7 +4626,9 @@ export function UserProfileDetail() {
                         // Add days to disbursed date without timezone conversion
                         const disbursedDateStr = parseDateString(disbursedDate);
                         const [year, month, day] = disbursedDateStr.split('-').map(Number);
-                        const dueDateObj = new Date(year, month - 1, day + calculation.interest.days);
+                        const startDate = new Date(year, month - 1, day);
+                        // Add days - 1 because start date counts as day 1
+                        const dueDateObj = new Date(startDate.getTime() + ((calculation.interest.days - 1) * 24 * 60 * 60 * 1000));
                         dueDate = `${dueDateObj.getFullYear()}-${String(dueDateObj.getMonth() + 1).padStart(2, '0')}-${String(dueDateObj.getDate()).padStart(2, '0')}`;
                       }
 
@@ -4641,15 +4643,21 @@ export function UserProfileDetail() {
                         penaltyData = calculatePenalty(principal, dpd);
                       }
 
-                      // Calculate interest till current date
-                      // For multi-EMI loans, sum interest from schedule; for single payment, calculate from disbursement
+                      // Calculate interest for full tenure (till due date, not till today)
+                      // For multi-EMI loans, sum interest from schedule; for single payment, use calculation.interest.amount
                       let interestTillDate = 0;
                       if (calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 1) {
                         // Multi-EMI loan: Sum interest from all EMI periods in the schedule
                         interestTillDate = calculation.repayment.schedule.reduce((sum: number, emi: any) => sum + (emi.interest || 0), 0);
-                      } else if (disbursedDate && calculation?.interest?.rate_per_day) {
-                        // Single payment loan: Calculate from disbursement to current date
-                        interestTillDate = calculateInterestTillDate(principal, calculation.interest.rate_per_day, disbursedDate, getCurrentDateString());
+                      } else {
+                        // Single payment loan: Use the full tenure interest from calculation
+                        interestTillDate = calculation?.interest?.amount || 0;
+                      }
+                      
+                      // Calculate interest till TODAY (for Pre-close calculation)
+                      let interestTillToday = 0;
+                      if (disbursedDate && calculation?.interest?.rate_per_day) {
+                        interestTillToday = calculateInterestTillDate(principal, calculation.interest.rate_per_day, disbursedDate, getCurrentDateString());
                       }
 
                       // Processing fee - use processed value if available, otherwise calculate
@@ -4663,6 +4671,11 @@ export function UserProfileDetail() {
                         ? loan.processed_post_service_fee
                         : (calculation?.totals?.repayableFee || 0);
                       const postServiceFeeGST = calculation?.totals?.repayableFeeGST || 0;
+                      
+                      // Pre-close fee calculation (10% of principal + 18% GST)
+                      const preCloseFeePercent = 10;
+                      const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
+                      const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
 
                       // Total GST - use processed value if available, otherwise calculate
                       const totalGSTOnFees = isProcessed && loan.processed_gst !== null
@@ -4687,9 +4700,15 @@ export function UserProfileDetail() {
                       // Loan extension fields (placeholder - these would come from database)
                       const loanExtensionAvailedDate = loan.extension_availed_date || 'N/A';
                       const loanExtensionPeriodTill = loan.extension_period_till || 'N/A';
-                      const loanExtensionFee = loan.extension_fee || 0;
+                      const loanExtensionFee = parseFloat(loan.extension_fee) || 0;
                       const loanExtendedAmount = loan.extended_amount || 'N/A';
                       const loanExtendedDate = loan.extended_date || 'N/A';
+                      
+                      // Loan extension amount: Only show if extension is actually availed
+                      const hasExtension = loanExtensionAvailedDate !== 'N/A' && loanExtensionAvailedDate !== null;
+                      const loanExtensionAmount = hasExtension 
+                        ? loanExtensionFee + interestTillDate + penaltyData.total
+                        : null;
 
                       // Loan closed fields
                       const loanClosedAmount = loan.status === 'cleared' ? (loan.closed_amount || totalAmount) : 'N/A';
@@ -4707,8 +4726,8 @@ export function UserProfileDetail() {
                         emiDates = formatDate(dueDate);
                       }
 
-                      // Pre close amount (changes with date - would need calculation based on current date)
-                      const preCloseAmount = 'N/A'; // This would require complex calculation
+                      // Pre-close amount: principal + 10% pre-close fee + GST + interest till TODAY (no post service fee)
+                      const preCloseAmount = principal + preCloseFee + preCloseFeeGST + interestTillToday;
 
                       // Status log
                       const statusLog = `${loan.status} - ${formatDate(loan.statusDate || loan.updatedAt)}`;
@@ -4764,7 +4783,7 @@ export function UserProfileDetail() {
                             {emiDates}
                           </td>
                           <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {preCloseAmount}
+                            {formatCurrency(preCloseAmount)}
                           </td>
                           <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
                             {statusLog}
@@ -4776,7 +4795,7 @@ export function UserProfileDetail() {
                             {loanClosedDate !== 'N/A' ? formatDate(loanClosedDate) : 'N/A'}
                           </td>
                           <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {formatCurrency(loanExtensionFee + interestTillDate + penaltyData.total)}
+                            {loanExtensionAmount !== null ? formatCurrency(loanExtensionAmount) : 'N/A'}
                           </td>
                           <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
                             {loanExtendedAmount !== 'N/A' ? formatCurrency(loanExtendedAmount) : 'N/A'}
