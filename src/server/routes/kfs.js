@@ -63,7 +63,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         la.last_calculated_at,
         la.user_id,
         u.first_name, u.last_name, u.email, u.phone, u.date_of_birth,
-        u.gender, u.marital_status
+        u.gender, u.marital_status, u.pan_number
       FROM loan_applications la
       INNER JOIN users u ON la.user_id = u.id
       WHERE la.id = ?
@@ -99,14 +99,32 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     const employmentDetails = employment[0] || {};
 
     // Get bank details for the loan application
-    const bankDetailsQuery = await executeQuery(`
-      SELECT bd.* FROM bank_details bd
-      INNER JOIN loan_applications la ON la.user_bank_id = bd.id
-      WHERE la.id = ?
-      LIMIT 1
-    `, [loanId]);
-
-    const bankDetails = bankDetailsQuery[0] || null;
+    // Try to get bank details from user_bank_id first, then fallback to primary bank details
+    let bankDetails = null;
+    try {
+      if (loan.user_bank_id) {
+        const bankDetailsQuery = await executeQuery(`
+          SELECT bd.* FROM bank_details bd
+          WHERE bd.id = ?
+          LIMIT 1
+        `, [loan.user_bank_id]);
+        bankDetails = bankDetailsQuery && bankDetailsQuery.length > 0 ? bankDetailsQuery[0] : null;
+      }
+      
+      // If no bank details from user_bank_id, try to get primary bank details
+      if (!bankDetails) {
+        const primaryBankQuery = await executeQuery(`
+          SELECT bd.* FROM bank_details bd
+          WHERE bd.user_id = ? AND bd.is_primary = 1
+          LIMIT 1
+        `, [loan.user_id]);
+        bankDetails = primaryBankQuery && primaryBankQuery.length > 0 ? primaryBankQuery[0] : null;
+      }
+    } catch (bankError) {
+      console.error('Error fetching bank details:', bankError);
+      // Continue without bank details - set to null
+      bankDetails = null;
+    }
 
     // Convert income_range to approximate monthly income for display
     const getMonthlyIncomeFromRange = (range) => {
@@ -427,6 +445,10 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         date_of_birth: loan.date_of_birth ? new Date(loan.date_of_birth).toLocaleDateString('en-IN') : 'N/A',
         gender: loan.gender || 'N/A',
         marital_status: loan.marital_status || 'N/A',
+        pan_number: loan.pan_number || 'N/A',
+        aadhar_number: loan.aadhar_number || 'N/A',
+        pan: loan.pan_number || 'N/A',
+        aadhar: loan.aadhar_number || 'N/A',
         address: {
           line1: address.address_line1 || 'N/A',
           line2: address.address_line2 || '',
@@ -1181,8 +1203,9 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         la.fees_breakdown,
         la.disbursal_amount,
         la.user_id,
+        la.user_bank_id,
         u.first_name, u.last_name, u.email, u.phone, u.date_of_birth,
-        u.gender, u.marital_status
+        u.gender, u.marital_status, u.pan_number
       FROM loan_applications la
       INNER JOIN users u ON la.user_id = u.id
       WHERE la.id = ?
@@ -1216,6 +1239,34 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     `, [loan.user_id]);
 
     const employmentDetails = employment[0] || {};
+
+    // Get bank details for the loan application
+    // Try to get bank details from user_bank_id first, then fallback to primary bank details
+    let bankDetails = null;
+    try {
+      if (loan.user_bank_id) {
+        const bankDetailsQuery = await executeQuery(`
+          SELECT bd.* FROM bank_details bd
+          WHERE bd.id = ?
+          LIMIT 1
+        `, [loan.user_bank_id]);
+        bankDetails = bankDetailsQuery && bankDetailsQuery.length > 0 ? bankDetailsQuery[0] : null;
+      }
+      
+      // If no bank details from user_bank_id, try to get primary bank details
+      if (!bankDetails) {
+        const primaryBankQuery = await executeQuery(`
+          SELECT bd.* FROM bank_details bd
+          WHERE bd.user_id = ? AND bd.is_primary = 1
+          LIMIT 1
+        `, [loan.user_id]);
+        bankDetails = primaryBankQuery && primaryBankQuery.length > 0 ? primaryBankQuery[0] : null;
+      }
+    } catch (bankError) {
+      console.error('Error fetching bank details:', bankError);
+      // Continue without bank details - set to null
+      bankDetails = null;
+    }
 
     // Convert income_range to approximate monthly income for display
     const getMonthlyIncomeFromRange = (range) => {
@@ -1812,13 +1863,15 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         name: `${loan.first_name} ${loan.last_name || ''}`.trim(),
         father_name: 'N/A', // Column doesn't exist yet
         mother_name: 'N/A', // Column doesn't exist yet
-        email: loan.email,
-        phone: loan.phone,
+        email: loan.email || 'N/A',
+        phone: loan.phone || 'N/A',
         date_of_birth: loan.date_of_birth,
         gender: loan.gender || 'N/A',
         marital_status: loan.marital_status || 'N/A',
-        pan_number: 'N/A', // Column doesn't exist yet
-        aadhar_number: 'N/A', // Column doesn't exist yet
+        pan_number: loan.pan_number || 'N/A',
+        aadhar_number: loan.aadhar_number || 'N/A',
+        pan: loan.pan_number || 'N/A',
+        aadhar: loan.aadhar_number || 'N/A',
         address: {
           line1: address.address_line1 || 'N/A',
           line2: address.address_line2 || '',
@@ -2115,6 +2168,14 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         recovery_clause: '7',
         grievance_clause: '8.3'
       },
+
+      // Bank Details
+      bank_details: bankDetails ? {
+        bank_name: bankDetails.bank_name || 'N/A',
+        account_number: bankDetails.account_number || 'N/A',
+        ifsc_code: bankDetails.ifsc_code || 'N/A',
+        account_holder_name: bankDetails.account_holder_name || 'N/A'
+      } : null,
 
       // Generated metadata
       // Use processed_at date for processed loans, otherwise disbursed_at or today

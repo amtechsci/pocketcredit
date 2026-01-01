@@ -264,14 +264,15 @@ export function DynamicDashboardPage() {
             return;
           }
 
-          // PRIORITY 4: Check for account_manager status - redirect to repayment schedule
+          // PRIORITY 4: Check for account_manager status
+          // Note: We no longer automatically redirect to repayment schedule
+          // Users can access dashboard and manually navigate to repayment schedule via buttons
           const accountManagerApp = applications.find(
             (app: any) => app.status === 'account_manager'
           );
           if (accountManagerApp) {
-            console.log('🔄 Found account_manager loan, redirecting to repayment schedule');
-            navigate(`/repayment-schedule?applicationId=${accountManagerApp.id}`);
-            return;
+            console.log('✅ Found account_manager loan, allowing dashboard access. User can navigate to repayment schedule via buttons.');
+            // Don't redirect - let user stay on dashboard
           }
 
           // PRIORITY 5: Check for under_review or submitted status
@@ -356,8 +357,9 @@ export function DynamicDashboardPage() {
         );
 
         if (accountManagerApp) {
-          navigate(`/repayment-schedule?applicationId=${accountManagerApp.id}`);
-          return;
+          console.log('✅ Found account_manager loan, allowing dashboard access');
+          // Don't redirect - let user stay on dashboard
+          // User can navigate to repayment schedule via "View Repayment" buttons
         }
 
         // If loan is cleared, keep user on dashboard (don't redirect)
@@ -741,30 +743,7 @@ export function DynamicDashboardPage() {
         ))}
       </div>
 
-      {/* Running Loans - Overview */}
-      {runningLoans.length > 0 && (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <CheckCircle className="w-6 h-6 text-green-600" />
-            <h3 className="text-lg font-semibold text-green-900">Loans with Account Manager</h3>
-            <Badge variant="secondary" className="bg-green-100 text-green-800">
-              {runningLoans.length} active
-            </Badge>
-          </div>
-
-          <div className="text-center py-4">
-            <p className="text-gray-600 mb-4">
-              You have {runningLoans.length} loan{runningLoans.length !== 1 ? 's' : ''} with account manager.
-            </p>
-            <Button
-              onClick={() => setActiveTab('loans')}
-              className="bg-green-600 hover:bg-green-700 text-white"
-            >
-              View My Loans
-            </Button>
-          </div>
-        </div>
-      )}
+     
 
       {/* Desktop Enhanced Layout */}
       <div className="hidden lg:block">

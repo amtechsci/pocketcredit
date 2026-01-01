@@ -5563,6 +5563,14 @@ export function UserProfileDetail() {
 
     // Parse the full report to extract detailed information
     const reportData = full_report?.result?.result_json?.INProfileResponse || {};
+    
+    // Extract PDF URL from various possible locations in the Experian response
+    const experianPdfUrl = full_report?.result?.pdf_url 
+      || full_report?.pdf_url 
+      || full_report?.result?.pdfUrl 
+      || full_report?.pdfUrl
+      || reportData?.pdf_url
+      || null;
     const accountSummary = reportData.CAIS_Account?.CAIS_Account_DETAILS || [];
     const enquirySummary = reportData.CAPS?.CAPS_Summary || {};
     const capsApplications = reportData.CAPS?.CAPS_Application_Details || [];
@@ -5620,9 +5628,27 @@ export function UserProfileDetail() {
 
         {/* Experian Credit Score */}
         <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200 p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <CheckCircle className="w-6 h-6 text-blue-600" />
-            <h3 className="text-lg font-semibold text-gray-900">Experian Credit Score</h3>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-6 h-6 text-blue-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Experian Credit Score</h3>
+            </div>
+            {/* Experian PDF Download Button */}
+            {experianPdfUrl && (
+              <button
+                onClick={() => {
+                  if (experianPdfUrl) {
+                    window.open(experianPdfUrl, '_blank');
+                  } else {
+                    toast.error('PDF URL not available');
+                  }
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                Download Experian PDF
+              </button>
+            )}
           </div>
           <p className="text-sm text-orange-600 italic mb-6">Your Experian Credit Report is summarized in the form of Experian Credit Score which ranges from 300 - 900.</p>
 

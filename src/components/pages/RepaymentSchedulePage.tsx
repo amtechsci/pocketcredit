@@ -367,10 +367,10 @@ export const RepaymentSchedulePage = () => {
       <div className="container mx-auto px-4 py-4 sm:py-6 max-w-5xl">
         {/* Header Message */}
         <div className="text-center mb-6 sm:mb-8">
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-2">
-            Repayment Schedule
-          </h1>
-          <p className="text-xs sm:text-sm text-gray-500">Get upto ₹{formatCurrency(nextLimit).replace('₹', '')} by closing this loan. Clear your loan fast to unlock higher limits</p>
+          <h5 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-2">
+          Get upto ₹{formatCurrency(nextLimit).replace('₹', '')}
+          </h5>
+          <p className="text-xs sm:text-sm text-gray-500"> by closing this loan. Clear your loan fast to unlock higher limits</p>
         </div>
 
         {/* Loan Cleared Success Message */}
@@ -409,54 +409,76 @@ export const RepaymentSchedulePage = () => {
         )}
 
         {/* Single Payment Plan - Current Page */}
-        {!shouldShowMultiEmi && !isLoanCleared && (
-          <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
-            <CardContent className="p-4 sm:p-6">
-              {/* Preclose Section - Single Row Layout */}
-              <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Preclose it today</h3>
-              
-              {/* Calculate preclose amount */}
-              {(() => {
-                const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
+        {!shouldShowMultiEmi && !isLoanCleared && (() => {
+          // Calculate DPD (Days Past Due Date) to determine if Pre-close button should be shown
+          // Pre-close button shall be available till DPD = -6 only (6 days before due date)
+          const dueDate = kfsData.repayment?.first_due_date || loanData.processed_due_date;
+          let dpd = null;
+          let canShowPreClose = false;
+          
+          if (dueDate) {
+            const dueDateObj = new Date(dueDate);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            dueDateObj.setHours(0, 0, 0, 0);
+            // DPD = today - due_date (negative means before due date, positive means after)
+            dpd = Math.ceil((today.getTime() - dueDateObj.getTime()) / (1000 * 60 * 60 * 24));
+            // Show Pre-close only if DPD <= -6 (at least 6 days before due date)
+            canShowPreClose = dpd <= -6;
+          }
+          
+          // If DPD condition not met, don't show Pre-close section
+          if (!canShowPreClose) {
+            return null;
+          }
+          
+          return (
+            <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
+              <CardContent className="p-4 sm:p-6">
+                {/* Preclose Section - Single Row Layout */}
+                <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Preclose it today</h3>
                 
-                // Calculate interest till today
-                let interestTillToday = 0;
-                let interestRatePerDay = planData.interest_percent_per_day || 
-                                    calculations.interest?.rate_per_day ||
-                                    (calculations.interest?.amount && calculations.interest?.days && principal > 0
-                                      ? calculations.interest.amount / (calculations.interest.days * principal)
-                                      : 0.001); // Default 0.1% per day
-                
-                if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
-                  // Use processed_interest from database
-                  interestTillToday = parseFloat(loanData.processed_interest || 0);
-                } else {
-                  interestTillToday = principal * interestRatePerDay * exhaustedDays;
-                }
-                
-                // Pre-close fee: 10% of principal + 18% GST (NO post service fee for pre-close)
-                const preCloseFeePercent = 10;
-                const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
-                const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
-                
-                const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
-                
-                // Get due date for display
-                const dueDate = kfsData.repayment?.first_due_date || loanData.processed_due_date;
-                let dueDateObj = null;
-                let daysRemaining = 0;
-                let isOverdue = false;
-                let isDueToday = false;
-                
-                if (dueDate) {
-                  dueDateObj = new Date(dueDate);
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0);
-                  dueDateObj.setHours(0, 0, 0, 0);
-                  daysRemaining = Math.ceil((dueDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                  isOverdue = daysRemaining < 0;
-                  isDueToday = daysRemaining === 0;
-                }
+                {/* Calculate preclose amount */}
+                {(() => {
+                  const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
+                  
+                  // Calculate interest till today
+                  let interestTillToday = 0;
+                  let interestRatePerDay = planData.interest_percent_per_day || 
+                                      calculations.interest?.rate_per_day ||
+                                      (calculations.interest?.amount && calculations.interest?.days && principal > 0
+                                        ? calculations.interest.amount / (calculations.interest.days * principal)
+                                        : 0.001); // Default 0.1% per day
+                  
+                  if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
+                    // Use processed_interest from database
+                    interestTillToday = parseFloat(loanData.processed_interest || 0);
+                  } else {
+                    interestTillToday = principal * interestRatePerDay * exhaustedDays;
+                  }
+                  
+                  // Pre-close fee: 10% of principal + 18% GST (NO post service fee for pre-close)
+                  const preCloseFeePercent = 10;
+                  const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
+                  const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
+                  
+                  const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
+                  
+                  // Get due date for display
+                  let dueDateObj = null;
+                  let daysRemaining = 0;
+                  let isOverdue = false;
+                  let isDueToday = false;
+                  
+                  if (dueDate) {
+                    dueDateObj = new Date(dueDate);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    dueDateObj.setHours(0, 0, 0, 0);
+                    daysRemaining = Math.ceil((dueDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                    isOverdue = daysRemaining < 0;
+                    isDueToday = daysRemaining === 0;
+                  }
                 
                 return (
                   <>
@@ -590,9 +612,10 @@ export const RepaymentSchedulePage = () => {
                   </>
                 );
               })()}
-            </CardContent>
-          </Card>
-        )}
+              </CardContent>
+            </Card>
+          );
+        })()}
 
         {/* Single Payment Plan - Pay on Due Date */}
         {!shouldShowMultiEmi && !isLoanCleared && (
@@ -796,51 +819,57 @@ export const RepaymentSchedulePage = () => {
         )}
 
         {/* Multi-EMI Plan - Preclose Section */}
-        {shouldShowMultiEmi && !isLoanCleared && (
-          <>
-            <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
-              <CardContent className="p-4 sm:p-6">
-                <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Preclose it today</h3>
-                
-                {/* Calculate preclose amount: principal + interest till today + post service fee (1 time) + gst */}
-                {(() => {
-                  const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
+        {shouldShowMultiEmi && !isLoanCleared && (() => {
+          // Calculate DPD (Days Past Due Date) using first EMI's due date
+          // Pre-close button shall be available till DPD = -6 only (6 days before first EMI due date)
+          const firstEmiDueDate = kfsData.repayment?.first_due_date 
+            || (kfsData.repayment?.schedule && kfsData.repayment.schedule.length > 0 
+              ? kfsData.repayment.schedule[0].due_date 
+              : null)
+            || loanData.processed_due_date;
+          let dpd = null;
+          let canShowPreClose = false;
+          
+          if (firstEmiDueDate) {
+            const dueDateObj = new Date(firstEmiDueDate);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            dueDateObj.setHours(0, 0, 0, 0);
+            // DPD = today - due_date (negative means before due date, positive means after)
+            dpd = Math.ceil((today.getTime() - dueDateObj.getTime()) / (1000 * 60 * 60 * 24));
+            // Show Pre-close only if DPD <= -6 (at least 6 days before first EMI due date)
+            canShowPreClose = dpd <= -6;
+          }
+          
+          // If DPD condition not met, don't show Pre-close section
+          if (!canShowPreClose) {
+            return null;
+          }
+          
+          return (
+            <>
+              <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
+                <CardContent className="p-4 sm:p-6">
+                  <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Preclose it today</h3>
                   
-                  // For processed loans, use processed_interest from database (updated by cron)
-                  // Per rulebook: Use processed_* values for processed loans, not recalculated values
-                  let interestTillToday = 0;
-                  let interestDays = exhaustedDays;
-                  let interestRatePerDay = planData.interest_percent_per_day || 
-                                      calculations.interest?.rate_per_day ||
-                                      (calculations.interest?.amount && calculations.interest?.days && principal > 0
-                                        ? calculations.interest.amount / (calculations.interest.days * principal)
-                                        : 0.001); // Default 0.1% per day
-                  
-                  if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
-                    // Use processed_interest from database (already calculated by cron)
-                    interestTillToday = parseFloat(loanData.processed_interest || 0);
-                    // Calculate days from processed_at to today for display
-                    // Extract date portion only to avoid timezone issues
-                    const processedDateStr = loanData.processed_at.split('T')[0]; // Get YYYY-MM-DD part
-                    const processedDate = new Date(processedDateStr + 'T00:00:00');
-                    processedDate.setHours(0, 0, 0, 0);
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0);
-                    interestDays = Math.ceil((today.getTime() - processedDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                    console.log('Using processed_interest from database:', {
-                      processed_interest: interestTillToday,
-                      processed_at: loanData.processed_at,
-                      processedDate: processedDate.toISOString().split('T')[0],
-                      today: today.toISOString().split('T')[0],
-                      interestDays: interestDays,
-                      diffMs: today.getTime() - processedDate.getTime(),
-                      diffDays: (today.getTime() - processedDate.getTime()) / (1000 * 60 * 60 * 24)
-                    });
-                  } else {
-                    // Calculate interest till today based on exhausted days (for non-processed loans)
-                    // But if loan is processed, use the same days calculation as above
-                    if (loanData.processed_at) {
-                      // For processed loans, recalculate days even if processed_interest is 0/null
+                  {/* Calculate preclose amount: principal + interest till today + post service fee (1 time) + gst */}
+                  {(() => {
+                    const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
+                    
+                    // For processed loans, use processed_interest from database (updated by cron)
+                    // Per rulebook: Use processed_* values for processed loans, not recalculated values
+                    let interestTillToday = 0;
+                    let interestDays = exhaustedDays;
+                    let interestRatePerDay = planData.interest_percent_per_day || 
+                                        calculations.interest?.rate_per_day ||
+                                        (calculations.interest?.amount && calculations.interest?.days && principal > 0
+                                          ? calculations.interest.amount / (calculations.interest.days * principal)
+                                          : 0.001); // Default 0.1% per day
+                    
+                    if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
+                      // Use processed_interest from database (already calculated by cron)
+                      interestTillToday = parseFloat(loanData.processed_interest || 0);
+                      // Calculate days from processed_at to today for display
                       // Extract date portion only to avoid timezone issues
                       const processedDateStr = loanData.processed_at.split('T')[0]; // Get YYYY-MM-DD part
                       const processedDate = new Date(processedDateStr + 'T00:00:00');
@@ -848,32 +877,53 @@ export const RepaymentSchedulePage = () => {
                       const today = new Date();
                       today.setHours(0, 0, 0, 0);
                       interestDays = Math.ceil((today.getTime() - processedDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                      console.log('Recalculating days for processed loan (processed_interest is 0/null):', interestDays);
+                      console.log('Using processed_interest from database:', {
+                        processed_interest: interestTillToday,
+                        processed_at: loanData.processed_at,
+                        processedDate: processedDate.toISOString().split('T')[0],
+                        today: today.toISOString().split('T')[0],
+                        interestDays: interestDays,
+                        diffMs: today.getTime() - processedDate.getTime(),
+                        diffDays: (today.getTime() - processedDate.getTime()) / (1000 * 60 * 60 * 24)
+                      });
+                    } else {
+                      // Calculate interest till today based on exhausted days (for non-processed loans)
+                      // But if loan is processed, use the same days calculation as above
+                      if (loanData.processed_at) {
+                        // For processed loans, recalculate days even if processed_interest is 0/null
+                        // Extract date portion only to avoid timezone issues
+                        const processedDateStr = loanData.processed_at.split('T')[0]; // Get YYYY-MM-DD part
+                        const processedDate = new Date(processedDateStr + 'T00:00:00');
+                        processedDate.setHours(0, 0, 0, 0);
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        interestDays = Math.ceil((today.getTime() - processedDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                        console.log('Recalculating days for processed loan (processed_interest is 0/null):', interestDays);
+                      }
+                      // Interest = Principal * Rate * Days
+                      interestTillToday = principal * interestRatePerDay * interestDays;
                     }
-                    // Interest = Principal * Rate * Days
-                    interestTillToday = principal * interestRatePerDay * interestDays;
-                  }
-                  
-                  // Pre-close fee: 10% of principal + 18% GST (NO post service fee for pre-close)
-                  const preCloseFeePercent = 10;
-                  const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
-                  const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
-                  
-                  const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
-                  
-                  // Debug logging
-                  console.log('Preclose Calculation:', {
-                    principal,
-                    interestRatePerDay,
-                    exhaustedDays,
-                    interestTillToday,
-                    preCloseFee,
-                    preCloseFeeGST,
-                    precloseAmount
-                  });
-                  
-                  // Get due date for display
-                  const dueDate = kfsData.repayment?.first_due_date || loanData.processed_due_date;
+                    
+                    // Pre-close fee: 10% of principal + 18% GST (NO post service fee for pre-close)
+                    const preCloseFeePercent = 10;
+                    const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
+                    const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
+                    
+                    const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
+                    
+                    // Debug logging
+                    console.log('Preclose Calculation:', {
+                      principal,
+                      interestRatePerDay,
+                      exhaustedDays,
+                      interestTillToday,
+                      preCloseFee,
+                      preCloseFeeGST,
+                      precloseAmount
+                    });
+                    
+                    // Get due date for display (first EMI due date)
+                    const dueDate = firstEmiDueDate;
                   let dueDateObj = null;
                   let daysRemaining = 0;
                   let isOverdue = false;
@@ -975,11 +1025,11 @@ export const RepaymentSchedulePage = () => {
                     </>
                   );
                 })()}
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
 
-            {/* EMI List */}
-            {repaymentSchedule.length > 0 && (
+              {/* EMI List */}
+              {repaymentSchedule.length > 0 && (
               <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
                 <CardContent className="p-4 sm:p-6">
                   <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">EMI Schedule</h3>
@@ -1109,19 +1159,38 @@ export const RepaymentSchedulePage = () => {
                   </div>
                 </CardContent>
               </Card>
-            )}
-          </>
-        )}
+              )}
+            </>
+          );
+        })()}
 
         {/* Loan Progression Stages - Redesigned */}
         <Card className="bg-white shadow-lg rounded-xl overflow-hidden mb-6">
           <CardContent className="p-3 sm:p-5">
             <div className="space-y-3">
-              {Array.from({ length: totalStages - startStage + 1 }, (_, index) => {
-                const stageNumber = startStage + index;
-                const stageLimit = currentLimit * stageNumber;
-                const isCurrentStage = index === 0;
-                const isFinalStage = stageNumber === totalStages;
+              {(() => {
+                // Only show: current stage, next stage, and final stage (10)
+                const stagesToShow = [];
+                
+                // Always show current stage
+                stagesToShow.push(startStage);
+                
+                // Show next stage if it exists and is not the final stage
+                const nextStage = startStage + 1;
+                if (nextStage <= totalStages && nextStage !== totalStages) {
+                  stagesToShow.push(nextStage);
+                }
+                
+                // Always show final stage (10) if it's not already included
+                if (totalStages !== startStage && !stagesToShow.includes(totalStages)) {
+                  stagesToShow.push(totalStages);
+                }
+                
+                return stagesToShow.map((stageNumber) => {
+                  const stageLimit = currentLimit * stageNumber;
+                  const isCurrentStage = stageNumber === startStage;
+                  const isFinalStage = stageNumber === totalStages;
+                  const isNextStage = stageNumber === nextStage && stageNumber !== totalStages;
                 
                 return (
                   <div key={stageNumber} className="relative">
@@ -1167,8 +1236,11 @@ export const RepaymentSchedulePage = () => {
                                   You are Here
                                 </span>
                               )}
-                              {!isCurrentStage && (
-                                <span className="text-[10px] font-medium text-gray-500">Locked</span>
+                              {!isCurrentStage && !isFinalStage && (
+                                <span className="text-[10px] font-medium text-gray-500">Next</span>
+                              )}
+                              {isFinalStage && !isCurrentStage && (
+                                <span className="text-[10px] font-medium text-gray-500">Ultimate</span>
                               )}
                             </div>
                             <div className={`text-xl sm:text-2xl font-bold mb-0.5 ${
@@ -1183,7 +1255,9 @@ export const RepaymentSchedulePage = () => {
                                 ? 'Your Current limit' 
                                 : isFinalStage 
                                 ? 'Your Ultimate limit' 
-                                : 'Your Next limit'}
+                                : isNextStage
+                                ? 'Your Next limit'
+                                : 'Your Ultimate limit'}
                             </div>
                           </div>
 
@@ -1222,7 +1296,8 @@ export const RepaymentSchedulePage = () => {
                     )}
                   </div>
                 );
-              })}
+                });
+              })()}
             </div>
           </CardContent>
         </Card>
