@@ -20,9 +20,18 @@ const getMonthlyIncomeFromRange = (range) => {
  * Format date to YYYY-MM-DD without timezone conversion
  */
 function formatDateLocal(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+  // If date is a string or needs parsing, parse it safely to avoid timezone issues
+  let d = date;
+  if (typeof date === 'string' || !(date instanceof Date)) {
+    const tempDate = new Date(date);
+    d = new Date(tempDate.getUTCFullYear(), tempDate.getUTCMonth(), tempDate.getUTCDate(), 0, 0, 0, 0);
+  } else if (date instanceof Date) {
+    // If already a Date object, ensure we're using local values
+    d = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+  }
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
@@ -657,14 +666,15 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
           } else {
             // Single payment: Store as single date string
             processedDueDate = calculatedValues?.interest?.repayment_date 
-              ? formatDateLocal(new Date(calculatedValues.interest.repayment_date))
+              ? formatDateLocal(calculatedValues.interest.repayment_date)
               : null;
+            console.log(`📅 Single payment loan ${loan.id}: Due date = ${processedDueDate} (from repayment_date:`, calculatedValues?.interest?.repayment_date, ')');
           }
         } catch (dueDateError) {
           console.error('Error calculating processed_due_date:', dueDateError);
           // Fallback to single date
           processedDueDate = calculatedValues?.interest?.repayment_date 
-            ? formatDateLocal(new Date(calculatedValues.interest.repayment_date))
+            ? formatDateLocal(calculatedValues.interest.repayment_date)
             : null;
         }
         
