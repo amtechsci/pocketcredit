@@ -6,6 +6,16 @@ const { getPresignedUrl, uploadStudentDocument } = require('../services/s3Servic
 const { getLoanCalculation } = require('../utils/loanCalculations');
 const router = express.Router();
 
+/**
+ * Format date to YYYY-MM-DD without timezone conversion
+ */
+function formatDateLocal(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 // Get user profile with all related data
 router.get('/:userId', authenticateAdmin, async (req, res) => {
   try {
@@ -1885,7 +1895,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     // Generate all EMI dates
                     for (let i = 0; i < emiCount; i++) {
                       const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
-                      allEmiDates.push(emiDate.toISOString().split('T')[0]); // Store as YYYY-MM-DD
+                      allEmiDates.push(formatDateLocal(emiDate)); // Store as YYYY-MM-DD without timezone conversion
                     }
                   }
                 } else {
@@ -1910,7 +1920,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                       emiDate.setDate(emiDate.getDate() + (i * daysBetween));
                     }
                     emiDate.setHours(0, 0, 0, 0);
-                    allEmiDates.push(emiDate.toISOString().split('T')[0]); // Store as YYYY-MM-DD
+                    allEmiDates.push(formatDateLocal(emiDate)); // Store as YYYY-MM-DD without timezone conversion
                   }
                 }
                 
@@ -1919,14 +1929,14 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
               } else {
                 // Single payment: Store as single date string
                 processedDueDate = calculatedValues?.interest?.repayment_date 
-                  ? new Date(calculatedValues.interest.repayment_date).toISOString().split('T')[0]
+                  ? formatDateLocal(new Date(calculatedValues.interest.repayment_date))
                   : null;
               }
             } catch (dueDateError) {
               console.error('Error calculating processed_due_date:', dueDateError);
               // Fallback to single date
               processedDueDate = calculatedValues?.interest?.repayment_date 
-                ? new Date(calculatedValues.interest.repayment_date).toISOString().split('T')[0]
+                ? formatDateLocal(new Date(calculatedValues.interest.repayment_date))
                 : null;
             }
 

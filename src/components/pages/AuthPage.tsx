@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Phone, Key } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -9,6 +9,48 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
 import { Logo } from '../Logo';
+import { getPolicyPdfUrl } from '../../services/policyService';
+
+// Component to handle policy links that fetch PDF from API
+function PolicyLink({ slug, label }: { slug: string; label: string }) {
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchPdf = async () => {
+      try {
+        setLoading(true);
+        const url = await getPolicyPdfUrl(slug);
+        setPdfUrl(url);
+      } catch (error) {
+        console.error(`Error fetching policy PDF for ${slug}:`, error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPdf();
+  }, [slug]);
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (pdfUrl) {
+      window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+    } else if (!loading) {
+      toast.error('Policy document is currently unavailable');
+    }
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      className="text-blue-600 hover:underline"
+      disabled={loading}
+    >
+      {label}
+    </button>
+  );
+}
 
 export function AuthPage() {
   const navigate = useNavigate();
@@ -188,20 +230,11 @@ export function AuthPage() {
                   </div>
                   
                   <div className="ml-6 space-y-2">
-                    <p className="text-xs text-gray-700 leading-relaxed" style={{ fontSize: '10px' }}>1. PocketCredit{' '}
-                      <button
-                        onClick={() => window.open('/terms', '_blank')}
-                        className="text-blue-600 hover:underline"
-                      >
-                        T&C
-                      </button>
+                    <p className="text-xs text-gray-700 leading-relaxed" style={{ fontSize: '10px' }}>
+                      1. PocketCredit{' '}
+                      <PolicyLink slug="terms-conditions" label="T&C" />
                       {' '}&{' '}
-                      <button
-                        onClick={() => window.open('/privacy', '_blank')}
-                        className="text-blue-600 hover:underline"
-                      >
-                        privacy policy
-                      </button>
+                      <PolicyLink slug="privacy-policy" label="privacy policy" />
                     </p>
                     <p className="text-xs text-gray-700 leading-relaxed" style={{ fontSize: '10px' }}>2. I am an Indian citizen above 21 years of age.</p>
                     <p className="text-xs text-gray-700 leading-relaxed" style={{ fontSize: '10px' }}>3. I give my explicit consent and authorize PocketCredit and its partners to contact me via calls, SMS, IVR, auto-calls, WhatsApp and email for transactional, service, and promotional purposes, even if I am registered on DND/NDNC. I confirm that I am applying for a financial product and this consent forms part of my application.</p>

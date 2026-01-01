@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, FileText, Upload } from 'lucide-react';
+import { Plus, Edit, Trash2, FileText, Upload, Shield } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
@@ -14,6 +14,7 @@ interface Policy {
   pdf_url: string | null;
   pdf_filename: string | null;
   is_active: number;
+  is_system_policy?: number | boolean;
   display_order: number;
   created_at: string;
   updated_at: string;
@@ -109,6 +110,14 @@ export function PoliciesManagement() {
   };
 
   const handleDelete = async (id: number) => {
+    const policy = policies.find(p => p.id === id);
+    
+    // Frontend guard: Prevent deletion of system policies
+    if (policy && (policy.is_system_policy === 1 || policy.is_system_policy === true)) {
+      toast.error('System policies cannot be deleted. You can only update the PDF file or toggle active status.');
+      return;
+    }
+
     if (!confirm('Are you sure you want to delete this policy?')) {
       return;
     }
@@ -119,11 +128,20 @@ export function PoliciesManagement() {
         toast.success('Policy deleted successfully');
         fetchPolicies();
       } else {
-        toast.error(response.message || 'Failed to delete policy');
+        if (response.message?.includes('System policies cannot be deleted')) {
+          toast.error('System policies cannot be deleted. You can only update the PDF file or toggle active status.');
+        } else {
+          toast.error(response.message || 'Failed to delete policy');
+        }
       }
     } catch (error: any) {
       console.error('Error deleting policy:', error);
-      toast.error(error.response?.data?.message || 'Failed to delete policy');
+      const errorMessage = error.response?.data?.message || 'Failed to delete policy';
+      if (errorMessage.includes('System policies cannot be deleted') || error.response?.data?.code === 'SYSTEM_POLICY_PROTECTED') {
+        toast.error('System policies cannot be deleted. You can only update the PDF file or toggle active status.');
+      } else {
+        toast.error(errorMessage);
+      }
     }
   };
 
@@ -195,6 +213,15 @@ export function PoliciesManagement() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {policy.is_system_policy && (
+                      <span 
+                        className="px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800 flex items-center gap-1"
+                        title="This is a system policy and cannot be deleted. You can only update the PDF or toggle active status."
+                      >
+                        <Shield className="w-3 h-3" />
+                        System Policy
+                      </span>
+                    )}
                     <span className={`px-3 py-1 rounded-full text-sm ${policy.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
                       {policy.is_active ? 'Active' : 'Inactive'}
                     </span>
@@ -205,14 +232,16 @@ export function PoliciesManagement() {
                     >
                       <Edit className="w-4 h-4" />
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleDelete(policy.id)}
-                      className="text-red-600 hover:text-red-700"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    {!(policy.is_system_policy === 1 || policy.is_system_policy === true) && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDelete(policy.id)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </CardContent>

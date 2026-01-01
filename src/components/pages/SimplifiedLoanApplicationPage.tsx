@@ -383,6 +383,27 @@ export function SimplifiedLoanApplicationPage() {
         return;
       }
 
+      // Build complete plan_snapshot with fees from calculation breakdown
+      const completePlanSnapshot = calcData?.plan ? {
+        plan_id: calcData.plan.id,
+        plan_name: calcData.plan.name,
+        plan_code: calcData.plan.code,
+        plan_type: calcData.plan.type,
+        duration_days: calcData.plan.duration_days,
+        repayment_days: calcData.plan.duration_days,
+        total_duration_days: calcData.plan.duration_days,
+        interest_percent_per_day: calcData?.breakdown?.interest_percent_per_day || 0.001,
+        emi_count: calcData?.emi_details?.emi_count || null,
+        emi_frequency: calcData?.emi_details?.emi_frequency || null,
+        calculate_by_salary_date: true, // Assuming this is the default for most plans
+        // Include fees with correct percentages from breakdown
+        fees: calcData?.breakdown?.fees?.map((fee: any) => ({
+          fee_name: fee.name,
+          fee_percent: fee.percent,
+          application_method: fee.application_method
+        })) || []
+      } : null;
+
       const response = await apiService.applyForLoan({
         loan_amount: formData.desiredAmount,
         tenure_months: Math.ceil((calcData?.plan?.duration_days || 15) / 30),
@@ -390,16 +411,19 @@ export function SimplifiedLoanApplicationPage() {
         plan_id: planIdToSend,
         loan_plan_id: planIdToSend, // Also send as loan_plan_id for backward compatibility
         plan_code: calcData?.plan?.code || null,
-        plan_snapshot: calcData?.plan ? {
-          plan_name: calcData.plan.name,
-          plan_type: calcData.plan.type,
-          duration_days: calcData.plan.duration_days
-        } : null,
+        plan_snapshot: completePlanSnapshot,
         // Legacy processing fee fields (for backward compatibility)
         processing_fee: calcData?.processing_fee || 0,
         processing_fee_percent: calcData?.breakdown?.processing_fee_percent || 0,
-        // Dynamic fees
-        fees_breakdown: feesBreakdown.length > 0 ? feesBreakdown : null,
+        // Dynamic fees - store with correct structure
+        fees_breakdown: feesBreakdown.length > 0 ? feesBreakdown.map((fee: any) => ({
+          fee_name: fee.name,
+          fee_percent: fee.percent,
+          fee_amount: fee.amount,
+          gst_amount: fee.gst_amount,
+          total_with_gst: fee.total_with_gst,
+          application_method: fee.application_method
+        })) : null,
         total_deduct_from_disbursal: totalDeductFromDisbursal,
         total_add_to_total: totalAddToTotal,
         disbursal_amount: disbursalAmount,

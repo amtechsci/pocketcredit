@@ -1,7 +1,10 @@
 import { Link } from 'react-router-dom';
 import { Facebook, Twitter, Linkedin, Instagram, Mail, Phone, MapPin } from 'lucide-react';
+import { usePolicies } from '../hooks/usePolicies';
 
 export function Footer() {
+  const { policies } = usePolicies(); // Fetch policies from API
+
   const quickLinks = [
     { label: 'Personal Loan', path: '/personal-loan' },
     { label: 'Business Loan', path: '/business-loan' },
@@ -13,16 +16,6 @@ export function Footer() {
     { label: 'About Us', path: '/about' },
     { label: 'Media / Press', path: '/media' },
     { label: 'Careers', path: '/careers' },
-  ];
-
-  const legalLinks = [
-    { label: 'Privacy Policy', path: '/privacy' },
-    { label: 'Terms & Conditions', path: '/terms' },
-    { label: 'Fair Practice Code', path: '/fair-practice' },
-    { label: 'Fees Policy', path: '/fees-policy' },
-    { label: 'IT Policy', path: '/it-policy' },
-    { label: 'Refund & Cancellation', path: '/refund-cancellation-policy' },
-    { label: 'Grievance Redressal', path: '/grievance' },
   ];
 
   const contactInfo = [
@@ -118,15 +111,19 @@ export function Footer() {
         {/* Legal Links - Compact horizontal layout */}
         <div className="mt-6 pt-6 border-t border-gray-200">
           <div className="flex flex-wrap gap-x-4 gap-y-2 justify-center lg:justify-start">
-            {legalLinks.map((link, index) => (
-              <span key={link.path} className="flex items-center">
-                <Link
-                  to={link.path}
-                  className="text-xs text-gray-600 hover:text-blue-600 transition-colors"
+            {policies.map((policy, index) => (
+              <span key={policy.id} className="flex items-center">
+                <button
+                  onClick={() => {
+                    if (policy.pdf_url) {
+                      window.open(policy.pdf_url, '_blank', 'noopener,noreferrer');
+                    }
+                  }}
+                  className="text-xs text-gray-600 hover:text-blue-600 transition-colors cursor-pointer"
                 >
-                  {link.label}
-                </Link>
-                {index < legalLinks.length - 1 && (
+                  {policy.policy_name}
+                </button>
+                {index < policies.length - 1 && (
                   <span className="text-gray-400 ml-4">|</span>
                 )}
               </span>

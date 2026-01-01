@@ -42,7 +42,7 @@ router.get('/', async (req, res) => {
     await initializeDatabase();
     
     const policies = await executeQuery(
-      'SELECT id, policy_name, policy_slug, pdf_url, is_active, display_order FROM policies WHERE is_active = 1 ORDER BY display_order ASC'
+      'SELECT id, policy_name, policy_slug, pdf_url, is_active, display_order, is_system_policy FROM policies WHERE is_active = 1 ORDER BY display_order ASC'
     );
 
     res.json({
@@ -59,11 +59,63 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/policies/slug/:slug - Get policy by slug (public endpoint)
+router.get('/slug/:slug', async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { slug } = req.params;
+    
+    const policies = await executeQuery(
+      'SELECT id, policy_name, policy_slug, pdf_url, pdf_filename, is_active, display_order FROM policies WHERE policy_slug = ? AND is_active = 1',
+      [slug]
+    );
+
+    if (policies.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Policy not found'
+      });
+    }
+
+    res.json({
+      status: 'success',
+      data: policies[0]
+    });
+  } catch (error) {
+    console.error('Error fetching policy by slug:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch policy',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 // GET /api/policies/:id - Get single policy
 router.get('/:id', async (req, res) => {
   try {
     await initializeDatabase();
     const { id } = req.params;
+    
+    // Check if id is a number (ID) or string (slug) - handle slug case
+    if (isNaN(parseInt(id))) {
+      const policies = await executeQuery(
+        'SELECT id, policy_name, policy_slug, pdf_url, pdf_filename, is_active, display_order FROM policies WHERE policy_slug = ? AND is_active = 1',
+        [id]
+      );
+
+      if (policies.length === 0) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Policy not found'
+        });
+      }
+
+      return res.json({
+        status: 'success',
+        data: policies[0]
+      });
+    }
     
     const policies = await executeQuery(
       'SELECT * FROM policies WHERE id = ?',
@@ -234,6 +286,7 @@ router.put('/:id', authenticateAdmin, upload.single('pdf'), async (req, res) => 
 });
 
 // DELETE /api/policies/:id - Delete policy (admin only)
+// HARD GUARD: System policies cannot be deleted
 router.delete('/:id', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
@@ -253,6 +306,15 @@ router.delete('/:id', authenticateAdmin, async (req, res) => {
     }
 
     const policy = existing[0];
+
+    // HARD GUARD: Block deletion of system policies
+    if (policy.is_system_policy === 1 || policy.is_system_policy === true) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'System policies cannot be deleted. You can only update the PDF file or toggle active status.',
+        code: 'SYSTEM_POLICY_PROTECTED'
+      });
+    }
 
     // Delete PDF file if exists
     if (policy.pdf_filename) {

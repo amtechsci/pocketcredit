@@ -363,61 +363,33 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           monthly_income: monthlyIncome
         }
       },
-      interest: {
-        rate: planData.interest_percent_per_day 
-          ? parseFloat((planData.interest_percent_per_day * 365 * 100).toFixed(2)) 
-          : (loanPlan.interest_percent_per_day 
-            ? parseFloat((loanPlan.interest_percent_per_day * 365 * 100).toFixed(2)) 
-            : 0),
-        rate_per_day: planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001,
-        type: 'Reducing Balance',
-        calculation_method: 'Daily',
-        annual_rate: ((planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001) * 365 * 100).toFixed(2),
-        days: loanValues.interest?.days || 0,
-        amount: loanValues.interest?.amount || 0,
-        calculation_days: loanValues.interest?.days || 0  // Actual days used for interest calculation
-      },
+      interest: (() => {
+        // For multi-EMI loans, calculate total interest from schedule sum (already generated below)
+        // This will be updated after schedule is generated
+        return {
+          rate: planData.interest_percent_per_day 
+            ? parseFloat((planData.interest_percent_per_day * 365 * 100).toFixed(2)) 
+            : (loanPlan.interest_percent_per_day 
+              ? parseFloat((loanPlan.interest_percent_per_day * 365 * 100).toFixed(2)) 
+              : 0),
+          rate_per_day: planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001,
+          type: 'Reducing Balance',
+          calculation_method: 'Daily',
+          annual_rate: ((planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001) * 365 * 100).toFixed(2),
+          days: loanValues.interest?.days || 0,
+          amount: loanValues.interest?.amount || 0, // Will be updated below for multi-EMI
+          calculation_days: loanValues.interest?.days || 0  // Actual days used for interest calculation
+        };
+      })(),
       fees: {
         processing_fee: loanValues.totals?.disbursalFee || loanValues.processingFee || 0,
-        total_add_to_total: (() => {
-          // For EMI loans, multiply post service fee by EMI count
-          const emiCount = planData.emi_count || 1;
-          const baseFee = loanValues.totals?.repayableFee || loanValues.totalAddToTotal || 0;
-          return emiCount > 1 ? baseFee * emiCount : baseFee;
-        })(),
-        gst_on_add_to_total: (() => {
-          // For EMI loans, multiply GST on post service fee by EMI count
-          const emiCount = planData.emi_count || 1;
-          const baseGST = loanValues.totals?.repayableFeeGST || 0;
-          return emiCount > 1 ? baseGST * emiCount : baseGST;
-        })(),
-        gst: (() => {
-          // Total GST = disbursal fee GST + (repayable fee GST * emi_count for EMI loans)
-          const emiCount = planData.emi_count || 1;
-          const disbursalGST = loanValues.totals?.disbursalFeeGST || 0;
-          const repayableGST = loanValues.totals?.repayableFeeGST || 0;
-          const repayableGSTMultiplied = emiCount > 1 ? repayableGST * emiCount : repayableGST;
-          return disbursalGST + repayableGSTMultiplied || loanValues.processingFeeGST || 0;
-        })(),
-        fees_breakdown: (() => {
-          // For EMI loans, multiply add_to_total fees by EMI count
-          const emiCount = planData.emi_count || 1;
-          if (emiCount > 1) {
-            return feesBreakdown.map(fee => {
-              if (fee.application_method === 'add_to_total') {
-                return {
-                  ...fee,
-                  amount: (fee.amount || 0) * emiCount,
-                  fee_amount: (fee.fee_amount || fee.amount || 0) * emiCount,
-                  gst_amount: (fee.gst_amount || 0) * emiCount,
-                  total_with_gst: (fee.total_with_gst || 0) * emiCount
-                };
-              }
-              return fee;
-            });
-          }
-          return feesBreakdown;
-        })()
+        // Fees are already calculated with EMI multiplication in loanCalculations.js
+        total_add_to_total: loanValues.totals?.repayableFee || loanValues.totalAddToTotal || 0,
+        gst_on_add_to_total: loanValues.totals?.repayableFeeGST || 0,
+        gst: (loanValues.totals?.disbursalFeeGST || 0) + (loanValues.totals?.repayableFeeGST || 0) || loanValues.processingFeeGST || 0,
+        // Fees breakdown is already calculated with EMI multiplication in loanCalculations.js
+        // and saved to database with correct amounts, so no need to multiply again
+        fees_breakdown: feesBreakdown
       },
       calculations: (() => {
         const principal = loanValues.principal || loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0;
@@ -426,16 +398,13 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         const days = loanValues.interest?.days || 0;
         const emiCount = planData.emi_count || 1;
         
-        // Calculate total GST (disbursal fee GST + repayable fee GST * emi_count for EMI loans)
+        // Totals are already calculated with EMI multiplication in loanCalculations.js
         const disbursalGST = loanValues.totals?.disbursalFeeGST || 0;
         const repayableGST = loanValues.totals?.repayableFeeGST || 0;
-        const repayableGSTMultiplied = emiCount > 1 ? repayableGST * emiCount : repayableGST;
-        const gst = disbursalGST + repayableGSTMultiplied;
+        const gst = disbursalGST + repayableGST;
         
-        // Calculate repayable fee (post service fee) - multiply by EMI count for Multi-EMI
-        const repayableFee = emiCount > 1
-          ? (loanValues.totals?.repayableFee || 0) * emiCount
-          : (loanValues.totals?.repayableFee || 0);
+        // Repayable fee is already multiplied by EMI count in loanCalculations.js
+        const repayableFee = loanValues.totals?.repayableFee || 0;
         
         // Calculate first due date for Multi-EMI loan term calculation
         let firstDueDate;
@@ -796,11 +765,11 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               emiDate.setDate(emiDate.getDate() + (i * daysBetween));
             }
             emiDate.setHours(0, 0, 0, 0);
-            allEmiDates.push(emiDate.toISOString());
+            allEmiDates.push(formatDateLocal(emiDate));
           }
         } else {
           // Single payment loan
-          allEmiDates = [firstDueDate.toISOString()];
+          allEmiDates = [formatDateLocal(firstDueDate)];
         }
 
         // Generate repayment schedule with all installments
@@ -861,7 +830,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               post_service_fee: postServiceFeePerEmi,
               gst_on_post_service_fee: postServiceFeeGSTPerEmi,
               instalment_amount: instalmentAmount,
-              due_date: emiDate.toISOString() // Keep ISO format for API consistency, frontend will format for display
+              due_date: formatDateLocal(emiDate) // Use local date format without timezone conversion
             });
             
             // Reduce outstanding principal for next period
@@ -879,7 +848,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             post_service_fee: postServiceFee,
             gst_on_post_service_fee: postServiceFeeGST,
             instalment_amount: totalRepayable,
-            due_date: firstDueDate.toISOString()
+            due_date: formatDateLocal(firstDueDate)
           });
         }
 
@@ -891,7 +860,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           total_emis: isMultiEmi ? emiCount : 1,
           first_emi_date: schedule.length > 0 ? schedule[0].due_date : (loan.first_emi_date || 'N/A'),
           last_emi_date: schedule.length > 0 ? schedule[schedule.length - 1].due_date : (loan.last_emi_date || 'N/A'),
-          first_due_date: schedule.length > 0 ? schedule[0].due_date : firstDueDate.toISOString(),
+          first_due_date: schedule.length > 0 ? schedule[0].due_date : formatDateLocal(firstDueDate),
           all_emi_dates: allEmiDates,
           schedule: schedule
         };
@@ -945,6 +914,16 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         return null;
       })()
     };
+
+    // For multi-EMI loans, update interest amount and total repayable to sum from schedule
+    if (kfsData.repayment.schedule && Array.isArray(kfsData.repayment.schedule) && kfsData.repayment.schedule.length > 1) {
+      const totalInterestFromSchedule = kfsData.repayment.schedule.reduce((sum, emi) => sum + (emi.interest || 0), 0);
+      const totalRepayableFromSchedule = kfsData.repayment.schedule.reduce((sum, emi) => sum + (emi.instalment_amount || 0), 0);
+      kfsData.interest.amount = totalInterestFromSchedule;
+      kfsData.calculations.total_repayable = totalRepayableFromSchedule;
+      kfsData.calculations.total_amount = totalRepayableFromSchedule;
+      console.log(`📊 Multi-EMI loan: Updated interest: ₹${totalInterestFromSchedule}, total repayable: ₹${totalRepayableFromSchedule}`);
+    }
 
     console.log('✅ KFS data generated successfully for user');
 
@@ -1504,7 +1483,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         applied_date: loan.created_at,
         approved_date: loan.approved_at,
         disbursed_date: loan.disbursed_at,
-        due_date: dueDate.toISOString(),
+        due_date: formatDateLocal(dueDate),
         emi_count: planData.emi_count || null
       },
 
@@ -1560,35 +1539,22 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
             total_with_gst: fee.total_with_gst,
             application_method: 'deduct_from_disbursal'
           })),
-          ...calculations.fees.addToTotal.map(fee => {
-            // For EMI loans, multiply add_to_total fees by EMI count
-            const emiCount = planData.emi_count || 1;
-            const multiplier = emiCount > 1 ? emiCount : 1;
-            return {
-              fee_name: fee.fee_name,
-              fee_percent: fee.fee_percent,
-              fee_amount: fee.fee_amount * multiplier,
-              gst_amount: fee.gst_amount * multiplier,
-              total_with_gst: fee.total_with_gst * multiplier,
-              application_method: 'add_to_total',
-              amount: fee.fee_amount * multiplier
-            };
-          })
+          ...calculations.fees.addToTotal.map(fee => ({
+            // Fee amounts are already multiplied by EMI count in loanCalculations.js
+            fee_name: fee.fee_name,
+            fee_percent: fee.fee_percent,
+            fee_amount: fee.fee_amount,
+            gst_amount: fee.gst_amount,
+            total_with_gst: fee.total_with_gst,
+            application_method: 'add_to_total',
+            amount: fee.fee_amount
+          }))
         ],
         total_deduct_from_disbursal: calculations.totals.disbursalFee,
-        total_add_to_total: (() => {
-          // For EMI loans, multiply post service fee by EMI count
-          const emiCount = planData.emi_count || 1;
-          const baseFee = calculations.totals.repayableFee;
-          return emiCount > 1 ? baseFee * emiCount : baseFee;
-        })(),
+        // Totals are already multiplied by EMI count in loanCalculations.js
+        total_add_to_total: calculations.totals.repayableFee,
         gst_on_deduct_from_disbursal: calculations.totals.disbursalFeeGST,
-        gst_on_add_to_total: (() => {
-          // For EMI loans, multiply GST on post service fee by EMI count
-          const emiCount = planData.emi_count || 1;
-          const baseGST = calculations.totals.repayableFeeGST;
-          return emiCount > 1 ? baseGST * emiCount : baseGST;
-        })()
+        gst_on_add_to_total: calculations.totals.repayableFeeGST
       },
 
       // Calculations
@@ -1683,11 +1649,11 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
               emiDate.setDate(emiDate.getDate() + (i * daysBetween));
             }
             emiDate.setHours(0, 0, 0, 0);
-            allEmiDates.push(emiDate.toISOString());
+            allEmiDates.push(formatDateLocal(emiDate));
           }
         } else {
           // Single payment loan
-          allEmiDates = [dueDate.toISOString()];
+          allEmiDates = [formatDateLocal(dueDate)];
         }
 
         // Generate repayment schedule with all installments
@@ -1744,7 +1710,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
               post_service_fee: postServiceFeePerEmi,
               gst_on_post_service_fee: postServiceFeeGSTPerEmi,
               instalment_amount: instalmentAmount,
-              due_date: emiDate.toISOString() // Keep ISO format for API consistency, frontend will format for display
+              due_date: formatDateLocal(emiDate) // Use local date format without timezone conversion
             });
             
             // Reduce outstanding principal for next period
@@ -1762,7 +1728,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
             post_service_fee: postServiceFee,
             gst_on_post_service_fee: postServiceFeeGST,
             instalment_amount: totalRepayable,
-            due_date: dueDate.toISOString()
+            due_date: formatDateLocal(dueDate)
           });
         }
 
@@ -1770,7 +1736,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           type: isMultiEmi ? 'EMI' : 'Bullet Payment',
           number_of_instalments: isMultiEmi ? emiCount : 1,
           instalment_amount: isMultiEmi ? schedule[0]?.instalment_amount || (totalRepayable / emiCount) : totalRepayable,
-          first_due_date: schedule.length > 0 ? schedule[0].due_date : dueDate.toISOString(),
+          first_due_date: schedule.length > 0 ? schedule[0].due_date : formatDateLocal(dueDate),
           all_emi_dates: allEmiDates,
           schedule: schedule
         };
@@ -1840,6 +1806,15 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         return null;
       })()
     };
+
+    // For multi-EMI loans, update interest amount and total repayable to sum from schedule
+    if (kfsData.repayment.schedule && Array.isArray(kfsData.repayment.schedule) && kfsData.repayment.schedule.length > 1) {
+      const totalInterestFromSchedule = kfsData.repayment.schedule.reduce((sum, emi) => sum + (emi.interest || 0), 0);
+      const totalRepayableFromSchedule = kfsData.repayment.schedule.reduce((sum, emi) => sum + (emi.instalment_amount || 0), 0);
+      kfsData.interest.amount = totalInterestFromSchedule;
+      kfsData.calculations.total_repayable = totalRepayableFromSchedule;
+      console.log(`📊 Multi-EMI loan: Updated interest: ₹${totalInterestFromSchedule}, total repayable: ₹${totalRepayableFromSchedule}`);
+    }
 
     console.log('✅ KFS data generated successfully');
 

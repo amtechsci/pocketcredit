@@ -135,6 +135,107 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     // Calculate using centralized function
     const calculation = calculateCompleteLoanValues(loanData, planData, userData, options);
     
+    // For multi-EMI loans, recalculate interest by summing from each EMI period
+    if (planData.emi_count && planData.emi_count > 1) {
+      const principal = calculation.principal;
+      const emiCount = planData.emi_count;
+      const interestRatePerDay = calculation.interest.rate_per_day;
+      
+      // Generate EMI dates to calculate interest per period
+      const { getNextSalaryDate, getSalaryDateForMonth } = require('../utils/loanCalculations');
+      
+      let allEmiDates = [];
+      let baseDate;
+      if (loan.disbursed_at) {
+        // Parse date to avoid timezone issues
+        try {
+          const d = new Date(loan.disbursed_at);
+          if (isNaN(d.getTime())) {
+            throw new Error('Invalid date');
+          }
+          // Create a new date using UTC values as local values
+          baseDate = new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0);
+        } catch (e) {
+          console.error('Error parsing disbursed_at date:', e);
+          baseDate = new Date();
+          baseDate.setHours(0, 0, 0, 0);
+        }
+      } else {
+        baseDate = new Date();
+        baseDate.setHours(0, 0, 0, 0);
+      }
+      
+      console.log(`📅 Base Date (Disbursed): ${baseDate.getFullYear()}-${String(baseDate.getMonth()+1).padStart(2,'0')}-${String(baseDate.getDate()).padStart(2,'0')}`);
+      
+      if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
+        const salaryDate = parseInt(userData.salary_date);
+        if (salaryDate >= 1 && salaryDate <= 31) {
+          let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
+          const minDuration = planData.repayment_days || 15;
+          const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          if (daysToNextSalary < minDuration) {
+            nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
+          }
+          for (let i = 0; i < emiCount; i++) {
+            const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
+            emiDate.setHours(0, 0, 0, 0); // Normalize to midnight
+            allEmiDates.push(emiDate);
+          }
+          const formatDateLocal = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+          console.log(`📅 EMI Dates: ${allEmiDates.map(formatDateLocal).join(', ')}`);
+        }
+      }
+      
+      // Calculate interest for each EMI period on reducing balance
+      if (allEmiDates.length === emiCount) {
+        const principalPerEmi = Math.floor(principal / emiCount * 100) / 100;
+        const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
+        
+        let outstandingPrincipal = principal;
+        let totalInterest = 0;
+        
+        for (let i = 0; i < emiCount; i++) {
+          const emiDate = new Date(allEmiDates[i]);
+          emiDate.setHours(0, 0, 0, 0);
+          
+          let previousDate;
+          if (i === 0) {
+            previousDate = new Date(baseDate);
+            previousDate.setHours(0, 0, 0, 0);
+          } else {
+            previousDate = new Date(allEmiDates[i - 1]);
+            previousDate.setHours(0, 0, 0, 0);
+            previousDate.setDate(previousDate.getDate() + 1);
+          }
+          
+          // Calculate days difference (inclusive of both start and end dates)
+          const msPerDay = 1000 * 60 * 60 * 24;
+          const daysDiff = Math.round((emiDate.getTime() - previousDate.getTime()) / msPerDay);
+          const daysForPeriod = daysDiff + 1; // +1 for inclusive counting
+          const principalForThisEmi = i === emiCount - 1 
+            ? Math.round((principalPerEmi + remainder) * 100) / 100
+            : principalPerEmi;
+          
+          const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
+          totalInterest += interestForPeriod;
+          
+          const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+          console.log(`📊 EMI ${i + 1}: ${formatDate(previousDate)} to ${formatDate(emiDate)} = ${daysForPeriod} days, Outstanding ₹${outstandingPrincipal}, Interest ₹${interestForPeriod}`);
+          
+          outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
+        }
+        
+        console.log(`✅ Total Interest (sum of all EMI periods): ₹${totalInterest}`);
+        
+        // Update interest and total repayable
+        calculation.interest.amount = totalInterest;
+        calculation.total.repayable = principal + totalInterest + calculation.totals.repayableFee + calculation.totals.repayableFeeGST;
+        calculation.total.breakdown = `Principal (₹${principal.toFixed(2)}) + Interest (₹${totalInterest.toFixed(2)}) + Repayable Fees (₹${(calculation.totals.repayableFee + calculation.totals.repayableFeeGST).toFixed(2)}) = ₹${calculation.total.repayable.toFixed(2)}`;
+        
+        console.log(`📊 Multi-EMI loan ${loanId}: Recalculated interest from reducing balance: ₹${totalInterest}`);
+      }
+    }
+    
     res.json({
       success: true,
       data: {

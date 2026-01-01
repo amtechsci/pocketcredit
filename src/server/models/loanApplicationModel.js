@@ -191,10 +191,29 @@ const createApplication = async (userId, applicationData) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
     `;
 
-    // Prepare fees_breakdown JSON (use provided fees_breakdown or construct from fees array)
+    // Prepare fees_breakdown JSON
+    // IMPORTANT: Always regenerate from finalPlanSnapshot.fees to ensure correct percentages
     let feesBreakdownJson = null;
-    if (fees_breakdown) {
+    if (finalPlanSnapshot && finalPlanSnapshot.fees && Array.isArray(finalPlanSnapshot.fees) && finalPlanSnapshot.fees.length > 0) {
+      // Regenerate fees_breakdown from plan_snapshot.fees with correct percentages
+      const regeneratedFees = finalPlanSnapshot.fees.map(fee => {
+        const feeAmount = Math.round((loan_amount * fee.fee_percent) / 100 * 100) / 100;
+        const gstAmount = Math.round(feeAmount * 0.18 * 100) / 100;
+        return {
+          fee_name: fee.fee_name,
+          fee_percent: fee.fee_percent,
+          fee_amount: feeAmount,
+          gst_amount: gstAmount,
+          total_with_gst: Math.round((feeAmount + gstAmount) * 100) / 100,
+          application_method: fee.application_method
+        };
+      });
+      feesBreakdownJson = JSON.stringify(regeneratedFees);
+      console.log(`✅ Regenerated fees_breakdown from plan_snapshot with correct percentages`);
+    } else if (fees_breakdown) {
+      // Fallback to provided fees_breakdown (for legacy support)
       feesBreakdownJson = typeof fees_breakdown === 'string' ? fees_breakdown : JSON.stringify(fees_breakdown);
+      console.warn(`⚠️ Using provided fees_breakdown (may have incorrect percentages). Plan snapshot fees not available.`);
     } else if (fees && Array.isArray(fees)) {
       feesBreakdownJson = JSON.stringify(fees);
     }

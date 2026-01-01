@@ -1812,7 +1812,10 @@ export function UserProfileDetail() {
     const parts = datePart.split('-');
     if (parts.length === 3) {
       const [year, month, day] = parts;
-      return `${day}/${month}/${year}`;
+      // Ensure day and month are zero-padded
+      const formattedDay = String(day).padStart(2, '0');
+      const formattedMonth = String(month).padStart(2, '0');
+      return `${formattedDay}/${formattedMonth}/${year}`;
     }
     
     return datePart; // Return as-is if format is unexpected
@@ -4638,10 +4641,16 @@ export function UserProfileDetail() {
                         penaltyData = calculatePenalty(principal, dpd);
                       }
 
-                      // Calculate interest till current date (always calculate, not frozen) - no timezone conversion
-                      const interestTillDate = disbursedDate && calculation?.interest?.rate_per_day
-                        ? calculateInterestTillDate(principal, calculation.interest.rate_per_day, disbursedDate, getCurrentDateString())
-                        : 0;
+                      // Calculate interest till current date
+                      // For multi-EMI loans, sum interest from schedule; for single payment, calculate from disbursement
+                      let interestTillDate = 0;
+                      if (calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 1) {
+                        // Multi-EMI loan: Sum interest from all EMI periods in the schedule
+                        interestTillDate = calculation.repayment.schedule.reduce((sum: number, emi: any) => sum + (emi.interest || 0), 0);
+                      } else if (disbursedDate && calculation?.interest?.rate_per_day) {
+                        // Single payment loan: Calculate from disbursement to current date
+                        interestTillDate = calculateInterestTillDate(principal, calculation.interest.rate_per_day, disbursedDate, getCurrentDateString());
+                      }
 
                       // Processing fee - use processed value if available, otherwise calculate
                       const processingFee = isProcessed && loan.processed_p_fee !== null 
@@ -4661,9 +4670,16 @@ export function UserProfileDetail() {
                         : (processingFeeGST + postServiceFeeGST);
 
                       // Total interest for full tenure - use processed value if available, otherwise calculate
-                      const totalInterestFullTenure = isProcessed && loan.processed_interest !== null
-                        ? loan.processed_interest
-                        : (calculation?.interest?.amount || loan.interest || 0);
+                      // For multi-EMI, use the same schedule-based calculation as interestTillDate
+                      let totalInterestFullTenure;
+                      if (isProcessed && loan.processed_interest !== null) {
+                        totalInterestFullTenure = loan.processed_interest;
+                      } else if (calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 1) {
+                        // Multi-EMI loan: Sum interest from all EMI periods in the schedule
+                        totalInterestFullTenure = calculation.repayment.schedule.reduce((sum: number, emi: any) => sum + (emi.interest || 0), 0);
+                      } else {
+                        totalInterestFullTenure = calculation?.interest?.amount || loan.interest || 0;
+                      }
 
                       // Calculate total amount: principal + post service fee + gst on post service fee + interest balance till current date + penalty if any + gst on penalty
                       const totalAmount = principal + postServiceFee + postServiceFeeGST + interestTillDate + penaltyData.total;

@@ -7,12 +7,14 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Logo } from './Logo';
 import { useAuth } from '../contexts/AuthContext';
 import { handleLogoClick, handleLoginClick } from '../utils/navigation';
+import { usePolicies } from '../hooks/usePolicies';
 
 export function Header() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
+  const { policies } = usePolicies(); // Fetch policies from API
 
   const navigationItems = [
     { label: 'Home', path: '/' },
@@ -21,16 +23,6 @@ export function Header() {
     { label: 'Credit Score', path: '/credit-score' },
     { label: 'Resources', path: '/resources' },
     { label: 'Contact Us', path: '/contact' },
-  ];
-
-  const policyItems = [
-    { label: 'Privacy Policy', path: '/privacy' },
-    { label: 'Terms & Conditions', path: '/terms' },
-    { label: 'Fair Practice Code', path: '/fair-practice' },
-    { label: 'Fees Policy', path: '/fees-policy' },
-    { label: 'IT Policy', path: '/it-policy' },
-    { label: 'Refund & Cancellation', path: '/refund-cancellation-policy' },
-    { label: 'Grievance Redressal', path: '/grievance' },
   ];
 
   const isActive = (path: string) => {
@@ -73,11 +65,17 @@ export function Header() {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
-                {policyItems.map((policy) => (
-                  <DropdownMenuItem key={policy.path} asChild>
-                    <Link to={policy.path} className="cursor-pointer">
-                      {policy.label}
-                    </Link>
+                {policies.map((policy) => (
+                  <DropdownMenuItem
+                    key={policy.id}
+                    onClick={() => {
+                      if (policy.pdf_url) {
+                        window.open(policy.pdf_url, '_blank', 'noopener,noreferrer');
+                      }
+                    }}
+                    className="cursor-pointer"
+                  >
+                    {policy.policy_name}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
@@ -160,15 +158,19 @@ export function Header() {
                   {/* Mobile Policies Section */}
                   <div className="border-t pt-4 mt-4">
                     <div className="px-4 py-2 text-sm font-semibold text-gray-500">Policies</div>
-                    {policyItems.map((policy) => (
-                      <Link
-                        key={policy.path}
-                        to={policy.path}
-                        onClick={() => setIsMobileMenuOpen(false)}
-                        className="text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 rounded-lg touch-manipulation block"
+                    {policies.map((policy) => (
+                      <button
+                        key={policy.id}
+                        onClick={() => {
+                          if (policy.pdf_url) {
+                            window.open(policy.pdf_url, '_blank', 'noopener,noreferrer');
+                          }
+                          setIsMobileMenuOpen(false);
+                        }}
+                        className="text-left w-full px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 rounded-lg touch-manipulation block"
                       >
-                        {policy.label}
-                      </Link>
+                        {policy.policy_name}
+                      </button>
                     ))}
                   </div>
                   
