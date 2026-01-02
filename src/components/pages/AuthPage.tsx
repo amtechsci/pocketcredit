@@ -328,19 +328,23 @@ export function AuthPage() {
             <div className="text-center pt-4">
               <p className="text-xs text-gray-500">
                 By continuing, you agree to our{' '}
-                <button
-                  onClick={() => navigate('/terms')}
+                <a
+                  href="/terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="text-blue-600 hover:underline"
                 >
                   Terms & Conditions
-                </button>{' '}
+                </a>{' '}
                 and{' '}
-                <button
-                  onClick={() => navigate('/privacy')}
+                <a
+                  href="/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="text-blue-600 hover:underline"
                 >
                   Privacy Policy
-                </button>
+                </a>
               </p>
             </div>
           </CardContent>

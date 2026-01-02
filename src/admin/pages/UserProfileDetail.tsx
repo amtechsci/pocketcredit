@@ -8913,7 +8913,7 @@ export function UserProfileDetail() {
                   {/* Delete Status Badge */}
                   {getUserData('status') === 'deleted' && (
                     <span className="px-2 py-1 text-xs font-semibold rounded-full bg-gray-800 text-white border border-gray-900">
-                      DELETE
+                      DELETED
                     </span>
                   )}
                 </div>

@@ -552,9 +552,9 @@ export function SimplifiedLoanApplicationPage() {
               </Select>
             </div>
 
-            {/* Display assigned loan plan (read-only) */}
-            {formData.selectedPlanId && availablePlans.length > 0 && (
-              <div className="space-y-2">
+            {/* Display assigned loan plan (read-only) - Hidden from view but data still available in background */}
+            {false && formData.selectedPlanId && availablePlans.length > 0 && (
+              <div className="space-y-2" style={{ display: 'none' }}>
                 <Label className="text-base font-medium">
                   Repayment Plan
                 </Label>
@@ -575,7 +575,7 @@ export function SimplifiedLoanApplicationPage() {
                 {/* <Shield className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" /> */}
                 <div className="flex-1 text-sm text-gray-600 leading-relaxed">
                   <p className="mb-2">
-                    <strong>Final tenure, loan amount, interest rate, and processing fee</strong> are subject to the credit risk assessment of the partnered NBFC.
+                    <strong>Final tenure, loan amount, interest rate, and processing fee</strong> are subject to the credit risk assessment of the NBFC.
                   </p>
                   <p className="mb-2">
                     Details of this assessment will be fully disclosed in the <strong>Key Facts Statement (KFS)</strong> and loan agreement prior to loan disbursement.
@@ -598,7 +598,7 @@ export function SimplifiedLoanApplicationPage() {
                   <label htmlFor="agreeToTerms" className="cursor-pointer">
                     I agree to pocketcredit.in{' '}
                     <a 
-                      href="/terms-conditions" 
+                      href="/terms" 
                       target="_blank" 
                       rel="noopener noreferrer"
                       className="text-blue-600 hover:text-blue-800 underline inline-flex items-center gap-1"
@@ -608,7 +608,7 @@ export function SimplifiedLoanApplicationPage() {
                     </a>
                     {' '}&{' '}
                     <a 
-                      href="/privacy-policy" 
+                      href="/privacy" 
                       target="_blank" 
                       rel="noopener noreferrer"
                       className="text-blue-600 hover:text-blue-800 underline inline-flex items-center gap-1"
@@ -647,7 +647,7 @@ export function SimplifiedLoanApplicationPage() {
         {/* Additional Info */}
         <div className="mt-6 text-center">
           <p className="text-sm text-gray-500">
-            Your application will be reviewed by our partnered NBFCs. 
+            Your application will be reviewed. 
             You'll receive updates via SMS and email.
           </p>
         </div>

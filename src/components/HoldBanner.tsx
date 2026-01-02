@@ -27,13 +27,8 @@ export function HoldBanner({ holdInfo }: HoldBannerProps) {
         <Alert variant="destructive" className="border-red-600 bg-red-100">
           <XCircle className="h-5 w-5" />
           <AlertTitle className="text-lg font-semibold">
-            Your profile is purged in our system
+            Your profile is purged in our system. Thank you.
           </AlertTitle>
-          <AlertDescription className="mt-2">
-            <p className="text-sm">
-              Thank you.
-            </p>
-          </AlertDescription>
         </Alert>
       </div>
     );
