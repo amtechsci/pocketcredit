@@ -63,9 +63,70 @@ export const PostDisbursalFlowPage = () => {
       navigate('/auth');
       return;
     }
+    
+    // Check for Digitap ClickWrap callback (success or error)
+    const clickwrapStatus = searchParams.get('clickwrap');
+    const successParam = searchParams.get('success');
+    const transactionId = searchParams.get('transactionId');
+    const errorCode = searchParams.get('error_code');
+    const errorMsg = searchParams.get('errorMsg');
+    
+    if (clickwrapStatus === 'success' || successParam === 'true') {
+      // User returned from successful signing
+      console.log('✅ ClickWrap signing successful, transactionId:', transactionId);
+      
+      // Get applicationId from URL params if not already set
+      const appIdFromUrl = searchParams.get('applicationId');
+      const appId = applicationId || (appIdFromUrl ? parseInt(appIdFromUrl) : null);
+      
+      if (appId) {
+        // Wait a moment for webhook to process, then check status
+        setTimeout(async () => {
+          try {
+            const statusResponse = await apiService.getPostDisbursalProgress(appId);
+            if (statusResponse.success && statusResponse.data?.agreement_signed) {
+              toast.success('Document signed successfully!');
+              // Update progress state
+              setProgress(prev => ({ ...prev, agreement_signed: true }));
+              // Refresh to show signed state
+              await fetchProgress(appId);
+            } else {
+              // Webhook might not have processed yet, show message and refresh
+              toast.info('Please wait while we verify your signature...');
+              await fetchProgress(appId);
+            }
+          } catch (error) {
+            console.error('Error checking signing status:', error);
+            toast.warning('Signing completed. Please wait while we verify...');
+          }
+        }, 2000);
+      } else {
+        toast.success('Document signed successfully!');
+      }
+      
+      // Remove callback params from URL
+      const newSearchParams = new URLSearchParams(searchParams);
+      newSearchParams.delete('clickwrap');
+      newSearchParams.delete('success');
+      newSearchParams.delete('transactionId');
+      navigate(`/post-disbursal?${newSearchParams.toString()}`, { replace: true });
+    } else if (clickwrapStatus === 'error' || errorCode) {
+      // User returned from failed signing
+      console.error('❌ ClickWrap signing failed:', { errorCode, errorMsg, transactionId });
+      toast.error(errorMsg || `Signing failed (Error: ${errorCode})`);
+      
+      // Remove callback params from URL
+      const newSearchParams = new URLSearchParams(searchParams);
+      newSearchParams.delete('clickwrap');
+      newSearchParams.delete('error_code');
+      newSearchParams.delete('errorMsg');
+      newSearchParams.delete('transactionId');
+      navigate(`/post-disbursal?${newSearchParams.toString()}`, { replace: true });
+    }
+    
     fetchApplicationAndProgress();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, navigate, searchParams]);
 
   // Fetch progress when applicationId changes (for cases where it's set from URL params)
   useEffect(() => {
@@ -1176,42 +1237,46 @@ const AgreementSignStep = ({ applicationId, onComplete, saving, progress }: Step
     return clonedElement.innerHTML;
   };
 
-  // Load Digitap SDK dynamically if not already loaded
-  const ensureDigitapSDK = (): Promise<any> => {
-    return new Promise((resolve, reject) => {
-      // Check if SDK is already loaded
-      if ((window as any).DigitapClickWrap) {
-        resolve((window as any).DigitapClickWrap);
-        return;
-      }
-
-      // Check if script is already being loaded
-      if (document.querySelector('script[src*="digitap.ai/clickwrap"]')) {
-        // Wait for script to load
-        const checkInterval = setInterval(() => {
-          if ((window as any).DigitapClickWrap) {
-            clearInterval(checkInterval);
-            resolve((window as any).DigitapClickWrap);
-          }
-        }, 100);
-
-        // Timeout after 10 seconds
-        setTimeout(() => {
-          clearInterval(checkInterval);
-          reject(new Error('Digitap SDK failed to load'));
-        }, 10000);
-        return;
-      }
-
-      // SDK not found - this shouldn't happen if script tag is in index.html
-      // But we'll handle it gracefully
-      reject(new Error('Digitap SDK script not found. Please ensure the SDK script is loaded.'));
-    });
+  // Digitap signing URL format with redirect URLs
+  // Production: https://sdk.digitap.ai/clickwrap/clickwrap.html?txnid={entTransactionId}&redirect_url={Success_url}&error_url={error_url}
+  const getDigitapSigningUrl = (entTransactionId: string, applicationId: number): string => {
+    // Build backend callback URLs - backend will handle PDF download, S3 upload, and email
+    // Digitap requires absolute URLs, so we need to construct the full backend URL
+    const hostname = window.location.hostname;
+    const protocol = window.location.protocol; // 'http:' or 'https:'
+    const isProduction = process.env.NODE_ENV === 'production';
+    
+    // In production, backend is on same host but different path, or use BACKEND_URL env var
+    // In development, backend is on port 3002
+    let backendBaseUrl: string;
+    if (isProduction) {
+      // Production: assume backend is at same origin with /api path, or construct from window.location
+      backendBaseUrl = `${protocol}//${hostname}/api`;
+    } else {
+      // Development: backend is on port 3002
+      backendBaseUrl = `http://${hostname}:3002/api`;
+    }
+    
+    // Backend callback endpoint that handles all post-signing processing
+    const successUrl = encodeURIComponent(`${backendBaseUrl}/clickwrap/callback?success=true&transactionId=${entTransactionId}&applicationId=${applicationId}`);
+    const errorUrl = encodeURIComponent(`${backendBaseUrl}/clickwrap/callback?success=false&transactionId=${entTransactionId}&applicationId=${applicationId}`);
+    
+    // Production URL format (per Digitap docs v1.9)
+    return `https://sdk.digitap.ai/clickwrap/clickwrap.html?txnid=${entTransactionId}&redirect_url=${successUrl}&error_url=${errorUrl}`;
   };
 
   const handleESign = async () => {
     try {
       setInitiating(true);
+
+      // Check if user is authenticated and has token
+      const token = localStorage.getItem('pocket_user_token');
+      if (!token) {
+        toast.error('Please login to continue');
+        setInitiating(false);
+        return;
+      }
+      console.log('🔑 Token found, length:', token.length);
 
       // Step 1: Extract HTML content from the agreement
       let htmlContent: string;
@@ -1251,70 +1316,24 @@ const AgreementSignStep = ({ applicationId, onComplete, saving, progress }: Step
         console.log('✅ ClickWrap initiated:', { entTransactionId, docTransactionId });
       }
 
-      // Step 3: Load and launch Digitap SDK
-      try {
-        const DigitapClickWrap = await ensureDigitapSDK();
-        
-        // Configure SDK options
-        const sdkOptions = {
-          entTransactionId: entTransactionId,
-          onSuccess: () => {
-            console.log('✅ Document signed successfully');
-            toast.success('Loan agreement signed successfully!');
-            
-            // Poll backend to check if webhook has updated the status
-            // We'll check every 2 seconds for up to 30 seconds
-            let pollCount = 0;
-            const maxPolls = 15;
-            const pollInterval = setInterval(async () => {
-              pollCount++;
-              try {
-                const statusResponse = await apiService.getPostDisbursalProgress(applicationId);
-                if (statusResponse.success && statusResponse.data?.agreement_signed) {
-                  clearInterval(pollInterval);
-                  setIsAlreadySigned(true);
-                  onComplete();
-                  toast.success('Agreement signing completed!');
-                } else if (pollCount >= maxPolls) {
-                  clearInterval(pollInterval);
-                  toast.warning('Please wait while we verify your signature...');
-                  // Still call onComplete as webhook might update later
-                  setTimeout(() => {
-                    onComplete();
-                  }, 2000);
-                }
-              } catch (error) {
-                console.error('Error polling agreement status:', error);
-              }
-            }, 2000);
-          },
-          onFailure: (error: any) => {
-            console.error('❌ Document signing failed:', error);
-            toast.error(error?.message || 'Failed to complete e-signature. Please try again.');
-            setInitiating(false);
-          },
-          onCancel: () => {
-            console.log('⚠️ User cancelled signing');
-            toast.info('Signing cancelled');
-            setInitiating(false);
-          }
-        };
-
-        // Launch Digitap SDK
-        console.log('🚀 Launching Digitap SDK with transaction ID:', entTransactionId);
-        DigitapClickWrap.init(sdkOptions);
-
-      } catch (sdkError: any) {
-        console.error('❌ Error loading Digitap SDK:', sdkError);
-        // Fallback: Show preview URL if SDK fails
-        if (previewUrl) {
-          toast.info('Opening signing page in new window...');
-          window.open(previewUrl, '_blank', 'width=800,height=600');
-          // Note: We can't track completion this way, but user can complete signing
-        } else {
-          throw new Error('Failed to load signing interface: ' + sdkError.message);
-        }
-      }
+      // Step 3: Redirect to Digitap signing page with callback URLs
+      // Digitap will redirect back to our app after signing completes/fails
+      const signingUrl = getDigitapSigningUrl(entTransactionId, applicationId);
+      console.log('🚀 Redirecting to Digitap signing page:', signingUrl);
+      console.log('🔑 Using entTransactionId:', entTransactionId);
+      
+      // Redirect in current window
+      toast.info('Redirecting to signing page...');
+      
+      // Small delay to ensure toast is visible before redirect
+      setTimeout(() => {
+        window.location.href = signingUrl;
+      }, 500);
+      
+      // Note: After signing, Digitap will redirect back to:
+      // Success: /post-disbursal?applicationId={id}&clickwrap=success&success=true&transactionId={txnId}
+      // Error: /post-disbursal?applicationId={id}&clickwrap=error&error_code={code}&errorMsg={msg}&transactionId={txnId}
+      // The useEffect hook will handle these callbacks and update the UI accordingly
 
     } catch (error: any) {
       console.error('Error initiating e-signature:', error);

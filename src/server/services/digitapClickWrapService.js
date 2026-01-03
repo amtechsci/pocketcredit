@@ -15,10 +15,13 @@ console.log('   Base URL:', DIGITAP_BASE_URL);
 console.log('   Client ID:', DIGITAP_CLIENT_ID ? 'Set (' + DIGITAP_CLIENT_ID.substring(0, 10) + '...)' : 'Missing');
 console.log('   Client Secret:', DIGITAP_CLIENT_SECRET ? 'Set' : 'Missing');
 console.log('   Doc Class ID:', DIGITAP_CLICKWRAP_DOC_CLASS_ID);
+if (DIGITAP_CLICKWRAP_DOC_CLASS_ID === 'EI1OTPxxxxx' || DIGITAP_CLICKWRAP_DOC_CLASS_ID.includes('xxxxx')) {
+  console.warn('⚠️  WARNING: Using placeholder Doc Class ID. Please set DIGITAP_CLICKWRAP_DOC_CLASS_ID in your .env file with the actual value from Digitap.');
+}
 
 // API Endpoints
 const ENDPOINTS = {
-  INITIATE: '/clickwrap/v1/inate',
+  INITIATE: '/clickwrap/v1/intiate', // Note: Digitap API has typo "intiate" not "initiate"
   SEND_SIGN_IN_LINK: '/clickwrap/v1/send/sign-in-link',
   GET_DOC_URL: '/clickwrap/v1/get-doc-url'
 };
@@ -92,6 +95,7 @@ async function initiateClickWrap(params) {
 
     const apiUrl = `${getBaseUrl()}${ENDPOINTS.INITIATE}`;
     const authHeader = getAuthHeader();
+    
     console.log('📤 Initiating Digitap ClickWrap:', apiUrl);
     console.log('📋 Request body:', JSON.stringify(requestBody, null, 2));
     console.log('🔑 Auth header created:', authHeader ? 'Yes (length: ' + authHeader.length + ')' : 'No');
@@ -99,7 +103,7 @@ async function initiateClickWrap(params) {
 
     const response = await axios.post(apiUrl, requestBody, {
       headers: {
-        'ent_authorization': authHeader,
+        'ent_authorization': authHeader, // According to curl example, use "Basic <token>" format
         'content-type': 'application/json'
       },
       timeout: 30000
@@ -128,10 +132,23 @@ async function initiateClickWrap(params) {
     
     if (error.response) {
       console.error('Error response:', error.response.data);
+      const errorMessage = error.response.data?.message || error.message;
+      
+      // Provide helpful error message for 404 "document not found"
+      if (error.response.status === 404 && errorMessage && errorMessage.toLowerCase().includes('document') && errorMessage.toLowerCase().includes('not found')) {
+        return {
+          success: false,
+          error: `Document Class ID not found. Please verify DIGITAP_CLICKWRAP_DOC_CLASS_ID in your .env file. Current value: ${DIGITAP_CLICKWRAP_DOC_CLASS_ID}. The Doc Class ID should be provided by Digitap (e.g., EI90OTPESIG40540).`,
+          statusCode: error.response.status,
+          code: error.response.data?.code
+        };
+      }
+      
       return {
         success: false,
-        error: error.response.data?.message || error.message,
-        statusCode: error.response.status
+        error: errorMessage,
+        statusCode: error.response.status,
+        code: error.response.data?.code
       };
     }
 
@@ -205,12 +222,14 @@ async function sendSignInLink(docTransactionId, sendNotification = false) {
     };
 
     const apiUrl = `${getBaseUrl()}${ENDPOINTS.SEND_SIGN_IN_LINK}`;
+    const authHeader = getAuthHeader();
+    
     console.log('📤 Sending sign-in link:', apiUrl);
     console.log('📋 Request body:', JSON.stringify(requestBody, null, 2));
 
     const response = await axios.post(apiUrl, requestBody, {
       headers: {
-        'ent_authorization': getAuthHeader(),
+        'ent_authorization': authHeader,
         'content-type': 'application/json'
       },
       timeout: 30000
@@ -264,12 +283,14 @@ async function getSignedDocumentUrl(transactionId) {
     };
 
     const apiUrl = `${getBaseUrl()}${ENDPOINTS.GET_DOC_URL}`;
+    const authHeader = getAuthHeader();
+    
     console.log('📤 Getting signed document URL:', apiUrl);
     console.log('📋 Request body:', JSON.stringify(requestBody, null, 2));
 
     const response = await axios.post(apiUrl, requestBody, {
       headers: {
-        'ent_authorization': getAuthHeader(),
+        'ent_authorization': authHeader,
         'content-type': 'application/json'
       },
       timeout: 30000

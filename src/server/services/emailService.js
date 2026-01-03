@@ -312,6 +312,218 @@ class EmailService {
   }
 
   /**
+   * Send signed loan agreement PDF via email
+   * @param {object} options - Email options
+   * @returns {Promise<object>} Email result
+   */
+  async sendSignedAgreementEmail(options) {
+    const {
+      loanId,
+      recipientEmail,
+      recipientName,
+      loanData,
+      pdfBuffer,
+      pdfFilename,
+      sentBy
+    } = options;
+
+    try {
+      console.log(`📧 Sending signed agreement email to ${recipientEmail}...`);
+
+      // Create email HTML template
+      const emailHTML = this.createSignedAgreementEmailTemplate({
+        recipientName,
+        loanData
+      });
+
+      // Send email
+      const info = await this.transporter.sendMail({
+        from: `"Pocket Credit" <${process.env.SMTP_USER || 'noreply@pocketcredit.in'}>`,
+        to: recipientEmail,
+        subject: `Signed Loan Agreement - Application ${loanData.application_number}`,
+        html: emailHTML,
+        attachments: [
+          {
+            filename: pdfFilename || `Signed_Agreement_${loanData.application_number}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf'
+          }
+        ]
+      });
+
+      console.log('✅ Signed agreement email sent successfully:', info.messageId);
+
+      // Log email in database (using same kfs_email_log table)
+      await this.logEmail({
+        loanId,
+        recipientEmail,
+        subject: `Signed Loan Agreement - Application ${loanData.application_number}`,
+        status: 'sent',
+        sentBy,
+        messageId: info.messageId
+      });
+
+      return {
+        success: true,
+        messageId: info.messageId,
+        message: 'Email sent successfully'
+      };
+
+    } catch (error) {
+      console.error('❌ Signed agreement email sending failed:', error);
+
+      // Log failed email
+      await this.logEmail({
+        loanId,
+        recipientEmail,
+        subject: `Signed Loan Agreement - Application ${loanData.application_number}`,
+        status: 'failed',
+        sentBy,
+        errorMessage: error.message
+      });
+
+      throw new Error(`Failed to send email: ${error.message}`);
+    }
+  }
+
+  /**
+   * Create signed agreement email HTML template
+   * @param {object} data - Template data
+   * @returns {string} HTML email content
+   */
+  createSignedAgreementEmailTemplate(data) {
+    const { recipientName, loanData } = data;
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .header {
+      background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+      border-radius: 10px 10px 0 0;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+    .content {
+      background: #f9f9f9;
+      padding: 30px;
+      border-radius: 0 0 10px 10px;
+    }
+    .info-box {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin: 20px 0;
+      border-left: 4px solid #28a745;
+    }
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .info-row:last-child {
+      border-bottom: none;
+    }
+    .label {
+      font-weight: bold;
+      color: #666;
+    }
+    .value {
+      color: #333;
+    }
+    .success-box {
+      background: #d4edda;
+      border: 1px solid #c3e6cb;
+      padding: 15px;
+      border-radius: 5px;
+      margin: 20px 0;
+      color: #155724;
+    }
+    .footer {
+      text-align: center;
+      padding: 20px;
+      color: #666;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>✅ Agreement Signed Successfully</h1>
+    <p>Your Loan Agreement Document</p>
+  </div>
+  
+  <div class="content">
+    <p>Dear ${recipientName},</p>
+    
+    <div class="success-box">
+      <strong>🎉 Congratulations!</strong> Your loan agreement has been successfully signed and is now complete.
+    </div>
+    
+    <p>Thank you for choosing <strong>Pocket Credit</strong>. Please find attached your signed loan agreement document for your records.</p>
+    
+    <div class="info-box">
+      <h3 style="margin-top: 0; color: #28a745;">Loan Details</h3>
+      <div class="info-row">
+        <span class="label">Application Number:</span>
+        <span class="value">${loanData.application_number}</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Loan Amount:</span>
+        <span class="value">₹${loanData.loan_amount?.toLocaleString('en-IN')}</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Status:</span>
+        <span class="value" style="color: #28a745; font-weight: bold;">${loanData.status}</span>
+      </div>
+    </div>
+    
+    <p><strong>What's Next?</strong></p>
+    <ul>
+      <li>Keep this signed agreement document safe for your records</li>
+      <li>Review the terms and conditions mentioned in the agreement</li>
+      <li>Your loan will be processed as per the agreement terms</li>
+      <li>You will receive further updates on your loan application</li>
+    </ul>
+    
+    <p>If you have any questions or need clarification, please don't hesitate to reach out to our support team.</p>
+    
+    <p>Best regards,<br>
+    <strong>Pocket Credit Team</strong></p>
+  </div>
+  
+  <div class="footer">
+    <p><strong>Pocket Credit Private Limited</strong></p>
+    <p>Plot No. 123, Sector 18, Gurugram, Haryana 122015</p>
+    <p>Phone: +91 9876543210 | Email: support@pocketcredit.in</p>
+    <p style="margin-top: 20px; font-size: 10px; color: #999;">
+      This is an automated email. Please do not reply to this email.<br>
+      If you did not sign this agreement, please contact us immediately.
+    </p>
+  </div>
+</body>
+</html>
+    `;
+  }
+
+  /**
    * Test email configuration
    * @returns {Promise<boolean>} Test result
    */
