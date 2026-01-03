@@ -85,14 +85,30 @@ class PDFService {
         console.log('✅ Browser launched successfully');
       } catch (error) {
         // If launch fails on ARM and we're using bundled Chrome, suggest cache clear
-        if (error.message.includes('Syntax error') || error.message.includes('chrome-linux64')) {
+        if (error.message.includes('Syntax error') || error.message.includes('chrome-linux64') || error.message.includes('word unexpected')) {
+          const userHome = os.homedir();
+          const cachePath = `${userHome}/.cache/puppeteer`;
           console.error('❌ Chrome binary architecture mismatch detected');
-          console.error('💡 Solution: Clear Puppeteer cache and reinstall:');
-          console.error('   rm -rf ~/.cache/puppeteer');
-          console.error('   npm install puppeteer --force');
-          console.error('   OR install system Chrome:');
-          console.error('   sudo apt-get install -y chromium-browser');
-          throw new Error('Chrome binary architecture mismatch. Please clear Puppeteer cache or install system Chrome. See logs for details.');
+          console.error('');
+          console.error('🔧 QUICK FIX - Run these commands on your server:');
+          console.error('');
+          console.error(`   # Option 1: Clear cache and reinstall (recommended)`);
+          console.error(`   rm -rf ${cachePath}`);
+          console.error(`   cd /var/www/pocket/src/server`);
+          console.error(`   npm install puppeteer --force`);
+          console.error(`   pm2 restart pocket-api  # or restart your Node.js process`);
+          console.error('');
+          console.error(`   # Option 2: Install system Chromium (better for production)`);
+          console.error(`   sudo apt-get update`);
+          console.error(`   sudo apt-get install -y chromium-browser`);
+          console.error(`   pm2 restart pocket-api  # restart to auto-detect system Chrome`);
+          console.error('');
+          console.error('   # Option 3: Use the fix script');
+          console.error('   cd /var/www/pocket/src/server');
+          console.error('   chmod +x scripts/fix-puppeteer-chrome.sh');
+          console.error('   ./scripts/fix-puppeteer-chrome.sh');
+          console.error('');
+          throw new Error(`Chrome binary architecture mismatch. Cache path: ${cachePath}. See logs above for fix commands.`);
         }
         throw error;
       }

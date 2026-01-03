@@ -298,15 +298,30 @@ async function getSignedDocumentUrl(transactionId) {
 
     console.log('📥 Get document URL response:', {
       code: response.data?.code,
-      hasModel: !!response.data?.model
+      hasModel: !!response.data?.model,
+      modelData: response.data?.model ? {
+        hasPreviewUrl: !!response.data.model.previewUrl,
+        signed: response.data.model.signed,
+        signedType: typeof response.data.model.signed
+      } : null
     });
 
     if (response.data && response.data.code === 200 && response.data.model) {
+      const signedValue = response.data.model.signed;
+      // Handle different signed value formats (boolean, string, number)
+      const isSigned = signedValue === true || 
+                       signedValue === 'true' || 
+                       signedValue === 1 || 
+                       signedValue === '1' ||
+                       String(signedValue).toLowerCase() === 'true';
+      
+      console.log(`📋 Document signed status: ${signedValue} (parsed as: ${isSigned})`);
+      
       return {
         success: true,
         data: {
           previewUrl: response.data.model.previewUrl,
-          signed: response.data.model.signed === true || response.data.model.signed === 'true'
+          signed: isSigned
         }
       };
     } else {
