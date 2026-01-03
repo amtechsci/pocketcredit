@@ -362,6 +362,8 @@ router.get('/callback', async (req, res) => {
       errorMsg 
     });
     
+    console.log('ℹ️ User completed signing on Digitap. Using stored preview URL to download signed document.');
+    
     // Handle error case - redirect to frontend with error
     // Digitap sends error_code and errorMsg in error_url callback
     if (success === 'false' || error_code || (success !== 'true' && errorMsg)) {
@@ -406,120 +408,56 @@ router.get('/callback', async (req, res) => {
       return res.redirect(`${frontendUrl}/post-disbursal?applicationId=${applicationId}&clickwrap=success&transactionId=${transactionId}`);
     }
 
-    // Verify transaction ID matches
-    // Digitap redirects back with entTransactionId, but get-doc-url might work better with docTransactionId
-    // Try docTransactionId first, then fall back to entTransactionId
-    const docTransactionId = application.clickwrap_doc_transaction_id;
-    const entTransactionId = application.clickwrap_ent_transaction_id;
-    
-    console.log('🔍 Transaction IDs:', { 
-      received: transactionId, 
-      stored_ent: entTransactionId,
-      stored_doc: docTransactionId 
-    });
-    
-    // Final safety check: ensure transactionId is a clean string before API call
-    // Digitap API expects a string, not an array
+    // Normalize transactionId for logging
     if (Array.isArray(transactionId)) {
       transactionId = transactionId[0];
     }
     transactionId = String(transactionId || '').trim().split('?')[0].split('&')[0];
     
-    if (!transactionId || transactionId === 'undefined' || transactionId === 'null') {
-      console.error('❌ Invalid transactionId after normalization:', transactionId);
-      const errorRedirect = `${frontendUrl}/post-disbursal?applicationId=${applicationId}&clickwrap=error&error_code=invalid_transaction&errorMsg=${encodeURIComponent('Invalid transaction ID')}`;
-      return res.redirect(errorRedirect);
-    }
-
-    // Use docTransactionId for get-doc-url if available, otherwise use entTransactionId
-    // According to Digitap docs, docTransactionId is more reliable for getting signed document
-    const transactionIdToUse = docTransactionId || transactionId || entTransactionId;
-    console.log('📤 Calling Digitap API with transactionId:', transactionIdToUse, '(type:', typeof transactionIdToUse + ', source: ' + (docTransactionId ? 'doc' : 'ent') + ')');
-
-    // Get signed document status from Digitap with retry logic
-    // Digitap may need a few seconds to process and mark the document as signed after user completes signing
-    let docResult = null;
-    let signedStatus = false;
-    const maxRetries = 5;
-    const retryDelay = 2000; // 2 seconds between retries
+    // We already have the preview URL stored from initiation
+    // After signing, Digitap updates this URL to point to the signed document
+    // We don't need to call get-doc-url API - just use the stored preview URL
+    const signedPdfUrl = application.clickwrap_preview_url;
     
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      console.log(`🔄 Checking signed status (attempt ${attempt}/${maxRetries})...`);
-      
-      docResult = await getSignedDocumentUrl(transactionIdToUse);
-      
-      if (docResult.success && docResult.data && docResult.data.signed) {
-        signedStatus = true;
-        console.log(`✅ Document verified as signed on attempt ${attempt}`);
-        break;
-      } else {
-        console.log(`ℹ️ Document not yet marked as signed (attempt ${attempt}/${maxRetries})`);
-        if (attempt < maxRetries) {
-          console.log(`⏳ Waiting ${retryDelay}ms before retry...`);
-          await new Promise(resolve => setTimeout(resolve, retryDelay));
-        }
-      }
-    }
-
-    // If still not signed after retries, check if we can use the preview URL anyway
-    // Sometimes the document is signed but the status check takes longer
-    if (!signedStatus) {
-      console.warn('⚠️ Document not marked as signed after retries, but user completed signing');
-      console.warn('⚠️ This might be a timing issue. Checking if preview URL is available...');
-      
-      // If we have a preview URL, we can still proceed (document might be signed but status not updated)
-      if (docResult && docResult.success && docResult.data && docResult.data.previewUrl) {
-        console.log('ℹ️ Preview URL available - proceeding with download (status check may be delayed)');
-        console.log('ℹ️ Document signed by user, proceeding even though API status check delayed');
-        signedStatus = true; // Proceed anyway since user completed signing
-      } else {
-        console.error('❌ Document verification failed after retries:', docResult?.error || 'No preview URL available');
-        // Instead of immediately failing, redirect to frontend and let webhook handle it
-        // The webhook is the source of truth and will update the status
-        console.log('ℹ️ Redirecting to frontend - webhook will update status if signing was successful');
-        console.log('ℹ️ User completed signing on Digitap, but verification is pending');
-        return res.redirect(`${frontendUrl}/post-disbursal?applicationId=${applicationId}&clickwrap=pending&transactionId=${transactionId}&message=${encodeURIComponent('Signing completed. Please wait while we verify...')}`);
-      }
-    }
-    
-    // Ensure docResult exists and has data before proceeding
-    if (!docResult || !docResult.success || !docResult.data) {
-      console.error('❌ Failed to get document status after retries');
+    if (!signedPdfUrl) {
+      console.error('❌ No preview URL stored in database');
+      // If no preview URL, redirect to frontend and let webhook handle it
+      console.log('ℹ️ No preview URL available - redirecting to frontend. Webhook will update status if signing was successful');
       return res.redirect(`${frontendUrl}/post-disbursal?applicationId=${applicationId}&clickwrap=pending&transactionId=${transactionId}&message=${encodeURIComponent('Signing completed. Please wait while we process...')}`);
     }
+    
+    console.log('✅ Using stored preview URL for signed document');
+    console.log('📥 Downloading signed PDF from stored preview URL');
+    console.log('📋 URL preview:', signedPdfUrl.substring(0, 100) + '...');
 
-    const signedPdfUrl = docResult.data.previewUrl;
-    if (!signedPdfUrl) {
-      console.error('❌ No preview URL returned from Digitap');
-      const errorRedirect = `${frontendUrl}/post-disbursal?applicationId=${applicationId}&clickwrap=error&error_code=no_url&errorMsg=${encodeURIComponent('Failed to get signed document URL')}`;
-      return res.redirect(errorRedirect);
-    }
-
-    console.log('📥 Downloading signed PDF from:', signedPdfUrl);
-
-    // Download signed PDF from Digitap
+    // Download signed PDF from Digitap's preview URL
+    // Note: The preview URL is updated by Digitap after signing to point to the signed document
     let pdfBuffer;
     try {
+      // Add a small delay to allow Digitap to update the preview URL after signing
+      console.log('⏳ Waiting 2 seconds for Digitap to update preview URL after signing...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
       const pdfResponse = await axios.get(signedPdfUrl, {
         responseType: 'arraybuffer',
-        timeout: 30000
+        timeout: 30000,
+        headers: {
+          'Accept': 'application/pdf'
+        }
       });
       pdfBuffer = Buffer.from(pdfResponse.data);
       console.log('✅ Downloaded signed PDF, size:', pdfBuffer.length, 'bytes');
+      
+      // Validate it's a PDF
+      if (pdfBuffer.length < 100 || !pdfBuffer.toString('ascii', 0, 4).startsWith('%PDF')) {
+        throw new Error('Downloaded file does not appear to be a valid PDF');
+      }
     } catch (downloadError) {
       console.error('❌ Failed to download PDF:', downloadError.message);
-      // Still mark as signed in DB, but log the error
-      await executeQuery(
-        `UPDATE loan_applications 
-         SET agreement_signed = 1,
-             status = 'ready_for_disbursement',
-             clickwrap_signed_at = NOW(),
-             updated_at = NOW()
-         WHERE id = ?`,
-        [applicationId]
-      );
-      const errorRedirect = `${frontendUrl}/post-disbursal?applicationId=${applicationId}&clickwrap=error&error_code=download_failed&errorMsg=${encodeURIComponent('Failed to download signed document')}`;
-      return res.redirect(errorRedirect);
+      // If download fails, still redirect to frontend - webhook will handle status update
+      // The document might need more time to be available, or webhook will handle it
+      console.log('ℹ️ PDF download failed, but redirecting to frontend. Webhook will update status if signing was successful.');
+      return res.redirect(`${frontendUrl}/post-disbursal?applicationId=${applicationId}&clickwrap=pending&transactionId=${transactionId}&message=${encodeURIComponent('Signing completed. Please wait while we download your signed document...')}`);
     }
 
     // Upload signed PDF to S3

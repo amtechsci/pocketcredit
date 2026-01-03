@@ -109,10 +109,8 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
 
                 <p className="font-bold mb-4">NOW, THEREFORE, THE PARTIES AGREE AS FOLLOWS:</p>
 
-                <div style={{ pageBreakBefore: 'always' }} />
-
                 {/* Section 1: Definitions */}
-                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>1. DEFINITIONS</h2>
+                <h2 className="font-bold mt-6 mb-3 force-page-break" style={{ fontSize: '12pt' }}>1. DEFINITIONS</h2>
                 <p className="mb-3">For the purposes of this Agreement:</p>
 
                 <p className="mb-2"><strong>Applicable Law</strong> refers to any statute, rule, regulation, order, judgement, directive, guideline, policy, or governmental requirement issued by any competent authority, whether currently in force or enacted in the future.</p>
@@ -139,10 +137,8 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
 
                 <p className="mb-4"><strong>Settlement</strong> means a mutually agreed arrangement for closing the Borrower's outstanding dues representing partial or full waiver at the discretion of the Company.</p>
 
-                <div style={{ pageBreakBefore: 'always' }} />
-
                 {/* Section 2: Interpretation */}
-                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>2. INTERPRETATION</h2>
+                <h2 className="font-bold mt-6 mb-3 force-page-break" style={{ fontSize: '12pt' }}>2. INTERPRETATION</h2>
                 <p className="mb-2">Unless the context requires otherwise:</p>
                 <ul className="list-disc ml-8 mb-4">
                     <li>Expressions not defined herein shall have the meaning assigned under the General Clauses Act, 1897.</li>
@@ -181,10 +177,8 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
                     <li className="mb-2">The Company may disclose Borrower information to credit bureaus, authorities, service providers, or agencies as permitted by law.</li>
                 </ol>
 
-                <div style={{ pageBreakBefore: 'always' }} />
-
                 {/* Section 4: Representations & Warranties */}
-                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>4. REPRESENTATIONS & WARRANTIES</h2>
+                <h2 className="font-bold mt-6 mb-3 force-page-break" style={{ fontSize: '12pt' }}>4. REPRESENTATIONS & WARRANTIES</h2>
                 <p className="mb-3">The Borrower represents and confirms that he/she:</p>
                 <ol className="list-decimal ml-8 mb-4 text-justify">
                     <li className="mb-2">Fully understands this Agreement and is legally and financially capable of complying with it.</li>
@@ -232,10 +226,8 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
                     <li>exercise other legal remedies after giving notice.</li>
                 </ul>
 
-                <div style={{ pageBreakBefore: 'always' }} />
-
                 {/* Section 6: Term & Termination */}
-                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>6. TERM & TERMINATION</h2>
+                <h2 className="font-bold mt-6 mb-3 force-page-break" style={{ fontSize: '12pt' }}>6. TERM & TERMINATION</h2>
                 <p className="mb-4">This Agreement remains valid from the disbursement date until full repayment, unless terminated earlier under an Event of Default or foreclosure.</p>
 
                 {/* Section 7: Privacy */}
@@ -262,18 +254,14 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
                     <li className="mb-2">This Agreement, the Application Form and platform terms constitute the entire agreement.</li>
                 </ol>
 
-                <div style={{ pageBreakBefore: 'always' }} />
-
                 {/* Loan Agreement Declaration */}
-                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>Loan Agreement Declaration</h2>
+                <h2 className="font-bold mt-6 mb-3 force-page-break" style={{ fontSize: '12pt' }}>Loan Agreement Declaration</h2>
                 <p className="mb-2">I hereby consent to the terms of this Loan Agreement. I understand that the Agreement becomes enforceable only upon approval of my Loan Application.</p>
                 <p className="mb-2">I further acknowledge that upon approval, the Loan Application submitted via the Platform together with this consent shall constitute a binding contract, without the need for any further execution.</p>
                 <p className="mb-4">I understand that the Company follows risk-based pricing based on financial and credit parameters.</p>
 
-                <div style={{ pageBreakBefore: 'always' }} />
-
                 {/* Schedule (1): Key Facts Statement */}
-                <h2 className="font-bold mt-6 mb-4" style={{ fontSize: '12pt', textAlign: 'center' }}>
+                <h2 className="font-bold mt-6 mb-4 force-page-break" style={{ fontSize: '12pt', textAlign: 'center' }}>
                     SCHEDULE (1): KEY FACT STATEMENT (KFS)
                 </h2>
 
@@ -282,10 +270,8 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
                     <SharedKFSDocument kfsData={agreementData} />
                 </div>
 
-                <div style={{ pageBreakBefore: 'always' }} />
-
                 {/* Loan Application Form (borrower details) */}
-                <h2 className="font-bold mt-6 mb-4" style={{ fontSize: '12pt', textAlign: 'center' }}>
+                <h2 className="font-bold mt-6 mb-4 force-page-break" style={{ fontSize: '12pt', textAlign: 'center' }}>
                     Loan Application Form (borrower details)
                 </h2>
 
@@ -326,10 +312,8 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
                     </tbody>
                 </table>
 
-                <div style={{ pageBreakBefore: 'always' }} />
-
                 {/* Applicant's Undertaking */}
-                <h2 className="font-bold mt-6 mb-3" style={{ fontSize: '12pt' }}>APPLICANT'S UNDERTAKING</h2>
+                <h2 className="font-bold mt-6 mb-3 force-page-break" style={{ fontSize: '12pt' }}>APPLICANT'S UNDERTAKING</h2>
                 <p className="mb-3">The Applicant hereby agrees, declares and confirms that:</p>
                 <ol className="list-decimal ml-8 mb-4 text-justify">
                     <li className="mb-2">He/She understands that submitting the Loan Application Form (LAF) does not guarantee that the Company will sanction the Loan.</li>
@@ -349,29 +333,6 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
                 </ol>
 
                 <p className="mb-4 font-bold">I HEREBY CONFIRM THAT I HAVE READ AND UNDERSTOOD ALL PROVISIONS OF THE LAF, INCLUDING THE DECLARATIONS, TERMS & CONDITIONS, AND UNDERTAKINGS PROVIDED HEREIN, AND I AGREE TO BE BOUND BY THEM.</p>
-
-                <div style={{ pageBreakBefore: 'always' }} />
-
-                {/* Signature Section */}
-                <div className="mt-8 space-y-4">
-                    <div>
-                        <p className="mb-2">Name of Lender: Spheeti Fintech Pvt. Ltd.</p>
-                        <p className="mb-2">Signature (Authorised Signatory)</p>
-                        <p className="mb-2">Date: {agreementData.signature?.signed_at ? formatDate(agreementData.signature.signed_at) : formatDate(new Date().toISOString())}</p>
-                    </div>
-
-                    <div className="mt-6">
-                        <p className="mb-2">Borrowers Name and {agreementData.borrower.name || 'N/A'} Signed By: {agreementData.signature?.signers_info?.[0] ? `${agreementData.signature.signers_info[0].fname || ''} ${agreementData.signature.signers_info[0].lname || ''}`.trim() || agreementData.borrower.name : agreementData.borrower.name || 'N/A'}</p>
-                        <p className="mb-2">Signature {agreementData.borrower.name || 'N/A'}</p>
-                        <p className="mb-2">Reason: Loan Agreement</p>
-                        <p className="mb-2">Signed on: {agreementData.signature?.signed_at ? formatDate(agreementData.signature.signed_at) : formatDate(new Date().toISOString())}</p>
-                        <p className="mb-2">Remark: Signed using</p>
-                        <p className="mb-2">OTP(Clickwrap</p>
-                        <p className="mb-2">sign)/Electronic</p>
-                        <p className="mb-2">signature: {agreementData.signature?.signers_info?.[0]?.otp || agreementData.signature?.signers_info?.[0]?.otpValue || 'N/A'}</p>
-                        <p className="mb-2">IP{agreementData.signature?.signers_info?.[0]?.ip ? ' ' + agreementData.signature.signers_info[0].ip : agreementData.signature?.ip ? ' ' + agreementData.signature.ip : 'N/A'}</p>
-                    </div>
-                </div>
 
             </div>
         </div>

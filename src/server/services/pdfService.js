@@ -269,6 +269,17 @@ class PDFService {
           margin: 20mm 15mm 25mm 15mm; /* top right bottom left */
         }
         
+        /* Prevent blank pages from empty page break divs */
+        div[style*="pageBreakBefore"]:empty,
+        div[style*="page-break-before"]:empty {
+          display: none !important;
+          height: 0 !important;
+          min-height: 0 !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          line-height: 0 !important;
+        }
+        
         * {
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
@@ -328,25 +339,41 @@ class PDFService {
         /* Leading utilities */
         .leading-relaxed { line-height: 1.625; }
         
-        .page-break-before {
+        /* Smart page breaks on section headers */
+        .force-page-break {
           page-break-before: always !important;
           break-before: page !important;
         }
         
+        /* Only force page break if there's enough space left on current page */
+        .page-break-before {
+          page-break-before: auto !important;
+          break-before: auto !important;
+        }
+        
         .page-break-after {
-          page-break-after: always !important;
-          break-after: page !important;
+          page-break-after: auto !important;
+          break-after: auto !important;
+        }
+        
+        /* Avoid page breaks right after headers */
+        h1, h2, h3, h4, h5, h6 {
+          page-break-after: avoid !important;
+          break-after: avoid !important;
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
+        }
+        
+        /* But allow breaks before major sections */
+        h2.force-page-break {
+          page-break-before: always !important;
+          break-before: page !important;
+          margin-top: 10mm !important;
         }
         
         .page-break-inside-avoid {
           page-break-inside: avoid !important;
           break-inside: avoid !important;
-        }
-        
-        /* Prevent orphan content */
-        h1, h2, h3, h4, h5, h6 {
-          page-break-after: avoid !important;
-          break-after: avoid !important;
         }
         
         /* Allow content to flow naturally across pages */
@@ -355,9 +382,23 @@ class PDFService {
           padding-bottom: 8mm; /* breathing room above footer */
         }
         
-        /* Reduce padding for PDF to prevent overflow */
+        /* Reduce padding for PDF to prevent overflow and extra pages */
         .p-8 {
-          padding: 1.5rem !important;
+          padding: 1rem 1.5rem !important; /* Reduced top/bottom padding */
+        }
+        
+        /* Reduce excessive margins that cause extra pages */
+        .mb-8, .mt-8 {
+          margin-bottom: 1rem !important;
+          margin-top: 1rem !important;
+        }
+        
+        .mb-6 {
+          margin-bottom: 0.75rem !important;
+        }
+        
+        .mb-4 {
+          margin-bottom: 0.5rem !important;
         }
         
         table {

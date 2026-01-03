@@ -71,37 +71,52 @@ export const PostDisbursalFlowPage = () => {
     const errorCode = searchParams.get('error_code');
     const errorMsg = searchParams.get('errorMsg');
     
-    if (clickwrapStatus === 'success' || successParam === 'true') {
-      // User returned from successful signing
+    if (clickwrapStatus === 'success' || successParam === 'true' || clickwrapStatus === 'pending') {
+      // User returned from successful signing (or pending verification)
+      const message = searchParams.get('message');
       console.log('✅ ClickWrap signing successful, transactionId:', transactionId);
       
       // Get applicationId from URL params if not already set
       const appIdFromUrl = searchParams.get('applicationId');
       const appId = applicationId || (appIdFromUrl ? parseInt(appIdFromUrl) : null);
       
-      if (appId) {
-        // Wait a moment for webhook to process, then check status
-        setTimeout(async () => {
-          try {
-            const statusResponse = await apiService.getPostDisbursalProgress(appId);
-            if (statusResponse.success && statusResponse.data?.agreement_signed) {
-              toast.success('Document signed successfully!');
-              // Update progress state
-              setProgress(prev => ({ ...prev, agreement_signed: true }));
-              // Refresh to show signed state
-              await fetchProgress(appId);
-            } else {
-              // Webhook might not have processed yet, show message and refresh
-              toast.info('Please wait while we verify your signature...');
-              await fetchProgress(appId);
-            }
-          } catch (error) {
-            console.error('Error checking signing status:', error);
-            toast.warning('Signing completed. Please wait while we verify...');
-          }
-        }, 2000);
+      if (clickwrapStatus === 'pending' || message) {
+        // Signing completed but verification is pending
+        toast.info(message || 'Please wait while we verify your signature...');
       } else {
         toast.success('Document signed successfully!');
+      }
+      
+      if (appId) {
+        // Wait a moment for webhook to process, then check status with retries
+        const checkStatusWithRetry = async (retries = 5, delay = 2000) => {
+          for (let i = 0; i < retries; i++) {
+            try {
+              await new Promise(resolve => setTimeout(resolve, delay));
+              const statusResponse = await apiService.getPostDisbursalProgress(appId);
+              if (statusResponse.success && statusResponse.data?.agreement_signed) {
+                toast.success('Document signed successfully!');
+                // Update progress state
+                setProgress(prev => ({ ...prev, agreement_signed: true }));
+                // Refresh to show signed state
+                await fetchProgress(appId);
+                return;
+              } else if (i < retries - 1) {
+                console.log(`⏳ Status check ${i + 1}/${retries}: Agreement not yet marked as signed, retrying...`);
+              }
+            } catch (error) {
+              console.error('Error checking signing status:', error);
+              if (i < retries - 1) {
+                continue;
+              }
+            }
+          }
+          // After all retries, refresh anyway
+          toast.info('Please wait while we verify your signature... The webhook will update the status shortly.');
+          await fetchProgress(appId);
+        };
+        
+        checkStatusWithRetry();
       }
       
       // Remove callback params from URL
@@ -109,6 +124,7 @@ export const PostDisbursalFlowPage = () => {
       newSearchParams.delete('clickwrap');
       newSearchParams.delete('success');
       newSearchParams.delete('transactionId');
+      newSearchParams.delete('message');
       navigate(`/post-disbursal?${newSearchParams.toString()}`, { replace: true });
     } else if (clickwrapStatus === 'error' || errorCode) {
       // User returned from failed signing
