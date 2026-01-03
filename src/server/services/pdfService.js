@@ -218,21 +218,9 @@ class PDFService {
       // Add necessary CSS for print
       const styledHTML = this.addPrintStyles(htmlContent);
 
-      // Generate PDF with KFS-specific options with dynamic footer
+      // Generate PDF without header/footer
       const pdfBuffer = await this.generatePDF(styledHTML, {
-        displayHeaderFooter: true,
-        headerTemplate: `<div></div>`, // Kept empty because @page margin handles top space
-        footerTemplate: `
-          <div style="box-sizing: border-box; width: 100%; font-size: 9px; padding: 5px 15mm; display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid #ccc;">
-            <div style="text-align: left; line-height: 1.3;">
-              <span style="font-weight: 500;">Page-<span class="pageNumber"></span> of <span class="totalPages"></span></span>
-            </div>
-            <div style="text-align: right; line-height: 1.3;">
-              <div style="font-weight: 500;">Digital Signature</div>
-              <div style="margin-top: 2px; font-size: 8px;">Pocket Credit Private Limited</div>
-            </div>
-          </div>
-        `
+        displayHeaderFooter: false
       });
 
       // Optionally save to file
