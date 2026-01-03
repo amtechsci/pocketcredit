@@ -4,7 +4,7 @@ const multer = require('multer');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
 const { authenticateAdmin } = require('../middleware/auth');
-const { uploadToS3 } = require('../services/s3Service');
+const { uploadToS3, getPresignedUrl } = require('../services/s3Service');
 const {
   generateBankStatementURL,
   uploadBankStatementPDF,
@@ -456,12 +456,14 @@ router.post('/initiate-bank-statement', requireAuth, async (req, res) => {
 /**
  * POST /api/user/upload-bank-statement
  * Upload bank statement PDF for user profile (one-time)
+ * REFACTORED: User-only upload - no Digitap API calls
+ * Verification is now admin-triggered only
  */
 router.post('/upload-bank-statement', requireAuth, upload.single('statement'), async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;
-    const { bank_name, password } = req.body;
+    const { bank_name } = req.body;
 
     if (!req.file) {
       return res.status(400).json({
@@ -470,16 +472,16 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
       });
     }
 
-    // Check if user already has a completed bank statement
+    // Check if user already has an uploaded bank statement
     const existing = await executeQuery(
-      'SELECT id, status FROM user_bank_statements WHERE user_id = ?',
+      'SELECT id, user_status FROM user_bank_statements WHERE user_id = ?',
       [userId]
     );
 
-    if (existing.length > 0 && existing[0].status === 'completed') {
+    if (existing.length > 0 && existing[0].user_status === 'verified') {
       return res.json({
         success: false,
-        message: 'Bank statement already uploaded. Please contact support to update.'
+        message: 'Bank statement already uploaded and verified. Please contact support to update.'
       });
     }
 
@@ -499,68 +501,121 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
     const mobileNumber = users[0].phone;
     const clientRefNum = generateClientRefNum(userId, 0);
 
-    // Upload to S3 first
-    const s3Key = `user-bank-statements/${userId}/${Date.now()}_${req.file.originalname}`;
-    const s3Result = await uploadToS3(req.file.buffer, s3Key, req.file.mimetype, false);
-
-    let fileUrl = null;
-    if (s3Result.success) {
-      fileUrl = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`;
-    }
-
-    // Try to upload to Digitap for analysis (optional - fallback if fails)
-    let digitapStatus = 'completed'; // Default to completed if Digitap not available
-    let useDigitapAnalysis = false;
-
-    try {
-      console.log('📤 Attempting to upload to Digitap for analysis...');
-      const digitapResult = await uploadBankStatementPDF({
-        mobile_no: mobileNumber,
-        client_ref_num: clientRefNum,
-        file_buffer: req.file.buffer,
-        file_name: req.file.originalname,
-        bank_name: bank_name || null,
-        password: password || null
-      });
-
-      if (digitapResult.success) {
-        console.log('✅ Digitap upload successful');
-        digitapStatus = digitapResult.data?.status || 'processing';
-        useDigitapAnalysis = true;
-      } else {
-        console.log('⚠️  Digitap upload failed, saving without analysis:', digitapResult.error);
+    // Upload to S3
+    // uploadToS3 signature: (fileBuffer, fileName, mimeType, options)
+    // Options: { folder, userId, documentType, isPublic }
+    const s3Result = await uploadToS3(
+      req.file.buffer, 
+      req.file.originalname, 
+      req.file.mimetype, 
+      {
+        folder: 'user-bank-statements',
+        userId: userId,
+        documentType: 'statement',
+        isPublic: false // Private file - will need presigned URL for access
       }
-    } catch (digitapError) {
-      console.log('⚠️  Digitap not available (demo credentials), saving file only');
+    );
+
+    if (!s3Result || !s3Result.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to upload file to storage'
+      });
     }
 
-    // Store in database
+    // Store S3 key in database (not presigned URL - URLs are too long and expire)
+    // Presigned URLs will be generated on-demand when needed (e.g., in admin panel)
+    const s3Key = s3Result.key;
+
+    console.log(`✅ Bank statement uploaded: S3 Key: ${s3Key}`);
+
+    // Store in database with user_status = 'uploaded' and verification_status = 'not_started'
+    // Set status = 'completed' for manual uploads so step manager recognizes it as complete
+    // No Digitap API calls - admin will trigger verification
+    // Store S3 key in file_path (will be converted to presigned URL when needed)
     await executeQuery(
       `INSERT INTO user_bank_statements 
-       (user_id, client_ref_num, mobile_number, bank_name, status, file_path, file_name, file_size, upload_method, created_at) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'manual', NOW())
+       (user_id, client_ref_num, mobile_number, bank_name, status, user_status, verification_status, file_path, file_name, file_size, upload_method, created_at) 
+       VALUES (?, ?, ?, ?, 'completed', 'uploaded', 'not_started', ?, ?, ?, 'manual', NOW())
        ON DUPLICATE KEY UPDATE 
        client_ref_num = VALUES(client_ref_num),
        file_path = VALUES(file_path), 
        file_name = VALUES(file_name), 
        file_size = VALUES(file_size), 
-       status = VALUES(status), 
+       status = 'completed',
+       user_status = 'uploaded',
+       verification_status = 'not_started',
        updated_at = NOW()`,
-      [userId, clientRefNum, mobileNumber, bank_name || null, digitapStatus, fileUrl, req.file.originalname, req.file.size]
+      [userId, clientRefNum, mobileNumber, bank_name || null, s3Key, req.file.originalname, req.file.size]
     );
+
+    // Update loan application step to 'bank-details' if user has an active application
+    // This marks bank-statement step as complete and allows user to proceed
+    // IMPORTANT: This must complete before redirect to ensure step manager recognizes completion
+    try {
+      const applications = await executeQuery(
+        `SELECT id, current_step, status FROM loan_applications 
+         WHERE user_id = ? AND status IN ('pending', 'under_review', 'in_progress', 'submitted')
+         ORDER BY created_at DESC LIMIT 1`,
+        [userId]
+      );
+
+      if (applications && applications.length > 0) {
+        const application = applications[0];
+        // Always update to 'bank-details' if we're at 'bank-statement' or earlier
+        // This matches the Account Aggregator flow behavior
+        if (!application.current_step || 
+            application.current_step === 'bank-statement' || 
+            application.current_step === 'employment-details' ||
+            application.current_step === 'kyc-verification' ||
+            application.current_step === 'application') {
+          await executeQuery(
+            `UPDATE loan_applications 
+             SET current_step = 'bank-details', updated_at = NOW() 
+             WHERE id = ?`,
+            [application.id]
+          );
+          console.log(`✅ Updated loan application ${application.id} step from '${application.current_step}' to 'bank-details'`);
+          
+          // Step updated successfully - continue to send response
+        } else {
+          console.log(`ℹ️  Loan application ${application.id} already at step '${application.current_step}', no update needed`);
+        }
+      } else {
+        console.log(`ℹ️  No active loan application found for user ${userId} to update step`);
+      }
+    } catch (stepUpdateError) {
+      // Don't fail the upload if step update fails, but log it
+      console.warn('⚠️  Could not update loan application step:', stepUpdateError.message);
+    }
+
+    // Get application ID if available for redirect (matching Account Aggregator flow)
+    let applicationId = null;
+    try {
+      const apps = await executeQuery(
+        `SELECT id FROM loan_applications 
+         WHERE user_id = ? AND status IN ('pending', 'under_review', 'in_progress', 'submitted')
+         ORDER BY created_at DESC LIMIT 1`,
+        [userId]
+      );
+      if (apps && apps.length > 0) {
+        applicationId = apps[0].id;
+      }
+    } catch (e) {
+      // Ignore error
+    }
 
     res.json({
       success: true,
-      message: useDigitapAnalysis
-        ? 'Bank statement uploaded successfully and sent for analysis'
-        : 'Bank statement uploaded successfully',
+      message: 'Bank statement uploaded successfully. It will be reviewed by our team.',
       data: {
         fileName: req.file.originalname,
         fileSize: req.file.size,
         clientRefNum: clientRefNum,
-        status: digitapStatus,
-        hasDigitapAnalysis: useDigitapAnalysis,
-        s3Uploaded: s3Result.success
+        status: 'completed', // Set to 'completed' so step manager recognizes it (matches Account Aggregator flow)
+        userStatus: 'uploaded',
+        s3Uploaded: true,
+        applicationId: applicationId // Include for redirect matching Account Aggregator flow
       }
     });
   } catch (error) {
@@ -596,7 +651,7 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     }
 
     const statements = await executeQuery(
-      `SELECT client_ref_num, request_id, txn_id, status, file_name, report_data, digitap_url, expires_at, transaction_data, created_at, updated_at 
+      `SELECT client_ref_num, request_id, txn_id, status, user_status, verification_status, file_name, report_data, digitap_url, expires_at, transaction_data, created_at, updated_at 
        FROM user_bank_statements 
        WHERE user_id = ? 
        ORDER BY created_at DESC LIMIT 1`,
@@ -608,7 +663,8 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
         success: true,
         data: {
           hasStatement: false,
-          status: null
+          status: null,
+          userStatus: null
         }
       });
     }
@@ -634,7 +690,13 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
       }
     }
 
-    const hasStatement = statement.status === 'completed';
+    // Bank statement is considered "has statement" if:
+    // 1. status === 'completed' (online mode - Digitap verified)
+    // 2. user_status === 'uploaded' or 'under_review' or 'verified' (manual upload)
+    const hasStatement = statement.status === 'completed' || 
+                        statement.user_status === 'uploaded' || 
+                        statement.user_status === 'under_review' || 
+                        statement.user_status === 'verified';
     let reportJustFetched = false;
 
     // Extract txn_id from transaction_data if not already in statement.txn_id
@@ -743,6 +805,8 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
       data: {
         hasStatement,
         status: statement.status,
+        userStatus: statement.user_status || statement.status, // Use user_status if available, fallback to status
+        verificationStatus: statement.verification_status || 'not_started',
         clientRefNum: statement.client_ref_num,
         requestId: statement.request_id,
         fileName: statement.file_name,

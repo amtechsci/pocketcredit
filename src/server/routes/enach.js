@@ -130,11 +130,11 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             });
         }
 
-        // Validate authMode - default to 'net_banking' if not provided
+        // Validate authMode - default to 'aadhaar' if not provided
         const validAuthModes = ['net_banking', 'debit_card', 'aadhaar'];
         const selectedAuthMode = authMode && validAuthModes.includes(authMode) 
             ? authMode 
-            : 'net_banking';
+            : 'aadhaar';
 
         // Fetch loan application details with all email fields and salary
         // Convert applicationId to integer to ensure proper type matching

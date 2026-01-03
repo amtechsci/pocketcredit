@@ -11,13 +11,17 @@ class EmailService {
    * Initialize email transporter
    */
   initTransporter() {
+    // Google Workspace (Gmail) SMTP: smtp.gmail.com
+    // Port 587 for STARTTLS, Port 465 for SSL/TLS
+    // IMPORTANT: Use App Password if 2FA is enabled
+    const port = parseInt(process.env.SMTP_PORT || '587');
     this.transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: process.env.SMTP_PORT || 587,
-      secure: false, // true for 465, false for other ports
+      port: port,
+      secure: port === 465, // true for 465 (SSL), false for 587 (STARTTLS)
       auth: {
-        user: process.env.SMTP_USER || 'your-email@gmail.com',
-        pass: process.env.SMTP_PASS || 'your-app-password'
+        user: process.env.SMTP_USER || 'support@pocketcredit.in',
+        pass: process.env.SMTP_PASS || '' // App Password if 2FA enabled
       },
       tls: {
         rejectUnauthorized: false

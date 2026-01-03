@@ -44,18 +44,9 @@ export const LinkSalaryBankAccountPage = () => {
     // Check URL parameters
     const urlParams = new URLSearchParams(window.location.search);
     const allowEdit = urlParams.get('allowEdit');
-    const applicationIdParam = urlParams.get('applicationId');
 
     // If allowEdit=true, skip the completion check and just load the page
     if (allowEdit === 'true') {
-      setCheckingEnach(false);
-      checkAndFetchReport();
-      return;
-    }
-
-    // If applicationId is provided in URL, skip the application check
-    if (applicationIdParam) {
-      console.log('✅ Application ID provided in URL:', applicationIdParam);
       setCheckingEnach(false);
       checkAndFetchReport();
       return;
@@ -464,14 +455,17 @@ export const LinkSalaryBankAccountPage = () => {
                   </div>
                 ))}
 
-                <Button
-                  onClick={() => setShowAddNew(true)}
-                  variant="outline"
-                  className="w-full mt-4"
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add New Bank Account
-                </Button>
+                {/* Only show "Add New Bank Account" if no bank details exist */}
+                {bankDetails.length === 0 && (
+                  <Button
+                    onClick={() => setShowAddNew(true)}
+                    variant="outline"
+                    className="w-full mt-4"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add New Bank Account
+                  </Button>
+                )}
               </div>
             )}
           </CardContent>

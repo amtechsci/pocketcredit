@@ -5,17 +5,24 @@ const { requireAuth } = require('../middleware/jwtAuth');
 const nodemailer = require('nodemailer');
 
 // Email transporter configuration - Using environment variables
+// Google Workspace (Gmail) SMTP: smtp.gmail.com
+// Port 587 for STARTTLS, Port 465 for SSL/TLS
+// IMPORTANT: For Google Workspace, you need either:
+// 1. Enable "Less secure app access" (if available), OR
+// 2. Use an App Password (if 2FA is enabled) - Generate at: https://myaccount.google.com/apppasswords
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.hostinger.com',
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
   port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: false, // TLS
+  secure: process.env.SMTP_PORT === '465', // true for 465 (SSL), false for 587 (STARTTLS)
   auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
+    user: process.env.SMTP_USER?.trim(), // Full email: support@pocketcredit.in
+    pass: process.env.SMTP_PASS?.trim(), // App Password if 2FA enabled, or regular password
   },
   tls: {
     rejectUnauthorized: false
-  }
+  },
+  debug: process.env.NODE_ENV === 'development', // Enable debug logs
+  logger: process.env.NODE_ENV === 'development' // Enable logger
 });
 
 // Generate 6-digit OTP
@@ -88,11 +95,24 @@ router.post('/send', requireAuth, async (req, res) => {
 
     // Send email
     const emailType = type === 'personal' ? 'Personal' : 'Official';
-    const fromEmail = process.env.SMTP_USER;
-    if (!fromEmail) {
+    const fromEmail = process.env.SMTP_USER?.trim();
+    const smtpPass = process.env.SMTP_PASS?.trim();
+    
+    if (!fromEmail || !smtpPass) {
       return res.status(500).json({
         status: 'error',
-        message: 'SMTP configuration is missing. Please configure SMTP_USER in environment variables.'
+        message: 'SMTP configuration is missing. Please configure SMTP_USER and SMTP_PASS in environment variables.'
+      });
+    }
+    
+    // Log SMTP config (without password) for debugging
+    if (process.env.NODE_ENV === 'development') {
+      console.log('📧 SMTP Config Check:', {
+        host: process.env.SMTP_HOST || 'smtp.titan.email',
+        port: process.env.SMTP_PORT || '587',
+        user: fromEmail,
+        hasPassword: !!smtpPass,
+        passwordLength: smtpPass.length
       });
     }
     const mailOptions = {
@@ -125,9 +145,18 @@ router.post('/send', requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error('Send OTP error:', error);
+    
+    // Provide more helpful error messages for authentication failures
+    let errorMessage = 'Failed to send OTP';
+    if (error.code === 'EAUTH') {
+      errorMessage = 'SMTP authentication failed. Please check: 1) Email and password are correct, 2) Third-party access is enabled in Titan Email settings, 3) Password contains special characters that may need escaping';
+    } else if (error.responseCode === 535) {
+      errorMessage = 'SMTP authentication failed. Verify your email credentials and ensure third-party app access is enabled in Titan Email settings.';
+    }
+    
     res.status(500).json({
       status: 'error',
-      message: 'Failed to send OTP',
+      message: errorMessage,
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

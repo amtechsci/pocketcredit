@@ -119,9 +119,9 @@ export const BankStatementSuccessPage = () => {
             );
             
             if (activeApplication) {
-              // Redirect with application ID
+              // Redirect to link salary bank account
               setTimeout(() => {
-                navigate(`/link-salary-bank-account?applicationId=${activeApplication.id}`);
+                navigate('/link-salary-bank-account');
               }, 1500);
               return;
             }

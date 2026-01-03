@@ -2304,21 +2304,99 @@ router.post('/:loanId/generate-pdf', authenticateAdmin, async (req, res) => {
 
     const filename = `KFS_${applicationNumber}.pdf`;
 
+    // Validate PDF service is available
+    if (!pdfService) {
+      console.error('❌ PDF service is not available');
+      return res.status(500).json({
+        success: false,
+        message: 'PDF service not initialized'
+      });
+    }
+
     // Generate PDF
     let pdfResult;
     try {
+      // Validate HTML content
+      if (typeof htmlContent !== 'string' || htmlContent.trim().length === 0) {
+        throw new Error('Invalid HTML content provided');
+      }
+
+      console.log('📄 Starting PDF generation, HTML length:', htmlContent.length);
+      console.log('📄 HTML preview (first 200 chars):', htmlContent.substring(0, 200));
+      
       pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
       
-      if (!pdfResult || !pdfResult.buffer) {
-        throw new Error('PDF generation returned invalid result');
+      if (!pdfResult) {
+        throw new Error('PDF generation returned null or undefined');
       }
+      
+      // Debug: Log the structure of pdfResult
+      console.log('📊 pdfResult type:', typeof pdfResult);
+      console.log('📊 pdfResult keys:', Object.keys(pdfResult || {}));
+      console.log('📊 pdfResult.buffer type:', typeof pdfResult.buffer);
+      console.log('📊 pdfResult.buffer is Buffer?', Buffer.isBuffer(pdfResult.buffer));
+      
+      // Check if pdfResult is a Buffer (direct return) or an object with buffer property
+      let pdfBuffer;
+      if (Buffer.isBuffer(pdfResult)) {
+        // Direct buffer return
+        pdfBuffer = pdfResult;
+        console.log('📊 Using direct buffer return');
+      } else if (pdfResult.buffer) {
+        // Object with buffer property
+        pdfBuffer = pdfResult.buffer;
+        console.log('📊 Using buffer from object property');
+      } else {
+        console.error('❌ pdfResult structure:', JSON.stringify(Object.keys(pdfResult || {})));
+        throw new Error('PDF generation returned invalid result structure');
+      }
+      
+      // Validate buffer
+      if (!pdfBuffer) {
+        console.error('❌ pdfBuffer is null or undefined');
+        throw new Error('PDF generation returned null buffer');
+      }
+      
+      // Puppeteer returns Uint8Array, not Buffer - convert it
+      if (!Buffer.isBuffer(pdfBuffer)) {
+        // Check if it's a Uint8Array (which Puppeteer returns)
+        if (pdfBuffer instanceof Uint8Array || pdfBuffer.constructor?.name === 'Uint8Array') {
+          console.log('📊 Converting Uint8Array to Buffer');
+          pdfBuffer = Buffer.from(pdfBuffer);
+        } else {
+          console.error('❌ Invalid buffer type:', typeof pdfBuffer, 'Is Buffer?', Buffer.isBuffer(pdfBuffer));
+          console.error('❌ pdfBuffer constructor:', pdfBuffer?.constructor?.name);
+          throw new Error('PDF generation returned invalid buffer type');
+        }
+      }
+      
+      // Update pdfResult to have the buffer for consistency
+      pdfResult.buffer = pdfBuffer;
+
+      console.log('✅ PDF generated successfully, buffer size:', pdfBuffer.length);
     } catch (pdfError) {
       console.error('❌ PDF generation error:', pdfError);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to generate PDF',
-        error: pdfError.message || 'PDF generation failed'
+      console.error('Error details:', {
+        message: pdfError.message,
+        stack: pdfError.stack,
+        name: pdfError.name,
+        cause: pdfError.cause
       });
+      
+      // Ensure we haven't sent headers yet
+      if (!res.headersSent) {
+        // Since frontend uses responseType: 'blob', we need to send error in a way that can be parsed
+        // But for now, send JSON and let frontend handle it
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to generate PDF',
+          error: pdfError.message || 'PDF generation failed',
+          details: process.env.NODE_ENV === 'development' ? pdfError.stack : undefined
+        });
+      } else {
+        console.error('⚠️ Cannot send error response - headers already sent');
+      }
+      return;
     }
 
     console.log('📤 Sending PDF, size:', pdfResult.buffer.length, 'bytes');
@@ -2341,11 +2419,21 @@ router.post('/:loanId/generate-pdf', authenticateAdmin, async (req, res) => {
     
     // Check if response has already been sent
     if (!res.headersSent) {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to generate PDF',
-        error: error.message || 'Unknown error occurred'
-      });
+      // Since frontend expects blob, send error as text/plain or JSON
+      // But first check if client accepts JSON
+      const accepts = req.headers.accept || '';
+      
+      if (accepts.includes('application/json')) {
+        res.status(500).json({
+          success: false,
+          message: 'Failed to generate PDF',
+          error: error.message || 'Unknown error occurred'
+        });
+      } else {
+        // Send as plain text error message
+        res.status(500).setHeader('Content-Type', 'text/plain');
+        res.send(`Error generating PDF: ${error.message || 'Unknown error occurred'}`);
+      }
     } else {
       console.error('⚠️ Response already sent, cannot send error response');
     }

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Cloud, FileText, AlertCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, FileText, AlertCircle, Loader2, Upload, CheckCircle, Cloud } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -11,18 +11,15 @@ import { useAuth } from '../../contexts/AuthContext';
 export const BankStatementUploadPage = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [uploadMethod, setUploadMethod] = useState<'online' | 'manual'>('online');
   const [onlineMethod, setOnlineMethod] = useState<'netbanking' | 'accountaggregator'>('accountaggregator');
   const [mobileNumber, setMobileNumber] = useState<string>('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [checkingStatus, setCheckingStatus] = useState(true);
-  const [hasPendingUpload, setHasPendingUpload] = useState(false);
-  const [pendingData, setPendingData] = useState<{
-    digitapUrl: string;
-    expiresAt: string;
-    status: string;
-  } | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<'none' | 'uploaded' | 'under_review' | 'verified' | 'rejected'>('none');
 
   // Set mobile number from user context on mount
   useEffect(() => {
@@ -31,63 +28,69 @@ export const BankStatementUploadPage = () => {
     }
   }, [user]);
 
-  // Check if bank statement already uploaded or pending
+  // Check if bank statement already uploaded
   useEffect(() => {
     const checkBankStatementStatus = async () => {
       try {
         const response = await apiService.getUserBankStatementStatus();
         
-        if (!response.success || !response.data) {
-          setCheckingStatus(false);
-          return;
-        }
-
-        const { status, digitapUrl, expiresAt } = response.data as any;
-
-        // Check if completed
-        if (status === 'completed') {
-          // Check if e-NACH is already registered
-          try {
-            const enachStatusResponse = await apiService.getEnachStatus();
-            if (enachStatusResponse.success && enachStatusResponse.data?.registered) {
-              // e-NACH already registered, skip to email verification
-              toast.success('Bank statement already uploaded! Redirecting...');
-              setTimeout(() => navigate('/email-verification'), 1500);
-              return;
+        if (response.success && response.data) {
+          const { status, userStatus, digitapUrl, expiresAt } = response.data as any;
+          
+          // If status is 'completed' (online flow or manual upload), redirect to link-salary-bank-account
+          // This matches the Account Aggregator flow behavior
+          if (status === 'completed') {
+            toast.success('Bank statement already uploaded! Redirecting...');
+            
+            // Get application ID for redirect
+            try {
+              const applicationsResponse = await apiService.getLoanApplications();
+              const isSuccess = applicationsResponse.success || applicationsResponse.status === 'success';
+              if (isSuccess && applicationsResponse.data?.applications) {
+                const applications = applicationsResponse.data.applications;
+                const activeApplication = applications.find((app: any) => 
+                  ['submitted', 'under_review', 'follow_up', 'disbursal', 'pending', 'in_progress'].includes(app.status)
+                );
+                
+                if (activeApplication) {
+                  setTimeout(() => {
+                    navigate('/link-salary-bank-account', { replace: true });
+                  }, 1500);
+                  return;
+                }
+              }
+            } catch (appError) {
+              console.error('Error fetching loan applications:', appError);
             }
-          } catch (enachError) {
-            console.error('Error checking e-NACH status:', enachError);
-            // Continue to e-NACH page if check fails
+            
+            // Fallback: Redirect without application ID
+            setTimeout(() => {
+              navigate('/link-salary-bank-account', { replace: true });
+            }, 1500);
+            return;
           }
           
-          toast.success('Bank statement already uploaded! Redirecting...');
-          setTimeout(() => navigate('/link-salary-bank-account'), 1500);
-          return;
-        }
-
-        // Check if pending, InProgress, or failed (needs retry)
-        // Note: 'failed' status should only appear for actual failures, not cancellations
-        if ((status === 'pending' || status === 'InProgress' || status === 'failed') && digitapUrl) {
-          // Check if expired
-          if (expiresAt && new Date(expiresAt) < new Date()) {
-            // Expired - delete and show form
-            toast.info('Previous session expired. Please start a new upload.');
-            await handleDeletePending();
-            setCheckingStatus(false);
-          } else {
-            // Not expired - show pending/retry message
-            // Only show "failed" message if status is explicitly 'failed' (actual failure)
-            // For 'pending' or 'InProgress', show as pending (could be cancellation)
-            setPendingData({ digitapUrl, expiresAt, status });
-            setHasPendingUpload(true);
-            setCheckingStatus(false);
+          // If userStatus is 'verified' (admin verified), also redirect
+          if (userStatus === 'verified') {
+            toast.success('Bank statement already uploaded and verified! Redirecting...');
+            setTimeout(() => navigate('/link-salary-bank-account', { replace: true }), 1500);
+            return;
+          } else if (userStatus === 'under_review') {
+            setUploadStatus('under_review');
+          } else if (userStatus === 'uploaded') {
+            setUploadStatus('uploaded');
+          } else if (userStatus === 'rejected') {
+            setUploadStatus('rejected');
           }
-        } else {
-          // No pending upload - show form
-          setCheckingStatus(false);
+
+          // Check for pending online upload
+          if (digitapUrl && expiresAt && new Date(expiresAt) > new Date()) {
+            // Has pending online upload - could show option to continue
+          }
         }
       } catch (error) {
         console.error('Error checking bank statement status:', error);
+      } finally {
         setCheckingStatus(false);
       }
     };
@@ -95,24 +98,20 @@ export const BankStatementUploadPage = () => {
     checkBankStatementStatus();
   }, [navigate]);
 
-  const handleContinuePending = () => {
-    if (pendingData?.digitapUrl) {
-      toast.info('Redirecting to your pending upload...');
-      window.location.href = pendingData.digitapUrl;
-    }
-  };
-
-  const handleDeletePending = async () => {
-    try {
-      const response = await apiService.deletePendingBankStatement();
-      if (response.success) {
-        toast.success('Starting fresh upload...');
-        setHasPendingUpload(false);
-        setPendingData(null);
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file type
+      if (file.type !== 'application/pdf') {
+        toast.error('Please upload a PDF file');
+        return;
       }
-    } catch (error) {
-      console.error('Error deleting pending upload:', error);
-      toast.error('Could not reset. Please try again.');
+      // Validate file size (10MB limit)
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error('File size must be less than 10MB');
+        return;
+      }
+      setSelectedFile(file);
     }
   };
 
@@ -132,7 +131,6 @@ export const BankStatementUploadPage = () => {
     setIsLoading(true);
 
     try {
-      
       const response = await apiService.initiateUserBankStatement({
         mobile_number: mobileNumber || '',
         bank_name: '',
@@ -176,26 +174,38 @@ export const BankStatementUploadPage = () => {
   };
 
   const handleManualUpload = async () => {
+    if (!selectedFile) {
+      toast.error('Please select a file to upload');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      // Manual also uses Digitap generateurl with destination: "statementupload"
-      const response = await apiService.initiateUserBankStatement({
-        mobile_number: '',
-        bank_name: '',
-        destination: 'statementupload'
-      });
+      const formData = new FormData();
+      formData.append('statement', selectedFile);
 
-      if (response.success && response.data) {
-        toast.success('Redirecting to upload page...');
-        // Redirect to Digitap's upload page
-        window.location.href = response.data.digitapUrl;
+      const response = await apiService.uploadBankStatement(formData);
+
+      if (response.success) {
+        toast.success('Bank statement uploaded successfully! Redirecting...');
+        setUploadStatus('uploaded');
+        setSelectedFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        // Redirect to link-salary-bank-account page after successful upload
+        // This matches the Account Aggregator flow behavior (see BankStatementSuccessPage.tsx)
+        // Wait a bit to ensure backend step update is complete
+        setTimeout(() => {
+          navigate('/link-salary-bank-account', { replace: true });
+        }, 1500);
       } else {
-        toast.error(response.message || 'Failed to initiate upload');
+        toast.error(response.message || 'Failed to upload bank statement');
       }
     } catch (error: any) {
-      console.error('Manual upload error:', error);
-      toast.error(error.message || 'Failed to initiate upload');
+      console.error('Upload error:', error);
+      toast.error(error.message || 'Failed to upload bank statement');
     } finally {
       setIsLoading(false);
     }
@@ -226,46 +236,51 @@ export const BankStatementUploadPage = () => {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-        {/* Pending/Failed Upload Message */}
-        {hasPendingUpload && pendingData && (
-          <Card className="p-6 border-2 border-yellow-400 bg-yellow-50">
+        {/* Status Messages */}
+        {uploadStatus === 'under_review' && (
+          <Card className="p-6 border-2 border-blue-400 bg-blue-50">
             <div className="flex items-start gap-3">
-              <AlertCircle className="w-6 h-6 text-yellow-600 flex-shrink-0 mt-1" />
+              <AlertCircle className="w-6 h-6 text-blue-600 flex-shrink-0 mt-1" />
               <div className="flex-1">
-                <h3 className="font-semibold text-yellow-900 mb-2">
-                  {pendingData.status === 'failed' 
-                    ? 'Previous bank statement upload failed'
-                    : 'You have a pending bank statement upload'
-                  }
-                </h3>
-                <p className="text-sm text-yellow-800 mb-4">
-                  {pendingData.status === 'failed'
-                    ? 'Your previous upload attempt failed. You can try again with the same method or choose a different one.'
-                    : 'You started an upload process but didn\'t complete it. You can continue where you left off or start fresh with a different method.'
-                  }
+                <h3 className="font-semibold text-blue-900 mb-2">Under Review</h3>
+                <p className="text-sm text-blue-800">
+                  Your bank statement is currently under review by our team. You will be notified once the review is complete.
                 </p>
-                <div className="flex gap-3">
-                  <Button
-                    onClick={handleContinuePending}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    {pendingData.status === 'failed' ? 'Try Again' : 'Continue Upload'}
-                  </Button>
-                  <Button
-                    onClick={handleDeletePending}
-                    variant="outline"
-                    className="border-yellow-600 text-yellow-900 hover:bg-yellow-100"
-                  >
-                    Try Other Method
-                  </Button>
-                </div>
               </div>
             </div>
           </Card>
         )}
 
-        {/* Upload Method Tabs - Only show if no pending upload */}
-        {!hasPendingUpload && (
+        {uploadStatus === 'rejected' && (
+          <Card className="p-6 border-2 border-red-400 bg-red-50">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-1" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-red-900 mb-2">Upload Rejected</h3>
+                <p className="text-sm text-red-800">
+                  Your bank statement was rejected. Please upload a new statement or contact support for assistance.
+                </p>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {uploadStatus === 'uploaded' && (
+          <Card className="p-6 border-2 border-green-400 bg-green-50">
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0 mt-1" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-green-900 mb-2">Upload Successful</h3>
+                <p className="text-sm text-green-800">
+                  Your bank statement has been uploaded successfully. It is now under review by our team.
+                </p>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {/* Upload Method Tabs */}
+        {uploadStatus !== 'verified' && (
           <>
             <div className="relative">
               <div className="flex gap-3">
@@ -321,126 +336,188 @@ export const BankStatementUploadPage = () => {
                   </div>
                   <div className="space-y-3">
                     <label className="flex items-center gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all hover:border-blue-500 hover:bg-blue-50"
-                  style={{
-                    borderColor: onlineMethod === 'accountaggregator' ? '#3b82f6' : '#e5e7eb',
-                    backgroundColor: onlineMethod === 'accountaggregator' ? '#eff6ff' : 'white'
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="onlineMethod"
-                    value="accountaggregator"
-                    checked={onlineMethod === 'accountaggregator'}
-                    onChange={(e) => setOnlineMethod(e.target.value as 'accountaggregator')}
-                    className="w-5 h-5 text-blue-600"
-                  />
-                  <div className="flex-1">
-                    <div className="font-semibold text-gray-900">By Mobile (Account Aggregator)</div>
-                    <div className="text-sm text-gray-600">Secure, RBI-approved method</div>
-                  </div>
-                </label>
+                      style={{
+                        borderColor: onlineMethod === 'accountaggregator' ? '#3b82f6' : '#e5e7eb',
+                        backgroundColor: onlineMethod === 'accountaggregator' ? '#eff6ff' : 'white'
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="onlineMethod"
+                        value="accountaggregator"
+                        checked={onlineMethod === 'accountaggregator'}
+                        onChange={(e) => setOnlineMethod(e.target.value as 'accountaggregator')}
+                        className="w-5 h-5 text-blue-600"
+                      />
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-900">By Mobile (Account Aggregator)</div>
+                        <div className="text-sm text-gray-600">Secure, RBI-approved method</div>
+                      </div>
+                    </label>
 
-                {/* Mobile Number Input - Only show when Account Aggregator is selected */}
-                {onlineMethod === 'accountaggregator' && (
-                  <Card className="p-4 bg-gray-50 border border-gray-200">
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Mobile Number <span className="text-red-500">*</span>
+                    {/* Mobile Number Input - Only show when Account Aggregator is selected */}
+                    {onlineMethod === 'accountaggregator' && (
+                      <Card className="p-4 bg-gray-50 border border-gray-200">
+                        <div className="space-y-2">
+                          <label className="block text-sm font-medium text-gray-700">
+                            Mobile Number <span className="text-red-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600 font-medium">+91</span>
+                            <input
+                              type="tel"
+                              value={mobileNumber}
+                              onChange={(e) => {
+                                // Only allow numbers
+                                const value = e.target.value.replace(/\D/g, '');
+                                if (value.length <= 10) {
+                                  setMobileNumber(value);
+                                }
+                              }}
+                              placeholder="Enter your mobile number"
+                              className="w-full h-12 pl-16 pr-4 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                              maxLength={10}
+                            />
+                          </div>
+                          {user?.phone && mobileNumber === user.phone && (
+                            <p className="text-xs text-green-600 mt-1">
+                              ✓ Using your registered mobile number
+                            </p>
+                          )}
+                        </div>
+                      </Card>
+                    )}
+
+                    <div className="flex items-center gap-3 my-2">
+                      <div className="flex-1 border-t border-gray-300"></div>
+                      <span className="text-sm text-gray-500 font-medium">or</span>
+                      <div className="flex-1 border-t border-gray-300"></div>
+                    </div>
+
+                    <label className="flex items-center gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all hover:border-blue-500 hover:bg-blue-50"
+                      style={{
+                        borderColor: onlineMethod === 'netbanking' ? '#3b82f6' : '#e5e7eb',
+                        backgroundColor: onlineMethod === 'netbanking' ? '#eff6ff' : 'white'
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="onlineMethod"
+                        value="netbanking"
+                        checked={onlineMethod === 'netbanking'}
+                        onChange={(e) => setOnlineMethod(e.target.value as 'netbanking')}
+                        className="w-5 h-5 text-blue-600"
+                      />
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-900">Net Banking</div>
+                        <div className="text-sm text-gray-600">Login to your bank directly</div>
+                      </div>
+                    </label>
+                  </div>
+                </Card>
+
+                {/* Upload Button */}
+                <Button
+                  onClick={handleOnlineUpload}
+                  disabled={isLoading}
+                  className="w-full h-14 text-lg font-semibold bg-blue-600 hover:bg-blue-700"
+                >
+                  <Cloud className="mr-2 h-5 w-5" />
+                  {isLoading ? 'Connecting...' : 'Continue'}
+                </Button>
+              </>
+            )}
+
+            {/* Manual Upload Section */}
+            {uploadMethod === 'manual' && (
+              <>
+                <Card className="p-6 space-y-6">
+                  <div>
+                    <h2 className="text-xl font-semibold mb-2">Upload Bank Statement</h2>
+                    <p className="text-sm text-gray-600">
+                      Please upload your last 6 months bank statement in PDF format (max 10MB)
+                    </p>
+                  </div>
+
+                  {/* File Input */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Bank Statement PDF <span className="text-red-500">*</span>
+                    </label>
+                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="application/pdf"
+                        onChange={handleFileSelect}
+                        className="hidden"
+                        id="bank-statement-file"
+                      />
+                      <label
+                        htmlFor="bank-statement-file"
+                        className="cursor-pointer flex flex-col items-center gap-2"
+                      >
+                        <Upload className="w-10 h-10 text-gray-400" />
+                        <div>
+                          <span className="text-blue-600 font-medium">Click to upload</span>
+                          <span className="text-gray-500"> or drag and drop</span>
+                        </div>
+                        <p className="text-xs text-gray-500">PDF only, max 10MB</p>
                       </label>
-                      <div className="relative">
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600 font-medium">+91</span>
-                        <input
-                          type="tel"
-                          value={mobileNumber}
-                          onChange={(e) => {
-                            // Only allow numbers
-                            const value = e.target.value.replace(/\D/g, '');
-                            if (value.length <= 10) {
-                              setMobileNumber(value);
+                    </div>
+                    {selectedFile && (
+                      <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
+                        <FileText className="w-5 h-5 text-blue-600" />
+                        <span className="text-sm text-gray-700 flex-1">{selectedFile.name}</span>
+                        <span className="text-xs text-gray-500">
+                          {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                        </span>
+                        <button
+                          onClick={() => {
+                            setSelectedFile(null);
+                            if (fileInputRef.current) {
+                              fileInputRef.current.value = '';
                             }
                           }}
-                          placeholder="Enter your mobile number"
-                          className="w-full h-12 pl-16 pr-4 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          maxLength={10}
-                        />
+                          className="text-red-500 hover:text-red-700"
+                        >
+                          ×
+                        </button>
                       </div>
-                      {user?.phone && mobileNumber === user.phone && (
-                        <p className="text-xs text-green-600 mt-1">
-                          ✓ Using your registered mobile number
-                        </p>
-                      )}
-                    </div>
-                  </Card>
-                )}
-
-                <div className="flex items-center gap-3 my-2">
-                  <div className="flex-1 border-t border-gray-300"></div>
-                  <span className="text-sm text-gray-500 font-medium">or</span>
-                  <div className="flex-1 border-t border-gray-300"></div>
-                </div>
-
-                <label className="flex items-center gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all hover:border-blue-500 hover:bg-blue-50"
-                  style={{
-                    borderColor: onlineMethod === 'netbanking' ? '#3b82f6' : '#e5e7eb',
-                    backgroundColor: onlineMethod === 'netbanking' ? '#eff6ff' : 'white'
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="onlineMethod"
-                    value="netbanking"
-                    checked={onlineMethod === 'netbanking'}
-                    onChange={(e) => setOnlineMethod(e.target.value as 'netbanking')}
-                    className="w-5 h-5 text-blue-600"
-                  />
-                  <div className="flex-1">
-                    <div className="font-semibold text-gray-900">Net Banking</div>
-                    <div className="text-sm text-gray-600">Login to your bank directly</div>
+                    )}
                   </div>
-                </label>
-              </div>
-            </Card>
 
-            {/* Upload Button */}
-            <Button
-              onClick={handleOnlineUpload}
-              disabled={isLoading}
-              className="w-full h-14 text-lg font-semibold bg-blue-600 hover:bg-blue-700"
-            >
-              <Cloud className="mr-2 h-5 w-5" />
-              {isLoading ? 'Connecting...' : 'Continue'}
-            </Button>
-          </>
-        )}
+                  {/* Upload Button */}
+                  <Button
+                    onClick={handleManualUpload}
+                    disabled={!selectedFile || isLoading}
+                    className="w-full h-12 text-base font-semibold bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="mr-2 h-5 w-5" />
+                        Upload Statement
+                      </>
+                    )}
+                  </Button>
 
-        {/* Manual Upload Section */}
-        {uploadMethod === 'manual' && (
-          <>
-            <Card className="p-6 space-y-4">
-              <div className="flex items-start gap-2">
-                <h3 className="text-lg font-semibold flex-1">Manual Statement Upload</h3>
-                <AlertCircle className="h-5 w-5 text-blue-600" />
-              </div>
-              <p className="text-sm text-gray-600">
-                Upload last 6 months Bank Statement PDF through Digitap's secure platform
-              </p>
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <p className="text-sm text-blue-800 font-medium">
-                  ℹ️ This method lets you upload your PDF statement for automatic analysis
-                </p>
-              </div>
-            </Card>
-
-            {/* Upload Button */}
-            <Button
-              onClick={handleManualUpload}
-              disabled={isLoading}
-              className="w-full h-14 text-lg font-semibold bg-blue-600 hover:bg-blue-700"
-            >
-              <FileText className="mr-2 h-5 w-5" />
-              {isLoading ? 'Uploading...' : 'Continue to Upload'}
-            </Button>
-          </>
+                  {/* Instructions */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <p className="text-sm font-semibold text-blue-900 mb-2">Important Instructions:</p>
+                    <ul className="text-xs text-blue-800 space-y-1 list-disc list-inside">
+                      <li>Upload statement from your salary account only</li>
+                      <li>Statement should cover last 6 months</li>
+                      <li>File must be in PDF format</li>
+                      <li>Maximum file size: 10MB</li>
+                    </ul>
+                  </div>
+                </Card>
+              </>
             )}
           </>
         )}

@@ -50,9 +50,14 @@ router.post('/initiate', requireAuth, async (req, res) => {
       });
     }
 
-    // Verify application belongs to user
+    // Verify application belongs to user and check for existing ClickWrap transaction
     const [application] = await executeQuery(
-      'SELECT id, user_id, status FROM loan_applications WHERE id = ? AND user_id = ?',
+      `SELECT id, user_id, status, 
+              clickwrap_ent_transaction_id, 
+              clickwrap_doc_transaction_id,
+              agreement_signed
+       FROM loan_applications 
+       WHERE id = ? AND user_id = ?`,
       [applicationId, userId]
     );
 
@@ -60,6 +65,37 @@ router.post('/initiate', requireAuth, async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Application not found or access denied'
+      });
+    }
+
+    // Idempotency check: If agreement is already signed, return existing transaction info
+    if (application.agreement_signed) {
+      return res.status(400).json({
+        success: false,
+        message: 'Agreement has already been signed'
+      });
+    }
+
+    // If transaction IDs already exist (but not signed yet), return them
+    // This allows re-initiating the SDK if user cancelled or closed the window
+    if (application.clickwrap_ent_transaction_id || application.clickwrap_doc_transaction_id) {
+      console.log('ℹ️ ClickWrap transaction already exists for application:', applicationId);
+      console.log('   Returning existing transaction IDs');
+      
+      // Get preview URL if available
+      const [appWithPreview] = await executeQuery(
+        'SELECT clickwrap_preview_url FROM loan_applications WHERE id = ?',
+        [applicationId]
+      );
+
+      return res.json({
+        success: true,
+        data: {
+          entTransactionId: application.clickwrap_ent_transaction_id,
+          docTransactionId: application.clickwrap_doc_transaction_id,
+          previewUrl: appWithPreview?.clickwrap_preview_url || null,
+          message: 'Existing ClickWrap transaction found. Use transaction IDs with SDK.'
+        }
       });
     }
 

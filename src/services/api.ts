@@ -1070,6 +1070,21 @@ class ApiService {
   }
 
   /**
+   * Upload bank statement (user-only, manual upload)
+   */
+  async uploadBankStatement(formData: FormData): Promise<ApiResponse<any>> {
+    const token = localStorage.getItem('pocket_user_token');
+    const response = await fetch(`${this.baseURL}/bank-statement/upload-bank-statement`, {
+      method: 'POST',
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: formData
+    });
+    return response.json();
+  }
+
+  /**
    * Account Aggregator - Get AA status
    */
   async getAccountAggregatorStatus(applicationId: number): Promise<ApiResponse<any>> {

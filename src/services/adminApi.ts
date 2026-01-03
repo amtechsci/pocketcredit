@@ -540,6 +540,35 @@ class AdminApiService {
     return this.request('PUT', `/user-profile/${userId}/salary-date`, { salaryDate });
   }
 
+  // Bank Statement Verification APIs
+  async getBankStatement(userId: string): Promise<ApiResponse<any>> {
+    return this.request('GET', `/bank-statement/${userId}`);
+  }
+
+  async triggerBankStatementVerification(userId: string, formData: FormData): Promise<ApiResponse<any>> {
+    const token = localStorage.getItem('adminToken');
+    const response = await fetch(`/api/admin/bank-statement/${userId}/verify-with-file`, {
+      method: 'POST',
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: formData
+    });
+    return response.json();
+  }
+
+  async checkBankStatementStatus(userId: string): Promise<ApiResponse<any>> {
+    return this.request('POST', `/bank-statement/${userId}/check-status`);
+  }
+
+  async fetchBankStatementReport(userId: string): Promise<ApiResponse<any>> {
+    return this.request('POST', `/bank-statement/${userId}/fetch-report`);
+  }
+
+  async updateBankStatementDecision(userId: string, decision: 'approved' | 'rejected', notes?: string): Promise<ApiResponse<any>> {
+    return this.request('POST', `/bank-statement/${userId}/update-decision`, { decision, notes });
+  }
+
   async updateUserContactInfo(userId: string, data: {
     email?: string;
     phone?: string;
@@ -1228,8 +1257,33 @@ class AdminApiService {
         },
         responseType: 'blob'
       });
+      
+      // Check if response is actually a PDF (blob with PDF content type)
+      if (response.headers['content-type']?.includes('application/pdf')) {
+        return response.data;
+      }
+      
+      // If not PDF, might be an error message - try to parse it
+      if (response.headers['content-type']?.includes('application/json')) {
+        const text = await response.data.text();
+        const errorData = JSON.parse(text);
+        throw new Error(errorData.message || errorData.error || 'Failed to generate PDF');
+      }
+      
       return response.data;
-    } catch (error) {
+    } catch (error: any) {
+      // If error response is a blob (JSON error sent as blob), try to parse it
+      if (error.response?.data instanceof Blob && error.response.status === 500) {
+        try {
+          const errorText = await error.response.data.text();
+          const errorData = JSON.parse(errorText);
+          throw new Error(errorData.message || errorData.error || 'Failed to generate PDF');
+        } catch (parseError) {
+          // If parsing fails, use original error
+          console.error('Error parsing error response:', parseError);
+        }
+      }
+      
       this.handleAuthError(error);
       throw error;
     }

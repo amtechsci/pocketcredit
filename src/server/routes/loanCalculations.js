@@ -12,7 +12,9 @@ const {
   getNextSalaryDate,
   getSalaryDateForMonth,
   calculateDaysBetween,
-  formatDateToString
+  formatDateToString,
+  getTodayString,
+  parseDateToString
 } = require('../utils/loanCalculations');
 const { executeQuery } = require('../config/database');
 
@@ -406,6 +408,36 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
         }
         calculation.repayment.schedule = schedule;
       }
+    }
+    
+    // Calculate exhausted days and interest till today for preclose calculation
+    // For processed loans, use processed_at; otherwise use disbursed_at
+    let exhaustedDays = 0;
+    let interestTillToday = 0;
+    
+    const isProcessed = loan.processed_at && ['account_manager', 'cleared'].includes(loan.status);
+    // Get base date - prefer processed_at_date (from SQL DATE() function) to avoid timezone issues
+    const dateSource = isProcessed 
+      ? (loan.processed_at_date || loan.processed_at)
+      : (loan.disbursed_at_date || loan.disbursed_at);
+    
+    // Normalize date to YYYY-MM-DD string using parseDateToString (handles Date objects, strings, etc.)
+    const baseDateStr = parseDateToString(dateSource);
+    
+    if (baseDateStr) {
+      const todayStr = getTodayString();
+      exhaustedDays = calculateDaysBetween(baseDateStr, todayStr);
+      
+      // Calculate interest till today using exhausted days
+      if (calculation.interest && calculation.interest.rate_per_day && calculation.principal) {
+        interestTillToday = Math.round(calculation.principal * calculation.interest.rate_per_day * exhaustedDays * 100) / 100;
+      }
+    }
+    
+    // Add exhausted days and interest till today to response
+    if (calculation.interest) {
+      calculation.interest.exhaustedDays = exhaustedDays;
+      calculation.interest.interestTillToday = interestTillToday;
     }
     
     res.json({

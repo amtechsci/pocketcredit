@@ -206,6 +206,37 @@ async function getPresignedUrl(key, expiresIn = 3600) {
 }
 
 /**
+ * Download file from S3
+ * @param {string} key - S3 object key
+ * @returns {Promise<Buffer>}
+ */
+async function downloadFromS3(key) {
+  try {
+    const BUCKET_NAME = process.env.AWS_S3_BUCKET;
+    if (!BUCKET_NAME) throw new Error('AWS_S3_BUCKET is not set');
+
+    const command = new GetObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+    });
+
+    const response = await s3Client.send(command);
+    
+    // Convert stream to buffer
+    const chunks = [];
+    for await (const chunk of response.Body) {
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks);
+    
+    return buffer;
+  } catch (error) {
+    console.error('Download from S3 Error:', error);
+    throw new Error(`Failed to download file from S3: ${error.message}`);
+  }
+}
+
+/**
  * Validate S3 configuration
  * @returns {boolean}
  */
@@ -314,6 +345,7 @@ module.exports = {
   uploadToS3,
   deleteFromS3,
   getPresignedUrl,
+  downloadFromS3,
   validateS3Config,
   s3Client,
 

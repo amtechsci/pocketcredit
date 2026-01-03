@@ -145,7 +145,15 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
     try {
       const response = await apiService.getUserBankStatementStatus();
       if (response.success && response.data) {
-        return response.data.status === 'completed';
+        const data = response.data as any;
+        // Bank statement is considered complete if:
+        // 1. status === 'completed' (online mode - Digitap verified)
+        // 2. userStatus === 'uploaded' (manual upload - admin will verify later)
+        // 3. userStatus === 'under_review' or 'verified' (admin is reviewing or has verified)
+        return data.status === 'completed' || 
+               data.userStatus === 'uploaded' || 
+               data.userStatus === 'under_review' || 
+               data.userStatus === 'verified';
       }
     } catch (error) {
       console.error('Error checking bank statement status:', error);

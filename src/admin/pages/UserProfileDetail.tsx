@@ -31,12 +31,15 @@ import {
   Shield,
   Wallet,
   UserPlus,
-  HelpCircle
+  HelpCircle,
+  Upload,
+  Loader2
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import { adminApiService } from '../../services/adminApi';
 import { toast } from 'sonner';
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '../../components/ui/tooltip';
+import { Button } from '../../components/ui/button';
 
 
 
@@ -132,6 +135,10 @@ export function UserProfileDetail() {
   const [editingNote, setEditingNote] = useState<number | null>(null);
   const [noteText, setNoteText] = useState<{ [key: number]: string }>({});
   const [editingSalaryDate, setEditingSalaryDate] = useState(false);
+  const [bankStatement, setBankStatement] = useState<any>(null);
+  const [loadingStatement, setLoadingStatement] = useState(false);
+  const [verifyingStatement, setVerifyingStatement] = useState(false);
+  const [statementFile, setStatementFile] = useState<File | null>(null);
   const [salaryDateEditValue, setSalaryDateEditValue] = useState('');
   const [editingReference, setEditingReference] = useState<number | null>(null);
   const [editingReferenceField, setEditingReferenceField] = useState<{ [key: number]: 'name' | 'phone' | 'relation' | null }>({});
@@ -765,6 +772,28 @@ export function UserProfileDetail() {
       });
     }
   }, [userData, showContactModal]);
+
+  // Fetch bank statement when tab becomes active
+  useEffect(() => {
+    if (activeTab === 'statement-verification' && params.userId && !bankStatement) {
+      const fetchBankStatement = async () => {
+        if (!params.userId) return;
+        setLoadingStatement(true);
+        try {
+          const response = await adminApiService.getBankStatement(params.userId);
+          if (response.success && response.data) {
+            setBankStatement(response.data.statement);
+          }
+        } catch (error) {
+          console.error('Error fetching bank statement:', error);
+          toast.error('Failed to fetch bank statement');
+        } finally {
+          setLoadingStatement(false);
+        }
+      };
+      fetchBankStatement();
+    }
+  }, [activeTab, params.userId, bankStatement]);
 
   // Form submission handlers
   const handleBasicInfoSubmit = async () => {
@@ -1876,6 +1905,7 @@ export function UserProfileDetail() {
     { id: 'kyc', label: 'KYC Details', icon: CheckCircle },
     { id: 'documents', label: 'Documents', icon: FileText },
     { id: 'bank', label: 'Bank Information', icon: CreditCard },
+    { id: 'statement-verification', label: 'Statement Verification', icon: FileText },
     { id: 'reference', label: 'Reference', icon: Phone },
     { id: 'applied-loans', label: 'Applied Loans', icon: Clock },
     { id: 'loans', label: 'Loans', icon: Building },
@@ -2983,6 +3013,567 @@ export function UserProfileDetail() {
       </div>
     </div>
   );
+
+  // Statement Verification Tab
+  const renderStatementVerificationTab = () => {
+    const fetchBankStatement = async () => {
+      if (!params.userId) return;
+      setLoadingStatement(true);
+      try {
+        const response = await adminApiService.getBankStatement(params.userId);
+        if (response.success && response.data) {
+          setBankStatement(response.data.statement);
+        }
+      } catch (error) {
+        console.error('Error fetching bank statement:', error);
+        toast.error('Failed to fetch bank statement');
+      } finally {
+        setLoadingStatement(false);
+      }
+    };
+
+    const handleTriggerVerification = async () => {
+      if (!params.userId || !statementFile) {
+        toast.error('Please select a file to upload');
+        return;
+      }
+
+      setVerifyingStatement(true);
+      try {
+        const formData = new FormData();
+        formData.append('statement', statementFile);
+
+        const response = await adminApiService.triggerBankStatementVerification(params.userId, formData);
+        if (response.success) {
+          toast.success('Verification initiated successfully');
+          setStatementFile(null);
+          await fetchBankStatement();
+        } else {
+          toast.error(response.message || 'Failed to trigger verification');
+        }
+      } catch (error: any) {
+        console.error('Verification error:', error);
+        toast.error(error.message || 'Failed to trigger verification');
+      } finally {
+        setVerifyingStatement(false);
+      }
+    };
+
+    const handleCheckStatus = async () => {
+      if (!params.userId) return;
+      setLoadingStatement(true);
+      try {
+        const response = await adminApiService.checkBankStatementStatus(params.userId);
+        if (response.success) {
+          toast.success('Status updated');
+          await fetchBankStatement();
+        } else {
+          toast.error(response.message || 'Failed to check status');
+        }
+      } catch (error) {
+        console.error('Status check error:', error);
+        toast.error('Failed to check status');
+      } finally {
+        setLoadingStatement(false);
+      }
+    };
+
+    const handleFetchReport = async () => {
+      if (!params.userId) return;
+      setLoadingStatement(true);
+      try {
+        const response = await adminApiService.fetchBankStatementReport(params.userId);
+        if (response.success) {
+          toast.success('Report fetched successfully');
+          await fetchBankStatement();
+        } else {
+          toast.error(response.message || 'Failed to fetch report');
+        }
+      } catch (error) {
+        console.error('Report fetch error:', error);
+        toast.error('Failed to fetch report');
+      } finally {
+        setLoadingStatement(false);
+      }
+    };
+
+    const handleUpdateDecision = async (decision: 'approved' | 'rejected', notes?: string) => {
+      if (!params.userId) return;
+      try {
+        const response = await adminApiService.updateBankStatementDecision(params.userId, decision, notes);
+        if (response.success) {
+          toast.success(`Statement ${decision} successfully`);
+          await fetchBankStatement();
+        } else {
+          toast.error(response.message || 'Failed to update decision');
+        }
+      } catch (error) {
+        console.error('Decision update error:', error);
+        toast.error('Failed to update decision');
+      }
+    };
+
+    if (loadingStatement && !bankStatement) {
+      return (
+        <div className="flex items-center justify-center p-12">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        </div>
+      );
+    }
+
+    const statement = bankStatement;
+    const hasStatement = !!statement;
+    const userStatus = statement?.user_status || 'none';
+    const verificationStatus = statement?.verification_status || 'not_started';
+
+    return (
+      <div className="space-y-6">
+        {/* Statement Details */}
+        {hasStatement && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h4 className="text-md font-semibold text-gray-900 mb-4">Statement Details</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Client Reference Number</label>
+                <p className="text-gray-900 font-mono text-sm">{statement.client_ref_num || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">File Name</label>
+                <p className="text-gray-900">{statement.file_name || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">File Size</label>
+                <p className="text-gray-900">
+                  {statement.file_size ? `${(statement.file_size / 1024 / 1024).toFixed(2)} MB` : 'N/A'}
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Upload Method</label>
+                <p className="text-gray-900 capitalize">{statement.upload_method || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Uploaded At</label>
+                <p className="text-gray-900">
+                  {statement.created_at ? new Date(statement.created_at).toLocaleString() : 'N/A'}
+                </p>
+              </div>
+              {statement.request_id && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Request ID</label>
+                  <p className="text-gray-900 font-mono text-sm">{statement.request_id}</p>
+                </div>
+              )}
+              {statement.txn_id && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Transaction ID</label>
+                  <p className="text-gray-900 font-mono text-sm">{statement.txn_id}</p>
+                </div>
+              )}
+              {/* Show uploaded file for manual uploads */}
+              {statement.upload_method === 'manual' && statement.file_path && (
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Uploaded File</label>
+                  <a
+                    href={statement.file_path}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 text-blue-600 hover:underline"
+                  >
+                    <Download className="w-4 h-4" />
+                    {statement.file_name || 'Download File'}
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Verification Actions - Only for manual uploads */}
+        {(!hasStatement || (hasStatement && statement.upload_method === 'manual')) && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h4 className="text-md font-semibold text-gray-900 mb-4">Verification Actions</h4>
+
+            {!hasStatement && (
+              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-sm text-yellow-800">
+                  No bank statement uploaded yet. User needs to upload a statement first.
+                </p>
+              </div>
+            )}
+
+          {hasStatement && verificationStatus === 'not_started' && statement.upload_method === 'manual' && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Upload File for Digitap Verification
+                </label>
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={(e) => setStatementFile(e.target.files?.[0] || null)}
+                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                />
+                {statementFile && (
+                  <p className="mt-2 text-sm text-gray-600">
+                    Selected: {statementFile.name} ({(statementFile.size / 1024 / 1024).toFixed(2)} MB)
+                  </p>
+                )}
+              </div>
+              <Button
+                onClick={handleTriggerVerification}
+                disabled={!statementFile || verifyingStatement}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {verifyingStatement ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Verifying...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4 mr-2" />
+                    Trigger Digitap Verification
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
+
+          {hasStatement && verificationStatus === 'api_verification_pending' && statement.upload_method === 'manual' && (
+            <div className="space-y-4">
+              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-sm text-yellow-800 mb-2">
+                  Verification is in progress. You can check the status or fetch the report when ready.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <Button
+                  onClick={handleCheckStatus}
+                  disabled={loadingStatement}
+                  variant="outline"
+                >
+                  <RefreshCw className={`w-4 h-4 mr-2 ${loadingStatement ? 'animate-spin' : ''}`} />
+                  Check Status
+                </Button>
+                <Button
+                  onClick={handleFetchReport}
+                  disabled={loadingStatement}
+                  variant="outline"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Fetch Report
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {hasStatement && verificationStatus === 'api_verified' && statement.upload_method === 'manual' && (
+            <div className="space-y-4">
+              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-sm text-green-800 mb-2">
+                  ✓ Digitap API verification completed successfully.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <Button
+                  onClick={handleFetchReport}
+                  disabled={loadingStatement}
+                  variant="outline"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  View Report
+                </Button>
+                <Button
+                  onClick={() => handleUpdateDecision('approved')}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Approve Statement
+                </Button>
+                <Button
+                  onClick={() => {
+                    const notes = prompt('Enter rejection reason:');
+                    if (notes) handleUpdateDecision('rejected', notes);
+                  }}
+                  variant="destructive"
+                >
+                  <XCircle className="w-4 h-4 mr-2" />
+                  Reject Statement
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {hasStatement && verificationStatus === 'api_failed' && statement.upload_method === 'manual' && (
+            <div className="space-y-4">
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-sm text-red-800 mb-2">
+                  ✗ Digitap API verification failed. {statement.upload_method === 'manual' ? 'You can retry with a new file.' : 'Please check the API logs or contact support.'}
+                </p>
+              </div>
+              {statement.upload_method === 'manual' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Upload New File for Retry
+                  </label>
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    onChange={(e) => setStatementFile(e.target.files?.[0] || null)}
+                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                  />
+                  <Button
+                    onClick={handleTriggerVerification}
+                    disabled={!statementFile || verifyingStatement}
+                    className="mt-3 bg-blue-600 hover:bg-blue-700"
+                  >
+                    Retry Verification
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+          </div>
+        )}
+
+        {/* Report Data */}
+        {hasStatement && statement.reportData && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h4 className="text-md font-semibold text-gray-900 mb-4">Verification Report</h4>
+            
+            {statement.upload_method === 'online' && typeof statement.reportData === 'object' ? (
+              <div className="space-y-6">
+                {/* Customer Info */}
+                {statement.reportData.customer_info && (
+                  <div>
+                    <h5 className="text-sm font-semibold text-gray-800 mb-3">Customer Information</h5>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200 border border-gray-200">
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {Object.entries(statement.reportData.customer_info).map(([key, value]: [string, any]) => (
+                            <tr key={key}>
+                              <td className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-50 capitalize">
+                                {key.replace(/_/g, ' ')}
+                              </td>
+                              <td className="px-4 py-2 text-sm text-gray-900">{value || 'N/A'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Accounts */}
+                {statement.reportData.accounts && Array.isArray(statement.reportData.accounts) && (
+                  <div>
+                    <h5 className="text-sm font-semibold text-gray-800 mb-3">Account Details</h5>
+                    {statement.reportData.accounts.map((account: any, accIndex: number) => (
+                      <div key={accIndex} className="mb-6 border border-gray-200 rounded-lg p-4">
+                        <h6 className="text-xs font-semibold text-gray-700 mb-3">Account {accIndex + 1}</h6>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+                          {Object.entries(account).filter(([key]) => key !== 'transactions').map(([key, value]: [string, any]) => (
+                            <div key={key}>
+                              <div className="text-xs font-medium text-gray-600 capitalize mb-1">
+                                {key.replace(/_/g, ' ')}
+                              </div>
+                              <div className="text-sm text-gray-900">{value || 'N/A'}</div>
+                            </div>
+                          ))}
+                        </div>
+                        
+                        {/* Transactions Table */}
+                        {account.transactions && Array.isArray(account.transactions) && account.transactions.length > 0 && (
+                          <div className="mt-4">
+                            <h6 className="text-xs font-semibold text-gray-700 mb-2">Transactions ({account.transactions.length})</h6>
+                            <div className="overflow-x-auto max-h-96">
+                              <table className="min-w-full divide-y divide-gray-200 border border-gray-200 text-xs">
+                                <thead className="bg-gray-50 sticky top-0">
+                                  <tr>
+                                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Date</th>
+                                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Amount</th>
+                                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Balance</th>
+                                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Category</th>
+                                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Narration</th>
+                                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Tamper Flag</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                  {account.transactions.map((txn: any, txnIndex: number) => (
+                                    <tr key={txnIndex} className="hover:bg-gray-50">
+                                      <td className="px-3 py-2 text-gray-900">{txn.date || 'N/A'}</td>
+                                      <td className={`px-3 py-2 font-medium ${
+                                        txn.amount > 0 ? 'text-green-600' : 'text-red-600'
+                                      }`}>
+                                        {txn.amount > 0 ? '+' : ''}{txn.amount?.toLocaleString('en-IN', { minimumFractionDigits: 2 }) || '0.00'}
+                                      </td>
+                                      <td className="px-3 py-2 text-gray-900">{txn.balance?.toLocaleString('en-IN', { minimumFractionDigits: 2 }) || 'N/A'}</td>
+                                      <td className="px-3 py-2 text-gray-900">{txn.category || 'N/A'}</td>
+                                      <td className="px-3 py-2 text-gray-900 max-w-xs truncate" title={txn.narration}>
+                                        {txn.narration || 'N/A'}
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                          txn.tamper_flag === 'GREEN' ? 'bg-green-100 text-green-800' :
+                                          txn.tamper_flag === 'RED' ? 'bg-red-100 text-red-800' :
+                                          'bg-yellow-100 text-yellow-800'
+                                        }`}>
+                                          {txn.tamper_flag || 'N/A'}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Analysis Data */}
+                {statement.reportData.analysis_data && (
+                  <div>
+                    <h5 className="text-sm font-semibold text-gray-800 mb-3">Analysis Data</h5>
+                    {Object.entries(statement.reportData.analysis_data).map(([period, data]: [string, any]) => (
+                      <div key={period} className="mb-4 border border-gray-200 rounded-lg p-4">
+                        <h6 className="text-xs font-semibold text-gray-700 mb-3">{period}</h6>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full divide-y divide-gray-200 border border-gray-200 text-xs">
+                            <tbody className="bg-white divide-y divide-gray-200">
+                              {Object.entries(data).slice(0, 20).map(([key, value]: [string, any]) => (
+                                <tr key={key}>
+                                  <td className="px-3 py-2 text-xs font-medium text-gray-700 bg-gray-50 w-1/3">
+                                    {key.replace(/_/g, ' ')}
+                                  </td>
+                                  <td className="px-3 py-2 text-xs text-gray-900">
+                                    {typeof value === 'number' ? value.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : (value || 'N/A')}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {Object.keys(data).length > 20 && (
+                            <p className="text-xs text-gray-500 mt-2 px-3">
+                              Showing first 20 of {Object.keys(data).length} fields. Full data available in API response.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Tamper Detection */}
+                {statement.reportData.tamper_detection_details && Array.isArray(statement.reportData.tamper_detection_details) && (
+                  <div>
+                    <h5 className="text-sm font-semibold text-gray-800 mb-3">Tamper Detection Details</h5>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200 border border-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            {Object.keys(statement.reportData.tamper_detection_details[0] || {}).map((key) => (
+                              <th key={key} className="px-4 py-2 text-left text-xs font-semibold text-gray-700 capitalize">
+                                {key.replace(/_/g, ' ')}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {statement.reportData.tamper_detection_details.map((detail: any, index: number) => (
+                            <tr key={index}>
+                              {Object.values(detail).map((value: any, valIndex: number) => (
+                                <td key={valIndex} className="px-4 py-2 text-sm text-gray-900">
+                                  {value || 'N/A'}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Statement Period Info */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {statement.reportData.statement_start_date && (
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <div className="text-xs font-medium text-gray-600 mb-1">Statement Start Date</div>
+                      <div className="text-sm text-gray-900">{statement.reportData.statement_start_date}</div>
+                    </div>
+                  )}
+                  {statement.reportData.statement_end_date && (
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <div className="text-xs font-medium text-gray-600 mb-1">Statement End Date</div>
+                      <div className="text-sm text-gray-900">{statement.reportData.statement_end_date}</div>
+                    </div>
+                  )}
+                  {statement.reportData.duration_in_month && (
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <div className="text-xs font-medium text-gray-600 mb-1">Duration (Months)</div>
+                      <div className="text-sm text-gray-900">{statement.reportData.duration_in_month}</div>
+                    </div>
+                  )}
+                  {statement.reportData.source_of_data && (
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <div className="text-xs font-medium text-gray-600 mb-1">Source of Data</div>
+                      <div className="text-sm text-gray-900">{statement.reportData.source_of_data}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="bg-gray-50 rounded-lg p-4 max-h-96 overflow-auto">
+                <pre className="text-xs text-gray-700 whitespace-pre-wrap">
+                  {JSON.stringify(statement.reportData, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Verification History */}
+        {hasStatement && statement.verified_at && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h4 className="text-md font-semibold text-gray-900 mb-4">Verification History</h4>
+            <div className="space-y-2 text-sm">
+              <div>
+                <span className="font-medium text-gray-700">Verified By:</span>{' '}
+                <span className="text-gray-900">Admin ID {statement.verified_by || 'N/A'}</span>
+              </div>
+              <div>
+                <span className="font-medium text-gray-700">Verified At:</span>{' '}
+                <span className="text-gray-900">
+                  {statement.verified_at ? new Date(statement.verified_at).toLocaleString() : 'N/A'}
+                </span>
+              </div>
+              {statement.verification_decision && (
+                <div>
+                  <span className="font-medium text-gray-700">Decision:</span>{' '}
+                  <span className={`font-semibold ${
+                    statement.verification_decision === 'approved' ? 'text-green-600' :
+                    statement.verification_decision === 'rejected' ? 'text-red-600' :
+                    'text-gray-600'
+                  }`}>
+                    {statement.verification_decision.toUpperCase()}
+                  </span>
+                </div>
+              )}
+              {statement.verification_notes && (
+                <div>
+                  <span className="font-medium text-gray-700">Notes:</span>{' '}
+                  <span className="text-gray-900">{statement.verification_notes}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // Reference Tab
   const renderReferenceTab = () => {
@@ -4363,10 +4954,12 @@ export function UserProfileDetail() {
   };
 
   // Helper function to calculate interest till current date - no timezone conversion
+  // Uses inclusive counting: both start date and end date count as days
   const calculateInterestTillDate = (principal: number, ratePerDay: number, disbursedDate: string, currentDate?: string) => {
     if (!disbursedDate) return 0;
     const current = currentDate || getCurrentDateString();
-    const days = Math.max(1, daysDifference(disbursedDate, current));
+    // Add +1 for inclusive counting (both start and end dates count)
+    const days = Math.max(1, daysDifference(disbursedDate, current) + 1);
     return principal * ratePerDay * days;
   };
 
@@ -4658,9 +5251,20 @@ export function UserProfileDetail() {
                       }
                       
                       // Calculate interest till TODAY (for Pre-close calculation)
+                      // Use API-provided value if available (backend calculates with proper inclusive counting)
+                      // Otherwise fall back to frontend calculation
                       let interestTillToday = 0;
-                      if (disbursedDate && calculation?.interest?.rate_per_day) {
-                        interestTillToday = calculateInterestTillDate(principal, calculation.interest.rate_per_day, disbursedDate, getCurrentDateString());
+                      if (calculation?.interest?.interestTillToday !== undefined && calculation.interest.interestTillToday !== null) {
+                        // Use backend-calculated value (ensures consistency and proper inclusive counting)
+                        interestTillToday = calculation.interest.interestTillToday;
+                      } else {
+                        // Fallback: Calculate on frontend (for backward compatibility)
+                        const baseDateForInterest = isProcessed && loan.processed_at 
+                          ? parseDateString(loan.processed_at) // Normalize date format (handles timezone issues)
+                          : (disbursedDate ? parseDateString(disbursedDate) : null);
+                        if (baseDateForInterest && calculation?.interest?.rate_per_day) {
+                          interestTillToday = calculateInterestTillDate(principal, calculation.interest.rate_per_day, baseDateForInterest, getCurrentDateString());
+                        }
                       }
 
                       // Processing fee - use processed value if available, otherwise calculate
@@ -4675,11 +5279,6 @@ export function UserProfileDetail() {
                         : (calculation?.totals?.repayableFee || 0);
                       const postServiceFeeGST = calculation?.totals?.repayableFeeGST || 0;
                       
-                      // Pre-close fee calculation (10% of principal + 18% GST)
-                      const preCloseFeePercent = 10;
-                      const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
-                      const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
-
                       // Total GST - use processed value if available, otherwise calculate
                       const totalGSTOnFees = isProcessed && loan.processed_gst !== null
                         ? loan.processed_gst
@@ -4732,8 +5331,16 @@ export function UserProfileDetail() {
                         emiDates = formatDate(dueDate);
                       }
 
-                      // Pre-close amount: principal + 10% pre-close fee + GST + interest till TODAY (no post service fee)
-                      const preCloseAmount = principal + preCloseFee + preCloseFeeGST + interestTillToday;
+                      // Pre-close amount: principal + 10% pre-close fee + GST + interest till TODAY
+                      // Use same calculation as RepaymentSchedulePage for consistency
+                      const preCloseFeePercent = 10;
+                      // Round to 2 decimals: Math.round(value * 100) / 100
+                      const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
+                      const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
+                      // Round interestTillToday to 2 decimals before summing
+                      const interestTillTodayRounded = Math.round(interestTillToday * 100) / 100;
+                      // Round each component before summing to avoid floating point errors
+                      const preCloseAmount = Math.round((principal + interestTillTodayRounded + preCloseFee + preCloseFeeGST) * 100) / 100;
 
                       // Status log
                       const statusLog = `${loan.status} - ${formatDate(loan.statusDate || loan.updatedAt)}`;
@@ -9097,6 +9704,7 @@ export function UserProfileDetail() {
         {activeTab === 'kyc' && renderKYCTab()}
         {activeTab === 'documents' && renderDocumentsTab()}
         {activeTab === 'bank' && renderBankTab()}
+        {activeTab === 'statement-verification' && renderStatementVerificationTab()}
         {activeTab === 'reference' && renderReferenceTab()}
         {activeTab === 'login-data' && renderLoginDataTab()}
         {activeTab === 'accounts' && renderAccountsTab()}

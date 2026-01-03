@@ -20,7 +20,8 @@ const DIGITAP_CLIENT_SECRET = process.env.DIGITAP_CLIENT_SECRET || 'o0GHuqVysgUK
 // Correct API Endpoints for Bank Statement
 const ENDPOINTS = {
   GENERATE_URL: `${DIGITAP_BASE_URL}/bank-data/generateurl`,
-  UPLOAD_PDF: `${DIGITAP_BASE_URL}/bank-data/upload`,
+  UPLOAD_PDF: `${DIGITAP_BASE_URL}/bank-data/uploadpdf`, // Try uploadpdf instead of upload
+  UPLOAD_PDF_ALT: `${DIGITAP_BASE_URL}/bank-data/upload`, // Fallback to original
   STATUS_CHECK: `${DIGITAP_BASE_URL}/bank-data/statuscheck`,
   RETRIEVE_REPORT: `${DIGITAP_BASE_URL}/bank-data/retrievereport`
 };
@@ -36,12 +37,16 @@ function getAuthHeader() {
 
 /**
  * Generate unique client reference number
- * Format: PC{timestamp} (only alphanumeric, dots, hyphens allowed)
- * Example: PC1761761705123
+ * Format: PC{userId}{timestamp} (only alphanumeric, dots, hyphens allowed)
+ * Example: PC1231761761705123 (userId=123, timestamp=1761761705123)
+ * This ensures uniqueness per user even if multiple users upload simultaneously
  */
 function generateClientRefNum(userId, applicationId) {
   const timestamp = Date.now();
-  return `PC${timestamp}`;
+  // Include userId to ensure uniqueness per user
+  // Pad userId to 6 digits for consistent format (supports up to 999999 users)
+  const paddedUserId = String(userId || 0).padStart(6, '0');
+  return `PC${paddedUserId}${timestamp}`;
 }
 
 /**
@@ -286,6 +291,8 @@ async function uploadBankStatementPDF(params) {
     }
 
     console.log(`📤 Uploading PDF to Digitap: ${file_name}`);
+    console.log(`📤 Digitap Upload Endpoint: ${ENDPOINTS.UPLOAD_PDF}`);
+    console.log(`📤 Base URL: ${DIGITAP_BASE_URL}`);
 
     const formData = new FormData();
     formData.append('mobile_no', mobile_no);
@@ -300,19 +307,51 @@ async function uploadBankStatementPDF(params) {
       formData.append('password', password);
     }
 
-    const response = await axios.post(
-      ENDPOINTS.UPLOAD_PDF,
-      formData,
-      {
-        headers: {
-          'Authorization': getAuthHeader(),
-          ...formData.getHeaders()
-        },
-        timeout: 30000, // 30 seconds for file upload
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity
+    // Try primary endpoint first, then fallback to alternative
+    let response;
+    let lastError;
+    
+    try {
+      response = await axios.post(
+        ENDPOINTS.UPLOAD_PDF,
+        formData,
+        {
+          headers: {
+            'Authorization': getAuthHeader(),
+            ...formData.getHeaders()
+          },
+          timeout: 30000, // 30 seconds for file upload
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity
+        }
+      );
+    } catch (error) {
+      // If 404, try alternative endpoint
+      if (error.response && error.response.status === 404 && ENDPOINTS.UPLOAD_PDF_ALT) {
+        console.log(`⚠️  Primary endpoint failed (404), trying alternative: ${ENDPOINTS.UPLOAD_PDF_ALT}`);
+        lastError = error;
+        try {
+          response = await axios.post(
+            ENDPOINTS.UPLOAD_PDF_ALT,
+            formData,
+            {
+              headers: {
+                'Authorization': getAuthHeader(),
+                ...formData.getHeaders()
+              },
+              timeout: 30000,
+              maxContentLength: Infinity,
+              maxBodyLength: Infinity
+            }
+          );
+        } catch (altError) {
+          // Both endpoints failed, throw the original error
+          throw lastError;
+        }
+      } else {
+        throw error;
       }
-    );
+    }
 
     console.log('✅ Digitap Upload Response:', response.data?.result_code);
 
@@ -334,13 +373,24 @@ async function uploadBankStatementPDF(params) {
     }
   } catch (error) {
     console.error('❌ Digitap PDF Upload Error:', error.message);
+    console.error('❌ Request URL:', ENDPOINTS.UPLOAD_PDF);
+    console.error('❌ Base URL:', DIGITAP_BASE_URL);
     
     if (error.response) {
-      console.error('Response error:', error.response.status, error.response.data);
+      console.error('❌ Response Status:', error.response.status);
+      console.error('❌ Response Headers:', error.response.headers);
+      console.error('❌ Response Data:', error.response.data);
       return {
         success: false,
-        error: `Upload error: ${error.response.status}`
+        error: `Upload error: ${error.response.status} - ${error.response.data?.message || error.response.data || 'Unknown error'}`,
+        status: error.response.status,
+        responseData: error.response.data
       };
+    }
+
+    if (error.request) {
+      console.error('❌ Request made but no response received');
+      console.error('❌ Request config:', error.config?.url);
     }
 
     return {

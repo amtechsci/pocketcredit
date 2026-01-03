@@ -148,7 +148,9 @@ export const PostDisbursalFlowPage = () => {
         // STRICT GUARD: Verify loan status before allowing access
         // Only 'disbursal' status loans can access this post-disbursal flow
         const response = await apiService.getLoanApplications();
-        if (response.success && response.data?.applications) {
+        // Check both response.status === 'success' and response.success for compatibility
+        const isSuccess = response.status === 'success' || response.success === true;
+        if (isSuccess && response.data?.applications) {
           const app = response.data.applications.find((a: any) => a.id == appId);
           
           if (!app) {
@@ -183,7 +185,13 @@ export const PostDisbursalFlowPage = () => {
           console.log(`✅ Access granted: App ${appId} is in 'disbursal' status`);
           setApplicationId(appId);
         } else {
-          console.error('Failed to fetch applications for status verification');
+          console.error('Failed to fetch applications for status verification', { 
+            response, 
+            hasStatus: !!response.status, 
+            hasSuccess: !!response.success,
+            hasData: !!response.data,
+            hasApplications: !!response.data?.applications 
+          });
           toast.error('Unable to verify loan status');
           navigate('/dashboard');
           return;
@@ -192,7 +200,9 @@ export const PostDisbursalFlowPage = () => {
       } else {
         // No applicationId in URL - fetch latest disbursal application
         const response = await apiService.getLoanApplications();
-        if (response.success && response.data?.applications) {
+        // Check both response.status === 'success' and response.success for compatibility
+        const isSuccess = response.status === 'success' || response.success === true;
+        if (isSuccess && response.data?.applications) {
           // Check for account_manager first (prioritize redirected flow)
           const activeLoan = response.data.applications.find(
             (app: any) => app.status === 'account_manager'
@@ -413,6 +423,7 @@ export const PostDisbursalFlowPage = () => {
                 applicationId={applicationId}
                 onComplete={() => handleStepComplete(5, { agreement_signed: true })}
                 saving={saving}
+                progress={progress}
               />
             )}
 
@@ -455,7 +466,8 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
   const [existingSubscription, setExistingSubscription] = useState<any>(null);
   const [bankDetails, setBankDetails] = useState<any>(null);
   const [loadingBank, setLoadingBank] = useState(true);
-  const [authMode, setAuthMode] = useState<string>('net_banking');
+  // Default authentication method: 'aadhaar' (Aadhaar Card is selected by default)
+  const [authMode, setAuthMode] = useState<string>('aadhaar');
 
   useEffect(() => {
     // Check if subscription already exists for this loan
@@ -1114,40 +1126,246 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
 };
 
 // Step 5: Agreement Sign
-const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => {
+const AgreementSignStep = ({ applicationId, onComplete, saving, progress }: StepProps) => {
   const [initiating, setInitiating] = useState(false);
   const [agreementLoaded, setAgreementLoaded] = useState(false);
+  const [checkingSignedStatus, setCheckingSignedStatus] = useState(false);
+  const [isAlreadySigned, setIsAlreadySigned] = useState(false);
+  const agreementContentRef = useRef<HTMLDivElement>(null);
+
+  // Check if agreement is already signed on mount and when progress changes
+  useEffect(() => {
+    const checkSignedStatus = async () => {
+      try {
+        setCheckingSignedStatus(true);
+        const progressResponse = await apiService.getPostDisbursalProgress(applicationId);
+        if (progressResponse.success && progressResponse.data) {
+          setIsAlreadySigned(progressResponse.data.agreement_signed === true);
+        }
+      } catch (error) {
+        console.error('Error checking agreement status:', error);
+      } finally {
+        setCheckingSignedStatus(false);
+      }
+    };
+
+    // Check initial status from prop, otherwise fetch
+    if (progress?.agreement_signed !== undefined) {
+      setIsAlreadySigned(progress.agreement_signed === true);
+    } else {
+      checkSignedStatus();
+    }
+  }, [applicationId, progress?.agreement_signed]);
 
   // Handle agreement loaded callback
   const handleAgreementLoaded = () => {
     setAgreementLoaded(true);
   };
 
-  const handleSign = async () => {
+  // Extract HTML content from the agreement document
+  const getAgreementHTML = (): string => {
+    const agreementElement = document.getElementById('loan-agreement-content');
+    if (!agreementElement) {
+      throw new Error('Agreement content not found');
+    }
+    
+    // Clone the element to avoid modifying the original
+    const clonedElement = agreementElement.cloneNode(true) as HTMLElement;
+    
+    // Get the HTML content
+    return clonedElement.innerHTML;
+  };
+
+  // Load Digitap SDK dynamically if not already loaded
+  const ensureDigitapSDK = (): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      // Check if SDK is already loaded
+      if ((window as any).DigitapClickWrap) {
+        resolve((window as any).DigitapClickWrap);
+        return;
+      }
+
+      // Check if script is already being loaded
+      if (document.querySelector('script[src*="digitap.ai/clickwrap"]')) {
+        // Wait for script to load
+        const checkInterval = setInterval(() => {
+          if ((window as any).DigitapClickWrap) {
+            clearInterval(checkInterval);
+            resolve((window as any).DigitapClickWrap);
+          }
+        }, 100);
+
+        // Timeout after 10 seconds
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          reject(new Error('Digitap SDK failed to load'));
+        }, 10000);
+        return;
+      }
+
+      // SDK not found - this shouldn't happen if script tag is in index.html
+      // But we'll handle it gracefully
+      reject(new Error('Digitap SDK script not found. Please ensure the SDK script is loaded.'));
+    });
+  };
+
+  const handleESign = async () => {
     try {
       setInitiating(true);
 
-      // Skip actual e-sign API for now - just mark as complete
-      // Update agreement as signed and set status to ready_for_disbursement
-      const response = await apiService.updatePostDisbursalProgress(applicationId, {
-        agreement_signed: true
-      });
+      // Step 1: Extract HTML content from the agreement
+      let htmlContent: string;
+      try {
+        htmlContent = getAgreementHTML();
+        console.log('✅ Agreement HTML extracted, length:', htmlContent.length);
+      } catch (error: any) {
+        throw new Error('Failed to extract agreement content: ' + error.message);
+      }
 
-      if (response.success) {
-        toast.success('Loan agreement marked as complete!');
-        onComplete();
+      // Step 2: Initiate ClickWrap with backend (or get existing transaction IDs)
+      console.log('🔄 Initiating ClickWrap for application:', applicationId);
+      const initiateResponse = await apiService.initiateClickWrap(applicationId, htmlContent);
+
+      if (!initiateResponse.success || !initiateResponse.data) {
+        // If backend says agreement already signed, check status and proceed
+        if (initiateResponse.message && initiateResponse.message.includes('already been signed')) {
+          toast.info('Agreement has already been signed');
+          setIsAlreadySigned(true);
+          setInitiating(false);
+          // Refresh progress to get updated status
+          const statusResponse = await apiService.getPostDisbursalProgress(applicationId);
+          if (statusResponse.success && statusResponse.data?.agreement_signed) {
+            onComplete();
+          }
+          return;
+        }
+        throw new Error(initiateResponse.message || 'Failed to initiate e-signature');
+      }
+
+      const { entTransactionId, docTransactionId, previewUrl } = initiateResponse.data;
+      
+      // Check if this is a new initiation or existing transaction
+      if (initiateResponse.data.message && initiateResponse.data.message.includes('Existing')) {
+        console.log('ℹ️ Using existing ClickWrap transaction:', { entTransactionId, docTransactionId });
       } else {
-        throw new Error(response.message || 'Failed to mark agreement as complete');
+        console.log('✅ ClickWrap initiated:', { entTransactionId, docTransactionId });
+      }
+
+      // Step 3: Load and launch Digitap SDK
+      try {
+        const DigitapClickWrap = await ensureDigitapSDK();
+        
+        // Configure SDK options
+        const sdkOptions = {
+          entTransactionId: entTransactionId,
+          onSuccess: () => {
+            console.log('✅ Document signed successfully');
+            toast.success('Loan agreement signed successfully!');
+            
+            // Poll backend to check if webhook has updated the status
+            // We'll check every 2 seconds for up to 30 seconds
+            let pollCount = 0;
+            const maxPolls = 15;
+            const pollInterval = setInterval(async () => {
+              pollCount++;
+              try {
+                const statusResponse = await apiService.getPostDisbursalProgress(applicationId);
+                if (statusResponse.success && statusResponse.data?.agreement_signed) {
+                  clearInterval(pollInterval);
+                  setIsAlreadySigned(true);
+                  onComplete();
+                  toast.success('Agreement signing completed!');
+                } else if (pollCount >= maxPolls) {
+                  clearInterval(pollInterval);
+                  toast.warning('Please wait while we verify your signature...');
+                  // Still call onComplete as webhook might update later
+                  setTimeout(() => {
+                    onComplete();
+                  }, 2000);
+                }
+              } catch (error) {
+                console.error('Error polling agreement status:', error);
+              }
+            }, 2000);
+          },
+          onFailure: (error: any) => {
+            console.error('❌ Document signing failed:', error);
+            toast.error(error?.message || 'Failed to complete e-signature. Please try again.');
+            setInitiating(false);
+          },
+          onCancel: () => {
+            console.log('⚠️ User cancelled signing');
+            toast.info('Signing cancelled');
+            setInitiating(false);
+          }
+        };
+
+        // Launch Digitap SDK
+        console.log('🚀 Launching Digitap SDK with transaction ID:', entTransactionId);
+        DigitapClickWrap.init(sdkOptions);
+
+      } catch (sdkError: any) {
+        console.error('❌ Error loading Digitap SDK:', sdkError);
+        // Fallback: Show preview URL if SDK fails
+        if (previewUrl) {
+          toast.info('Opening signing page in new window...');
+          window.open(previewUrl, '_blank', 'width=800,height=600');
+          // Note: We can't track completion this way, but user can complete signing
+        } else {
+          throw new Error('Failed to load signing interface: ' + sdkError.message);
+        }
       }
 
     } catch (error: any) {
-      console.error('Error marking agreement as complete:', error);
-      toast.error(error.message || 'Failed to mark agreement as complete');
-    } finally {
+      console.error('Error initiating e-signature:', error);
+      toast.error(error.message || 'Failed to initiate e-signature. Please try again.');
       setInitiating(false);
     }
   };
 
+  // If already signed, show success message
+  if (isAlreadySigned) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center">
+          <CheckCircle className="w-16 h-16 text-green-600 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold mb-2">Loan Agreement Signed</h2>
+          <p className="text-gray-600">
+            Your loan agreement has been successfully e-signed.
+          </p>
+        </div>
+
+        <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded-lg">
+          <p className="text-sm text-gray-700">
+            <strong>Agreement Status:</strong> Signed and verified
+          </p>
+          <p className="text-sm text-gray-600 mt-2">
+            Your application is ready for disbursement. You will receive your funds shortly.
+          </p>
+        </div>
+
+        <div 
+          className="border rounded-lg p-4 max-h-[600px] overflow-y-auto" 
+          id="loan-agreement-content"
+        >
+          <UserLoanAgreementDocument 
+            loanId={applicationId} 
+            onLoaded={handleAgreementLoaded}
+          />
+        </div>
+
+        <div className="flex justify-end gap-4">
+          <Button
+            onClick={onComplete}
+            disabled={saving}
+            className="min-w-[120px]"
+          >
+            Continue
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -1155,11 +1373,12 @@ const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => 
         <PenTool className="w-16 h-16 text-blue-600 mx-auto mb-4" />
         <h2 className="text-2xl font-bold mb-2">Loan Agreement</h2>
         <p className="text-gray-600">
-          Review and confirm your loan agreement
+          Review and e-sign your loan agreement
         </p>
       </div>
 
       <div 
+        ref={agreementContentRef}
         className="border rounded-lg p-4 max-h-[600px] overflow-y-auto" 
         id="loan-agreement-content"
       >
@@ -1171,12 +1390,13 @@ const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => 
 
       <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg">
         <p className="text-sm text-gray-700">
-          <strong>Agreement Confirmation:</strong>
+          <strong>E-Signature Process:</strong>
         </p>
         <ul className="text-sm text-gray-600 mt-2 list-disc list-inside space-y-1">
           <li>Please review the loan agreement carefully</li>
-          <li>Click "Confirm Agreement" to proceed</li>
-          <li>Your application will be marked as ready for disbursement</li>
+          <li>Click "E-Sign Agreement" to proceed with digital signature</li>
+          <li>You will receive an OTP on your registered mobile number</li>
+          <li>Enter the OTP to complete the signing process</li>
         </ul>
       </div>
 
@@ -1187,19 +1407,19 @@ const AgreementSignStep = ({ applicationId, onComplete, saving }: StepProps) => 
       </div>
 
       <div className="flex justify-end gap-4">
-        {!agreementLoaded && (
+        {(!agreementLoaded || checkingSignedStatus) && (
           <p className="text-sm text-gray-500 mr-auto flex items-center">
             <Loader2 className="w-4 h-4 animate-spin mr-2" />
-            Loading agreement...
+            {checkingSignedStatus ? 'Checking status...' : 'Loading agreement...'}
           </p>
         )}
         <Button
-          onClick={handleSign}
-          disabled={saving || initiating || !agreementLoaded}
-          className="min-w-[120px]"
+          onClick={handleESign}
+          disabled={saving || initiating || !agreementLoaded || checkingSignedStatus}
+          className="min-w-[150px]"
         >
           {(saving || initiating) ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-          {initiating ? 'Processing...' : 'Confirm Agreement'}
+          {initiating ? 'Initiating...' : 'E-Sign Agreement'}
         </Button>
       </div>
     </div>
