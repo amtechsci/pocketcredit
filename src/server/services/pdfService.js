@@ -1,10 +1,74 @@
 const puppeteer = require('puppeteer');
 const path = require('path');
 const fs = require('fs').promises;
+const os = require('os');
 
 class PDFService {
   constructor() {
     this.browser = null;
+  }
+
+  /**
+   * Get Puppeteer launch options with architecture detection
+   */
+  getLaunchOptions() {
+    const platform = os.platform();
+    const arch = os.arch();
+    
+    console.log(`🖥️ System: ${platform} ${arch}`);
+    
+    const baseArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--disable-gpu',
+      '--disable-software-rasterizer',
+      '--disable-extensions',
+      '--disable-web-security',
+      '--font-render-hinting=none'
+    ];
+
+    // For ARM Linux, add additional args and potentially use system Chrome
+    if (platform === 'linux' && (arch === 'arm' || arch === 'arm64')) {
+      console.log('🔧 Detected ARM Linux - using ARM-compatible Chrome configuration');
+      baseArgs.push('--single-process'); // Helpful for ARM systems
+      
+      // Try to use system Chrome if available
+      const possibleChromePaths = [
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/snap/bin/chromium'
+      ];
+
+      for (const chromePath of possibleChromePaths) {
+        try {
+          if (require('fs').existsSync(chromePath)) {
+            console.log(`✅ Found system Chrome at: ${chromePath}`);
+            return {
+              headless: 'new',
+              executablePath: chromePath,
+              args: baseArgs,
+              ignoreHTTPSErrors: true,
+              dumpio: false
+            };
+          }
+        } catch (e) {
+          // Continue checking other paths
+        }
+      }
+      
+      console.log('⚠️ No system Chrome found, will use Puppeteer bundled Chrome');
+    }
+
+    return {
+      headless: 'new',
+      args: baseArgs,
+      ignoreHTTPSErrors: true,
+      dumpio: false
+    };
   }
 
   /**
@@ -13,23 +77,25 @@ class PDFService {
   async initBrowser() {
     if (!this.browser) {
       console.log('🚀 Launching Puppeteer browser...');
-      this.browser = await puppeteer.launch({
-        headless: 'new',
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--disable-gpu',
-          '--disable-software-rasterizer',
-          '--disable-extensions',
-          '--disable-web-security',
-          '--font-render-hinting=none'
-        ],
-        ignoreHTTPSErrors: true,
-        dumpio: false
-      });
-      console.log('✅ Browser launched successfully');
+      
+      const launchOptions = this.getLaunchOptions();
+      
+      try {
+        this.browser = await puppeteer.launch(launchOptions);
+        console.log('✅ Browser launched successfully');
+      } catch (error) {
+        // If launch fails on ARM and we're using bundled Chrome, suggest cache clear
+        if (error.message.includes('Syntax error') || error.message.includes('chrome-linux64')) {
+          console.error('❌ Chrome binary architecture mismatch detected');
+          console.error('💡 Solution: Clear Puppeteer cache and reinstall:');
+          console.error('   rm -rf ~/.cache/puppeteer');
+          console.error('   npm install puppeteer --force');
+          console.error('   OR install system Chrome:');
+          console.error('   sudo apt-get install -y chromium-browser');
+          throw new Error('Chrome binary architecture mismatch. Please clear Puppeteer cache or install system Chrome. See logs for details.');
+        }
+        throw error;
+      }
     }
     return this.browser;
   }
