@@ -349,19 +349,20 @@ router.post('/:userId/verify-with-file', authenticateAdmin, async (req, res) => 
           }
         }
 
-        // Upload to Digitap
-        console.log(`📤 Uploading ${useExistingFile ? 'existing' : 'new'} file to Digitap: ${fileName}`);
-        const digitapResult = await uploadBankStatementPDF({
-          mobile_no: mobileNumber,
+        // Generate Digitap upload URL and upload file to that URL
+        console.log(`📤 Generating Digitap upload URL for ${useExistingFile ? 'existing' : 'new'} file: ${fileName}`);
+        
+        // Step 1: Generate upload URL from Digitap
+        const generateUrlResult = await generateBankStatementURL({
           client_ref_num: finalClientRefNum,
-          file_buffer: fileBuffer,
-          file_name: fileName,
-          bank_name: req.body.bank_name || null,
-          password: req.body.password || null
+          mobile_num: mobileNumber,
+          destination: 'statementupload',
+          return_url: process.env.APP_URL || 'http://localhost:3000/admin/dashboard',
+          txn_completed_cburl: process.env.APP_URL ? `${process.env.APP_URL}/api/bank-statement/bank-data/webhook` : 'http://localhost:3002/api/bank-statement/bank-data/webhook'
         });
 
-        if (!digitapResult.success) {
-          // Update status to failed
+        if (!generateUrlResult.success || !generateUrlResult.data?.url) {
+          console.error('❌ Failed to generate Digitap upload URL:', generateUrlResult.error);
           await executeQuery(
             `UPDATE user_bank_statements 
              SET verification_status = 'api_failed',
@@ -372,10 +373,77 @@ router.post('/:userId/verify-with-file', authenticateAdmin, async (req, res) => 
 
           return res.status(500).json({
             success: false,
-            message: digitapResult.error || 'Failed to upload to Digitap',
-            error: digitapResult.error
+            message: generateUrlResult.error || 'Failed to generate Digitap upload URL',
+            error: generateUrlResult.error
           });
         }
+
+        const uploadUrl = generateUrlResult.data.url;
+        console.log(`✅ Generated Digitap upload URL: ${uploadUrl}`);
+
+        // Step 2: Upload file to the generated URL
+        const axios = require('axios');
+        try {
+          console.log(`📤 Uploading file to Digitap URL...`);
+          const uploadResponse = await axios.put(uploadUrl, fileBuffer, {
+            headers: {
+              'Content-Type': 'application/pdf',
+            },
+            timeout: 60000, // 60 seconds timeout
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity
+          });
+          
+          console.log('✅ File successfully uploaded to Digitap URL');
+          console.log('📊 Upload response status:', uploadResponse.status);
+          
+          // Store the request_id and txn_id if available from URL generation
+          const requestId = generateUrlResult.data.request_id || null;
+          const txnId = generateUrlResult.data.txn_id || null;
+          
+          // Update statement with request_id and txn_id
+          if (requestId || txnId) {
+            await executeQuery(
+              `UPDATE user_bank_statements 
+               SET request_id = ?,
+                   txn_id = ?,
+                   updated_at = NOW()
+               WHERE id = ?`,
+              [requestId, txnId, statementId]
+            );
+          }
+        } catch (uploadError) {
+          console.error('❌ Error uploading file to Digitap URL:', uploadError.message);
+          if (uploadError.response) {
+            console.error('❌ Upload response status:', uploadError.response.status);
+            console.error('❌ Upload response data:', uploadError.response.data);
+          }
+          
+          await executeQuery(
+            `UPDATE user_bank_statements 
+             SET verification_status = 'api_failed',
+                 updated_at = NOW()
+             WHERE id = ?`,
+            [statementId]
+          );
+
+          return res.status(500).json({
+            success: false,
+            message: `Failed to upload file to Digitap: ${uploadError.message}`,
+            error: uploadError.message
+          });
+        }
+
+        // Success - file uploaded to Digitap URL
+        const digitapResult = {
+          success: true,
+          data: {
+            status: 'processing',
+            request_id: generateUrlResult.data.request_id,
+            txn_id: generateUrlResult.data.txn_id,
+            url: uploadUrl
+          }
+        };
 
         // Update status to pending and record admin action
         await executeQuery(

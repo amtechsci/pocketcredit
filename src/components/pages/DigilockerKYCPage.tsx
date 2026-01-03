@@ -14,7 +14,13 @@ export const DigilockerKYCPage: React.FC = () => {
   const location = useLocation();
   const { user } = useAuth();
   const { applicationId: statePayloadId, showPanInput: stateShowPanInput } = location.state || {};
-  const [applicationId, setApplicationId] = useState<string | null>(statePayloadId?.toString() || null);
+  
+  // Get applicationId from URL query params or state
+  const urlParams = new URLSearchParams(location.search);
+  const urlAppId = urlParams.get('applicationId');
+  const initialAppId = urlAppId || statePayloadId?.toString() || null;
+  
+  const [applicationId, setApplicationId] = useState<string | null>(initialAppId);
 
   const [mobileNumber, setMobileNumber] = useState('');
   const [loading, setLoading] = useState(false);
@@ -40,19 +46,26 @@ export const DigilockerKYCPage: React.FC = () => {
 
   // Check if KYC is already verified on page load
   useEffect(() => {
+    // Check URL params on mount/update
+    const urlParams = new URLSearchParams(location.search);
+    const urlAppId = urlParams.get('applicationId');
+    if (urlAppId && urlAppId !== applicationId) {
+      setApplicationId(urlAppId);
+      return; // Don't proceed with initPage if we just set from URL
+    }
+    
     const initPage = async () => {
       // If no app ID, try to fetch the latest one
       if (!applicationId) {
         try {
-          const apps = await apiService.getUserApplications();
-          if (apps && apps.length > 0) {
+          const response = await apiService.getLoanApplications();
+          if (response.success && response.data?.applications && response.data.applications.length > 0) {
             // Assume the most recent one is relevant
-            const latest = apps[0];
+            const latest = response.data.applications[0];
             setApplicationId(latest.id.toString());
             // Update checking to true again to verify status for this ID
           } else {
             toast.error("No active application found.");
-            // navigate('/dashboard'); // Optional: redirect
             setChecking(false);
             return;
           }
@@ -67,7 +80,7 @@ export const DigilockerKYCPage: React.FC = () => {
     if (!applicationId) {
       initPage();
     }
-  }, [applicationId]);
+  }, [applicationId, location.search]);
 
   useEffect(() => {
     const checkKYCStatus = async () => {

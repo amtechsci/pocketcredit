@@ -167,6 +167,10 @@ router.post('/upload', requireAuth, upload.single('document'), async (req, res) 
 
     console.log(`✅ Document saved: ID=${finalDocumentId}, name=${document_name}, type=${document_type}, loan_app_id=${loan_application_id}`);
 
+    // Note: We do NOT update current_step here when documents are uploaded
+    // The step manager will determine the current step based on prerequisites
+    // This prevents jumping to 'steps' prematurely when user still has other steps to complete
+
     res.json({
       status: 'success',
       success: true,

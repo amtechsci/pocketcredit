@@ -392,7 +392,9 @@ function AppContent() {
         <Route path="/loan-application/upload-documents" element={
           isAuthenticated ? (
             <DashboardLayout>
-              <LoanDocumentUploadPage />
+              <StepGuard step="upload-documents">
+                <LoanDocumentUploadPage />
+              </StepGuard>
             </DashboardLayout>
           ) : (
             <Navigate to="/auth" replace />

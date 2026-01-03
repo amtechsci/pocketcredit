@@ -146,7 +146,7 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
         DATE(disbursed_at) as disbursed_at_date, disbursed_at,
         DATE(processed_at) as processed_at_date, processed_at,
         plan_snapshot,
-        interest_percent_per_day, fees_breakdown, user_id
+        interest_percent_per_day, fees_breakdown, user_id, loan_plan_id
       FROM loan_applications 
       WHERE id = ?`,
       [loanId]
@@ -172,20 +172,20 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
       }
     }
     
-    // If no plan snapshot, try to get plan from fees_breakdown or use defaults
-    if (!planSnapshot) {
-      // Try to get plan from fees_breakdown
-      let feesBreakdown = [];
-      if (loan.fees_breakdown) {
-        try {
-          feesBreakdown = typeof loan.fees_breakdown === 'string' 
-            ? JSON.parse(loan.fees_breakdown) 
-            : loan.fees_breakdown;
-        } catch (e) {
-          console.error('Error parsing fees_breakdown:', e);
-        }
+    // Parse fees_breakdown
+    let feesBreakdown = [];
+    if (loan.fees_breakdown) {
+      try {
+        feesBreakdown = typeof loan.fees_breakdown === 'string' 
+          ? JSON.parse(loan.fees_breakdown) 
+          : loan.fees_breakdown;
+      } catch (e) {
+        console.error('Error parsing fees_breakdown:', e);
       }
-      
+    }
+    
+    // If no plan snapshot, create one from fees_breakdown or use defaults
+    if (!planSnapshot) {
       planSnapshot = {
         plan_type: 'single',
         repayment_days: 15,
@@ -197,6 +197,143 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           application_method: fee.application_method || 'deduct_from_disbursal'
         }))
       };
+    } else {
+      // Plan snapshot exists, but check if fees are missing, empty, or missing application_method
+      if (!planSnapshot.fees || !Array.isArray(planSnapshot.fees) || planSnapshot.fees.length === 0) {
+        // Fees are missing or empty - try to populate from fees_breakdown or loan_plan_fees
+        if (feesBreakdown && feesBreakdown.length > 0) {
+          // Use fees from fees_breakdown
+          planSnapshot.fees = feesBreakdown.map(fee => ({
+            fee_name: fee.fee_name || fee.name || 'Fee',
+            fee_percent: fee.fee_percent || fee.percent || 0,
+            application_method: fee.application_method || 'deduct_from_disbursal'
+          }));
+        } else if (loan.loan_plan_id) {
+          // Try to fetch fees from loan_plan_fees table
+          try {
+            const planFees = await executeQuery(
+              `SELECT 
+                lpf.fee_percent,
+                ft.fee_name,
+                ft.application_method
+              FROM loan_plan_fees lpf
+              INNER JOIN fee_types ft ON lpf.fee_type_id = ft.id
+              WHERE lpf.loan_plan_id = ? AND ft.is_active = 1
+              ORDER BY ft.fee_name ASC`,
+              [loan.loan_plan_id]
+            );
+            
+            if (planFees && planFees.length > 0) {
+              planSnapshot.fees = planFees.map(pf => ({
+                fee_name: pf.fee_name || 'Fee',
+                fee_percent: parseFloat(pf.fee_percent || 0),
+                application_method: pf.application_method || 'deduct_from_disbursal'
+              }));
+              console.log(`✅ Fetched ${planSnapshot.fees.length} fee(s) from loan_plan_fees for loan #${loanId}`);
+            } else {
+              planSnapshot.fees = [];
+            }
+          } catch (feeError) {
+            console.error(`Error fetching fees from loan_plan_fees for loan #${loanId}:`, feeError);
+            planSnapshot.fees = [];
+          }
+        } else {
+          // Ensure fees is at least an empty array
+          planSnapshot.fees = planSnapshot.fees || [];
+        }
+      } else {
+        // Fees exist but may be missing application_method - fix them
+        const feesNeedFixing = planSnapshot.fees.some(fee => !fee.application_method);
+        if (feesNeedFixing) {
+          console.log(`⚠️ Loan #${loanId} fees exist but missing application_method. Attempting to fix...`);
+          
+          // Try to get application_method from fees_breakdown by matching fee_name
+          if (feesBreakdown && feesBreakdown.length > 0) {
+            planSnapshot.fees = planSnapshot.fees.map(fee => {
+              const matchingFee = feesBreakdown.find(bf => 
+                (bf.fee_name === fee.fee_name || bf.name === fee.fee_name)
+              );
+              return {
+                ...fee,
+                application_method: fee.application_method || matchingFee?.application_method || 'deduct_from_disbursal'
+              };
+            });
+            console.log(`✅ Fixed application_method for fees from fees_breakdown`);
+          } else if (loan.loan_plan_id) {
+            // Try to fetch from loan_plan_fees table
+            try {
+              const planFees = await executeQuery(
+                `SELECT 
+                  lpf.fee_percent,
+                  ft.fee_name,
+                  ft.application_method
+                FROM loan_plan_fees lpf
+                INNER JOIN fee_types ft ON lpf.fee_type_id = ft.id
+                WHERE lpf.loan_plan_id = ? AND ft.is_active = 1
+                ORDER BY ft.fee_name ASC`,
+                [loan.loan_plan_id]
+              );
+              
+              if (planFees && planFees.length > 0) {
+                planSnapshot.fees = planSnapshot.fees.map(fee => {
+                  const matchingFee = planFees.find(pf => pf.fee_name === fee.fee_name);
+                  return {
+                    ...fee,
+                    application_method: fee.application_method || matchingFee?.application_method || 'deduct_from_disbursal'
+                  };
+                });
+                console.log(`✅ Fixed application_method for fees from loan_plan_fees`);
+              }
+            } catch (feeError) {
+              console.error(`Error fetching fees from loan_plan_fees for loan #${loanId}:`, feeError);
+            }
+          }
+          
+          // Validate and correct application_method based on fee name (even if already set)
+          // This ensures "post service fee" is always "add_to_total" regardless of what's in fees_breakdown
+          planSnapshot.fees = planSnapshot.fees.map(fee => {
+            const feeNameLower = fee.fee_name?.toLowerCase() || '';
+            let correctMethod = fee.application_method;
+            
+            // Validate: "post service fee" should always be "add_to_total"
+            if (feeNameLower.includes('post service')) {
+              if (fee.application_method !== 'add_to_total') {
+                console.log(`⚠️ Correcting application_method for "${fee.fee_name}": ${fee.application_method} → add_to_total`);
+                correctMethod = 'add_to_total';
+              }
+            } else {
+              // Other fees (like "processing fee") should be "deduct_from_disbursal"
+              if (!fee.application_method || fee.application_method !== 'deduct_from_disbursal') {
+                console.log(`⚠️ Correcting application_method for "${fee.fee_name}": ${fee.application_method || 'missing'} → deduct_from_disbursal`);
+                correctMethod = 'deduct_from_disbursal';
+              }
+            }
+            
+            return {
+              ...fee,
+              application_method: correctMethod
+            };
+          });
+        } else {
+          // Fees exist and have application_method, but validate them anyway
+          planSnapshot.fees = planSnapshot.fees.map(fee => {
+            const feeNameLower = fee.fee_name?.toLowerCase() || '';
+            
+            // Validate: "post service fee" should always be "add_to_total"
+            if (feeNameLower.includes('post service')) {
+              if (fee.application_method !== 'add_to_total') {
+                console.log(`⚠️ Correcting application_method for "${fee.fee_name}": ${fee.application_method} → add_to_total`);
+                return {
+                  ...fee,
+                  application_method: 'add_to_total'
+                };
+              }
+            }
+            
+            return fee;
+          });
+        }
+      }
     }
     
     // Fetch user data
@@ -229,6 +366,21 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
       emi_frequency: planSnapshot.emi_frequency || null,
       fees: planSnapshot.fees || []
     };
+    
+    // Debug logging for fees
+    if (!planData.fees || planData.fees.length === 0) {
+      console.warn(`⚠️ Loan #${loanId} has no fees in planData. planSnapshot.fees:`, planSnapshot.fees, 'feesBreakdown:', feesBreakdown);
+    } else {
+      console.log(`✅ Loan #${loanId} has ${planData.fees.length} fee(s):`, planData.fees.map(f => f.fee_name).join(', '));
+      console.log(`📋 Fee details before calculation:`, JSON.stringify(planData.fees, null, 2));
+      console.log(`📋 planData being passed:`, {
+        fees: planData.fees,
+        feesLength: planData.fees.length,
+        feeNames: planData.fees.map(f => f.fee_name),
+        feePercents: planData.fees.map(f => f.fee_percent),
+        applicationMethods: planData.fees.map(f => f.application_method)
+      });
+    }
     
     // For processed loans, use processed_at as calculation date (not current date)
     // This ensures interest calculation starts from the actual processing date
@@ -279,6 +431,13 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
     
     // Calculate using centralized function
     const calculation = calculateCompleteLoanValues(loanData, planData, userData, options);
+    
+    // Debug: Log calculation result fees
+    console.log(`🔍 Calculation result fees for loan #${loanId}:`, {
+      deductFromDisbursal: calculation.fees?.deductFromDisbursal?.length || 0,
+      addToTotal: calculation.fees?.addToTotal?.length || 0,
+      totals: calculation.totals
+    });
     
     // For multi-EMI loans, recalculate interest by summing from each EMI period
     if (planData.emi_count && planData.emi_count > 1) {

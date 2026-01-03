@@ -545,14 +545,20 @@ class AdminApiService {
     return this.request('GET', `/bank-statement/${userId}`);
   }
 
-  async triggerBankStatementVerification(userId: string, formData: FormData): Promise<ApiResponse<any>> {
+  async triggerBankStatementVerification(userId: string, formData: FormData | null): Promise<ApiResponse<any>> {
     const token = localStorage.getItem('adminToken');
+    const headers: HeadersInit = {
+      'Authorization': token ? `Bearer ${token}` : '',
+    };
+    
+    // If formData is provided, include it (for backward compatibility)
+    // Otherwise, send empty body (backend will use existing file)
+    const body = formData || undefined;
+    
     const response = await fetch(`/api/admin/bank-statement/${userId}/verify-with-file`, {
       method: 'POST',
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
-      body: formData
+      headers,
+      body
     });
     return response.json();
   }

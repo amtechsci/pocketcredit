@@ -8,6 +8,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
 import { toast } from 'sonner';
 import { DashboardHeader } from '../DashboardHeader';
+import { useLoanApplicationStepManager, STEP_ROUTES } from '../../hooks/useLoanApplicationStepManager';
 
 export const LoanDocumentUploadPage = () => {
   const navigate = useNavigate();
@@ -25,24 +26,87 @@ export const LoanDocumentUploadPage = () => {
       return;
     }
 
-    // Get application ID from URL params, location state, or fetch latest
-    const urlParams = new URLSearchParams(location.search);
-    const urlAppId = urlParams.get('applicationId');
-    const stateAppId = (location.state as any)?.applicationId;
-    const appId = urlAppId || stateAppId;
-    
-    if (appId) {
-      const id = parseInt(appId);
-      if (!isNaN(id)) {
-        setApplicationId(id);
-        fetchRequiredDocuments(id);
-        return;
+    // Check prerequisites and redirect to current step if needed
+    const initializePage = async () => {
+      // Get application ID from URL params, location state, or fetch latest
+      const urlParams = new URLSearchParams(location.search);
+      const urlAppId = urlParams.get('applicationId');
+      const stateAppId = (location.state as any)?.applicationId;
+      let appId = urlAppId || stateAppId;
+      
+      // If no appId, try to get from latest application
+      if (!appId) {
+        try {
+          const response = await apiService.getLoanApplications();
+          if (response.success && response.data && response.data.applications) {
+            const followUpApp = response.data.applications.find(
+              (app: any) => app.status === 'follow_up'
+            );
+            if (followUpApp) {
+              appId = followUpApp.id;
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching applications:', error);
+        }
       }
-    }
-    
-    // Try to get from user's latest loan application
-    fetchLatestLoanApplication();
-  }, [isAuthenticated, navigate, location]);
+      
+      if (appId) {
+        const id = parseInt(appId);
+        if (!isNaN(id)) {
+          // Check email verification and get current step from loan application
+          try {
+            // Check email verification
+            const profileResponse = await apiService.getUserProfile();
+            const userData = profileResponse.status === 'success' && profileResponse.data?.user 
+              ? profileResponse.data.user 
+              : user;
+            
+            if (userData && !userData.personal_email_verified) {
+              console.log('⚠️ Email verification pending, redirecting to email verification');
+              navigate('/email-verification', { replace: true });
+              return;
+            }
+            
+            // Get current step from loan application
+            const appResponse = await apiService.getLoanApplicationById(id);
+            if (appResponse.success && appResponse.data?.application) {
+              const currentStep = appResponse.data.application.current_step;
+              
+              // If current step is not upload-documents, redirect to current step
+              if (currentStep && currentStep !== 'upload-documents') {
+                console.log(`⚠️ Current step is ${currentStep}, redirecting from upload-documents`);
+                const stepRoutes: { [key: string]: string } = {
+                  'kyc-verification': `/loan-application/kyc-verification?applicationId=${id}`,
+                  'employment-details': `/loan-application/employment-details?applicationId=${id}`,
+                  'bank-statement': `/loan-application/bank-statement?applicationId=${id}`,
+                  'bank-details': `/link-salary-bank-account?applicationId=${id}`,
+                  'references': `/loan-application/references?applicationId=${id}`,
+                  'steps': `/application-under-review?applicationId=${id}`
+                };
+                const route = stepRoutes[currentStep] || STEP_ROUTES[currentStep as keyof typeof STEP_ROUTES] || '/dashboard';
+                navigate(route, { replace: true });
+                return;
+              }
+            }
+            
+            // Current step is upload-documents or couldn't determine, proceed
+            setApplicationId(id);
+            fetchRequiredDocuments(id);
+            return;
+          } catch (error) {
+            console.error('Error checking prerequisites:', error);
+            // Continue with document upload if check fails
+          }
+        }
+      }
+      
+      // No application ID or check failed, try to get from latest loan application
+      fetchLatestLoanApplication();
+    };
+
+    initializePage();
+  }, [isAuthenticated, navigate, location, user]);
 
   const fetchLatestLoanApplication = async () => {
     try {
@@ -123,14 +187,62 @@ export const LoanDocumentUploadPage = () => {
                   });
                   
                   if (allUploaded && documents.length > 0) {
-                    // All documents uploaded, redirect to application pending page
-                    console.log('✅ All required documents are uploaded, redirecting...');
-                    toast.success('All required documents have been uploaded!');
-                    setTimeout(() => {
-                      navigate('/application-under-review', { 
-                        state: { applicationId: appId } 
-                      });
-                    }, 1500);
+                    // All documents uploaded, check for pending steps before redirecting
+                    console.log('✅ All required documents are uploaded, checking pending steps...');
+                    
+                    // All documents uploaded, get current step from loan application
+                    try {
+                      // Check email verification first
+                      const profileResponse = await apiService.getUserProfile();
+                      const userData = profileResponse.status === 'success' && profileResponse.data?.user 
+                        ? profileResponse.data.user 
+                        : user;
+                      
+                      if (userData && !userData.personal_email_verified) {
+                        console.log('⚠️ Email verification pending, redirecting to email verification');
+                        toast.info('Please complete email verification before proceeding');
+                        setTimeout(() => {
+                          navigate('/email-verification', { 
+                            state: { applicationId: appId } 
+                          });
+                        }, 1500);
+                        setLoading(false);
+                        return;
+                      }
+                      
+                      // Get current step from loan application
+                      const appResponse = await apiService.getLoanApplicationById(appId);
+                      if (appResponse.success && appResponse.data?.application) {
+                        const currentStep = appResponse.data.application.current_step;
+                        // Map current_step to route
+                        const stepRoutes: { [key: string]: string } = {
+                          'kyc-verification': `/loan-application/kyc-verification?applicationId=${appId}`,
+                          'employment-details': `/loan-application/employment-details?applicationId=${appId}`,
+                          'bank-statement': `/loan-application/bank-statement?applicationId=${appId}`,
+                          'bank-details': `/link-salary-bank-account?applicationId=${appId}`,
+                          'references': `/loan-application/references?applicationId=${appId}`,
+                          'upload-documents': `/loan-application/upload-documents?applicationId=${appId}`,
+                          'steps': `/application-under-review?applicationId=${appId}`
+                        };
+                        const route = stepRoutes[currentStep] || `/application-under-review?applicationId=${appId}`;
+                        
+                        toast.success('All required documents have been uploaded!');
+                        setTimeout(() => {
+                          navigate(route);
+                        }, 1500);
+                      } else {
+                        toast.success('All required documents have been uploaded!');
+                        setTimeout(() => {
+                          navigate('/application-under-review');
+                        }, 1500);
+                      }
+                    } catch (error) {
+                      console.error('Error getting loan application:', error);
+                      toast.success('All required documents have been uploaded!');
+                      setTimeout(() => {
+                        navigate('/application-under-review');
+                      }, 1500);
+                    }
                     setLoading(false);
                     return;
                   }
@@ -327,15 +439,61 @@ export const LoanDocumentUploadPage = () => {
           return;
         }
         
-        // All documents are uploaded
-        toast.success('All documents uploaded successfully! Your application will be reviewed.');
+        // All documents are uploaded, get current step from loan application
+        console.log('✅ All documents uploaded, getting current step...');
         
-        // Redirect to application under review page
-        setTimeout(() => {
-          navigate('/application-under-review', { 
-            state: { applicationId: applicationId } 
-          });
-        }, 1500);
+        try {
+          // Check email verification first
+          const profileResponse = await apiService.getUserProfile();
+          const userData = profileResponse.status === 'success' && profileResponse.data?.user 
+            ? profileResponse.data.user 
+            : user;
+          
+          if (userData && !userData.personal_email_verified) {
+            console.log('⚠️ Email verification pending, redirecting to email verification');
+            toast.info('Please complete email verification before proceeding');
+            setTimeout(() => {
+              navigate('/email-verification', { 
+                state: { applicationId: applicationId } 
+              });
+            }, 1500);
+            setSubmitting(false);
+            return;
+          }
+          
+          // Get current step from loan application
+          const appResponse = await apiService.getLoanApplicationById(applicationId);
+          if (appResponse.success && appResponse.data?.application) {
+            const currentStep = appResponse.data.application.current_step;
+            // Map current_step to route
+            const stepRoutes: { [key: string]: string } = {
+              'kyc-verification': `/loan-application/kyc-verification?applicationId=${applicationId}`,
+              'employment-details': `/loan-application/employment-details?applicationId=${applicationId}`,
+              'bank-statement': `/loan-application/bank-statement?applicationId=${applicationId}`,
+              'bank-details': `/link-salary-bank-account?applicationId=${applicationId}`,
+              'references': `/loan-application/references?applicationId=${applicationId}`,
+              'upload-documents': `/loan-application/upload-documents?applicationId=${applicationId}`,
+              'steps': `/application-under-review?applicationId=${applicationId}`
+            };
+            const route = stepRoutes[currentStep] || `/application-under-review?applicationId=${applicationId}`;
+            
+            toast.success('All documents uploaded successfully!');
+            setTimeout(() => {
+              navigate(route);
+            }, 1500);
+          } else {
+            toast.success('All documents uploaded successfully!');
+            setTimeout(() => {
+              navigate('/application-under-review');
+            }, 1500);
+          }
+        } catch (error) {
+          console.error('Error getting loan application:', error);
+          toast.success('All documents uploaded successfully!');
+          setTimeout(() => {
+            navigate('/application-under-review');
+          }, 1500);
+        }
       } else {
         toast.error('Failed to verify documents. Please try again.');
         setSubmitting(false);

@@ -138,7 +138,6 @@ export function UserProfileDetail() {
   const [bankStatement, setBankStatement] = useState<any>(null);
   const [loadingStatement, setLoadingStatement] = useState(false);
   const [verifyingStatement, setVerifyingStatement] = useState(false);
-  const [statementFile, setStatementFile] = useState<File | null>(null);
   const [salaryDateEditValue, setSalaryDateEditValue] = useState('');
   const [editingReference, setEditingReference] = useState<number | null>(null);
   const [editingReferenceField, setEditingReferenceField] = useState<{ [key: number]: 'name' | 'phone' | 'relation' | null }>({});
@@ -3033,20 +3032,17 @@ export function UserProfileDetail() {
     };
 
     const handleTriggerVerification = async () => {
-      if (!params.userId || !statementFile) {
-        toast.error('Please select a file to upload');
+      if (!params.userId) {
+        toast.error('User ID not found');
         return;
       }
 
       setVerifyingStatement(true);
       try {
-        const formData = new FormData();
-        formData.append('statement', statementFile);
-
-        const response = await adminApiService.triggerBankStatementVerification(params.userId, formData);
+        // No file upload needed - backend will use existing file from S3 and generate Digitap URL
+        const response = await adminApiService.triggerBankStatementVerification(params.userId, null);
         if (response.success) {
           toast.success('Verification initiated successfully');
-          setStatementFile(null);
           await fetchBankStatement();
         } else {
           toast.error(response.message || 'Failed to trigger verification');
@@ -3203,31 +3199,20 @@ export function UserProfileDetail() {
 
           {hasStatement && verificationStatus === 'not_started' && statement.upload_method === 'manual' && (
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Upload File for Digitap Verification
-                </label>
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={(e) => setStatementFile(e.target.files?.[0] || null)}
-                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                />
-                {statementFile && (
-                  <p className="mt-2 text-sm text-gray-600">
-                    Selected: {statementFile.name} ({(statementFile.size / 1024 / 1024).toFixed(2)} MB)
-                  </p>
-                )}
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-800 mb-2">
+                  The existing uploaded file will be used for Digitap verification. Click the button below to generate a Digitap upload URL and upload the file.
+                </p>
               </div>
               <Button
                 onClick={handleTriggerVerification}
-                disabled={!statementFile || verifyingStatement}
+                disabled={verifyingStatement}
                 className="bg-blue-600 hover:bg-blue-700"
               >
                 {verifyingStatement ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Verifying...
+                    Processing...
                   </>
                 ) : (
                   <>
@@ -3316,18 +3301,19 @@ export function UserProfileDetail() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Upload New File for Retry
                   </label>
-                  <input
-                    type="file"
-                    accept="application/pdf"
-                    onChange={(e) => setStatementFile(e.target.files?.[0] || null)}
-                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                  />
                   <Button
                     onClick={handleTriggerVerification}
-                    disabled={!statementFile || verifyingStatement}
+                    disabled={verifyingStatement}
                     className="mt-3 bg-blue-600 hover:bg-blue-700"
                   >
-                    Retry Verification
+                    {verifyingStatement ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      'Retry Verification'
+                    )}
                   </Button>
                 </div>
               )}

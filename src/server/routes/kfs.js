@@ -160,6 +160,138 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     const planSnapshot = loan.plan_snapshot ? (typeof loan.plan_snapshot === 'string' ? JSON.parse(loan.plan_snapshot) : loan.plan_snapshot) : loanPlan;
     const defaultRepaymentDays = planSnapshot.repayment_days || planSnapshot.total_duration_days || loanPlan.repayment_days || loanPlan.total_duration_days || 15;
 
+    // Parse fees_breakdown for user endpoint (early parsing for fee validation)
+    let userFeesBreakdown = [];
+    if (loan.fees_breakdown) {
+      try {
+        const parsedFees = typeof loan.fees_breakdown === 'string'
+          ? JSON.parse(loan.fees_breakdown)
+          : loan.fees_breakdown;
+        userFeesBreakdown = parsedFees.map(fee => ({
+          fee_name: fee.fee_name || fee.name,
+          fee_percent: fee.fee_percent || fee.percent,
+          amount: fee.amount,
+          application_method: fee.application_method
+        }));
+      } catch (e) {
+        console.error('Error parsing fees_breakdown:', e);
+        userFeesBreakdown = [];
+      }
+    }
+
+    // Get fees from planSnapshot or loanPlan, and fix application_method
+    let fees = planSnapshot.fees || loanPlan.fees || [];
+    const principal = loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0;
+
+    // If fees are missing or empty, try to populate from fees_breakdown or loan_plan_fees
+    if (!fees || !Array.isArray(fees) || fees.length === 0) {
+      if (userFeesBreakdown && userFeesBreakdown.length > 0) {
+        fees = userFeesBreakdown.map(fee => {
+          let feePercent = fee.fee_percent || fee.percent;
+          if (!feePercent && fee.amount && principal > 0) {
+            feePercent = (fee.amount / principal) * 100;
+          }
+          return {
+            fee_name: fee.fee_name || fee.name || 'Fee',
+            fee_percent: feePercent || 0,
+            application_method: fee.application_method || 'deduct_from_disbursal'
+          };
+        });
+      } else if (loan.loan_plan_id) {
+        try {
+          const planFees = await executeQuery(
+            `SELECT 
+              lpf.fee_percent,
+              ft.fee_name,
+              ft.application_method
+            FROM loan_plan_fees lpf
+            INNER JOIN fee_types ft ON lpf.fee_type_id = ft.id
+            WHERE lpf.loan_plan_id = ? AND ft.is_active = 1
+            ORDER BY ft.fee_name ASC`,
+            [loan.loan_plan_id]
+          );
+          
+          if (planFees && planFees.length > 0) {
+            fees = planFees.map(pf => ({
+              fee_name: pf.fee_name || 'Fee',
+              fee_percent: parseFloat(pf.fee_percent || 0),
+              application_method: pf.application_method || 'deduct_from_disbursal'
+            }));
+          }
+        } catch (feeError) {
+          console.error(`Error fetching fees from loan_plan_fees for loan #${loanId}:`, feeError);
+        }
+      }
+    } else {
+      // Fees exist but may be missing application_method - fix them
+      const feesNeedFixing = fees.some(fee => !fee.application_method);
+      if (feesNeedFixing) {
+        if (userFeesBreakdown && userFeesBreakdown.length > 0) {
+          fees = fees.map(fee => {
+            const matchingFee = userFeesBreakdown.find(bf => 
+              (bf.fee_name === fee.fee_name || bf.name === fee.fee_name)
+            );
+            let feePercent = fee.fee_percent;
+            if (!feePercent && matchingFee?.amount && principal > 0) {
+              feePercent = (matchingFee.amount / principal) * 100;
+            }
+            return {
+              ...fee,
+              fee_percent: feePercent || fee.fee_percent || 0,
+              application_method: fee.application_method || matchingFee?.application_method || 'deduct_from_disbursal'
+            };
+          });
+        } else if (loan.loan_plan_id) {
+          try {
+            const planFees = await executeQuery(
+              `SELECT 
+                lpf.fee_percent,
+                ft.fee_name,
+                ft.application_method
+              FROM loan_plan_fees lpf
+              INNER JOIN fee_types ft ON lpf.fee_type_id = ft.id
+              WHERE lpf.loan_plan_id = ? AND ft.is_active = 1
+              ORDER BY ft.fee_name ASC`,
+              [loan.loan_plan_id]
+            );
+            
+            if (planFees && planFees.length > 0) {
+              fees = fees.map(fee => {
+                const matchingFee = planFees.find(pf => pf.fee_name === fee.fee_name);
+                return {
+                  ...fee,
+                  application_method: fee.application_method || matchingFee?.application_method || 'deduct_from_disbursal'
+                };
+              });
+            }
+          } catch (feeError) {
+            console.error(`Error fetching fees from loan_plan_fees for loan #${loanId}:`, feeError);
+          }
+        }
+      }
+      
+      // Validate and correct application_method based on fee name
+      fees = fees.map(fee => {
+        const feeNameLower = fee.fee_name?.toLowerCase() || '';
+        let correctMethod = fee.application_method;
+        
+        if (feeNameLower.includes('post service')) {
+          if (fee.application_method !== 'add_to_total') {
+            correctMethod = 'add_to_total';
+          }
+        } else {
+          if (!fee.application_method || fee.application_method !== 'deduct_from_disbursal') {
+            correctMethod = 'deduct_from_disbursal';
+          }
+        }
+        
+        return {
+          ...fee,
+          application_method: correctMethod
+        };
+      });
+    }
+
     const planData = {
       plan_id: planSnapshot.plan_id || loanPlan.id || null,
       plan_type: planSnapshot.plan_type || loanPlan.plan_type || 'single',
@@ -169,7 +301,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       emi_frequency: planSnapshot.emi_frequency || loanPlan.emi_frequency || null,
       interest_percent_per_day: parseFloat(planSnapshot.interest_percent_per_day || loanPlan.interest_percent_per_day || loan.interest_percent_per_day || 0.001),
       calculate_by_salary_date: planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true || loanPlan.calculate_by_salary_date === 1 || false,
-      fees: planSnapshot.fees || loanPlan.fees || []
+      fees: fees
     };
 
     // Get user data for salary date calculation
@@ -1360,13 +1492,127 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       };
     }
 
-    // Ensure fees array exists in plan snapshot
-    if (!planSnapshot.fees && feesBreakdown.length > 0) {
-      planSnapshot.fees = feesBreakdown.map(fee => ({
-        fee_name: fee.fee_name || 'Fee',
-        fee_percent: fee.fee_percent || 0,
-        application_method: fee.application_method || 'deduct_from_disbursal'
-      }));
+    // Ensure fees array exists in plan snapshot and fix application_method
+    if (!planSnapshot.fees || !Array.isArray(planSnapshot.fees) || planSnapshot.fees.length === 0) {
+      // Fees are missing or empty - try to populate from fees_breakdown or loan_plan_fees
+      if (feesBreakdown && feesBreakdown.length > 0) {
+        planSnapshot.fees = feesBreakdown.map(fee => {
+          // Calculate fee_percent from amount if not provided
+          let feePercent = fee.fee_percent || fee.percent;
+          if (!feePercent && fee.amount && principal > 0) {
+            feePercent = (fee.amount / principal) * 100;
+          }
+          return {
+            fee_name: fee.fee_name || fee.name || 'Fee',
+            fee_percent: feePercent || 0,
+            application_method: fee.application_method || 'deduct_from_disbursal'
+          };
+        });
+      } else if (loan.loan_plan_id) {
+        // Try to fetch fees from loan_plan_fees table
+        try {
+          const planFees = await executeQuery(
+            `SELECT 
+              lpf.fee_percent,
+              ft.fee_name,
+              ft.application_method
+            FROM loan_plan_fees lpf
+            INNER JOIN fee_types ft ON lpf.fee_type_id = ft.id
+            WHERE lpf.loan_plan_id = ? AND ft.is_active = 1
+            ORDER BY ft.fee_name ASC`,
+            [loan.loan_plan_id]
+          );
+          
+          if (planFees && planFees.length > 0) {
+            planSnapshot.fees = planFees.map(pf => ({
+              fee_name: pf.fee_name || 'Fee',
+              fee_percent: parseFloat(pf.fee_percent || 0),
+              application_method: pf.application_method || 'deduct_from_disbursal'
+            }));
+          } else {
+            planSnapshot.fees = [];
+          }
+        } catch (feeError) {
+          console.error(`Error fetching fees from loan_plan_fees for loan #${loanId}:`, feeError);
+          planSnapshot.fees = [];
+        }
+      } else {
+        planSnapshot.fees = [];
+      }
+    } else {
+      // Fees exist but may be missing application_method or have wrong value - fix them
+      const feesNeedFixing = planSnapshot.fees.some(fee => !fee.application_method);
+      if (feesNeedFixing) {
+        // Try to get application_method from fees_breakdown by matching fee_name
+        if (feesBreakdown && feesBreakdown.length > 0) {
+          planSnapshot.fees = planSnapshot.fees.map(fee => {
+            const matchingFee = feesBreakdown.find(bf => 
+              (bf.fee_name === fee.fee_name || bf.name === fee.fee_name)
+            );
+            // Calculate fee_percent from amount if not provided
+            let feePercent = fee.fee_percent;
+            if (!feePercent && matchingFee?.amount && principal > 0) {
+              feePercent = (matchingFee.amount / principal) * 100;
+            }
+            return {
+              ...fee,
+              fee_percent: feePercent || fee.fee_percent || 0,
+              application_method: fee.application_method || matchingFee?.application_method || 'deduct_from_disbursal'
+            };
+          });
+        } else if (loan.loan_plan_id) {
+          // Try to fetch from loan_plan_fees table
+          try {
+            const planFees = await executeQuery(
+              `SELECT 
+                lpf.fee_percent,
+                ft.fee_name,
+                ft.application_method
+              FROM loan_plan_fees lpf
+              INNER JOIN fee_types ft ON lpf.fee_type_id = ft.id
+              WHERE lpf.loan_plan_id = ? AND ft.is_active = 1
+              ORDER BY ft.fee_name ASC`,
+              [loan.loan_plan_id]
+            );
+            
+            if (planFees && planFees.length > 0) {
+              planSnapshot.fees = planSnapshot.fees.map(fee => {
+                const matchingFee = planFees.find(pf => pf.fee_name === fee.fee_name);
+                return {
+                  ...fee,
+                  application_method: fee.application_method || matchingFee?.application_method || 'deduct_from_disbursal'
+                };
+              });
+            }
+          } catch (feeError) {
+            console.error(`Error fetching fees from loan_plan_fees for loan #${loanId}:`, feeError);
+          }
+        }
+      }
+      
+      // Validate and correct application_method based on fee name (even if already set)
+      // This ensures "post service fee" is always "add_to_total" regardless of what's in fees_breakdown
+      planSnapshot.fees = planSnapshot.fees.map(fee => {
+        const feeNameLower = fee.fee_name?.toLowerCase() || '';
+        let correctMethod = fee.application_method;
+        
+        // Validate: "post service fee" should always be "add_to_total"
+        if (feeNameLower.includes('post service')) {
+          if (fee.application_method !== 'add_to_total') {
+            correctMethod = 'add_to_total';
+          }
+        } else {
+          // Other fees (like "processing fee") should be "deduct_from_disbursal"
+          if (!fee.application_method || fee.application_method !== 'deduct_from_disbursal') {
+            correctMethod = 'deduct_from_disbursal';
+          }
+        }
+        
+        return {
+          ...fee,
+          application_method: correctMethod
+        };
+      });
     }
 
     const loanData = {

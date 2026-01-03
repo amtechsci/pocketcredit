@@ -133,6 +133,7 @@ export function DynamicDashboardPage() {
   const [canApplyForLoan, setCanApplyForLoan] = useState(true);
   const [selectedLoanDetails, setSelectedLoanDetails] = useState<any>(null);
   const [showLoanDetailsModal, setShowLoanDetailsModal] = useState(false);
+  const [loanDocumentStatus, setLoanDocumentStatus] = useState<{ [loanId: number]: { allUploaded: boolean; hasPending: boolean } }>({});
 
   // Combine applied loans (pre-disbursal) and running loans (account_manager) for "Active Loans" display
   // This ensures all in-progress loans are visible to the user
@@ -429,6 +430,53 @@ export function DynamicDashboardPage() {
 
         // All loans includes everything (for My Loans history tab, including cleared loans)
         const all = uniqueApplications;
+
+        // Check document status for follow_up loans
+        const documentStatusChecks = applied
+          .filter((app: any) => app.status === 'follow_up')
+          .map(async (app: any) => {
+            try {
+              const validationResponse = await apiService.request('GET', `/validation/user/history?loanApplicationId=${app.id}`, {});
+              if (validationResponse.status === 'success' && validationResponse.data) {
+                const documentActions = validationResponse.data.filter(
+                  (action: any) => action.action_type === 'need_document' && action.loan_application_id === app.id
+                );
+                
+                if (documentActions.length > 0) {
+                  const latestAction = documentActions[0];
+                  const documents = latestAction.action_details?.documents || [];
+                  
+                  if (documents.length > 0) {
+                    const docsResponse = await apiService.getLoanDocuments(app.id);
+                    if (docsResponse.success || docsResponse.status === 'success') {
+                      const uploadedDocs = docsResponse.data?.documents || [];
+                      const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+                      
+                      const allUploaded = documents.every((doc: string) => {
+                        const normalizedDoc = normalize(doc);
+                        return uploadedDocs.some((uploaded: any) => {
+                          const normalizedUploaded = normalize(uploaded.document_name || '');
+                          return normalizedDoc === normalizedUploaded ||
+                                 normalizedDoc.includes(normalizedUploaded) ||
+                                 normalizedUploaded.includes(normalizedDoc);
+                        });
+                      });
+                      
+                      setLoanDocumentStatus(prev => ({
+                        ...prev,
+                        [app.id]: { allUploaded, hasPending: true }
+                      }));
+                    }
+                  }
+                }
+              }
+            } catch (error) {
+              console.error(`Error checking document status for loan ${app.id}:`, error);
+            }
+          });
+        
+        // Run document status checks in parallel (don't await - let it run in background)
+        Promise.all(documentStatusChecks).catch(err => console.error('Error checking document statuses:', err));
 
         console.log('🔍 Loan Categorization:', {
           total: uniqueApplications.length,
@@ -804,14 +852,55 @@ export function DynamicDashboardPage() {
                           {loan.status === 'account_manager' && 'Loan is active'}
                         </p>
                         <Button
-                          onClick={() => {
+                          onClick={async () => {
                             console.log('View Details clicked for:', loan.id);
                             if (loan.status === 'account_manager') {
                               navigate(`/repayment-schedule?applicationId=${loan.id}`);
                             } else if (loan.status === 'follow_up') {
-                              navigate('/loan-application/upload-documents', {
-                                state: { applicationId: loan.id }
-                              });
+                              // Check if documents are uploaded
+                              const docStatus = loanDocumentStatus[loan.id];
+                              if (docStatus?.allUploaded) {
+                                // Documents are uploaded, get current step from loan application
+                                try {
+                                  const appResponse = await apiService.getLoanApplicationById(loan.id);
+                                  if (appResponse.success && appResponse.data?.application) {
+                                    const currentStep = (appResponse.data.application as any).current_step;
+                                    
+                                    // If current_step is 'steps', navigate to first step and let StepGuard redirect to correct step
+                                    // This handles cases where step was updated prematurely
+                                    if (currentStep === 'steps') {
+                                      // Navigate to first step - StepGuard will redirect to actual current step
+                                      navigate(`/loan-application/kyc-verification?applicationId=${loan.id}`);
+                                      return;
+                                    }
+                                    
+                                    // Map current_step to route
+                                    const stepRoutes: { [key: string]: string } = {
+                                      'kyc-verification': `/loan-application/kyc-verification?applicationId=${loan.id}`,
+                                      'employment-details': `/loan-application/employment-details?applicationId=${loan.id}`,
+                                      'bank-statement': `/loan-application/bank-statement?applicationId=${loan.id}`,
+                                      'bank-details': `/link-salary-bank-account?applicationId=${loan.id}`,
+                                      'references': `/loan-application/references?applicationId=${loan.id}`,
+                                      'upload-documents': `/loan-application/upload-documents?applicationId=${loan.id}`,
+                                      'steps': `/loan-application/kyc-verification?applicationId=${loan.id}` // Let StepGuard redirect
+                                    };
+                                    const route = stepRoutes[currentStep] || `/loan-application/kyc-verification?applicationId=${loan.id}`;
+                                    navigate(route);
+                                  } else {
+                                    // Fallback: navigate to first step, StepGuard will redirect
+                                    navigate(`/loan-application/kyc-verification?applicationId=${loan.id}`);
+                                  }
+                                } catch (error) {
+                                  console.error('Error getting loan application:', error);
+                                  // Fallback: navigate to first step, StepGuard will redirect
+                                  navigate(`/loan-application/kyc-verification?applicationId=${loan.id}`);
+                                }
+                              } else {
+                                // Documents not uploaded, navigate to upload page
+                                navigate('/loan-application/upload-documents', {
+                                  state: { applicationId: loan.id }
+                                });
+                              }
                             } else {
                               navigate('/loan-application/kyc-verification', {
                                 state: { applicationId: loan.id }
@@ -822,7 +911,11 @@ export function DynamicDashboardPage() {
                           size="sm"
                           className="text-xs lg:text-sm whitespace-nowrap"
                         >
-                          {loan.status === 'account_manager' ? 'View Loan' : loan.status === 'follow_up' ? 'Upload Documents' : 'View'}
+                          {loan.status === 'account_manager' 
+                            ? 'View Loan' 
+                            : loan.status === 'follow_up' 
+                              ? (loanDocumentStatus[loan.id]?.allUploaded ? 'View' : 'Upload Documents')
+                              : 'View'}
                         </Button>
                       </div>
                     </Card>

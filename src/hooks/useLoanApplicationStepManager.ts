@@ -47,7 +47,7 @@ const STEP_ORDER: LoanApplicationStep[] = [
   'steps'                   // Step 8: Final completion
 ];
 
-const STEP_ROUTES: Record<LoanApplicationStep, string> = {
+export const STEP_ROUTES: Record<LoanApplicationStep, string> = {
   'application': '/application', // Application creation page
   'kyc-verification': '/loan-application/kyc-verification',
   'employment-details': '/loan-application/employment-details',
@@ -194,7 +194,7 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
     return false;
   }, []);
 
-  // Check if admin requested document upload
+  // Check if admin requested document upload AND if documents are not yet uploaded
   const checkDocumentRequest = useCallback(async (applicationId: number) => {
     try {
       const response = await (apiService as any).request('GET', `/validation/user/history?loanApplicationId=${applicationId}`, {});
@@ -205,6 +205,34 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
         if (documentActions.length > 0) {
           const latestAction = documentActions[0];
           const docs = latestAction.action_details?.documents || [];
+          
+          if (docs.length > 0) {
+            // Check if all documents are already uploaded
+            try {
+              const docsResponse = await apiService.getLoanDocuments(applicationId);
+              if (docsResponse.success || docsResponse.status === 'success') {
+                const uploadedDocs = docsResponse.data?.documents || [];
+                const normalize = (str: string) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                
+                const allUploaded = docs.every((requiredDoc: string) => {
+                  const normalizedRequired = normalize(requiredDoc);
+                  return uploadedDocs.some((uploaded: any) => {
+                    const normalizedUploaded = normalize(uploaded.document_name || '');
+                    return normalizedRequired === normalizedUploaded ||
+                           normalizedRequired.includes(normalizedUploaded) ||
+                           normalizedUploaded.includes(normalizedRequired);
+                  });
+                });
+                
+                // Documents are needed only if NOT all uploaded
+                return { needed: !allUploaded, documents: docs };
+              }
+            } catch (docsError) {
+              console.error('Error checking uploaded documents:', docsError);
+              // If we can't check, assume documents are needed
+            }
+          }
+          
           return { needed: docs.length > 0, documents: docs };
         }
       }

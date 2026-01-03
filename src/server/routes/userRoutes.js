@@ -263,7 +263,7 @@ const getAvailableAddresses = async (req, res) => {
     // Check users.address_data and digitap_responses for addresses
     try {
       const userData = await executeQuery(
-        `SELECT address_data, pincode, state 
+        `SELECT address_data, pincode 
          FROM users 
          WHERE id = ?`,
         [userId]
