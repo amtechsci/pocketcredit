@@ -93,7 +93,7 @@ class CreditAnalyticsService {
       otp: "123456", // Demo OTP
       timestamp,
       device_ip,
-      report_type: "0"
+      report_type: "3"
     };
 
     try {

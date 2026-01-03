@@ -2270,27 +2270,56 @@ router.post('/:loanId/generate-pdf', authenticateAdmin, async (req, res) => {
       });
     }
 
-    console.log('📄 Generating PDF for loan ID:', loanId);
-
-    // Get loan data for filename
-    const db = await initializeDatabase();
-    const [loans] = await db.execute(
-      'SELECT application_number FROM loan_applications WHERE id = ?',
-      [loanId]
-    );
-
-    if (!loans || loans.length === 0) {
-      return res.status(404).json({
+    if (!loanId) {
+      return res.status(400).json({
         success: false,
-        message: 'Loan not found'
+        message: 'Loan ID is required'
       });
     }
 
-    const applicationNumber = loans[0].application_number;
+    console.log('📄 Generating PDF for loan ID:', loanId);
+
+    // Get loan data for filename
+    let applicationNumber = null;
+    try {
+      const db = await initializeDatabase();
+      const [loans] = await db.execute(
+        'SELECT application_number FROM loan_applications WHERE id = ?',
+        [loanId]
+      );
+
+      if (!loans || loans.length === 0 || !loans[0]) {
+        return res.status(404).json({
+          success: false,
+          message: 'Loan not found'
+        });
+      }
+
+      applicationNumber = loans[0].application_number || `LOAN_${loanId}`;
+    } catch (dbError) {
+      console.error('❌ Database error:', dbError);
+      // Use fallback filename if DB query fails
+      applicationNumber = `LOAN_${loanId}`;
+    }
+
     const filename = `KFS_${applicationNumber}.pdf`;
 
     // Generate PDF
-    const pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
+    let pdfResult;
+    try {
+      pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
+      
+      if (!pdfResult || !pdfResult.buffer) {
+        throw new Error('PDF generation returned invalid result');
+      }
+    } catch (pdfError) {
+      console.error('❌ PDF generation error:', pdfError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to generate PDF',
+        error: pdfError.message || 'PDF generation failed'
+      });
+    }
 
     console.log('📤 Sending PDF, size:', pdfResult.buffer.length, 'bytes');
 
@@ -2308,11 +2337,18 @@ router.post('/:loanId/generate-pdf', authenticateAdmin, async (req, res) => {
 
   } catch (error) {
     console.error('❌ Error generating PDF:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to generate PDF',
-      error: error.message
-    });
+    console.error('Error stack:', error.stack);
+    
+    // Check if response has already been sent
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to generate PDF',
+        error: error.message || 'Unknown error occurred'
+      });
+    } else {
+      console.error('⚠️ Response already sent, cannot send error response');
+    }
   }
 });
 

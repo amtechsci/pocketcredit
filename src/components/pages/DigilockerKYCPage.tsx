@@ -284,15 +284,18 @@ export const DigilockerKYCPage: React.FC = () => {
         </div>
 
         <Card className="shadow-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Phone className="w-5 h-5" />
-              Aadhaar-Linked Mobile Number
-            </CardTitle>
-            <CardDescription>
-              Enter the mobile number linked to your Aadhaar card
-            </CardDescription>
-          </CardHeader>
+          {/* Only show header when NOT in PAN verification mode */}
+          {!showPanInput && (
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Phone className="w-5 h-5" />
+                Aadhaar-Linked Mobile Number
+              </CardTitle>
+              <CardDescription>
+                Enter the mobile number linked to your Aadhaar card
+              </CardDescription>
+            </CardHeader>
+          )}
 
           <CardContent className="space-y-6">
             {/* Verification Status */}
