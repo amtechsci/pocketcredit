@@ -143,13 +143,21 @@ export function AuthPage() {
       console.log('📥 loginWithOTP result:', result);
       
       if (result.success) {
-        console.log('✅ Login successful, navigating to dashboard...');
+        console.log('✅ Login successful, navigating...');
         toast.success('Login successful!');
         
-        // Check if user needs to complete profile
-        // The AuthContext will handle this based on profile_completion_step
-        // For now, navigate to dashboard - the App component will handle routing
-        navigate('/dashboard');
+        // Check user status and redirect accordingly
+        const currentUser = JSON.parse(localStorage.getItem('pocket_user') || '{}');
+        if (currentUser.status === 'deleted') {
+          navigate('/deleted-status');
+        } else if (currentUser.status === 'on_hold') {
+          navigate('/hold-status');
+        } else {
+          // Check if user needs to complete profile
+          // The AuthContext will handle this based on profile_completion_step
+          // For now, navigate to dashboard - the App component will handle routing
+          navigate('/dashboard');
+        }
       } else {
         console.log('❌ Login failed:', result.message);
         toast.error(result.message);

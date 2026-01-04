@@ -1690,6 +1690,61 @@ router.post('/:userId/documents', authenticateAdmin, async (req, res) => {
   }
 });
 
+// Update transaction
+router.put('/:userId/transactions/:transactionId', authenticateAdmin, async (req, res) => {
+  try {
+    console.log('💰 Updating transaction:', req.params.transactionId);
+    await initializeDatabase();
+    const { userId, transactionId } = req.params;
+    const adminId = req.admin.id;
+
+    const { reference_number } = req.body;
+
+    // Validate reference_number
+    if (!reference_number || reference_number.trim() === '') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Reference / UTR number is required'
+      });
+    }
+
+    // Check if transaction exists and belongs to user
+    const transactionCheck = await executeQuery(
+      'SELECT id FROM transactions WHERE id = ? AND user_id = ?',
+      [transactionId, userId]
+    );
+
+    if (!transactionCheck || transactionCheck.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Transaction not found'
+      });
+    }
+
+    // Update transaction
+    await executeQuery(
+      `UPDATE transactions 
+       SET reference_number = ?, updated_at = NOW() 
+       WHERE id = ? AND user_id = ?`,
+      [reference_number.trim(), transactionId, userId]
+    );
+
+    console.log('✅ Transaction reference number updated successfully');
+    res.json({
+      status: 'success',
+      message: 'Transaction reference number updated successfully',
+      data: { transactionId, reference_number: reference_number.trim() }
+    });
+
+  } catch (error) {
+    console.error('Update transaction error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update transaction reference number'
+    });
+  }
+});
+
 // Add transaction
 router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
   try {

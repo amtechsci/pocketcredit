@@ -13,6 +13,7 @@ import { AdminSettings } from './admin/pages/AdminSettings';
 import { SystemSettings } from './admin/pages/SystemSettings';
 import { KFSDocument } from './admin/pages/KFSDocument';
 import { LoanAgreementDocument } from './admin/pages/LoanAgreementDocument';
+import { ExtensionLetterDocument } from './admin/pages/ExtensionLetterDocument';
 import { SearchResultsPage } from './admin/pages/SearchResultsPage';
 import { PoliciesManagement } from './admin/pages/PoliciesManagement';
 import { AdminProvider } from './admin/context/AdminContext';
@@ -311,6 +312,11 @@ export default function AdminApp() {
       <Route path="loan-agreement/:loanId" element={
         <ProtectedRoute>
           <LoanAgreementDocument />
+        </ProtectedRoute>
+      } />
+      <Route path="extension-letter/:loanId" element={
+        <ProtectedRoute>
+          <ExtensionLetterDocument />
         </ProtectedRoute>
       } />
       <Route path="search" element={

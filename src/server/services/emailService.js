@@ -245,9 +245,6 @@ class EmailService {
   </div>
   
   <div class="footer">
-    <p><strong>Pocket Credit Private Limited</strong></p>
-    <p>Plot No. 123, Sector 18, Gurugram, Haryana 122015</p>
-    <p>Phone: +91 9876543210 | Email: support@pocketcredit.in</p>
     <p style="margin-top: 20px; font-size: 10px; color: #999;">
       This is an automated email. Please do not reply to this email.<br>
       If you did not request this information, please contact us immediately.
@@ -510,9 +507,6 @@ class EmailService {
   </div>
   
   <div class="footer">
-    <p><strong>Pocket Credit Private Limited</strong></p>
-    <p>Plot No. 123, Sector 18, Gurugram, Haryana 122015</p>
-    <p>Phone: +91 9876543210 | Email: support@pocketcredit.in</p>
     <p style="margin-top: 20px; font-size: 10px; color: #999;">
       This is an automated email. Please do not reply to this email.<br>
       If you did not sign this agreement, please contact us immediately.

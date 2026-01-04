@@ -1175,24 +1175,105 @@ const ReferencesStep = ({ applicationId, onComplete, saving }: StepProps) => {
 
 // Step 4: KFS View
 const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
+  const [generating, setGenerating] = useState(false);
+  const [kfsLoaded, setKfsLoaded] = useState(false);
+
+  // Extract HTML content from the KFS document
+  const getKFSHTML = (): string => {
+    const kfsElement = document.getElementById('kfs-document-content');
+    if (!kfsElement) {
+      throw new Error('KFS content not found');
+    }
+    
+    // Clone the element to avoid modifying the original
+    const clonedElement = kfsElement.cloneNode(true) as HTMLElement;
+    
+    // Get the HTML content
+    return clonedElement.innerHTML;
+  };
+
+  const handleGenerateAndSave = async () => {
+    try {
+      setGenerating(true);
+
+      const token = localStorage.getItem('pocket_user_token');
+      if (!token) {
+        toast.error('Please login to continue');
+        setGenerating(false);
+        return;
+      }
+
+      let htmlContent: string;
+      try {
+        htmlContent = getKFSHTML();
+        console.log('✅ KFS HTML extracted, length:', htmlContent.length);
+      } catch (error: any) {
+        throw new Error('Failed to extract KFS content: ' + error.message);
+      }
+
+      console.log('🔄 Generating and saving KFS PDF for application:', applicationId);
+      const response = await apiService.generateAndSaveKFS(applicationId, htmlContent);
+
+      if (!response.success) {
+        throw new Error(response.message || 'Failed to generate and save KFS PDF');
+      }
+
+      console.log('✅ KFS PDF generated and saved:', response.data);
+      toast.success('KFS PDF generated and sent to your email!');
+      
+      // Automatically mark as reviewed after generating
+      setTimeout(() => {
+        onComplete();
+      }, 1000);
+
+    } catch (error: any) {
+      console.error('Error generating KFS PDF:', error);
+      toast.error(error.message || 'Failed to generate KFS PDF. Please try again.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="text-center">
         <FileText className="w-16 h-16 text-blue-600 mx-auto mb-4" />
         <h2 className="text-2xl font-bold mb-2">Key Facts Statement</h2>
         <p className="text-gray-600">
-          Please review your loan details and terms
+          Please review your loan details and terms. We'll generate a PDF and send it to your email.
         </p>
       </div>
 
-      <div className="border rounded-lg p-4 max-h-[600px] overflow-y-auto">
+      <div 
+        className="border rounded-lg p-4 max-h-[600px] overflow-y-auto"
+        id="kfs-document-content"
+        onLoad={() => setKfsLoaded(true)}
+      >
         <UserKFSDocument loanId={applicationId} />
       </div>
 
       <div className="flex justify-end gap-4">
         <Button
+          onClick={handleGenerateAndSave}
+          disabled={saving || generating || !kfsLoaded}
+          className="min-w-[200px]"
+        >
+          {generating ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Generating PDF...
+            </>
+          ) : (
+            <>
+              <FileText className="w-4 h-4 mr-2" />
+              Generate PDF & Send Email
+            </>
+          )}
+        </Button>
+        <Button
           onClick={onComplete}
-          disabled={saving}
+          disabled={saving || generating}
+          variant="outline"
           className="min-w-[120px]"
         >
           I've Reviewed

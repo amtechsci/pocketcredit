@@ -1275,6 +1275,20 @@ class ApiService {
   }
 
   /**
+   * Generate KFS PDF, upload to S3, save URL, and send email
+   */
+  async generateAndSaveKFS(loanId: number, htmlContent: string): Promise<ApiResponse<{
+    s3Key: string;
+    filename: string;
+    pdfSize: number;
+    emailSent: boolean;
+  }>> {
+    return this.request('POST', `/kfs/${loanId}/generate-and-save`, {
+      htmlContent
+    });
+  }
+
+  /**
    * Get loan calculation (same API used by admin and user)
    * @param loanId - Loan application ID
    * @param options - Optional calculation options

@@ -79,9 +79,10 @@ const requireAuth = async (req, res, next) => {
       return;
     }
 
-    // Allow 'active' and 'on_hold' users to authenticate
+    // Allow 'active', 'on_hold', and 'deleted' users to authenticate
     // Users on hold can view their dashboard but can't progress (enforced by checkHoldStatus middleware)
-    if (user.status !== 'active' && user.status !== 'on_hold') {
+    // Deleted users can view their deleted status message
+    if (user.status !== 'active' && user.status !== 'on_hold' && user.status !== 'deleted') {
       console.log('❌ User account is not active. Status:', user.status);
       return res.status(401).json({
         success: false,

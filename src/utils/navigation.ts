@@ -17,8 +17,14 @@ export const handleLogoClick = (
   user?: User | null
 ) => {
   if (isAuthenticated && user) {
-    // If profile is complete, go to dashboard
-    if (user.profile_completion_step >= 4) {
+    // If user is deleted, redirect to deleted status page
+    if (user.status === 'deleted') {
+      navigate('/deleted-status');
+    } else if (user.status === 'on_hold') {
+      // If user is on hold, redirect to hold status page
+      navigate('/hold-status');
+    } else if (user.profile_completion_step >= 4) {
+      // If profile is complete, go to dashboard
       navigate('/dashboard');
     } else {
       // If profile is incomplete, go to profile completion
@@ -37,6 +43,16 @@ export const handleLogoClick = (
  */
 export const getAuthenticatedRedirect = (user?: User | null): string => {
   if (!user) return '/dashboard';
+  
+  // If user is deleted, redirect to deleted status page
+  if (user.status === 'deleted') {
+    return '/deleted-status';
+  }
+  
+  // If user is on hold, redirect to hold status page
+  if (user.status === 'on_hold') {
+    return '/hold-status';
+  }
   
   // If profile is not complete, redirect to profile completion
   if (user.profile_completion_step < 4) {

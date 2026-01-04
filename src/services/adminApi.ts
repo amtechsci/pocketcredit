@@ -373,6 +373,10 @@ class AdminApiService {
     return this.request('POST', `/user-profile/${userId}/transactions`, transactionData);
   }
 
+  async updateTransaction(userId: string, transactionId: string, referenceNumber: string): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/user-profile/${userId}/transactions/${transactionId}`, { reference_number: referenceNumber });
+  }
+
   // Follow-ups Management
   async getUserFollowUps(userId: string): Promise<ApiResponse<any>> {
     return this.request('GET', `/user-profile/${userId}/follow-ups`);
@@ -1311,18 +1315,79 @@ class AdminApiService {
   }
 
   async emailKFSPDF(loanId: number, htmlContent: string, recipientEmail: string, recipientName: string): Promise<ApiResponse<any>> {
+    return this.request('POST', `/kfs/${loanId}/email-pdf`, {
+      htmlContent,
+      recipientEmail,
+      recipientName
+    });
+  }
+
+  /**
+   * Get Extension Letter data
+   */
+  async getExtensionLetter(loanId: number, transactionId?: number, extensionNumber?: number): Promise<ApiResponse<any>> {
     try {
-      const response = await axios.post(`/api/kfs/${loanId}/email-pdf`, {
-        htmlContent,
-        recipientEmail,
-        recipientName
-      }, {
+      const params = new URLSearchParams();
+      if (transactionId) params.append('transactionId', transactionId.toString());
+      if (extensionNumber) params.append('extensionNumber', extensionNumber.toString());
+      
+      const queryString = params.toString();
+      const url = `/api/kfs/${loanId}/extension-letter${queryString ? `?${queryString}` : ''}`;
+      
+      const response = await axios.get(url, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
         }
       });
       return response.data;
     } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate Extension Letter PDF
+   */
+  async generateExtensionLetterPDF(loanId: number, htmlContent: string, transactionId?: number, extensionNumber?: number): Promise<Blob> {
+    try {
+      const response = await axios.post(`/api/kfs/${loanId}/extension-letter/generate-pdf`, {
+        htmlContent,
+        transactionId,
+        extensionNumber
+      }, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        },
+        responseType: 'blob'
+      });
+      
+      // Check if response is actually a PDF (blob with PDF content type)
+      if (response.headers['content-type']?.includes('application/pdf')) {
+        return response.data;
+      }
+      
+      // If not PDF, might be an error message - try to parse it
+      if (response.headers['content-type']?.includes('application/json')) {
+        const text = await response.data.text();
+        const errorData = JSON.parse(text);
+        throw new Error(errorData.message || errorData.error || 'Failed to generate PDF');
+      }
+      
+      return response.data;
+    } catch (error: any) {
+      // If error response is a blob (JSON error sent as blob), try to parse it
+      if (error.response?.data instanceof Blob && error.response.status === 500) {
+        try {
+          const errorText = await error.response.data.text();
+          const errorData = JSON.parse(errorText);
+          throw new Error(errorData.message || errorData.error || 'Failed to generate PDF');
+        } catch (parseError) {
+          // If parsing fails, use original error
+          console.error('Error parsing error response:', parseError);
+        }
+      }
+      
       this.handleAuthError(error);
       throw error;
     }

@@ -53,7 +53,7 @@ export function HoldBanner({ holdInfo }: HoldBannerProps) {
           </AlertTitle>
           <AlertDescription className="mt-2 space-y-2">
             <p className="text-sm">
-              We will update you if it's unlocked.
+              We will update you if it is unlocked.
             </p>
             {holdInfo.hold_reason && (
               <div className="bg-white/50 p-3 rounded border border-red-200">

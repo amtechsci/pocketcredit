@@ -149,11 +149,30 @@ export function DynamicDashboardPage() {
     return combined;
   }, [appliedLoans, runningLoans]);
 
+  // Check if user is on hold and redirect
+  useEffect(() => {
+    if (user && user.status === 'on_hold') {
+      navigate('/hold-status', { replace: true });
+    }
+  }, [user, navigate]);
+
   // Load dashboard data
   const loadDashboardData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
+      
+      // If user is deleted, redirect to deleted status page
+      if (user?.status === 'deleted') {
+        navigate('/deleted-status', { replace: true });
+        return;
+      }
+      
+      // If user is on hold, redirect to hold status page
+      if (user?.status === 'on_hold') {
+        navigate('/hold-status', { replace: true });
+        return;
+      }
 
       // Priority-based routing: Check applications in priority order
       try {
@@ -294,13 +313,9 @@ export function DynamicDashboardPage() {
 
       if (response.status === 'success' && response.data) {
         // Check if user is deleted
-        if ((response.data as any).deleted) {
-          // Show deleted message and prevent any actions
-          setDashboardData({
-            ...response.data,
-            user: (response.data as any).user || {}
-          } as DashboardData);
-          setCanApplyForLoan(false);
+        if ((response.data as any).deleted || (response.data as any).deleted_message) {
+          // Redirect to deleted status page
+          navigate('/deleted-status', { replace: true });
           return;
         }
         

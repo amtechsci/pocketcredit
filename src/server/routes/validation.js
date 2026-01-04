@@ -144,6 +144,32 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       });
     }
 
+    // Ensure the status enum includes 'on_hold' and 'deleted' values
+    try {
+      await executeQuery(
+        `ALTER TABLE users MODIFY COLUMN status ENUM('active', 'inactive', 'suspended', 'on_hold', 'deleted') DEFAULT 'active'`
+      );
+      console.log('✅ Updated users.status enum to include on_hold and deleted');
+    } catch (enumError) {
+      // Ignore error if enum already has these values or if it's a different error
+      if (!enumError.message.includes('Duplicate value') && !enumError.message.includes('already exists')) {
+        console.log('ℹ️ Status enum update note:', enumError.message);
+      }
+    }
+
+    // Ensure the action_type enum includes all action types
+    try {
+      await executeQuery(
+        `ALTER TABLE user_validation_history MODIFY COLUMN action_type ENUM('need_document', 'process', 'not_process', 'cancel', 're_process', 'unhold', 'delete') NOT NULL`
+      );
+      console.log('✅ Updated user_validation_history.action_type enum to include all action types');
+    } catch (enumError) {
+      // Ignore error if enum already has these values or if it's a different error
+      if (!enumError.message.includes('Duplicate value') && !enumError.message.includes('already exists')) {
+        console.log('ℹ️ Action type enum update note:', enumError.message);
+      }
+    }
+
     // Insert validation history record
     const historyResult = await executeQuery(
       `INSERT INTO user_validation_history 
@@ -248,53 +274,79 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       console.log(`✅ User ${userId} marked as DELETED`);
       
 
-      // Get user's primary phone, PAN, and Aadhar before deletion
+      // Get user's primary phone and PAN before deletion
       const userData = await executeQuery(
-        `SELECT phone, pan_number, aadhar_number FROM users WHERE id = ?`,
+        `SELECT phone, pan_number FROM users WHERE id = ?`,
         [userId]
       );
       
       const primaryPhone = userData[0]?.phone || null;
       const panNumber = userData[0]?.pan_number || null;
-      const aadharNumber = userData[0]?.aadhar_number || null;
 
       // Delete user data except primary number, PAN, Aadhar, and loan data
-      // Delete addresses
-      await executeQuery(`DELETE FROM addresses WHERE user_id = ?`, [userId]);
+      // Note: Aadhaar is stored in verification_records table, so we'll preserve those records
+      // Wrap each delete in try-catch to handle missing tables gracefully
       
-      // Delete bank details (but keep loan-related bank info if exists in loan_applications)
-      await executeQuery(`DELETE FROM bank_details WHERE user_id = ?`, [userId]);
+      const deleteOperations = [
+        { query: `DELETE FROM addresses WHERE user_id = ?`, name: 'addresses' },
+        { query: `DELETE FROM bank_details WHERE user_id = ?`, name: 'bank_details' },
+        { query: `DELETE FROM \`references\` WHERE user_id = ?`, name: 'references' },
+        { query: `DELETE FROM student_documents WHERE user_id = ?`, name: 'student_documents' },
+        { query: `DELETE FROM kyc_verifications WHERE user_id = ?`, name: 'kyc_verifications' },
+        { query: `DELETE FROM user_notes WHERE user_id = ?`, name: 'user_notes' },
+        { query: `DELETE FROM user_follow_ups WHERE user_id = ?`, name: 'user_follow_ups' },
+        { query: `DELETE FROM user_bank_statements WHERE user_id = ?`, name: 'user_bank_statements' }
+      ];
+
+      for (const operation of deleteOperations) {
+        try {
+          await executeQuery(operation.query, [userId]);
+          console.log(`✅ Deleted from ${operation.name} for user ${userId}`);
+        } catch (error) {
+          // Ignore errors if table doesn't exist
+          if (error.code === 'ER_NO_SUCH_TABLE') {
+            console.log(`ℹ️ Table ${operation.name} doesn't exist, skipping...`);
+          } else {
+            console.error(`⚠️ Error deleting from ${operation.name}:`, error.message);
+            // Continue with other deletions even if one fails
+          }
+        }
+      }
       
-      // Delete references
-      await executeQuery(`DELETE FROM \`references\` WHERE user_id = ?`, [userId]);
-      
-      // Delete student documents (keep loan documents)
-      await executeQuery(`DELETE FROM student_documents WHERE user_id = ?`, [userId]);
-      
-      // Delete KYC verifications
-      await executeQuery(`DELETE FROM kyc_verifications WHERE user_id = ?`, [userId]);
-      
-      // Delete user notes
-      await executeQuery(`DELETE FROM user_notes WHERE user_id = ?`, [userId]);
-      
-      // Delete user follow-ups
-      await executeQuery(`DELETE FROM user_follow_ups WHERE user_id = ?`, [userId]);
-      
-      // Delete bank statements (except those linked to loans)
-      await executeQuery(`DELETE FROM user_bank_statements WHERE user_id = ?`, [userId]);
+      // Delete verification records EXCEPT PAN and Aadhaar (keep these as per requirements)
+      try {
+        await executeQuery(
+          `DELETE FROM verification_records WHERE user_id = ? AND document_type NOT IN ('pan', 'aadhaar', 'aadhar')`,
+          [userId]
+        );
+        console.log(`✅ Deleted verification records (except PAN/Aadhaar) for user ${userId}`);
+      } catch (error) {
+        if (error.code === 'ER_NO_SUCH_TABLE') {
+          console.log(`ℹ️ Table verification_records doesn't exist, skipping...`);
+        } else {
+          console.error(`⚠️ Error deleting verification records:`, error.message);
+        }
+      }
       
       // Clear user profile data but keep primary identifiers
-      await executeQuery(
-        `UPDATE users 
-         SET first_name = NULL, last_name = NULL, email = NULL, 
-             date_of_birth = NULL, gender = NULL, marital_status = NULL,
-             employment_type = NULL, company_name = NULL, designation = NULL,
-             monthly_income = NULL, work_experience = NULL, profile_completion_step = 0,
-             graduation_status = NULL, loan_limit = 0, credit_score = NULL,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-        [userId]
-      );
+      // Only update columns that exist in the users table
+      try {
+        await executeQuery(
+          `UPDATE users 
+           SET first_name = NULL, last_name = NULL, email = NULL, 
+               date_of_birth = NULL, gender = NULL, marital_status = NULL,
+               employment_type = NULL, company_name = NULL,
+               monthly_net_income = NULL, work_experience_range = NULL, profile_completion_step = 0,
+               graduation_status = NULL, loan_limit = 0, credit_score = NULL,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [userId]
+        );
+        console.log(`✅ Cleared user profile data for user ${userId}`);
+      } catch (error) {
+        console.error(`⚠️ Error clearing user profile data:`, error.message);
+        // Continue even if some columns don't exist
+      }
     }
 
     res.json({

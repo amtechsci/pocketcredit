@@ -12,6 +12,8 @@ import { AdminLogin } from './admin/AdminLogin';
 import ProfileCompletionPageSimple from './components/pages/ProfileCompletionPageSimple';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DynamicDashboardPage as DashboardPage } from './components/pages/DynamicDashboardPage';
+import { HoldStatusPage } from './components/pages/HoldStatusPage';
+import { DeletedStatusPage } from './components/pages/DeletedStatusPage';
 import { AuthOnlyRoute, ProtectedRoute } from './components/ProtectedRoute';
 import { PayEMIPage } from './components/pages/PayEMIPage';
 import { DynamicLoanDetailsPage as LoanDetailsPage } from './components/pages/DynamicLoanDetailsPage';
@@ -562,8 +564,28 @@ function AppContent() {
           )
         } />
 
-        <Route path="/dashboard" element={
+        <Route path="/hold-status" element={
           isAuthenticated ? (
+            <HoldStatusPage />
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+
+        <Route path="/deleted-status" element={
+          isAuthenticated ? (
+            <DeletedStatusPage />
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+
+        <Route path="/dashboard" element={
+          isAuthenticated && user?.status === 'deleted' ? (
+            <Navigate to="/deleted-status" replace />
+          ) : isAuthenticated && user?.status === 'on_hold' ? (
+            <Navigate to="/hold-status" replace />
+          ) : isAuthenticated ? (
             <DashboardLayout>
               <DashboardPage />
             </DashboardLayout>

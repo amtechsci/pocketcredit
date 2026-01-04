@@ -6,6 +6,7 @@ const { initializeDatabase, executeQuery } = require('../config/database');
 const { calculateLoanValues, calculateTotalDays, calculateCompleteLoanValues, calculateInterestDays, getNextSalaryDate, getSalaryDateForMonth, parseDateToString, getTodayString, calculateDaysBetween, formatDateToString } = require('../utils/loanCalculations');
 const pdfService = require('../services/pdfService');
 const emailService = require('../services/emailService');
+const { uploadGeneratedPDF } = require('../services/s3Service');
 
 /**
  * Format date to YYYY-MM-DD
@@ -62,7 +63,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         la.processed_due_date,
         la.last_calculated_at,
         la.user_id,
-        u.first_name, u.last_name, u.email, u.phone, u.date_of_birth,
+        u.first_name, u.last_name, u.email, u.personal_email, u.official_email, u.phone, u.date_of_birth,
         u.gender, u.marital_status, u.pan_number
       FROM loan_applications la
       INNER JOIN users u ON la.user_id = u.id
@@ -77,6 +78,33 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     }
 
     const loan = fullLoans[0];
+
+    // Get KYC verification data for masked Aadhar number
+    let maskedAadharNumber = 'N/A';
+    try {
+      const kycVerifications = await executeQuery(`
+        SELECT verification_data 
+        FROM kyc_verifications 
+        WHERE user_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `, [loan.user_id]);
+
+      if (kycVerifications && kycVerifications.length > 0) {
+        const verificationData = kycVerifications[0].verification_data;
+        let kycData = typeof verificationData === 'string' ? JSON.parse(verificationData) : verificationData;
+        
+        // Try to get masked Aadhar from various possible locations in the JSON structure
+        maskedAadharNumber = kycData?.kycData?.maskedAdharNumber || 
+                             kycData?.maskedAdharNumber || 
+                             kycData?.masked_adhar_number ||
+                             kycData?.uid ||
+                             'N/A';
+      }
+    } catch (kycError) {
+      console.error('Error fetching KYC verification for Aadhar:', kycError);
+      // Continue with 'N/A' if KYC data not found
+    }
 
     // Get address details
     const addresses = await executeQuery(`
@@ -572,15 +600,15 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       },
       borrower: {
         name: `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'N/A',
-        email: loan.email || 'N/A',
+        email: loan.personal_email || loan.official_email || loan.email || 'N/A',
         phone: loan.phone || 'N/A',
         date_of_birth: loan.date_of_birth ? new Date(loan.date_of_birth).toLocaleDateString('en-IN') : 'N/A',
         gender: loan.gender || 'N/A',
         marital_status: loan.marital_status || 'N/A',
         pan_number: loan.pan_number || 'N/A',
-        aadhar_number: loan.aadhar_number || 'N/A',
+        aadhar_number: maskedAadharNumber,
         pan: loan.pan_number || 'N/A',
-        aadhar: loan.aadhar_number || 'N/A',
+        aadhar: maskedAadharNumber,
         address: {
           line1: address.address_line1 || 'N/A',
           line2: address.address_line2 || '',
@@ -1318,6 +1346,851 @@ const isInternalCall = (req) => {
   return req.headers['x-internal-call'] === 'true' || req.query.internal === 'true';
 };
 
+/**
+ * GET /api/kfs/:loanId/extension-letter
+ * Get extension letter data for a loan
+ * Requires extension transaction ID or extension number
+ * NOTE: This route must be BEFORE /:loanId to avoid route conflicts
+ */
+router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { loanId } = req.params;
+    const { transactionId, extensionNumber } = req.query;
+
+    console.log('📄 Generating extension letter for loan ID:', loanId, 'transactionId:', transactionId, 'extensionNumber:', extensionNumber);
+
+    // Get loan details including user salary date
+    // NOTE: processed_due_date is TEXT and can contain JSON array for multi-EMI loans
+    // Don't use DATE() function on it as it will fail for JSON arrays
+    const loans = await executeQuery(`
+      SELECT 
+        la.*,
+        DATE(la.disbursed_at) as disbursed_at_date,
+        la.processed_due_date,
+        u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
+        u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number,
+        u.salary_date
+      FROM loan_applications la
+      INNER JOIN users u ON la.user_id = u.id
+      WHERE la.id = ?
+    `, [loanId]);
+
+    if (!loans || loans.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan application not found'
+      });
+    }
+
+    const loan = loans[0];
+
+    // Get principal amount and plan snapshot for calculations
+    const principal = parseFloat(loan.processed_amount || loan.sanctioned_amount || loan.loan_amount || 0);
+    
+    if (principal <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid loan principal amount'
+      });
+    }
+
+    // Get existing extensions to determine extension number
+    const existingExtensions = await executeQuery(`
+      SELECT * FROM transactions 
+      WHERE loan_application_id = ? 
+      AND transaction_type LIKE 'loan_extension%'
+      ORDER BY created_at ASC
+    `, [loanId]);
+
+    // Determine extension number (1st, 2nd, 3rd, 4th)
+    let extensionNumberFromType = existingExtensions.length + 1;
+    if (extensionNumber) {
+      extensionNumberFromType = parseInt(extensionNumber);
+    } else if (transactionId) {
+      // If transactionId provided, find the extension number from that transaction
+      const specificTransaction = await executeQuery(`
+        SELECT transaction_type FROM transactions 
+        WHERE id = ? AND loan_application_id = ?
+      `, [transactionId, loanId]);
+      
+      if (specificTransaction && specificTransaction.length > 0) {
+        const txType = specificTransaction[0].transaction_type;
+        if (txType === 'loan_extension_1st') extensionNumberFromType = 1;
+        else if (txType === 'loan_extension_2nd') extensionNumberFromType = 2;
+        else if (txType === 'loan_extension_3rd') extensionNumberFromType = 3;
+        else if (txType === 'loan_extension_4th') extensionNumberFromType = 4;
+      }
+    }
+
+    // Limit to maximum 4 extensions
+    if (extensionNumberFromType > 4) {
+      return res.status(400).json({
+        success: false,
+        message: 'Maximum 4 extensions allowed per loan'
+      });
+    }
+
+    console.log(`📊 Extension number: ${extensionNumberFromType} (${existingExtensions.length} existing extensions)`);
+
+    // Get plan snapshot early (needed for calculating due date if processed_due_date is null)
+    let planSnapshot = {};
+    try {
+      planSnapshot = typeof loan.plan_snapshot === 'string'
+        ? JSON.parse(loan.plan_snapshot)
+        : loan.plan_snapshot || {};
+    } catch (e) {
+      console.error('Error parsing plan_snapshot:', e);
+    }
+
+    // Calculate original due date (before any extensions)
+    // For multi-EMI loans, processed_due_date is a JSON array of EMI dates
+    // We need to get the LAST EMI date as the original due date
+    let originalDueDate = null;
+    
+    if (loan.processed_due_date) {
+      try {
+        // Try to parse as JSON array (for multi-EMI loans)
+        const parsedDueDate = typeof loan.processed_due_date === 'string' 
+          ? JSON.parse(loan.processed_due_date) 
+          : loan.processed_due_date;
+        
+        if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
+          // Multi-EMI loan: use the LAST EMI date as original due date
+          originalDueDate = parsedDueDate[parsedDueDate.length - 1];
+          console.log(`📅 Multi-EMI loan: Original due date (last EMI) = ${originalDueDate} from EMI dates:`, parsedDueDate);
+        } else if (typeof parsedDueDate === 'string') {
+          // Single payment loan: use the single date
+          originalDueDate = parsedDueDate;
+          console.log(`📅 Single payment loan: Original due date = ${originalDueDate}`);
+        }
+      } catch (e) {
+        // If parsing fails, treat as single date string
+        originalDueDate = loan.processed_due_date;
+        console.log(`📅 Parsed as single date string: Original due date = ${originalDueDate}`);
+      }
+    }
+    
+    // For multi-EMI loans, we need to get all EMI dates and shift them all forward
+    let allOriginalEmiDates = [];
+    let isMultiEmi = false;
+    
+    if (loan.processed_due_date) {
+      try {
+        const parsedDueDate = typeof loan.processed_due_date === 'string' 
+          ? JSON.parse(loan.processed_due_date) 
+          : loan.processed_due_date;
+        
+        if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
+          isMultiEmi = true;
+          allOriginalEmiDates = parsedDueDate;
+          originalDueDate = parsedDueDate[parsedDueDate.length - 1]; // Last EMI date
+          console.log(`📅 Multi-EMI loan: Found ${parsedDueDate.length} EMI dates, original due date (last EMI) = ${originalDueDate}`);
+        }
+      } catch (e) {
+        // If parsing fails, treat as single date
+      }
+    }
+    
+    // If processed_due_date is null, calculate it from plan snapshot and processed_at
+    // This is the same logic used when processing the loan
+    if (!originalDueDate && loan.processed_at) {
+      console.log(`📅 processed_due_date is null, calculating from plan snapshot and processed_at`);
+      
+      // Get plan snapshot if not already parsed
+      if (!planSnapshot || Object.keys(planSnapshot).length === 0) {
+        try {
+          planSnapshot = typeof loan.plan_snapshot === 'string'
+            ? JSON.parse(loan.plan_snapshot)
+            : loan.plan_snapshot || {};
+        } catch (e) {
+          console.error('Error parsing plan_snapshot:', e);
+          planSnapshot = {};
+        }
+      }
+      
+      const emiCount = parseInt(planSnapshot.emi_count || 0) || 1;
+      isMultiEmi = emiCount > 1;
+      const usesSalaryDate = planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true;
+      const salaryDate = loan.salary_date ? parseInt(loan.salary_date) : null;
+      
+      // Parse processed_at to get base date
+      const processedAtStr = parseDateToString(loan.processed_at);
+      if (processedAtStr) {
+        const baseDate = new Date(processedAtStr);
+        baseDate.setHours(0, 0, 0, 0);
+        
+        if (isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
+          // Multi-EMI with salary date: Calculate all EMI dates
+          let firstDueDate = getNextSalaryDate(baseDate, salaryDate);
+          const minDuration = planSnapshot.repayment_days || 15;
+          const firstDueDateStr = formatDateToString(firstDueDate);
+          const daysToFirstSalary = calculateDaysBetween(processedAtStr, firstDueDateStr);
+          
+          if (daysToFirstSalary < minDuration) {
+            firstDueDate = getSalaryDateForMonth(firstDueDateStr, salaryDate, 1);
+          }
+          
+          // Generate all EMI dates
+          for (let i = 0; i < emiCount; i++) {
+            const emiDate = getSalaryDateForMonth(firstDueDate, salaryDate, i);
+            allOriginalEmiDates.push(formatDateToString(emiDate));
+          }
+          
+          originalDueDate = allOriginalEmiDates[allOriginalEmiDates.length - 1];
+          console.log(`📅 Calculated ${allOriginalEmiDates.length} EMI dates from plan snapshot: ${allOriginalEmiDates.join(', ')}, original due date = ${originalDueDate}`);
+        } else if (!isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
+          // Single payment with salary date
+          const nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
+          const minDuration = planSnapshot.repayment_days || 15;
+          const nextSalaryDateStr = formatDateToString(nextSalaryDate);
+          const daysToSalary = calculateDaysBetween(processedAtStr, nextSalaryDateStr);
+          
+          if (daysToSalary < minDuration) {
+            originalDueDate = formatDateToString(getSalaryDateForMonth(nextSalaryDateStr, salaryDate, 1));
+          } else {
+            originalDueDate = nextSalaryDateStr;
+          }
+          console.log(`📅 Calculated single payment due date from plan snapshot: ${originalDueDate}`);
+        } else {
+          // Fixed days plan
+          const repaymentDays = planSnapshot.repayment_days || planSnapshot.total_duration_days || 15;
+          const dueDate = new Date(baseDate);
+          dueDate.setDate(dueDate.getDate() + repaymentDays);
+          dueDate.setHours(0, 0, 0, 0);
+          
+          if (isMultiEmi) {
+            // For multi-EMI fixed days, calculate all EMI dates
+            const daysPerEmi = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
+            const emiFrequency = planSnapshot.emi_frequency || 'monthly';
+            const daysBetween = daysPerEmi[emiFrequency] || 30;
+            
+            for (let i = 0; i < emiCount; i++) {
+              const emiDate = new Date(baseDate);
+              if (emiFrequency === 'monthly') {
+                emiDate.setMonth(emiDate.getMonth() + i);
+              } else {
+                emiDate.setDate(emiDate.getDate() + repaymentDays + (i * daysBetween));
+              }
+              emiDate.setHours(0, 0, 0, 0);
+              allOriginalEmiDates.push(formatDateToString(emiDate));
+            }
+            originalDueDate = allOriginalEmiDates[allOriginalEmiDates.length - 1];
+            console.log(`📅 Calculated ${allOriginalEmiDates.length} EMI dates (fixed days): ${allOriginalEmiDates.join(', ')}, original due date = ${originalDueDate}`);
+          } else {
+            originalDueDate = formatDateToString(dueDate);
+            console.log(`📅 Calculated single payment due date (fixed days): ${originalDueDate}`);
+          }
+        }
+      }
+    }
+    
+    // Final fallback to processed_at only if we still don't have a due date
+    if (!originalDueDate) {
+      originalDueDate = parseDateToString(loan.processed_at) || loan.processed_at;
+      console.log(`⚠️ Using processed_at as final fallback: Original due date = ${originalDueDate}`);
+    }
+    
+    // Get current due date (after all previous extensions)
+    // Use the calculated originalDueDate (which might have been calculated from plan snapshot)
+    let currentDueDate = originalDueDate;
+    let allCurrentEmiDates = isMultiEmi && allOriginalEmiDates.length > 0 ? [...allOriginalEmiDates] : [];
+    
+    if (existingExtensions && existingExtensions.length > 0) {
+      // Get the latest extension's new due date
+      const latestExtension = existingExtensions[existingExtensions.length - 1];
+      if (latestExtension.description) {
+        try {
+          const desc = typeof latestExtension.description === 'string' 
+            ? JSON.parse(latestExtension.description) 
+            : latestExtension.description;
+          
+          // For multi-EMI, check if extension stored all new EMI dates
+          if (isMultiEmi && desc.new_emi_dates && Array.isArray(desc.new_emi_dates)) {
+            allCurrentEmiDates = desc.new_emi_dates;
+            currentDueDate = desc.new_emi_dates[desc.new_emi_dates.length - 1];
+          } else {
+            currentDueDate = desc.new_due_date || desc.extension_period_till || currentDueDate;
+          }
+        } catch (e) {
+          // If parsing fails, use current due date
+        }
+      }
+    }
+
+    // Get plan snapshot to check if it uses salary date calculation
+    // (May have been parsed earlier when calculating originalDueDate from plan snapshot)
+    if (!planSnapshot || Object.keys(planSnapshot).length === 0) {
+      try {
+        planSnapshot = typeof loan.plan_snapshot === 'string'
+          ? JSON.parse(loan.plan_snapshot)
+          : loan.plan_snapshot || {};
+      } catch (e) {
+        console.error('Error parsing plan_snapshot:', e);
+        planSnapshot = {};
+      }
+    }
+    
+    const usesSalaryDate = planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true;
+    const salaryDate = loan.salary_date ? parseInt(loan.salary_date) : null;
+    
+    console.log(`📅 Extension calculation method: ${usesSalaryDate ? 'Salary Date Based' : 'Fixed Days'}`);
+    if (usesSalaryDate && salaryDate) {
+      console.log(`   Salary Date: ${salaryDate}`);
+    }
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const currentDueDateObj = currentDueDate ? new Date(currentDueDate) : today;
+    currentDueDateObj.setHours(0, 0, 0, 0);
+    
+    let newDueDate;
+    let allNewEmiDates = [];
+    let extensionPeriodDays = 15; // Default for fixed days
+    
+    // Calculate new due date based on plan type
+    if (usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
+      // Salary Date Based Plan: Shift to next month's salary date
+      if (isMultiEmi && allCurrentEmiDates.length > 0) {
+        // Multi-EMI: Each EMI date shifts to next month's salary date
+        allNewEmiDates = allCurrentEmiDates.map(emiDate => {
+          const emiDateObj = new Date(emiDate);
+          emiDateObj.setHours(0, 0, 0, 0);
+          // Get next month's salary date from this EMI date
+          const nextMonthSalaryDate = getSalaryDateForMonth(emiDateObj, salaryDate, 1);
+          return formatDateLocal(nextMonthSalaryDate);
+        });
+        // New due date is the last new EMI date
+        if (allNewEmiDates.length > 0) {
+          newDueDate = new Date(allNewEmiDates[allNewEmiDates.length - 1]);
+          newDueDate.setHours(0, 0, 0, 0);
+        }
+        console.log(`📅 Multi-EMI extension (Salary Date): Shifting ${allCurrentEmiDates.length} EMI dates to next month's salary date`);
+        console.log(`   Original EMI dates: ${allCurrentEmiDates.join(', ')}`);
+        console.log(`   New EMI dates: ${allNewEmiDates.join(', ')}`);
+      } else {
+        // Single payment: Shift to next month's salary date from current due date
+        const nextMonthSalaryDate = getSalaryDateForMonth(currentDueDateObj, salaryDate, 1);
+        newDueDate = nextMonthSalaryDate;
+        newDueDate.setHours(0, 0, 0, 0);
+        console.log(`📅 Single payment extension (Salary Date): ${formatDateLocal(currentDueDateObj)} → ${formatDateLocal(newDueDate)}`);
+      }
+    } else {
+      // Fixed Days Plan: Original Due Date + 15 days (always, regardless of today's date)
+      if (isMultiEmi && allCurrentEmiDates.length > 0) {
+        // Multi-EMI: All EMI dates shift forward by 15 days
+        allNewEmiDates = allCurrentEmiDates.map(emiDate => {
+          const emiDateObj = new Date(emiDate);
+          emiDateObj.setHours(0, 0, 0, 0);
+          const newEmiDate = new Date(emiDateObj);
+          newEmiDate.setDate(newEmiDate.getDate() + extensionPeriodDays);
+          return formatDateLocal(newEmiDate);
+        });
+        // New due date is the last new EMI date
+        if (allNewEmiDates.length > 0) {
+          newDueDate = new Date(allNewEmiDates[allNewEmiDates.length - 1]);
+          newDueDate.setHours(0, 0, 0, 0);
+        }
+        console.log(`📅 Multi-EMI extension (Fixed Days): Shifting ${allCurrentEmiDates.length} EMI dates forward by ${extensionPeriodDays} days`);
+        console.log(`   Original EMI dates: ${allCurrentEmiDates.join(', ')}`);
+        console.log(`   New EMI dates: ${allNewEmiDates.join(', ')}`);
+      } else {
+        // Single payment: Original Due Date + 15 days (always, regardless of today)
+        newDueDate = new Date(currentDueDateObj);
+        newDueDate.setDate(newDueDate.getDate() + extensionPeriodDays);
+        newDueDate.setHours(0, 0, 0, 0);
+        console.log(`📅 Single payment extension (Fixed Days): ${formatDateLocal(currentDueDateObj)} + ${extensionPeriodDays} days = ${formatDateLocal(newDueDate)}`);
+      }
+    }
+    
+    const extensionPeriodTill = formatDateLocal(newDueDate);
+
+    // Calculate extension fee: 21% of principal
+    const extensionFeePercent = 0.21; // 21%
+    const extensionFee = Math.round(principal * extensionFeePercent * 100) / 100;
+
+    // Calculate GST: 18% of extension fee
+    const GST_RATE = 0.18; // 18% GST
+    const gstAmount = Math.round(extensionFee * GST_RATE * 100) / 100;
+
+    // Calculate interest till date
+    // Interest should be calculated from processed_at date to today
+    // processed_at date is day 1, so days = (today - processed_at) + 1
+    let interestTillDate = 0;
+    
+    // Get interest rate from plan snapshot (already parsed above)
+    const interestRatePerDay = parseFloat(planSnapshot.interest_percent_per_day || 0.001); // Default 0.1% per day
+    
+    // Use processed_at as the start date (processed_at is day 1)
+    // If processed_at is not available, use disbursed_at or created_at
+    let processedDate;
+    if (loan.processed_at) {
+      processedDate = new Date(loan.processed_at);
+    } else if (loan.disbursed_at) {
+      processedDate = new Date(loan.disbursed_at);
+    } else {
+      processedDate = new Date(loan.created_at);
+    }
+    
+    // Normalize dates to start of day (ignore time)
+    processedDate.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+    
+    // Calculate days from processed_at to today (inclusive counting)
+    // processed_at date is day 1, so: days = (today - processed_at) + 1
+    // Use the same calculation as cron job: Math.ceil((end - start) / msPerDay) + 1
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const days = Math.ceil((today - processedDate) / msPerDay) + 1;
+    
+    // Ensure days is at least 1 (if processed_at is today, days = 1)
+    const finalDays = Math.max(1, days);
+    
+    // Calculate total interest from processed_at to today: Principal × Interest Rate Per Day × Days
+    interestTillDate = Math.round(principal * interestRatePerDay * finalDays * 100) / 100;
+    
+    console.log(`💰 Interest calculation:
+      Principal: ₹${principal}
+      Interest Rate Per Day: ${interestRatePerDay} (${(interestRatePerDay * 100).toFixed(4)}%)
+      Processed Date: ${formatDateLocal(processedDate)} (Day 1)
+      Today: ${formatDateLocal(today)}
+      Raw Days Calculation: ${(today - processedDate) / msPerDay}
+      Days: ${finalDays} (inclusive, processed_at is day 1)
+      Interest Calculation: ₹${principal} × ${interestRatePerDay} × ${finalDays} = ₹${principal * interestRatePerDay * finalDays}
+      Interest Till Date (rounded): ₹${interestTillDate}`);
+
+    // Calculate total extension amount: Extension Fee + GST + Interest Till Date
+    // This is what user pays NOW for the extension (transactional charge)
+    const totalExtensionAmount = Math.round((extensionFee + gstAmount + interestTillDate) * 100) / 100;
+
+    // Calculate outstanding loan balance CORRECTLY
+    // Outstanding Balance = Principal + Post Service Fee + GST on Post Service Fee
+    // Extension charges (extension fee, GST on extension fee, interest till date) are NOT part of outstanding balance
+    // They are settled separately when user pays for extension
+    
+    // Get EMI count to determine if this is a multi-EMI loan
+    const emiCount = parseInt(planSnapshot.emi_count || 0) || (isMultiEmi && allOriginalEmiDates.length > 0 ? allOriginalEmiDates.length : 1);
+    const isMultiEmiLoan = emiCount > 1;
+    
+    console.log(`📊 Loan type: ${isMultiEmiLoan ? `Multi-EMI (${emiCount} EMIs)` : 'Single Payment'}`);
+    
+    // Get post service fee from processed values
+    // IMPORTANT: For multi-EMI loans, processed_post_service_fee is the BASE fee per EMI (needs multiplication)
+    // For single payment loans, processed_post_service_fee is the total fee
+    let postServiceFee = parseFloat(loan.processed_post_service_fee || 0);
+    // Track if we got base fee (per EMI) or total fee
+    // For multi-EMI loans, processed_post_service_fee is typically base fee
+    let isBaseFee = isMultiEmiLoan && postServiceFee > 0; // If multi-EMI and we have processed_post_service_fee, it's base
+    
+    // If processed_post_service_fee is 0 or missing, try to get from fees_breakdown
+    if (postServiceFee === 0 && loan.fees_breakdown) {
+      try {
+        const feesBreakdown = typeof loan.fees_breakdown === 'string' 
+          ? JSON.parse(loan.fees_breakdown) 
+          : loan.fees_breakdown;
+        
+        if (Array.isArray(feesBreakdown)) {
+          // Find post service fee in fees_breakdown
+          const postServiceFeeObj = feesBreakdown.find(fee => 
+            (fee.fee_name && fee.fee_name.toLowerCase().includes('post service')) ||
+            (fee.name && fee.name.toLowerCase().includes('post service'))
+          );
+          
+          if (postServiceFeeObj) {
+            // Use fee_amount if available, otherwise calculate from principal and fee_percent
+            if (postServiceFeeObj.base_fee_amount) {
+              // Prefer base_fee_amount if available (for multi-EMI loans)
+              postServiceFee = parseFloat(postServiceFeeObj.base_fee_amount);
+              isBaseFee = true;
+              console.log(`📊 Found base post service fee from fees_breakdown.base_fee_amount: ₹${postServiceFee} (base per EMI)`);
+            } else if (postServiceFeeObj.fee_amount) {
+              // Use fee_amount, but check if it's base or total
+              postServiceFee = parseFloat(postServiceFeeObj.fee_amount);
+              // For multi-EMI loans, if there's no base_fee_amount, fee_amount might already be total
+              // But if it's a reasonable single-EMI amount, it might be base
+              isBaseFee = false; // Default to false (assume total), will check later
+              console.log(`📊 Found post service fee from fees_breakdown.fee_amount: ₹${postServiceFee} (checking if base or total)`);
+            } else if (postServiceFeeObj.fee_percent && principal > 0) {
+              postServiceFee = Math.round((principal * parseFloat(postServiceFeeObj.fee_percent) / 100) * 100) / 100;
+              isBaseFee = true; // Calculated from percent is always base per EMI
+              console.log(`📊 Calculated post service fee from fees_breakdown.fee_percent: ₹${postServiceFee} (base per EMI)`);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Error parsing fees_breakdown for post service fee:', e);
+      }
+    }
+    
+    // If still 0, try to calculate from plan snapshot fees
+    if (postServiceFee === 0 && planSnapshot.fees && Array.isArray(planSnapshot.fees)) {
+      const postServiceFeeObj = planSnapshot.fees.find(fee => 
+        fee.fee_name && fee.fee_name.toLowerCase().includes('post service') &&
+        fee.application_method === 'add_to_total'
+      );
+      
+      if (postServiceFeeObj && postServiceFeeObj.fee_percent && principal > 0) {
+        postServiceFee = Math.round((principal * parseFloat(postServiceFeeObj.fee_percent) / 100) * 100) / 100;
+        isBaseFee = true; // This is base fee per EMI
+        console.log(`📊 Calculated post service fee from plan snapshot: ₹${postServiceFee} (${postServiceFeeObj.fee_percent}% of ₹${principal}) - base per EMI`);
+      }
+    }
+    
+    // For multi-EMI loans, multiply post service fee by EMI count
+    // processed_post_service_fee stores BASE fee per EMI for multi-EMI loans
+    // fees_breakdown might have base_fee_amount (base) or fee_amount (total)
+    // plan snapshot fees are always base (per EMI)
+    if (isMultiEmiLoan && isBaseFee && postServiceFee > 0) {
+      // We have base fee - multiply by EMI count
+      const basePostServiceFee = postServiceFee;
+      postServiceFee = Math.round(postServiceFee * emiCount * 100) / 100;
+      console.log(`📊 Multi-EMI loan: Multiplying post service fee by EMI count: ₹${basePostServiceFee} × ${emiCount} = ₹${postServiceFee}`);
+    } else if (isMultiEmiLoan && !isBaseFee && postServiceFee > 0) {
+      // We got it from fees_breakdown.fee_amount (without base_fee_amount)
+      // Check if it seems like it's already total or base
+      // If base_fee_amount was available, we would have used it and set isBaseFee = true
+      // So if we're here, fee_amount might already be total, but let's check
+      const feePercentOfPrincipal = (postServiceFee / principal) * 100;
+      // If it's in the typical range for a single EMI fee (5-15% of principal), it's probably base
+      if (feePercentOfPrincipal >= 5 && feePercentOfPrincipal <= 15) {
+        // Looks like base fee per EMI - multiply
+        const basePostServiceFee = postServiceFee;
+        postServiceFee = Math.round(postServiceFee * emiCount * 100) / 100;
+        console.log(`📊 Multi-EMI loan: Detected base fee from fees_breakdown (${feePercentOfPrincipal.toFixed(2)}% of principal), multiplying: ₹${basePostServiceFee} × ${emiCount} = ₹${postServiceFee}`);
+      } else {
+        console.log(`📊 Multi-EMI loan: Post service fee from fees_breakdown appears to already be total (${feePercentOfPrincipal.toFixed(2)}% of principal), not multiplying`);
+      }
+    }
+    
+    // Calculate GST on Post Service Fee (18% of post service fee)
+    // Note: processed_gst is total GST (on both processing fee and post service fee)
+    // But outstanding balance only includes GST on post service fee
+    const GST_RATE_FOR_FEES = 0.18; // 18% GST
+    const postServiceFeeGST = Math.round(postServiceFee * GST_RATE_FOR_FEES * 100) / 100;
+    
+    // Outstanding balance BEFORE extension = Principal + Post Service Fee + GST on Post Service Fee
+    const outstandingLoanBalance = Math.round((principal + postServiceFee + postServiceFeeGST) * 100) / 100;
+    
+    console.log(`💰 Outstanding Balance Calculation:
+      Principal: ₹${principal}
+      Post Service Fee: ₹${postServiceFee}
+      Post Service Fee GST (18%): ₹${postServiceFeeGST}
+      Outstanding Balance: ₹${outstandingLoanBalance}`);
+    
+    // Outstanding balance AFTER extension remains the SAME (extension is date shift, not balance mutation)
+    // Extension payment is a separate transactional charge, not added to outstanding
+    const outstandingLoanBalanceAfterExtension = outstandingLoanBalance;
+
+    // Calculate extension period according to business logic:
+    // For single payment: Extension Period = New Due Date - Original Due Date (before any extensions)
+    // For multi-EMI salary date-based: Extension Period = Gap between first and second EMI (e.g., 28 days)
+    // For multi-EMI fixed days: Extension Period = 15 days (fixed)
+    const originalDueDateObj = originalDueDate ? new Date(originalDueDate) : new Date(loan.processed_at);
+    originalDueDateObj.setHours(0, 0, 0, 0);
+    const newDueDateObj = new Date(newDueDate);
+    newDueDateObj.setHours(0, 0, 0, 0);
+    
+    let extensionPeriodDaysCalculated;
+    if (isMultiEmi && allOriginalEmiDates.length > 0) {
+      if (usesSalaryDate && allOriginalEmiDates.length >= 2) {
+        // For salary date-based multi-EMI: Extension Period = Gap between first and second EMI
+        const firstEmiDate = new Date(allOriginalEmiDates[0]);
+        firstEmiDate.setHours(0, 0, 0, 0);
+        const secondEmiDate = new Date(allOriginalEmiDates[1]);
+        secondEmiDate.setHours(0, 0, 0, 0);
+        extensionPeriodDaysCalculated = Math.ceil((secondEmiDate - firstEmiDate) / (1000 * 60 * 60 * 24));
+        console.log(`📅 Multi-EMI salary date-based: Extension period = gap between first and second EMI: ${formatDateLocal(firstEmiDate)} to ${formatDateLocal(secondEmiDate)} = ${extensionPeriodDaysCalculated} days`);
+      } else {
+        // For fixed days multi-EMI: Extension Period = 15 days (fixed)
+        extensionPeriodDaysCalculated = 15;
+        console.log(`📅 Multi-EMI fixed days: Extension period = 15 days (fixed)`);
+      }
+    } else {
+      // For single payment: Extension Period = New Due Date - Original Due Date
+      extensionPeriodDaysCalculated = Math.ceil((newDueDateObj - originalDueDateObj) / (1000 * 60 * 60 * 24));
+    }
+    
+    // Ensure extension period is at least 1 day
+    const finalExtensionPeriodDays = Math.max(1, extensionPeriodDaysCalculated);
+
+    // Calculate total tenure days (from disbursement to new due date)
+    // Use parseDateToString and calculateDaysBetween for consistent inclusive day counting
+    const disbursementDateStr = parseDateToString(loan.disbursed_at || loan.processed_at);
+    const newDueDateStr = parseDateToString(newDueDate);
+    
+    // Create disbursementDateObj for console.log (always needed)
+    const disbursementDateObj = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date(loan.processed_at);
+    disbursementDateObj.setHours(0, 0, 0, 0);
+    
+    let totalTenureDays = 0;
+    if (disbursementDateStr && newDueDateStr) {
+      // Use calculateDaysBetween for inclusive day counting (both start and end dates count)
+      totalTenureDays = calculateDaysBetween(disbursementDateStr, newDueDateStr);
+      console.log(`📅 Total tenure calculation: ${disbursementDateStr} to ${newDueDateStr} = ${totalTenureDays} days (inclusive)`);
+    } else {
+      // Fallback to old calculation if date parsing fails
+      totalTenureDays = Math.ceil((newDueDateObj - disbursementDateObj) / (1000 * 60 * 60 * 24)) + 1;
+      console.log(`⚠️ Using fallback total tenure calculation: ${totalTenureDays} days`);
+    }
+
+    console.log(`📅 Extension Period & Total Tenure Calculation:
+      Original Due Date (before any extensions): ${formatDateLocal(originalDueDateObj)}
+      ${isMultiEmi ? `Original EMI Dates: ${allOriginalEmiDates.join(', ')}` : ''}
+      ${isMultiEmi ? `New EMI Dates: ${allNewEmiDates.join(', ')}` : ''}
+      New Due Date (after this extension): ${formatDateLocal(newDueDateObj)}
+      Extension Period: ${finalExtensionPeriodDays} days ${isMultiEmi ? '(fixed 15 days for multi-EMI)' : '(New Due Date - Original Due Date for single payment)'}
+      Disbursement Date: ${formatDateLocal(disbursementDateObj)}
+      Total Tenure: ${totalTenureDays} days (from disbursement to new due date)`);
+
+    console.log(`💰 Extension calculation:
+      Principal: ₹${principal}
+      Post Service Fee: ₹${postServiceFee}
+      Post Service Fee GST: ₹${postServiceFeeGST}
+      Outstanding Balance (Principal + Post Service Fee + GST): ₹${outstandingLoanBalance}
+      Extension Fee (21%): ₹${extensionFee}
+      GST (18% of extension fee): ₹${gstAmount}
+      Interest Till Date: ₹${interestTillDate}
+      Total Extension Payment (transactional charge): ₹${totalExtensionAmount}
+      Outstanding Balance After Extension: ₹${outstandingLoanBalanceAfterExtension} (UNCHANGED - extension is date shift, not balance mutation)
+      Total Tenure Days: ${totalTenureDays}`);
+
+    // Get address details
+    const addresses = await executeQuery(`
+      SELECT * FROM addresses 
+      WHERE user_id = ? AND is_primary = 1 
+      LIMIT 1
+    `, [loan.user_id]);
+    const address = addresses[0] || {};
+
+    // Get company details (same as KFS)
+    const companyData = {
+      name: 'SPHEETI FINTECH PRIVATE LIMITED',
+      cin: 'U65929MH2018PTC306088',
+      rbi_registration: 'N-13.02361',
+      address: 'Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI, MAHARASHTRA, 421001'
+    };
+
+    // Prepare extension letter data
+    const extensionLetterData = {
+      company: companyData,
+      loan: {
+        id: loan.id,
+        application_number: loan.application_number,
+        sanctioned_amount: loan.sanctioned_amount || loan.loan_amount || loan.principal_amount || 0,
+        disbursed_at: loan.disbursed_at,
+        processed_due_date: loan.processed_due_date
+      },
+      borrower: {
+        name: `${loan.first_name || ''} ${loan.last_name || ''}`.trim(),
+        first_name: loan.first_name,
+        last_name: loan.last_name,
+        email: loan.email,
+        phone: loan.phone,
+        pan_number: loan.pan_number,
+        address: address
+      },
+      extension: {
+        extension_number: extensionNumberFromType,
+        extension_availed_date: formatDateLocal(today),
+        extension_period_till: extensionPeriodTill,
+        extension_fee: extensionFee,
+        gst_amount: gstAmount,
+        interest_till_date: interestTillDate,
+        penalty: 0, // No penalty for extension
+        total_extension_amount: totalExtensionAmount,
+        original_due_date: parseDateToString(originalDueDate) || originalDueDate,
+        new_due_date: extensionPeriodTill,
+        extension_period_days: finalExtensionPeriodDays, // Days added by this extension (15 days for multi-EMI, calculated for single payment)
+        outstanding_loan_balance: outstandingLoanBalance,
+        outstanding_loan_balance_after_extension: outstandingLoanBalanceAfterExtension,
+        total_tenure_days: totalTenureDays, // Total tenure from disbursement to new due date
+        // For multi-EMI loans, include all new EMI dates
+        ...(isMultiEmi && allNewEmiDates.length > 0 ? {
+          original_emi_dates: allOriginalEmiDates,
+          new_emi_dates: allNewEmiDates
+        } : {}),
+        reason: 'Loan tenure extended as per borrower request.'
+      },
+      generated_at: new Date().toISOString()
+    };
+
+    res.json({
+      success: true,
+      data: extensionLetterData
+    });
+
+  } catch (error) {
+    console.error('❌ Error generating extension letter:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate extension letter',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/kfs/:loanId/extension-letter/generate-pdf
+ * Generate and download PDF for Extension Letter
+ * NOTE: This route must be BEFORE /:loanId to avoid route conflicts
+ */
+router.post('/:loanId/extension-letter/generate-pdf', authenticateAdmin, async (req, res) => {
+  try {
+    const { loanId } = req.params;
+    const { htmlContent, transactionId, extensionNumber } = req.body;
+
+    if (!htmlContent) {
+      return res.status(400).json({
+        success: false,
+        message: 'HTML content is required'
+      });
+    }
+
+    if (!loanId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Loan ID is required'
+      });
+    }
+
+    console.log('📄 Generating Extension Letter PDF for loan ID:', loanId);
+
+    // Get loan data for filename
+    let applicationNumber = null;
+    let extensionNum = 1;
+    try {
+      const db = await initializeDatabase();
+      
+      // Get application number
+      const [loans] = await db.execute(
+        'SELECT application_number FROM loan_applications WHERE id = ?',
+        [loanId]
+      );
+
+      if (!loans || loans.length === 0 || !loans[0]) {
+        return res.status(404).json({
+          success: false,
+          message: 'Loan not found'
+        });
+      }
+
+      applicationNumber = loans[0].application_number || `LOAN_${loanId}`;
+
+      // Get extension number from transaction
+      if (transactionId) {
+        const [transactions] = await db.execute(
+          'SELECT transaction_type FROM transactions WHERE id = ? AND loan_application_id = ?',
+          [transactionId, loanId]
+        );
+        if (transactions && transactions.length > 0) {
+          const txType = transactions[0].transaction_type;
+          if (txType === 'loan_extension_1st') extensionNum = 1;
+          else if (txType === 'loan_extension_2nd') extensionNum = 2;
+          else if (txType === 'loan_extension_3rd') extensionNum = 3;
+          else if (txType === 'loan_extension_4th') extensionNum = 4;
+        }
+      } else if (extensionNumber) {
+        extensionNum = parseInt(extensionNumber) || 1;
+      }
+    } catch (dbError) {
+      console.error('❌ Database error:', dbError);
+      applicationNumber = `LOAN_${loanId}`;
+    }
+
+    const ordinals = ['', '1st', '2nd', '3rd', '4th'];
+    const filename = `Loan_Tenure_Extension_${ordinals[extensionNum] || extensionNum}_${applicationNumber}.pdf`;
+
+    // Validate PDF service is available
+    if (!pdfService) {
+      console.error('❌ PDF service is not available');
+      return res.status(500).json({
+        success: false,
+        message: 'PDF service not initialized'
+      });
+    }
+
+    // Generate PDF
+    let pdfResult;
+    try {
+      if (typeof htmlContent !== 'string' || htmlContent.trim().length === 0) {
+        throw new Error('Invalid HTML content provided');
+      }
+
+      console.log('📄 Starting Extension Letter PDF generation, HTML length:', htmlContent.length);
+      pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
+      
+      if (!pdfResult) {
+        throw new Error('PDF generation returned null or undefined');
+      }
+      
+      let pdfBuffer;
+      if (Buffer.isBuffer(pdfResult)) {
+        pdfBuffer = pdfResult;
+      } else if (pdfResult.buffer) {
+        pdfBuffer = pdfResult.buffer;
+      } else {
+        throw new Error('PDF generation returned invalid result structure');
+      }
+      
+      if (!Buffer.isBuffer(pdfBuffer)) {
+        if (pdfBuffer instanceof Uint8Array || pdfBuffer.constructor?.name === 'Uint8Array') {
+          pdfBuffer = Buffer.from(pdfBuffer);
+        } else {
+          throw new Error('PDF generation returned invalid buffer type');
+        }
+      }
+      
+      pdfResult.buffer = pdfBuffer;
+      console.log('✅ Extension Letter PDF generated successfully, buffer size:', pdfBuffer.length);
+    } catch (pdfError) {
+      console.error('❌ Extension Letter PDF generation error:', pdfError);
+      if (!res.headersSent) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to generate PDF',
+          error: pdfError.message || 'PDF generation failed'
+        });
+      }
+      return;
+    }
+
+    console.log('📤 Sending Extension Letter PDF, size:', pdfResult.buffer.length, 'bytes');
+
+    // Set headers for download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfResult.buffer.length);
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    // Send PDF buffer directly
+    res.end(pdfResult.buffer, 'binary');
+
+    console.log('✅ Extension Letter PDF sent successfully');
+
+  } catch (error) {
+    console.error('❌ Error generating Extension Letter PDF:', error);
+    
+    if (!res.headersSent) {
+      const accepts = req.headers.accept || '';
+      if (accepts.includes('application/json')) {
+        res.status(500).json({
+          success: false,
+          message: 'Failed to generate Extension Letter PDF',
+          error: error.message || 'Unknown error occurred'
+        });
+      } else {
+        res.status(500).setHeader('Content-Type', 'text/plain');
+        res.send(`Error generating Extension Letter PDF: ${error.message || 'Unknown error occurred'}`);
+      }
+    }
+  }
+});
+
+/**
+ * GET /api/kfs/:loanId
+ * Admin endpoint to get KFS data for a loan
+ */
 router.get('/:loanId', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
@@ -1336,7 +2209,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         la.disbursal_amount,
         la.user_id,
         la.user_bank_id,
-        u.first_name, u.last_name, u.email, u.phone, u.date_of_birth,
+        u.first_name, u.last_name, u.email, u.personal_email, u.official_email, u.phone, u.date_of_birth,
         u.gender, u.marital_status, u.pan_number
       FROM loan_applications la
       INNER JOIN users u ON la.user_id = u.id
@@ -1351,6 +2224,33 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     }
 
     const loan = loans[0];
+
+    // Get KYC verification data for masked Aadhar number
+    let maskedAadharNumber = 'N/A';
+    try {
+      const kycVerifications = await executeQuery(`
+        SELECT verification_data 
+        FROM kyc_verifications 
+        WHERE user_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `, [loan.user_id]);
+
+      if (kycVerifications && kycVerifications.length > 0) {
+        const verificationData = kycVerifications[0].verification_data;
+        let kycData = typeof verificationData === 'string' ? JSON.parse(verificationData) : verificationData;
+        
+        // Try to get masked Aadhar from various possible locations in the JSON structure
+        maskedAadharNumber = kycData?.kycData?.maskedAdharNumber || 
+                             kycData?.maskedAdharNumber || 
+                             kycData?.masked_adhar_number ||
+                             kycData?.uid ||
+                             'N/A';
+      }
+    } catch (kycError) {
+      console.error('Error fetching KYC verification for Aadhar:', kycError);
+      // Continue with 'N/A' if KYC data not found
+    }
 
     // Get address details
     const addresses = await executeQuery(`
@@ -2109,15 +3009,15 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         name: `${loan.first_name} ${loan.last_name || ''}`.trim(),
         father_name: 'N/A', // Column doesn't exist yet
         mother_name: 'N/A', // Column doesn't exist yet
-        email: loan.email || 'N/A',
+        email: loan.personal_email || loan.official_email || loan.email || 'N/A',
         phone: loan.phone || 'N/A',
         date_of_birth: loan.date_of_birth,
         gender: loan.gender || 'N/A',
         marital_status: loan.marital_status || 'N/A',
         pan_number: loan.pan_number || 'N/A',
-        aadhar_number: loan.aadhar_number || 'N/A',
+        aadhar_number: maskedAadharNumber,
         pan: loan.pan_number || 'N/A',
-        aadhar: loan.aadhar_number || 'N/A',
+        aadhar: maskedAadharNumber,
         address: {
           line1: address.address_line1 || 'N/A',
           line2: address.address_line2 || '',
@@ -2794,6 +3694,163 @@ router.get('/:loanId/email-history', authenticateAdmin, async (req, res) => {
     });
   }
 });
+
+/**
+ * POST /api/kfs/:loanId/generate-and-save
+ * Generate KFS PDF, upload to S3, save URL, and send email
+ * No e-signature needed - just PDF generation and storage
+ */
+router.post('/:loanId/generate-and-save', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { loanId } = req.params;
+    const userId = req.userId;
+    const { htmlContent } = req.body;
+
+    console.log('📄 Generating KFS PDF for loan ID:', loanId, 'User ID:', userId);
+
+    // Verify loan belongs to user
+    const loans = await executeQuery(`
+      SELECT 
+        la.id, la.user_id, la.application_number, la.loan_amount, la.status,
+        u.email, u.first_name, u.last_name, u.personal_email, u.official_email
+      FROM loan_applications la
+      INNER JOIN users u ON la.user_id = u.id
+      WHERE la.id = ? AND la.user_id = ?
+    `, [loanId, userId]);
+
+    if (!loans || loans.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan application not found or access denied'
+      });
+    }
+
+    const loan = loans[0];
+
+    if (!htmlContent) {
+      return res.status(400).json({
+        success: false,
+        message: 'HTML content is required to generate PDF'
+      });
+    }
+
+    // Generate PDF
+    const filename = `KFS_${loan.application_number}.pdf`;
+    console.log('📄 Generating KFS PDF:', filename);
+    
+    let pdfResult;
+    try {
+      pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
+      console.log('✅ PDF generated successfully, size:', pdfResult.buffer.length, 'bytes');
+    } catch (pdfError) {
+      console.error('❌ Error generating PDF:', pdfError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to generate PDF: ' + pdfError.message
+      });
+    }
+
+    // Upload to S3
+    console.log('📤 Uploading KFS PDF to S3...');
+    let s3Key = null;
+    try {
+      const uploadResult = await uploadGeneratedPDF(
+        pdfResult.buffer,
+        filename,
+        userId,
+        'kfs'
+      );
+      
+      if (uploadResult.success) {
+        s3Key = uploadResult.key;
+        console.log('✅ KFS PDF uploaded to S3:', s3Key);
+      } else {
+        console.error('❌ Failed to upload KFS PDF to S3:', uploadResult.error);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to upload PDF to S3: ' + (uploadResult.error || 'Unknown error')
+        });
+      }
+    } catch (s3Error) {
+      console.error('❌ Error uploading KFS PDF to S3:', s3Error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to upload PDF to S3: ' + s3Error.message
+      });
+    }
+
+    // Save S3 key to database
+    console.log('💾 Saving KFS PDF URL to database...');
+    try {
+      await executeQuery(
+        `UPDATE loan_applications 
+         SET kfs_pdf_url = ?,
+             updated_at = NOW()
+         WHERE id = ?`,
+        [s3Key, loanId]
+      );
+      console.log('✅ KFS PDF URL saved to database');
+    } catch (dbError) {
+      console.error('❌ Error saving KFS PDF URL to database:', dbError);
+      // Continue anyway - we still want to send email
+    }
+
+    // Send email with PDF attachment
+    console.log('📧 Sending KFS email...');
+    try {
+      const recipientEmail = loan.personal_email || loan.official_email || loan.email;
+      const recipientName = `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'User';
+
+      if (recipientEmail) {
+        await emailService.sendKFSEmail({
+          loanId: loan.id,
+          recipientEmail: recipientEmail,
+          recipientName: recipientName,
+          loanData: {
+            application_number: loan.application_number,
+            sanctioned_amount: loan.loan_amount,
+            loan_term_days: 30, // Default - could be fetched from plan
+            status: loan.status
+          },
+          pdfBuffer: pdfResult.buffer,
+          pdfFilename: filename,
+          sentBy: userId // User ID who triggered it
+        });
+        console.log('✅ KFS email sent successfully to:', recipientEmail);
+      } else {
+        console.warn('⚠️ No email address found for user, skipping email');
+      }
+    } catch (emailError) {
+      console.error('❌ Error sending KFS email (non-fatal):', emailError.message);
+      // Continue - email failure shouldn't block the process
+    }
+
+    res.json({
+      success: true,
+      message: 'KFS PDF generated, saved to S3, and email sent successfully',
+      data: {
+        s3Key: s3Key,
+        filename: filename,
+        pdfSize: pdfResult.buffer.length,
+        emailSent: !!loan.email || !!loan.personal_email || !!loan.official_email
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error in generate-and-save KFS:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate and save KFS: ' + error.message
+    });
+  }
+});
+
+/**
+ * DUPLICATE ROUTES REMOVED - These routes are now defined earlier in the file (before /:loanId)
+ * GET /:loanId/extension-letter is at line 1355
+ * POST /:loanId/extension-letter/generate-pdf is at line 1551
+ */
 
 module.exports = router;
 

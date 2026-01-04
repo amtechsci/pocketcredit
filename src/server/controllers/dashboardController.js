@@ -39,10 +39,11 @@ const getDashboardSummary = async (req, res) => {
     }
 
     // Check if user has completed their profile
+    // Note: Don't filter by status='active' here - we need to allow 'on_hold' and 'deleted' users too
     const userQuery = `
-      SELECT profile_completed, profile_completion_step, first_name, last_name, email, date_of_birth
+      SELECT profile_completed, profile_completion_step, first_name, last_name, email, date_of_birth, status
       FROM users 
-      WHERE id = ? AND status = 'active'
+      WHERE id = ?
     `;
     const users = await executeQuery(userQuery, [userId]);
     
@@ -54,6 +55,52 @@ const getDashboardSummary = async (req, res) => {
     }
 
     const user = users[0];
+
+    // If user is deleted, return deleted status immediately
+    if (user.status === 'deleted') {
+      return res.json({
+        status: 'success',
+        data: {
+          deleted: true,
+          deleted_message: 'Your profile has been purged from our system. Thank you.',
+          user: {
+            id: user.id,
+            phone: user.phone || '',
+            status: 'deleted'
+          }
+        }
+      });
+    }
+
+    // If user is on hold, skip profile completion check and return dashboard data
+    // The fetchDashboardData function will handle showing appropriate messages
+    if (user.status === 'on_hold') {
+      const cacheKey = `dashboard_${userId}`;
+      const dashboardData = await getCachedOrFetch(cacheKey, async () => {
+        return await fetchDashboardData(userId);
+      });
+
+      return res.json({
+        status: 'success',
+        data: dashboardData
+      });
+    }
+
+    // If user is deleted, return deleted status immediately
+    if (user.status === 'deleted') {
+      return res.json({
+        status: 'success',
+        data: {
+          deleted: true,
+          deleted_message: 'Your profile has been purged from our system. Thank you.',
+          user: {
+            id: user.id,
+            phone: user.phone || '',
+            status: 'deleted'
+          }
+        }
+      });
+    }
 
     // Check if user needs to complete profile
     if (!user.profile_completed) {

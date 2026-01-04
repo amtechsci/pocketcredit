@@ -141,6 +141,8 @@ export function UserProfileDetail() {
   const [salaryDateEditValue, setSalaryDateEditValue] = useState('');
   const [editingReference, setEditingReference] = useState<number | null>(null);
   const [editingReferenceField, setEditingReferenceField] = useState<{ [key: number]: 'name' | 'phone' | 'relation' | null }>({});
+  const [editingTransactionId, setEditingTransactionId] = useState<number | null>(null);
+  const [editingReferenceNumber, setEditingReferenceNumber] = useState<string>('');
   const [referenceEditValues, setReferenceEditValues] = useState<{ [key: number]: { name?: string; phone?: string; relation?: string } }>({});
   const [newReference, setNewReference] = useState({ name: '', phone: '', relation: '' });
   const [referenceErrors, setReferenceErrors] = useState({ name: '', phone: '', relation: '' });
@@ -1063,6 +1065,35 @@ export function UserProfileDetail() {
     } catch (error) {
       console.error('Error adding transaction:', error);
       alert('Error adding transaction');
+    }
+  };
+
+  const handleUpdateTransactionReference = async (transactionId: number, referenceNumber: string) => {
+    try {
+      if (!referenceNumber || referenceNumber.trim() === '') {
+        alert('Reference / UTR number cannot be empty');
+        setEditingTransactionId(null);
+        return;
+      }
+
+      const response = await adminApiService.updateTransaction(params.userId!, transactionId.toString(), referenceNumber.trim());
+      
+      if (response.status === 'success') {
+        // Update local state
+        if (userData && userData.transactions) {
+          const updatedTransactions = userData.transactions.map((t: any) =>
+            t.id === transactionId ? { ...t, reference_number: referenceNumber.trim() } : t
+          );
+          setUserData({ ...userData, transactions: updatedTransactions });
+        }
+        setEditingTransactionId(null);
+        setEditingReferenceNumber('');
+      } else {
+        alert(response.message || 'Failed to update reference number');
+      }
+    } catch (error) {
+      console.error('Error updating transaction reference:', error);
+      alert('Error updating reference number');
     }
   };
 
@@ -5506,116 +5537,6 @@ export function UserProfileDetail() {
             <h3 className="text-lg font-semibold text-gray-900">Validation Status</h3>
           </div>
 
-          {/* Validation Summary Cards */}
-          <div className="grid grid-cols-6 gap-2 mb-6">
-            {/* KYC Verification Card */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-2">
-              <div className="flex items-center justify-between mb-1">
-                <div className="w-4 h-4 bg-blue-100 rounded flex items-center justify-center">
-                  <Shield className="w-2 h-2 text-blue-600" />
-                </div>
-                <span className="text-xs font-medium text-blue-600 bg-blue-100 px-1 py-0.5 rounded-full">
-                  ✓
-                </span>
-              </div>
-              <h3 className="text-xs font-medium text-gray-600 mb-0.5">KYC</h3>
-              <p className="text-xs text-gray-500 mb-1">Aadhaar & PAN</p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-900">95%</span>
-                <button className="text-xs text-blue-600 hover:text-blue-800">Update</button>
-              </div>
-            </div>
-
-            {/* Income Verification Card */}
-            <div className="bg-green-50 border border-green-200 rounded-lg p-2">
-              <div className="flex items-center justify-between mb-1">
-                <div className="w-4 h-4 bg-green-100 rounded flex items-center justify-center">
-                  <Shield className="w-2 h-2 text-green-600" />
-                </div>
-                <span className="text-xs font-medium text-green-600 bg-green-100 px-1 py-0.5 rounded-full">
-                  ✓
-                </span>
-              </div>
-              <h3 className="text-xs font-medium text-gray-600 mb-0.5">Income</h3>
-              <p className="text-xs text-gray-500 mb-1">Bank Statement</p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-900">100%</span>
-                <button className="text-xs text-green-600 hover:text-green-800">Update</button>
-              </div>
-            </div>
-
-            {/* Reference Verification Card */}
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2">
-              <div className="flex items-center justify-between mb-1">
-                <div className="w-4 h-4 bg-yellow-100 rounded flex items-center justify-center">
-                  <Shield className="w-2 h-2 text-yellow-600" />
-                </div>
-                <span className="text-xs font-medium text-yellow-600 bg-yellow-100 px-1 py-0.5 rounded-full">
-                  !
-                </span>
-              </div>
-              <h3 className="text-xs font-medium text-gray-600 mb-0.5">Reference</h3>
-              <p className="text-xs text-gray-500 mb-1">2/3 Verified</p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-900">67%</span>
-                <button className="text-xs text-yellow-600 hover:text-yellow-800">Update</button>
-              </div>
-            </div>
-
-            {/* Address Verification Card */}
-            <div className="bg-purple-50 border border-purple-200 rounded-lg p-2">
-              <div className="flex items-center justify-between mb-1">
-                <div className="w-4 h-4 bg-purple-100 rounded flex items-center justify-center">
-                  <Shield className="w-2 h-2 text-purple-600" />
-                </div>
-                <span className="text-xs font-medium text-purple-600 bg-purple-100 px-1 py-0.5 rounded-full">
-                  ✓
-                </span>
-              </div>
-              <h3 className="text-xs font-medium text-gray-600 mb-0.5">Address</h3>
-              <p className="text-xs text-gray-500 mb-1">Gas Bill</p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-900">90%</span>
-                <button className="text-xs text-purple-600 hover:text-purple-800">Update</button>
-              </div>
-            </div>
-
-            {/* Employment Verification Card */}
-            <div className="bg-orange-50 border border-orange-200 rounded-lg p-2">
-              <div className="flex items-center justify-between mb-1">
-                <div className="w-4 h-4 bg-orange-100 rounded flex items-center justify-center">
-                  <Shield className="w-2 h-2 text-orange-600" />
-                </div>
-                <span className="text-xs font-medium text-orange-600 bg-orange-100 px-1 py-0.5 rounded-full">
-                  ✓
-                </span>
-              </div>
-              <h3 className="text-xs font-medium text-gray-600 mb-0.5">Employment</h3>
-              <p className="text-xs text-gray-500 mb-1">Official Mail</p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-900">85%</span>
-                <button className="text-xs text-orange-600 hover:text-orange-800">Update</button>
-              </div>
-            </div>
-
-            {/* Other Verification Card */}
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-2">
-              <div className="flex items-center justify-between mb-1">
-                <div className="w-4 h-4 bg-gray-100 rounded flex items-center justify-center">
-                  <Shield className="w-2 h-2 text-gray-600" />
-                </div>
-                <span className="text-xs font-medium text-gray-600 bg-gray-100 px-1 py-0.5 rounded-full">
-                  !
-                </span>
-              </div>
-              <h3 className="text-xs font-medium text-gray-600 mb-0.5">Other</h3>
-              <p className="text-xs text-gray-500 mb-1">Extra Details</p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-900">0%</span>
-                <button className="text-xs text-gray-600 hover:text-gray-800">Update</button>
-              </div>
-            </div>
-          </div>
 
           {/* Quick Follow-up Form and History Layout */}
           <div className="flex gap-6">
@@ -7319,13 +7240,72 @@ export function UserProfileDetail() {
                     <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
                       {transaction.loan_application_id ? (
                         <span className="text-blue-600 hover:underline cursor-pointer">
-                          Loan #{transaction.loan_application_id}
-                          {transaction.application_number && ` (${transaction.application_number})`}
+                          {transaction.application_number || 
+                           (transaction.loan_application_id ? 
+                             `PLL${String(transaction.loan_application_id).padStart(4, '0').slice(-4)}` : 
+                             '-')}
                         </span>
                       ) : '-'}
                     </td>
                     <td className="px-3 py-4 whitespace-nowrap text-sm font-mono text-gray-500">
-                      {transaction.reference_number || '-'}
+                      {editingTransactionId === transaction.id ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={editingReferenceNumber}
+                            onChange={(e) => setEditingReferenceNumber(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                handleUpdateTransactionReference(transaction.id, editingReferenceNumber);
+                              } else if (e.key === 'Escape') {
+                                setEditingTransactionId(null);
+                                setEditingReferenceNumber('');
+                              }
+                            }}
+                            onBlur={() => {
+                              if (editingReferenceNumber.trim() !== (transaction.reference_number || '')) {
+                                handleUpdateTransactionReference(transaction.id, editingReferenceNumber);
+                              } else {
+                                setEditingTransactionId(null);
+                                setEditingReferenceNumber('');
+                              }
+                            }}
+                            className="px-2 py-1 border border-blue-500 rounded text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 min-w-[150px]"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => handleUpdateTransactionReference(transaction.id, editingReferenceNumber)}
+                            className="text-green-600 hover:text-green-800"
+                            title="Save"
+                          >
+                            <CheckCircle className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingTransactionId(null);
+                              setEditingReferenceNumber('');
+                            }}
+                            className="text-red-600 hover:text-red-800"
+                            title="Cancel"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div
+                          onClick={() => {
+                            setEditingTransactionId(transaction.id);
+                            setEditingReferenceNumber(transaction.reference_number || '');
+                          }}
+                          className="flex items-center gap-2 cursor-pointer group"
+                          title="Click to edit"
+                        >
+                          <span className="font-mono group-hover:text-blue-600">
+                            {transaction.reference_number || '-'}
+                          </span>
+                          <Edit className="w-3.5 h-3.5 text-gray-400 group-hover:text-blue-600 transition-colors" />
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
                       {transaction.created_by_name || 'System'}
@@ -8458,48 +8438,63 @@ export function UserProfileDetail() {
                     {transactionForm.transactionType === 'loan_disbursement' ? (
                       <>
                         {/* Show ready_for_disbursement loans first */}
-                        {getArray('loans')?.filter((l: any) => l.status === 'ready_for_disbursement').map((loan: any) => (
-                          <option key={loan.id || loan.loanId} value={loan.id || loan.loanId} className="font-bold text-green-600">
-                            📦 Loan #{loan.id || loan.loanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} (Ready for Disbursement)
-                          </option>
-                        ))}
+                        {getArray('loans')?.filter((l: any) => l.status === 'ready_for_disbursement').map((loan: any) => {
+                          const shortLoanId = loan.shortLoanId || loan.application_number || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
+                          return (
+                            <option key={loan.id || loan.loanId} value={loan.id || loan.loanId} className="font-bold text-green-600">
+                              📦 {shortLoanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} (Ready for Disbursement)
+                            </option>
+                          );
+                        })}
                         {getArray('loans')?.filter((l: any) => l.status === 'ready_for_disbursement').length > 0 && 
                          getArray('loans')?.filter((l: any) => l.status !== 'ready_for_disbursement' && l.status !== 'account_manager' && l.status !== 'cleared').length > 0 && (
                           <option disabled>──────────────</option>
                         )}
                         {/* Show other loans (exclude account_manager and cleared) */}
-                        {getArray('loans')?.filter((l: any) => l.status !== 'ready_for_disbursement' && l.status !== 'account_manager' && l.status !== 'cleared').map((loan: any) => (
-                          <option key={loan.id || loan.loanId} value={loan.id || loan.loanId}>
-                            Loan #{loan.id || loan.loanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} ({loan.status})
-                          </option>
-                        ))}
+                        {getArray('loans')?.filter((l: any) => l.status !== 'ready_for_disbursement' && l.status !== 'account_manager' && l.status !== 'cleared').map((loan: any) => {
+                          const shortLoanId = loan.shortLoanId || loan.application_number || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
+                          return (
+                            <option key={loan.id || loan.loanId} value={loan.id || loan.loanId}>
+                              {shortLoanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} ({loan.status})
+                            </option>
+                          );
+                        })}
                         {/* Show already disbursed loans as disabled */}
                         {getArray('loans')?.filter((l: any) => l.status === 'account_manager' || l.status === 'cleared').length > 0 && (
                           <>
                             <option disabled>─── Already Disbursed (Cannot Select) ───</option>
-                            {getArray('loans')?.filter((l: any) => l.status === 'account_manager' || l.status === 'cleared').map((loan: any) => (
-                              <option key={loan.id || loan.loanId} disabled style={{ color: '#999' }}>
-                                🚫 Loan #{loan.id || loan.loanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} ({loan.status})
-                              </option>
-                            ))}
+                            {getArray('loans')?.filter((l: any) => l.status === 'account_manager' || l.status === 'cleared').map((loan: any) => {
+                              const shortLoanId = loan.shortLoanId || loan.application_number || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
+                              return (
+                                <option key={loan.id || loan.loanId} disabled style={{ color: '#999' }}>
+                                  🚫 {shortLoanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} ({loan.status})
+                                </option>
+                              );
+                            })}
                           </>
                         )}
                       </>
                     ) : (
                       <>
                         {/* Show ready_for_disbursement loans first */}
-                        {getArray('loans')?.filter((l: any) => l.status === 'ready_for_disbursement').map((loan: any) => (
-                          <option key={loan.id || loan.loanId} value={loan.id || loan.loanId} className="font-bold text-green-600">
-                            📦 Loan #{loan.id || loan.loanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} (Ready for Disbursement)
-                          </option>
-                        ))}
+                        {getArray('loans')?.filter((l: any) => l.status === 'ready_for_disbursement').map((loan: any) => {
+                          const shortLoanId = loan.shortLoanId || loan.application_number || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
+                          return (
+                            <option key={loan.id || loan.loanId} value={loan.id || loan.loanId} className="font-bold text-green-600">
+                              📦 {shortLoanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} (Ready for Disbursement)
+                            </option>
+                          );
+                        })}
                         <option disabled>──────────────</option>
                         {/* Show all other loans */}
-                        {getArray('loans')?.filter((l: any) => l.status !== 'ready_for_disbursement').map((loan: any) => (
-                          <option key={loan.id || loan.loanId} value={loan.id || loan.loanId}>
-                            Loan #{loan.id || loan.loanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} ({loan.status})
-                          </option>
-                        ))}
+                        {getArray('loans')?.filter((l: any) => l.status !== 'ready_for_disbursement').map((loan: any) => {
+                          const shortLoanId = loan.shortLoanId || loan.application_number || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
+                          return (
+                            <option key={loan.id || loan.loanId} value={loan.id || loan.loanId}>
+                              {shortLoanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} ({loan.status})
+                            </option>
+                          );
+                        })}
                       </>
                     )}
                   </select>
