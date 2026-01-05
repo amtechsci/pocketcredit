@@ -33,6 +33,10 @@ export const LinkSalaryBankAccountPage = () => {
   const [showAddNew, setShowAddNew] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // Log component mount
+  console.log('🔵🔵🔵 LinkSalaryBankAccountPage COMPONENT MOUNTED 🔵🔵🔵');
+  console.log('🔵 Current URL:', window.location.pathname, window.location.search);
+
   // Form state for adding new bank
   const [newBankForm, setNewBankForm] = useState({
     account_number: '',
@@ -41,7 +45,9 @@ export const LinkSalaryBankAccountPage = () => {
   });
 
   useEffect(() => {
-    console.log('🔵 LinkSalaryBankAccountPage: useEffect triggered');
+    console.log('🔵🔵🔵 LinkSalaryBankAccountPage: useEffect triggered 🔵🔵🔵');
+    console.log('🔵 User:', user?.id, 'Email verified:', user?.personal_email_verified);
+    
     // Check URL parameters
     const urlParams = new URLSearchParams(window.location.search);
     const allowEdit = urlParams.get('allowEdit');
@@ -56,18 +62,64 @@ export const LinkSalaryBankAccountPage = () => {
     }
 
     // Check if user has already completed this step by checking:
-    // 1. If user has a primary bank account (set during e-NACH registration)
-    // 2. If email is already verified (comes after e-NACH)
-    // 3. If user has an active loan application (if not, redirect to dashboard)
+    // PRIORITY 1: Check bank account FIRST (this is the main purpose of this page)
+    // PRIORITY 2: Check if user has an active loan application
+    // PRIORITY 3: Only redirect if bank account exists AND email is verified
     const checkCompletionAndRedirect = async () => {
       console.log('🔵 LinkSalaryBankAccountPage: checkCompletionAndRedirect started');
       if (!user?.id) {
+        console.log('🔵 No user ID, exiting');
         setCheckingEnach(false);
         return;
       }
 
       try {
-        // First, check if user has an active/pending loan application
+        // FIRST: Check if user has a primary bank account (MOST IMPORTANT CHECK)
+        // This check MUST happen before any redirects
+        try {
+          console.log('🔵 STEP 1: Checking bank details for user:', user.id);
+          const bankDetailsResponse = await apiService.getUserBankDetails(user.id);
+          console.log('🔵 Bank details response:', bankDetailsResponse);
+          
+          if (bankDetailsResponse.success && bankDetailsResponse.data && bankDetailsResponse.data.length > 0) {
+            console.log('🔵 Bank details data:', bankDetailsResponse.data);
+            const hasPrimaryBank = bankDetailsResponse.data.some((bank: BankDetail) => {
+              const isPrimary = Boolean(bank.is_primary);
+              console.log(`🔵 Bank ${bank.id}: is_primary=${bank.is_primary}, boolean=${isPrimary}`);
+              return isPrimary;
+            });
+
+            console.log('🔵 Has primary bank account?', hasPrimaryBank);
+
+            if (hasPrimaryBank) {
+              console.log('✅ Primary bank account found - user has already linked bank');
+              // User has linked bank account - redirect to next step
+              if (!user.personal_email_verified) {
+                console.log('📧 Email not verified, redirecting to email verification');
+                navigate('/email-verification', { replace: true });
+              } else {
+                console.log('✅ Email verified and bank linked - redirecting to residence address');
+                navigate('/residence-address', { replace: true });
+              }
+              return; // Exit early - bank account exists
+            } else {
+              console.log('ℹ️ No primary bank account found - user needs to link bank account');
+              // No primary bank account - user MUST stay on this page to link it
+              // DO NOT redirect - allow page to render
+            }
+          } else {
+            console.log('ℹ️ No bank details found - user needs to link bank account');
+            // No bank details - user MUST stay on this page to link it
+            // DO NOT redirect - allow page to render
+          }
+        } catch (bankError) {
+          console.error('❌ Error checking bank details:', bankError);
+          // On error, allow user to proceed to link bank account
+          // DO NOT redirect - allow page to render
+        }
+
+        // SECOND: Check if user has an active/pending loan application
+        // Only check this AFTER bank check to ensure we don't redirect prematurely
         try {
           const applicationsResponse = await apiService.getLoanApplications();
           console.log('📋 Loan applications response:', {
@@ -133,53 +185,10 @@ export const LinkSalaryBankAccountPage = () => {
           // Continue with other checks even if this fails - don't block the flow
         }
 
-        // Method 1: Check if user has a primary bank account
-        // If they have a primary bank account, they've already completed this step
-        // Skip email check and redirect to next step
-        try {
-          console.log('🔍 Checking bank details for user:', user.id);
-          const bankDetailsResponse = await apiService.getUserBankDetails(user.id);
-          console.log('🔍 Bank details response:', bankDetailsResponse);
-          
-          if (bankDetailsResponse.success && bankDetailsResponse.data) {
-            console.log('🔍 Bank details data:', bankDetailsResponse.data);
-            const hasPrimaryBank = bankDetailsResponse.data.some((bank: BankDetail) => {
-              const isPrimary = Boolean(bank.is_primary);
-              console.log(`🔍 Bank ${bank.id}: is_primary=${bank.is_primary}, boolean=${isPrimary}`);
-              return isPrimary;
-            });
-
-            console.log('🔍 Has primary bank account?', hasPrimaryBank);
-
-            if (hasPrimaryBank) {
-              console.log('✅ Primary bank account found, step completed, redirecting');
-              // If email is not verified, go to email verification
-              // If email is verified, proceed to next step (residence address or dashboard)
-              if (!user.personal_email_verified) {
-                console.log('📧 Email not verified, redirecting to email verification');
-                navigate('/email-verification', { replace: true });
-              } else {
-                console.log('✅ Email verified and bank linked - redirecting to residence address');
-                // Email verified and bank linked - redirect to residence address or let flow continue
-                navigate('/residence-address', { replace: true });
-              }
-              return;
-            } else {
-              console.log('ℹ️ No primary bank account found - user can link bank account');
-            }
-          } else {
-            console.log('ℹ️ No bank details found - user can link bank account');
-          }
-        } catch (bankError) {
-          console.error('❌ Error checking bank details:', bankError);
-          // Don't block - allow user to proceed to link bank account
-        }
-
-        // Method 2: If email is verified BUT no primary bank account exists
-        // Allow user to stay on page to link bank account
-        // Only redirect if BOTH email is verified AND bank account exists
-        // (Handled above, so if we reach here, user needs to link bank account)
-        console.log('✅ User needs to link bank account - staying on page');
+        // If we reach here, user does NOT have a primary bank account
+        // Therefore, they MUST stay on this page to link their bank account
+        // DO NOT redirect - the page should render to allow bank linking
+        console.log('✅✅✅ User needs to link bank account - staying on page ✅✅✅');
 
         setCheckingEnach(false);
         checkAndFetchReport();
@@ -191,7 +200,7 @@ export const LinkSalaryBankAccountPage = () => {
     };
 
     checkCompletionAndRedirect();
-  }, [user?.id, user?.personal_email_verified, navigate]);
+  }, [user?.id, navigate]); // Removed user?.personal_email_verified from dependencies to prevent premature redirects
 
   const checkAndFetchReport = async () => {
     try {

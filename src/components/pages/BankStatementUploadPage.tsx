@@ -48,13 +48,15 @@ export const BankStatementUploadPage = () => {
               const isSuccess = applicationsResponse.success || applicationsResponse.status === 'success';
               if (isSuccess && applicationsResponse.data?.applications) {
                 const applications = applicationsResponse.data.applications;
+                // Include ready_for_disbursement status as well
                 const activeApplication = applications.find((app: any) => 
-                  ['submitted', 'under_review', 'follow_up', 'disbursal', 'pending', 'in_progress'].includes(app.status)
+                  ['submitted', 'under_review', 'follow_up', 'disbursal', 'pending', 'in_progress', 'ready_for_disbursement'].includes(app.status)
                 );
                 
                 if (activeApplication) {
+                  console.log('🟢 BankStatementUploadPage: Redirecting to link-salary-bank-account with applicationId:', activeApplication.id);
                   setTimeout(() => {
-                    navigate('/link-salary-bank-account', { replace: true });
+                    navigate(`/link-salary-bank-account?applicationId=${activeApplication.id}`, { replace: true });
                   }, 1500);
                   return;
                 }
@@ -64,6 +66,7 @@ export const BankStatementUploadPage = () => {
             }
             
             // Fallback: Redirect without application ID
+            console.log('🟢 BankStatementUploadPage: Redirecting to link-salary-bank-account (fallback)');
             setTimeout(() => {
               navigate('/link-salary-bank-account', { replace: true });
             }, 1500);
