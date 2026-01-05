@@ -128,13 +128,9 @@ export const LinkSalaryBankAccountPage = () => {
           // Continue with other checks even if this fails - don't block the flow
         }
 
-        // Method 1: Check if email is already verified
-        if (user.personal_email_verified) {
-          navigate('/email-verification', { replace: true });
-          return;
-        }
-
-        // Method 2: Check if user has a primary bank account
+        // Method 1: Check if user has a primary bank account
+        // If they have a primary bank account, they've already completed this step
+        // Skip email check and redirect to next step
         try {
           const bankDetailsResponse = await apiService.getUserBankDetails(user.id);
           if (bankDetailsResponse.success && bankDetailsResponse.data) {
@@ -145,13 +141,25 @@ export const LinkSalaryBankAccountPage = () => {
 
             if (hasPrimaryBank) {
               console.log('Primary bank account found, step completed, redirecting');
-              navigate('/email-verification', { replace: true });
+              // If email is not verified, go to email verification
+              // If email is verified, proceed to next step (residence address or dashboard)
+              if (!user.personal_email_verified) {
+                navigate('/email-verification', { replace: true });
+              } else {
+                // Email verified and bank linked - redirect to residence address or let flow continue
+                navigate('/residence-address', { replace: true });
+              }
               return;
             }
           }
         } catch (bankError) {
           console.log('Error checking bank details:', bankError);
         }
+
+        // Method 2: If email is verified BUT no primary bank account exists
+        // Allow user to stay on page to link bank account
+        // Only redirect if BOTH email is verified AND bank account exists
+        // (Handled above, so if we reach here, user needs to link bank account)
 
         setCheckingEnach(false);
         checkAndFetchReport();
