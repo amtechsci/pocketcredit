@@ -83,16 +83,23 @@ export const LinkSalaryBankAccountPage = () => {
             // Include all statuses that indicate an active application in progress
             // This matches the backend check in userBankStatement.js which includes:
             // 'pending', 'under_review', 'in_progress', 'submitted'
-            const activeApplication = applications.find((app: any) => 
-              ['submitted', 'under_review', 'follow_up', 'disbursal', 'ready_for_disbursement'].includes(app.status)
-            );
+            // Also include 'ready_for_disbursement' as users can still link bank accounts at this stage
+            const activeStatuses = ['submitted', 'under_review', 'follow_up', 'disbursal', 'ready_for_disbursement', 'pending', 'in_progress'];
+            const activeApplication = applications.find((app: any) => {
+              const matches = activeStatuses.includes(app.status);
+              console.log(`🔍 Checking app ${app.id}: status="${app.status}", matches=${matches}`);
+              return matches;
+            });
             
             if (!activeApplication) {
               console.log('⚠️ No active loan application found. Applications:', applications.map((app: any) => app.status));
+              console.log('⚠️ Allowed statuses:', activeStatuses);
               toast.info('No active loan application found. Redirecting to dashboard...');
               setTimeout(() => navigate('/dashboard', { replace: true }), 1500);
               return;
             }
+            
+            console.log('✅ Active application found:', { id: activeApplication.id, status: activeApplication.status });
             
             console.log('✅ Active application found:', { id: activeApplication.id, status: activeApplication.status });
           } else {
