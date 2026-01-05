@@ -32,10 +32,18 @@ export const LinkSalaryBankAccountPage = () => {
   const [fullAccountNumber, setFullAccountNumber] = useState('');
   const [showAddNew, setShowAddNew] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [hasCheckedBank, setHasCheckedBank] = useState(false); // Prevent multiple redirects
 
-  // Log component mount
-  console.log('🔵🔵🔵 LinkSalaryBankAccountPage COMPONENT MOUNTED 🔵🔵🔵');
-  console.log('🔵 Current URL:', window.location.pathname, window.location.search);
+  // Log component mount - this should ALWAYS show if component renders
+  // This runs on EVERY render, so if we don't see this, component isn't rendering
+  console.log('🔵🔵🔵 LinkSalaryBankAccountPage COMPONENT RENDERED 🔵🔵🔵', {
+    pathname: window.location.pathname,
+    search: window.location.search,
+    userId: user?.id,
+    emailVerified: user?.personal_email_verified,
+    hasCheckedBank,
+    checkingEnach
+  });
 
   // Form state for adding new bank
   const [newBankForm, setNewBankForm] = useState({
@@ -73,11 +81,18 @@ export const LinkSalaryBankAccountPage = () => {
         return;
       }
 
+      // Prevent multiple checks/redirects
+      if (hasCheckedBank) {
+        console.log('🔵 Already checked bank, skipping');
+        return;
+      }
+
       try {
         // FIRST: Check if user has a primary bank account (MOST IMPORTANT CHECK)
         // This check MUST happen before any redirects
         try {
           console.log('🔵 STEP 1: Checking bank details for user:', user.id);
+          setHasCheckedBank(true); // Mark as checked to prevent duplicate checks
           const bankDetailsResponse = await apiService.getUserBankDetails(user.id);
           console.log('🔵 Bank details response:', bankDetailsResponse);
           
@@ -96,19 +111,19 @@ export const LinkSalaryBankAccountPage = () => {
               // User has linked bank account - redirect to next step
               if (!user.personal_email_verified) {
                 console.log('📧 Email not verified, redirecting to email verification');
-                navigate('/email-verification', { replace: true });
+                setTimeout(() => navigate('/email-verification', { replace: true }), 500);
               } else {
                 console.log('✅ Email verified and bank linked - redirecting to residence address');
-                navigate('/residence-address', { replace: true });
+                setTimeout(() => navigate('/residence-address', { replace: true }), 500);
               }
               return; // Exit early - bank account exists
             } else {
-              console.log('ℹ️ No primary bank account found - user needs to link bank account');
+              console.log('✅✅✅ No primary bank account found - user NEEDS to link bank account - STAYING ON PAGE ✅✅✅');
               // No primary bank account - user MUST stay on this page to link it
               // DO NOT redirect - allow page to render
             }
           } else {
-            console.log('ℹ️ No bank details found - user needs to link bank account');
+            console.log('✅✅✅ No bank details found - user NEEDS to link bank account - STAYING ON PAGE ✅✅✅');
             // No bank details - user MUST stay on this page to link it
             // DO NOT redirect - allow page to render
           }
@@ -199,8 +214,13 @@ export const LinkSalaryBankAccountPage = () => {
       }
     };
 
-    checkCompletionAndRedirect();
-  }, [user?.id, navigate]); // Removed user?.personal_email_verified from dependencies to prevent premature redirects
+    // Only run check if user is loaded and we haven't checked yet
+    if (user?.id && !hasCheckedBank) {
+      checkCompletionAndRedirect();
+    } else if (!user?.id) {
+      console.log('🔵 Waiting for user to load...');
+    }
+  }, [user?.id, navigate, hasCheckedBank]); // Only depend on user.id and navigate
 
   const checkAndFetchReport = async () => {
     try {
@@ -384,14 +404,17 @@ export const LinkSalaryBankAccountPage = () => {
     return '****' + accountNumber.slice(-4);
   };
 
-  // Don't render anything while checking e-NACH status
+  // Always render something - even if checking, so component is visible
+  // This ensures component mount logs will show
   if (checkingEnach) {
+    console.log('🔵 Rendering checking state...');
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <Card className="max-w-2xl w-full">
           <CardContent className="py-12 text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Checking status...</p>
+            <p className="text-gray-600">Checking bank account status...</p>
+            <p className="text-xs text-gray-500 mt-2">Please wait while we verify your information</p>
           </CardContent>
         </Card>
       </div>
