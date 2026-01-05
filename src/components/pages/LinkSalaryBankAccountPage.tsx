@@ -41,12 +41,15 @@ export const LinkSalaryBankAccountPage = () => {
   });
 
   useEffect(() => {
+    console.log('🔵 LinkSalaryBankAccountPage: useEffect triggered');
     // Check URL parameters
     const urlParams = new URLSearchParams(window.location.search);
     const allowEdit = urlParams.get('allowEdit');
+    console.log('🔵 LinkSalaryBankAccountPage: allowEdit =', allowEdit);
 
     // If allowEdit=true, skip the completion check and just load the page
     if (allowEdit === 'true') {
+      console.log('🔵 LinkSalaryBankAccountPage: allowEdit=true, skipping checks');
       setCheckingEnach(false);
       checkAndFetchReport();
       return;
@@ -57,6 +60,7 @@ export const LinkSalaryBankAccountPage = () => {
     // 2. If email is already verified (comes after e-NACH)
     // 3. If user has an active loan application (if not, redirect to dashboard)
     const checkCompletionAndRedirect = async () => {
+      console.log('🔵 LinkSalaryBankAccountPage: checkCompletionAndRedirect started');
       if (!user?.id) {
         setCheckingEnach(false);
         return;
@@ -116,6 +120,7 @@ export const LinkSalaryBankAccountPage = () => {
             }
             
             console.log('✅ Active application found:', { id: activeApplication.id, status: activeApplication.status });
+            console.log('🔵 LinkSalaryBankAccountPage: Continuing to bank check...');
           } else {
             // No applications at all, redirect to dashboard
             console.log('⚠️ No loan applications found in response. Response:', applicationsResponse);
