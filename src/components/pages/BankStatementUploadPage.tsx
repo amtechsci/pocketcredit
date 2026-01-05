@@ -196,9 +196,15 @@ export const BankStatementUploadPage = () => {
         }
         // Redirect to link-salary-bank-account page after successful upload
         // This matches the Account Aggregator flow behavior (see BankStatementSuccessPage.tsx)
+        // Include applicationId in URL if available from response
+        const applicationId = response.data?.applicationId;
+        const redirectUrl = applicationId 
+          ? `/link-salary-bank-account?applicationId=${applicationId}`
+          : '/link-salary-bank-account';
+        
         // Wait a bit to ensure backend step update is complete
         setTimeout(() => {
-          navigate('/link-salary-bank-account', { replace: true });
+          navigate(redirectUrl, { replace: true });
         }, 1500);
       } else {
         toast.error(response.message || 'Failed to upload bank statement');

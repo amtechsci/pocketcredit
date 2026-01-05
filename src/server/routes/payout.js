@@ -361,5 +361,85 @@ router.get('/loan/:loanApplicationId', authenticateAdmin, async (req, res) => {
     }
 });
 
+/**
+ * GET /api/payout/ready-for-disbursement
+ * Get all loans ready for disbursement with user and bank details
+ */
+router.get('/ready-for-disbursement', authenticateAdmin, async (req, res) => {
+    try {
+        await initializeDatabase();
+        
+        const loansQuery = `
+            SELECT 
+                la.id,
+                la.application_number,
+                la.loan_amount,
+                la.loan_purpose,
+                la.status,
+                la.created_at,
+                la.user_id,
+                u.first_name,
+                u.last_name,
+                u.email,
+                u.phone,
+                u.personal_email,
+                u.official_email,
+                bd.id as bank_id,
+                bd.account_number,
+                bd.ifsc_code,
+                bd.bank_name,
+                bd.account_holder_name,
+                bd.is_primary
+            FROM loan_applications la
+            JOIN users u ON la.user_id = u.id
+            LEFT JOIN bank_details bd ON u.id = bd.user_id AND bd.is_primary = 1
+            WHERE la.status = 'ready_for_disbursement'
+            ORDER BY la.created_at DESC
+        `;
+
+        const loans = await executeQuery(loansQuery);
+
+        // Format the response
+        const formattedLoans = loans.map(loan => ({
+            id: loan.id,
+            applicationNumber: loan.application_number,
+            loanAmount: parseFloat(loan.loan_amount) || 0,
+            loanPurpose: loan.loan_purpose || 'Not specified',
+            status: loan.status,
+            createdAt: loan.created_at,
+            user: {
+                id: loan.user_id,
+                firstName: loan.first_name,
+                lastName: loan.last_name,
+                fullName: `${loan.first_name || ''} ${loan.last_name || ''}`.trim(),
+                email: loan.personal_email || loan.official_email || loan.email,
+                phone: loan.phone
+            },
+            bank: loan.bank_id ? {
+                id: loan.bank_id,
+                accountNumber: loan.account_number,
+                ifscCode: loan.ifsc_code,
+                bankName: loan.bank_name,
+                accountHolderName: loan.account_holder_name,
+                isPrimary: loan.is_primary
+            } : null
+        }));
+
+        res.json({
+            success: true,
+            data: formattedLoans,
+            count: formattedLoans.length
+        });
+
+    } catch (error) {
+        console.error('[Payout] Error fetching ready for disbursement loans:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch loans ready for disbursement',
+            error: error.message
+        });
+    }
+});
+
 module.exports = router;
 

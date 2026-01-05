@@ -1304,7 +1304,9 @@ class ApiService {
     if (options?.calculationDate) {
       params.calculationDate = options.calculationDate;
     }
-    return this.request('GET', `/loan-calculations/${loanId}`, undefined, params);
+    const queryString = new URLSearchParams(params).toString();
+    const url = `/loan-calculations/${loanId}${queryString ? `?${queryString}` : ''}`;
+    return this.request('GET', url);
   }
 
   /**
@@ -1359,6 +1361,48 @@ class ApiService {
    */
   async getPaymentOrderStatus(orderId: string): Promise<ApiResponse<any>> {
     return this.request('GET', `/payment/order-status/${orderId}`);
+  }
+
+  /**
+   * Loan Extension APIs
+   */
+
+  /**
+   * Check extension eligibility
+   */
+  async checkExtensionEligibility(loanId: number): Promise<ApiResponse<any>> {
+    return this.request('GET', `/loan-extensions/eligibility/${loanId}`);
+  }
+
+  /**
+   * Request loan extension
+   */
+  async requestLoanExtension(loanApplicationId: number, reason?: string): Promise<ApiResponse<any>> {
+    return this.request('POST', '/loan-extensions/request', {
+      loan_application_id: loanApplicationId,
+      reason: reason || 'Requesting loan tenure extension'
+    });
+  }
+
+  /**
+   * Get extension letter data for a loan (user accessible)
+   */
+  async getExtensionLetter(loanId: number): Promise<ApiResponse<any>> {
+    return this.request('GET', `/kfs/user/${loanId}/extension-letter`);
+  }
+
+  /**
+   * Send extension letter to email
+   */
+  async sendExtensionLetterEmail(loanId: number, htmlContent: string): Promise<ApiResponse<any>> {
+    return this.request('POST', `/kfs/user/${loanId}/extension-letter/send-email`, { htmlContent });
+  }
+
+  /**
+   * Get extension history for a loan
+   */
+  async getExtensionHistory(loanId: number): Promise<ApiResponse<any>> {
+    return this.request('GET', `/loan-extensions/history/${loanId}`);
   }
 }
 

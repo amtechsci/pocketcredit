@@ -15,6 +15,7 @@ import { DashboardHeader } from '../DashboardHeader';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
 import { toast } from 'sonner';
+import { ExtensionLetterModal } from '../modals/ExtensionLetterModal';
 // @ts-ignore - Cashfree SDK doesn't have TypeScript definitions
 import { load } from '@cashfreepayments/cashfree-js';
 
@@ -26,6 +27,8 @@ export const RepaymentSchedulePage = () => {
   const [loanData, setLoanData] = useState<any>(null);
   const [kfsData, setKfsData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [extensionEligibility, setExtensionEligibility] = useState<any>(null);
+  const [showExtensionModal, setShowExtensionModal] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -103,7 +106,24 @@ export const RepaymentSchedulePage = () => {
         if (calculationResponse && calculationResponse.success && calculationResponse.data) {
           // Use calculation API data which has correct date handling - this is the source of truth
           kfsResponse.data.calculations = calculationResponse.data;
+          
+          // Also merge repayment schedule from calculation API if available
+          if (calculationResponse.data.repayment?.schedule) {
+            if (!kfsResponse.data.repayment) {
+              kfsResponse.data.repayment = {};
+            }
+            kfsResponse.data.repayment.schedule = calculationResponse.data.repayment.schedule;
+            // Also set first_due_date from schedule if available
+            if (calculationResponse.data.repayment.schedule.length > 0) {
+              kfsResponse.data.repayment.first_due_date = calculationResponse.data.repayment.schedule[0].due_date;
+            }
+            console.log('✅ Merged repayment schedule from calculation API:', kfsResponse.data.repayment.schedule);
+          } else {
+            console.log('⚠️ No repayment schedule in calculation API response');
+          }
+          
           console.log('✅ Using calculation API data (correct date handling):', calculationResponse.data);
+          console.log('📊 Final KFS repayment data:', kfsResponse.data.repayment);
         } else {
           console.log('⚠️ Using KFS calculations (may have date issues):', kfsResponse.data.calculations);
         }
@@ -123,6 +143,18 @@ export const RepaymentSchedulePage = () => {
         }
       } else {
         setError('Failed to load loan data. Please try again later.');
+      }
+
+      // Fetch extension eligibility
+      try {
+        const eligibilityResponse = await apiService.checkExtensionEligibility(loanId);
+        if (eligibilityResponse.success && eligibilityResponse.data) {
+          setExtensionEligibility(eligibilityResponse.data);
+          console.log('📊 Extension Eligibility:', eligibilityResponse.data);
+        }
+      } catch (eligibilityError) {
+        console.error('Error fetching extension eligibility:', eligibilityError);
+        // Continue without eligibility data
       }
 
       // Fetch user's completed loans count to determine current stage
@@ -230,14 +262,15 @@ export const RepaymentSchedulePage = () => {
   const planData = kfsData.plan || {};
   
   // Debug: Log to check data structure
-  console.log('KFS Data:', {
+  console.log('🔍 KFS Data Debug:', {
     planData,
     loanData: loanData,
     repayment: kfsData.repayment,
     planType: planData.plan_type,
     loanPlanType: loanData.plan_type,
     hasRepaymentSchedule: !!kfsData.repayment?.schedule,
-    scheduleLength: kfsData.repayment?.schedule?.length
+    scheduleLength: kfsData.repayment?.schedule?.length,
+    scheduleData: kfsData.repayment?.schedule
   });
   
   // Check multiple possible locations for plan_type
@@ -248,6 +281,14 @@ export const RepaymentSchedulePage = () => {
                    'single';
   const isMultiEmi = planType === 'multi_emi';
   const repaymentSchedule = kfsData.repayment?.schedule || [];
+  
+  console.log('🔍 Schedule Debug:', {
+    planType,
+    isMultiEmi,
+    repaymentScheduleLength: repaymentSchedule.length,
+    repaymentSchedule: repaymentSchedule,
+    shouldShowMultiEmi: isMultiEmi || repaymentSchedule.length > 1
+  });
   
   // Also check if we have multiple EMIs in schedule (fallback detection)
   const hasMultipleEmis = repaymentSchedule.length > 1;
@@ -618,8 +659,41 @@ export const RepaymentSchedulePage = () => {
         })()}
 
         {/* Single Payment Plan - Pay on Due Date */}
-        {!shouldShowMultiEmi && !isLoanCleared && (
-          <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-green-100">
+        {!shouldShowMultiEmi && !isLoanCleared && (() => {
+          // Check if extension button should be shown for single payment loan (D-5 to D+15)
+          const dueDate = kfsData.repayment?.first_due_date || loanData.processed_due_date;
+          let canShowExtension = false;
+          if (dueDate) {
+            // Parse due date correctly (handle both string and Date formats)
+            const dueDateObj = typeof dueDate === 'string' ? new Date(dueDate + 'T00:00:00') : new Date(dueDate);
+            dueDateObj.setHours(0, 0, 0, 0);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            // DPD = today - due_date (negative means before due date, positive means after)
+            const dpd = Math.ceil((today.getTime() - dueDateObj.getTime()) / (1000 * 60 * 60 * 24));
+            // Show extension button if DPD is between -5 and +15 (5 days before to 15 days after)
+            const isWithinDpdWindow = dpd >= -5 && dpd <= 15;
+            // Also check backend eligibility - only show if backend says it's eligible
+            // If eligibility data is not loaded yet, don't show the button
+            const isBackendEligible = extensionEligibility 
+              ? (extensionEligibility.can_extend === true || extensionEligibility.is_eligible === true)
+              : false;
+            canShowExtension = isWithinDpdWindow && isBackendEligible;
+            console.log('🔍 Extension Button Check (Single Payment):', {
+              dueDate,
+              dpd,
+              isWithinDpdWindow,
+              isBackendEligible,
+              canShowExtension,
+              extensionEligibility,
+              today: today.toISOString().split('T')[0],
+              dueDateStr: dueDateObj.toISOString().split('T')[0]
+            });
+          }
+          
+          return (
+            <>
+              <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-green-100">
             <CardContent className="p-4 sm:p-6">
               <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Pay on Due Date</h3>
               
@@ -814,9 +888,41 @@ export const RepaymentSchedulePage = () => {
                   </>
                 );
               })()}
-            </CardContent>
-          </Card>
-        )}
+                </CardContent>
+              </Card>
+              
+              {/* Extension Button for Single Payment Loan */}
+              {canShowExtension && (
+                <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-orange-100">
+                  <CardContent className="p-4 sm:p-6">
+                    {extensionEligibility?.has_pending_request ? (
+                      <div className="flex items-center justify-center p-4 bg-orange-50 rounded-lg border-2 border-orange-200">
+                        <AlertCircle className="w-5 h-5 mr-2 text-orange-600" />
+                        <span className="text-orange-700 font-semibold">
+                          Extension Request Pending Approval
+                        </span>
+                      </div>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        className="w-full h-12 border-2 border-orange-500 text-orange-600 hover:bg-orange-50 font-semibold"
+                        onClick={() => {
+                          const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
+                          if (loanId) {
+                            setShowExtensionModal(true);
+                          }
+                        }}
+                      >
+                        <TrendingUp className="w-4 h-4 mr-2" />
+                        Extend Loan Tenure
+                      </Button>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          );
+        })()}
 
         {/* Multi-EMI Plan - Preclose Section */}
         {shouldShowMultiEmi && !isLoanCleared && (() => {
@@ -1027,10 +1133,51 @@ export const RepaymentSchedulePage = () => {
                 })()}
                 </CardContent>
               </Card>
+            </>
+          );
+        })()}
 
-              {/* EMI List */}
-              {repaymentSchedule.length > 0 && (
-              <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
+        {/* Multi-EMI Plan - EMI Schedule Section (Always show if schedule exists) */}
+        {shouldShowMultiEmi && !isLoanCleared && (() => {
+          console.log('🔍 Rendering EMI Schedule - shouldShowMultiEmi:', shouldShowMultiEmi, 'repaymentSchedule.length:', repaymentSchedule.length, 'repaymentSchedule:', repaymentSchedule);
+          if (repaymentSchedule.length === 0) {
+            console.log('⚠️ Repayment schedule is empty, not rendering EMI Schedule section');
+            return null;
+          }
+          
+          // Check if extension button should be shown (only for first EMI, D-5 to D+15)
+          const firstEmi = repaymentSchedule[0];
+          let canShowExtension = false;
+          if (firstEmi && firstEmi.due_date) {
+            const firstEmiDate = new Date(firstEmi.due_date);
+            firstEmiDate.setHours(0, 0, 0, 0);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            // DPD = today - due_date (negative means before due date, positive means after)
+            const dpd = Math.ceil((today.getTime() - firstEmiDate.getTime()) / (1000 * 60 * 60 * 24));
+            // Show extension button if DPD is between -5 and +15 (5 days before to 15 days after)
+            const isWithinDpdWindow = dpd >= -5 && dpd <= 15;
+            // Also check backend eligibility - only show if backend says it's eligible
+            // If eligibility data is not loaded yet, don't show the button
+            const isBackendEligible = extensionEligibility 
+              ? (extensionEligibility.can_extend === true || extensionEligibility.is_eligible === true)
+              : false;
+            canShowExtension = isWithinDpdWindow && isBackendEligible;
+            console.log('🔍 Extension Button Check (Multi-EMI):', {
+              firstEmiDueDate: firstEmi.due_date,
+              dpd,
+              isWithinDpdWindow,
+              isBackendEligible,
+              canShowExtension,
+              extensionEligibility,
+              today: today.toISOString().split('T')[0],
+              dueDate: firstEmiDate.toISOString().split('T')[0]
+            });
+          }
+          
+          return (
+            <>
+            <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
                 <CardContent className="p-4 sm:p-6">
                   <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">EMI Schedule</h3>
                   <div className="space-y-3">
@@ -1158,8 +1305,59 @@ export const RepaymentSchedulePage = () => {
                     })}
                   </div>
                 </CardContent>
+            </Card>
+            
+            {/* Extension Button for Multi-EMI (only for first EMI) */}
+            {canShowExtension && (
+              <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-orange-100">
+                <CardContent className="p-4 sm:p-6">
+                  {extensionEligibility?.has_pending_request ? (
+                    <div className="flex items-center justify-center p-4 bg-orange-50 rounded-lg border-2 border-orange-200">
+                      <AlertCircle className="w-5 h-5 mr-2 text-orange-600" />
+                      <span className="text-orange-700 font-semibold">
+                        Extension Request Pending Approval
+                      </span>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      className="w-full h-12 border-2 border-orange-500 text-orange-600 hover:bg-orange-50 font-semibold"
+                      onClick={async () => {
+                        try {
+                          const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
+                          if (!loanId) {
+                            toast.error('Unable to process extension request');
+                            return;
+                          }
+
+                          toast.loading('Requesting loan extension...');
+
+                          const response = await apiService.requestLoanExtension(loanId, 'Requesting loan tenure extension');
+
+                          if (response.success) {
+                            toast.success('Extension request submitted successfully!');
+                            // Refresh loan data and eligibility to show updated extension status
+                            await fetchLoanData(loanId);
+                            const eligibilityResponse = await apiService.checkExtensionEligibility(loanId);
+                            if (eligibilityResponse.success && eligibilityResponse.data) {
+                              setExtensionEligibility(eligibilityResponse.data);
+                            }
+                          } else {
+                            toast.error(response.message || 'Failed to submit extension request');
+                          }
+                        } catch (error: any) {
+                          console.error('Extension request error:', error);
+                          toast.error(error.message || 'Failed to submit extension request');
+                        }
+                      }}
+                    >
+                      <TrendingUp className="w-4 h-4 mr-2" />
+                      Extend Loan Tenure
+                    </Button>
+                  )}
+                </CardContent>
               </Card>
-              )}
+            )}
             </>
           );
         })()}
@@ -1328,6 +1526,37 @@ export const RepaymentSchedulePage = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Extension Letter Modal */}
+      {loanData && (
+        <ExtensionLetterModal
+          loanId={loanData.id || parseInt(searchParams.get('applicationId') || '0')}
+          isOpen={showExtensionModal}
+          onClose={() => {
+            setShowExtensionModal(false);
+            // Refresh loan data and eligibility after modal closes
+            const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
+            if (loanId) {
+              fetchLoanData(loanId);
+            }
+          }}
+          onAccept={async () => {
+            const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
+            if (!loanId) {
+              throw new Error('Loan ID not found');
+            }
+            const response = await apiService.requestLoanExtension(loanId, 'Requesting loan tenure extension');
+            if (!response.success) {
+              throw new Error(response.message || 'Failed to submit extension request');
+            }
+            // Refresh eligibility
+            const eligibilityResponse = await apiService.checkExtensionEligibility(loanId);
+            if (eligibilityResponse.success && eligibilityResponse.data) {
+              setExtensionEligibility(eligibilityResponse.data);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

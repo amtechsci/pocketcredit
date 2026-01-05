@@ -80,8 +80,11 @@ export const LinkSalaryBankAccountPage = () => {
             const applications = applicationsResponse.data.applications;
             console.log('📋 Applications found:', applications.map((app: any) => ({ id: app.id, status: app.status })));
             
+            // Include all statuses that indicate an active application in progress
+            // This matches the backend check in userBankStatement.js which includes:
+            // 'pending', 'under_review', 'in_progress', 'submitted'
             const activeApplication = applications.find((app: any) => 
-              ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(app.status)
+              ['submitted', 'under_review', 'follow_up', 'disbursal', 'ready_for_disbursement'].includes(app.status)
             );
             
             if (!activeApplication) {

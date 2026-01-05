@@ -84,6 +84,7 @@ const employmentQuickCheckRoutes = require('./routes/employmentQuickCheck');
 const loanPlansRoutes = require('./routes/loanPlans');
 const validationRoutes = require('./routes/validation');
 const loanCalculationsRoutes = require('./routes/loanCalculations');
+const loanExtensionsRoutes = require('./routes/loanExtensions');
 const kfsRoutes = require('./routes/kfs');
 const postDisbursalRoutes = require('./routes/postDisbursal');
 const cronManagerRoutes = require('./routes/cronManager');
@@ -249,6 +250,8 @@ app.use('/api/loan-plans', loanPlansRoutes);
 app.use('/api/validation', validationRoutes);
 app.use('/api/loan-calculations', loanCalculationsRoutes); // Accessible to both admin and users (with proper auth)
 app.use('/api/admin/loan-calculations', loanCalculationsRoutes); // Keep for backward compatibility
+app.use('/api/loan-extensions', loanExtensionsRoutes); // User extension APIs
+app.use('/api/admin/loan-extensions', loanExtensionsRoutes); // Admin extension APIs
 app.use('/api/admin/cron', cronManagerRoutes);
 app.use('/api/kfs', kfsRoutes);
 app.use('/api/post-disbursal', postDisbursalRoutes);

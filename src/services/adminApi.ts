@@ -1347,6 +1347,37 @@ class AdminApiService {
   }
 
   /**
+   * Get pending extension requests
+   */
+  async getPendingExtensions(page: number = 1, limit: number = 20): Promise<ApiResponse<any>> {
+    // Base URL is /api/admin, route is /loan-extensions/pending
+    // Full path: /api/admin/loan-extensions/pending
+    return this.request('GET', `/loan-extensions/pending`, undefined, { page, limit });
+  }
+
+  /**
+   * Approve extension request
+   */
+  async approveExtension(extensionId: number, referenceNumber?: string): Promise<ApiResponse<any>> {
+    // Base URL is /api/admin, route is /loan-extensions/:extensionId/approve
+    // Full path: /api/admin/loan-extensions/:extensionId/approve
+    return this.request('POST', `/loan-extensions/${extensionId}/approve`, {
+      reference_number: referenceNumber
+    });
+  }
+
+  /**
+   * Reject extension request
+   */
+  async rejectExtension(extensionId: number, rejectionReason?: string): Promise<ApiResponse<any>> {
+    // Base URL is /api/admin, route is /loan-extensions/:extensionId/reject
+    // Full path: /api/admin/loan-extensions/:extensionId/reject
+    return this.request('POST', `/loan-extensions/${extensionId}/reject`, {
+      rejection_reason: rejectionReason
+    });
+  }
+
+  /**
    * Generate Extension Letter PDF
    */
   async generateExtensionLetterPDF(loanId: number, htmlContent: string, transactionId?: number, extensionNumber?: number): Promise<Blob> {
@@ -1513,6 +1544,68 @@ class AdminApiService {
       }
     });
     return response.data;
+  }
+
+  // Payout Management APIs
+  // Note: Payout routes are under /api/payout (not /api/admin), but still require admin auth
+  async getReadyForDisbursementLoans(): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.get('/api/payout/ready-for-disbursement', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
+
+  async disburseLoan(loanApplicationId: string): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.post('/api/payout/disburse-loan', { loanApplicationId }, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
+
+  async getTransferStatus(transferId: string): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.get(`/api/payout/transfer-status/${transferId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
+
+  async getPayoutDetails(loanApplicationId: string): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.get(`/api/payout/loan/${loanApplicationId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
   }
 }
 

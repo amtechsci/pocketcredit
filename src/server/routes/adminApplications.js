@@ -104,7 +104,9 @@ router.get('/', authenticateAdmin, async (req, res) => {
         COALESCE(a.address_line1, '') as address_line1,
         COALESCE(a.address_line2, '') as address_line2,
         COALESCE(lp.plan_code, '') as plan_code,
-        COALESCE(lp.plan_name, '') as plan_name
+        COALESCE(lp.plan_name, '') as plan_name,
+        la.extension_status,
+        la.extension_count
       FROM loan_applications la
       LEFT JOIN users u ON la.user_id = u.id
       LEFT JOIN (
@@ -326,7 +328,10 @@ router.get('/', authenticateAdmin, async (req, res) => {
         loan_plan_id: app.loan_plan_id || null,
         plan_code: app.plan_code || null,
         plan_name: app.plan_name || null,
-        plan_snapshot: app.plan_snapshot || null
+        plan_snapshot: app.plan_snapshot || null,
+        // Extension information
+        extension_status: app.extension_status || 'none',
+        extension_count: app.extension_count || 0
       };
     });
 
@@ -664,11 +669,53 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
             // Store as JSON array for multi-EMI
             processedDueDate = JSON.stringify(allEmiDates);
           } else {
-            // Single payment: Store as single date string
-            processedDueDate = calculatedValues?.interest?.repayment_date 
-              ? formatDateLocal(calculatedValues.interest.repayment_date)
-              : null;
-            console.log(`📅 Single payment loan ${loan.id}: Due date = ${processedDueDate} (from repayment_date:`, calculatedValues?.interest?.repayment_date, ')');
+            // Single payment: Calculate from plan snapshot and processed_at
+            const { getNextSalaryDate, getSalaryDateForMonth, formatDateToString, calculateDaysBetween, parseDateToString } = require('../utils/loanCalculations');
+            
+            // Get user salary date
+            const userResult = await executeQuery('SELECT salary_date FROM users WHERE id = ?', [loan.user_id]);
+            const userSalaryDate = userResult[0]?.salary_date || null;
+            
+            // Calculate base date (use processed_at if available, otherwise disbursed_at or today)
+            const baseDate = loan.processed_at 
+              ? new Date(loan.processed_at) 
+              : (loan.disbursed_at ? new Date(loan.disbursed_at) : new Date());
+            baseDate.setHours(0, 0, 0, 0);
+            const baseDateStr = formatDateToString(baseDate);
+            
+            // Try to get from calculatedValues first
+            if (calculatedValues?.interest?.repayment_date) {
+              processedDueDate = formatDateLocal(calculatedValues.interest.repayment_date);
+              console.log(`📅 Single payment loan ${loan.id}: Due date = ${processedDueDate} (from repayment_date)`);
+            } else {
+              // Calculate from plan snapshot
+              const usesSalaryDate = planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true;
+              const salaryDate = userSalaryDate ? parseInt(userSalaryDate) : null;
+              
+              if (usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
+                // Salary-date-based calculation
+                const nextSalaryDate = getNextSalaryDate(baseDateStr, salaryDate);
+                const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 15;
+                const nextSalaryDateStr = formatDateToString(nextSalaryDate);
+                const daysToSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
+                
+                if (daysToSalary < minDuration) {
+                  // Extend to next month's salary date
+                  processedDueDate = formatDateToString(getSalaryDateForMonth(nextSalaryDateStr, salaryDate, 1));
+                } else {
+                  processedDueDate = nextSalaryDateStr;
+                }
+                console.log(`📅 Single payment loan ${loan.id}: Due date = ${processedDueDate} (salary-date-based, base: ${baseDateStr}, salary date: ${salaryDate})`);
+              } else {
+                // Fixed days calculation
+                const repaymentDays = planSnapshot.repayment_days || planSnapshot.total_duration_days || 15;
+                const dueDate = new Date(baseDate);
+                dueDate.setDate(dueDate.getDate() + repaymentDays);
+                dueDate.setHours(0, 0, 0, 0);
+                processedDueDate = formatDateToString(dueDate);
+                console.log(`📅 Single payment loan ${loan.id}: Due date = ${processedDueDate} (fixed days: ${repaymentDays}, base: ${baseDateStr})`);
+              }
+            }
           }
         } catch (dueDateError) {
           console.error('Error calculating processed_due_date:', dueDateError);

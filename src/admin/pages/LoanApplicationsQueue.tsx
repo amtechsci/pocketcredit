@@ -47,6 +47,8 @@ interface LoanApplication {
   }>;
   disbursalAmount?: number;
   totalInterest?: number;
+  extension_status?: 'none' | 'pending' | 'approved' | 'rejected';
+  extension_count?: number;
   totalRepayable?: number;
   city: string;
   state: string;
@@ -797,9 +799,16 @@ export function LoanApplicationsQueue() {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColors[application.status]}`}>
-                      {getStatusLabel(application.status)}
-                    </span>
+                    <div className="flex flex-col gap-1">
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColors[application.status]}`}>
+                        {getStatusLabel(application.status)}
+                      </span>
+                      {application.extension_status === 'pending' && (
+                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+                          Extension Requested
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center gap-1 text-sm text-gray-900">
