@@ -222,4 +222,84 @@ router.put('/cloud-configs/:id', async (req, res) => {
   }
 });
 
+// GET /api/admin/settings/system-settings - Get system settings
+router.get('/system-settings', async (req, res) => {
+  try {
+    await initializeDatabase();
+    
+    const settings = await executeQuery(
+      'SELECT `key`, value, description FROM system_settings'
+    );
+    
+    // Convert to object format
+    const settingsObj = {};
+    settings.forEach(setting => {
+      settingsObj[setting.key] = {
+        value: setting.value,
+        description: setting.description
+      };
+    });
+    
+    res.json({
+      success: true,
+      data: settingsObj
+    });
+    
+  } catch (error) {
+    console.error('Error fetching system settings:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while fetching system settings'
+    });
+  }
+});
+
+// PUT /api/admin/settings/system-settings/:key - Update system setting
+router.put('/system-settings/:key', async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { key } = req.params;
+    const { value, description } = req.body;
+    
+    if (value === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Value is required'
+      });
+    }
+    
+    // Check if setting exists
+    const existing = await executeQuery(
+      'SELECT `key` FROM system_settings WHERE `key` = ?',
+      [key]
+    );
+    
+    if (existing && existing.length > 0) {
+      // Update existing
+      await executeQuery(
+        'UPDATE system_settings SET value = ?, description = ?, updated_at = NOW() WHERE `key` = ?',
+        [value, description || null, key]
+      );
+    } else {
+      // Insert new
+      await executeQuery(
+        'INSERT INTO system_settings (`key`, value, description, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())',
+        [key, value, description || null]
+      );
+    }
+    
+    res.json({
+      success: true,
+      message: 'System setting updated successfully'
+    });
+    
+  } catch (error) {
+    console.error('Error updating system setting:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while updating system setting'
+    });
+  }
+});
+
 module.exports = router;

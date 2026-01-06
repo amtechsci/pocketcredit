@@ -17,7 +17,6 @@ import { LoanAgreementDocument } from './admin/pages/LoanAgreementDocument';
 import { ExtensionLetterDocument } from './admin/pages/ExtensionLetterDocument';
 import { SearchResultsPage } from './admin/pages/SearchResultsPage';
 import { PoliciesManagement } from './admin/pages/PoliciesManagement';
-import { PayoutPage } from './admin/pages/PayoutPage';
 import { AdminProvider } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
 
@@ -101,16 +100,6 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                   }`}
                 >
                   Extensions
-                </button>
-                <button
-                  onClick={() => navigate('/admin/payout')}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/admin/payout') 
-                      ? 'bg-blue-100 text-blue-700' 
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  Payout
                 </button>
                 <button
                   onClick={() => navigate('/admin/users')}
@@ -289,11 +278,6 @@ export default function AdminApp() {
       <Route path="extensions" element={
         <ProtectedRoute>
           <PendingExtensionsPage />
-        </ProtectedRoute>
-      } />
-      <Route path="payout" element={
-        <ProtectedRoute>
-          <PayoutPage />
         </ProtectedRoute>
       } />
       <Route path="user-profile/:userId" element={

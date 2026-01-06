@@ -58,6 +58,8 @@ import { CareersPage } from './components/pages/CareersPage';
 import { GrievanceRedressalPage } from './components/pages/GrievanceRedressalPage';
 import { DisclaimerPage } from './components/pages/DisclaimerPage';
 import { AboutPage } from './components/pages/AboutPage';
+import { ChangeMobileNumberPage } from './components/pages/ChangeMobileNumberPage';
+import { SendEmailPage } from './components/pages/SendEmailPage';
 import { Logo } from './components/Logo';
 import AdminApp from './AdminApp';
 
@@ -588,6 +590,26 @@ function AppContent() {
           ) : isAuthenticated ? (
             <DashboardLayout>
               <DashboardPage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+
+        <Route path="/change-mobile-number" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <ChangeMobileNumberPage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+
+        <Route path="/send-email" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <SendEmailPage />
             </DashboardLayout>
           ) : (
             <Navigate to="/auth" replace />

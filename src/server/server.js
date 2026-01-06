@@ -78,6 +78,7 @@ const adminFeeTypesRoutes = require('./routes/adminFeeTypes');
 const adminLateFeesRoutes = require('./routes/adminLateFees');
 const adminBankStatementRoutes = require('./routes/adminBankStatement');
 const activityLogsRoutes = require('./routes/activityLogsSimple');
+const contactRoutes = require('./routes/contact');
 const eligibilityRoutes = require('./routes/eligibilityConfig');
 const searchRoutes = require('./routes/search');
 const employmentQuickCheckRoutes = require('./routes/employmentQuickCheck');
@@ -248,6 +249,7 @@ app.use('/api/eligibility', eligibilityRoutes);
 app.use('/api/employment-quick-check', employmentQuickCheckRoutes);
 app.use('/api/loan-plans', loanPlansRoutes);
 app.use('/api/validation', validationRoutes);
+app.use('/api/contact', contactRoutes);
 app.use('/api/loan-calculations', loanCalculationsRoutes); // Accessible to both admin and users (with proper auth)
 app.use('/api/admin/loan-calculations', loanCalculationsRoutes); // Keep for backward compatibility
 app.use('/api/loan-extensions', loanExtensionsRoutes); // User extension APIs
@@ -268,6 +270,17 @@ const payoutRoutes = require('./routes/payout');
 const payoutWebhookRoutes = require('./routes/payoutWebhooks');
 app.use('/api/payout', payoutWebhookRoutes);  // Webhooks on /api/payout/webhook - must be first!
 app.use('/api/payout', payoutRoutes);
+if (payoutRoutes.stack) {
+  const routes = payoutRoutes.stack.map(r => {
+    if (r.route) {
+      return `${Object.keys(r.route.methods).join(',').toUpperCase()} ${r.route.path}`;
+    }
+    return r.regexp?.toString();
+  }).filter(Boolean);
+  console.log('✅ Payout routes registered:', routes);
+} else {
+  console.warn('⚠️  Payout routes stack not found');
+}
 
 // ClickWrap (e-Signature) routes
 const clickWrapRoutes = require('./routes/clickWrap');

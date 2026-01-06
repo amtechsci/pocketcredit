@@ -314,6 +314,11 @@ export function SystemSettings() {
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [showPasswords, setShowPasswords] = useState<{ [key: string]: boolean }>({});
+  
+  // General settings state
+  const [supportEmail, setSupportEmail] = useState('support@pocketcredit.in');
+  const [generalSettingsLoading, setGeneralSettingsLoading] = useState(false);
+  const [generalSettingsSaving, setGeneralSettingsSaving] = useState(false);
 
   const apiConfigs: ApiConfig[] = [
     {
@@ -618,8 +623,65 @@ export function SystemSettings() {
       }))
     : apiConfigs.filter(config => config.type === 'sms');
 
+  // Load general settings
+  const loadGeneralSettings = async () => {
+    setGeneralSettingsLoading(true);
+    try {
+      const response = await fetch('/api/admin/settings/system-settings', {
+        credentials: 'include'
+      });
+      const result = await response.json();
+      if (result.success && result.data) {
+        if (result.data.support_email) {
+          setSupportEmail(result.data.support_email.value || 'support@pocketcredit.in');
+        }
+      }
+    } catch (error) {
+      console.error('Error loading general settings:', error);
+    } finally {
+      setGeneralSettingsLoading(false);
+    }
+  };
+
+  // Save support email
+  const saveSupportEmail = async () => {
+    if (!supportEmail || !supportEmail.includes('@')) {
+      alert('Please enter a valid email address');
+      return;
+    }
+
+    setGeneralSettingsSaving(true);
+    try {
+      const response = await fetch('/api/admin/settings/system-settings/support_email', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          value: supportEmail,
+          description: 'Support email address for contact form emails'
+        })
+      });
+      const result = await response.json();
+      
+      if (result.success) {
+        alert('Support email updated successfully!');
+      } else {
+        alert('Failed to update support email');
+      }
+    } catch (error) {
+      console.error('Error saving support email:', error);
+      alert('Failed to update support email');
+    } finally {
+      setGeneralSettingsSaving(false);
+    }
+  };
+
   useEffect(() => {
-    if (activeTab === 'email') {
+    if (activeTab === 'general') {
+      loadGeneralSettings();
+    } else if (activeTab === 'email') {
       loadEmailConfigs();
     } else if (activeTab === 'cloud') {
       loadCloudConfigs();
@@ -678,7 +740,47 @@ export function SystemSettings() {
 
         {/* Configuration Cards */}
         <div className="space-y-6">
-          {(activeTab === 'email' && emailConfigsLoading) || (activeTab === 'cloud' && cloudConfigsLoading) ? (
+          {activeTab === 'general' ? (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-6">General Settings</h3>
+              
+              {generalSettingsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  <span className="ml-2 text-gray-600">Loading settings...</span>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Support Email Address
+                      <span className="text-red-500 ml-1">*</span>
+                    </label>
+                    <p className="text-xs text-gray-500 mb-2">
+                      This email will receive all contact form submissions from users
+                    </p>
+                    <div className="flex gap-3">
+                      <input
+                        type="email"
+                        value={supportEmail}
+                        onChange={(e) => setSupportEmail(e.target.value)}
+                        placeholder="support@pocketcredit.in"
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <button
+                        onClick={saveSupportEmail}
+                        disabled={generalSettingsSaving}
+                        className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        <Save className="w-4 h-4" />
+                        {generalSettingsSaving ? 'Saving...' : 'Save'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (activeTab === 'email' && emailConfigsLoading) || (activeTab === 'cloud' && cloudConfigsLoading) ? (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
               <span className="ml-2 text-gray-600">Loading configurations...</span>

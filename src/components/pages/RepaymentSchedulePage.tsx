@@ -1541,19 +1541,10 @@ export const RepaymentSchedulePage = () => {
             }
           }}
           onAccept={async () => {
-            const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
-            if (!loanId) {
-              throw new Error('Loan ID not found');
-            }
-            const response = await apiService.requestLoanExtension(loanId, 'Requesting loan tenure extension');
-            if (!response.success) {
-              throw new Error(response.message || 'Failed to submit extension request');
-            }
-            // Refresh eligibility
-            const eligibilityResponse = await apiService.checkExtensionEligibility(loanId);
-            if (eligibilityResponse.success && eligibilityResponse.data) {
-              setExtensionEligibility(eligibilityResponse.data);
-            }
+            // This is now handled inside ExtensionLetterModal
+            // The modal will handle the extension request and payment flow
+            // This function is kept for compatibility but won't be called
+            // as the modal handles everything internally
           }}
         />
       )}

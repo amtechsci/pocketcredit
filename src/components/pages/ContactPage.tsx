@@ -24,10 +24,14 @@ export function ContactPage() {
     message: ''
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate form submission
-    toast.success('Your message has been sent successfully! We will get back to you within 24 hours.');
+    
+    // For non-authenticated users on contact page, we'll use a different approach
+    // For now, show a message to use the app's send email feature
+    toast.success('Please use the "Send E-mail" option from your profile in the app to send emails.');
+    
+    // TODO: Could add a public contact API endpoint if needed
     setFormData({
       name: '',
       email: '',

@@ -640,6 +640,90 @@ class EmailService {
   }
 
   /**
+   * Send contact/support email from user
+   * @param {object} options - Email options
+   * @returns {Promise<object>} Email result
+   */
+  async sendContactEmail(options) {
+    const {
+      userEmail,
+      userName,
+      userPhone,
+      subject,
+      message,
+      supportEmail
+    } = options;
+
+    try {
+      console.log(`📧 Sending contact email from ${userEmail} to ${supportEmail}...`);
+
+      // Create email HTML template
+      const emailHTML = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background-color: #0052FF; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }
+    .content { background-color: #f9f9f9; padding: 20px; border: 1px solid #ddd; }
+    .info-box { background-color: white; padding: 15px; margin: 15px 0; border-left: 4px solid #0052FF; }
+    .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h2>New Contact Email from Pocket Credit App</h2>
+    </div>
+    <div class="content">
+      <div class="info-box">
+        <h3 style="margin-top: 0;">User Information</h3>
+        <p><strong>Name:</strong> ${userName || 'Not provided'}</p>
+        <p><strong>Email:</strong> ${userEmail}</p>
+        <p><strong>Phone:</strong> ${userPhone || 'Not provided'}</p>
+      </div>
+      
+      <div class="info-box">
+        <h3 style="margin-top: 0;">Message</h3>
+        <p><strong>Subject:</strong> ${subject}</p>
+        <p><strong>Message:</strong></p>
+        <p style="white-space: pre-wrap;">${message}</p>
+      </div>
+    </div>
+    <div class="footer">
+      <p>This email was sent from the Pocket Credit application contact form.</p>
+    </div>
+  </div>
+</body>
+</html>
+      `;
+
+      // Send email to support
+      const info = await this.transporter.sendMail({
+        from: `"Pocket Credit App" <${process.env.SMTP_USER || 'noreply@pocketcredit.in'}>`,
+        to: supportEmail,
+        replyTo: userEmail,
+        subject: `[Contact Form] ${subject}`,
+        html: emailHTML
+      });
+
+      console.log('✅ Contact email sent successfully:', info.messageId);
+
+      return {
+        success: true,
+        messageId: info.messageId,
+        message: 'Email sent successfully'
+      };
+
+    } catch (error) {
+      console.error('❌ Contact email sending failed:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Test email configuration
    * @returns {Promise<boolean>} Test result
    */

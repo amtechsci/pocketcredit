@@ -4,6 +4,8 @@ import { Button } from '../ui/button';
 import { SharedExtensionLetterDocument } from '../shared/SharedExtensionLetterDocument';
 import { apiService } from '../../services/api';
 import { toast } from 'sonner';
+// @ts-ignore - Cashfree SDK doesn't have TypeScript definitions
+import { load } from '@cashfreepayments/cashfree-js';
 
 interface ExtensionLetterModalProps {
   loanId: number;
@@ -52,43 +54,66 @@ export function ExtensionLetterModal({ loanId, isOpen, onClose, onAccept }: Exte
 
     try {
       setAccepting(true);
+      toast.loading('Submitting extension request...');
 
-      // Step 1: Get HTML content from the extension letter document
-      const extensionLetterElement = document.querySelector('.extension-letter-content');
-      if (!extensionLetterElement) {
-        throw new Error('Extension letter content not found');
+      // Step 1: Submit extension request (creates extension with pending_payment status)
+      const extensionRequestResponse = await apiService.requestLoanExtension(loanId, 'Requesting loan tenure extension');
+      
+      if (!extensionRequestResponse.success) {
+        throw new Error(extensionRequestResponse.message || 'Failed to submit extension request');
       }
 
-      const htmlContent = extensionLetterElement.outerHTML;
+      // Step 2: Get the extension ID from the response
+      const extensionId = extensionRequestResponse.data?.extension_id;
+      
+      if (!extensionId) {
+        throw new Error('Extension ID not found in response');
+      }
 
-      // Step 2: Send extension letter to email
+      toast.loading('Creating payment order...');
+
+      // Step 3: Create payment order for extension fee
+      const paymentResponse = await apiService.createExtensionPayment(extensionId);
+      
+      if (!paymentResponse.success || !paymentResponse.data?.paymentSessionId) {
+        throw new Error(paymentResponse.message || 'Failed to create payment order');
+      }
+
+      toast.success('Opening payment gateway...');
+
+      // Step 4: Open payment gateway
       try {
-        const emailResponse = await apiService.sendExtensionLetterEmail(loanId, htmlContent);
-        if (emailResponse.success) {
-          toast.success('Extension letter sent to your email');
-        } else {
-          console.warn('Email sending failed (non-fatal):', emailResponse.message);
-          // Continue even if email fails
-        }
-      } catch (emailError: any) {
-        console.error('Error sending email (non-fatal):', emailError);
-        // Continue even if email fails
-      }
+        const isProduction = paymentResponse.data.checkoutUrl?.includes('payments.cashfree.com') && 
+                           !paymentResponse.data.checkoutUrl?.includes('payments-test');
+        
+        const cashfree = await load({ 
+          mode: isProduction ? "production" : "sandbox"
+        });
 
-      // Step 2: Submit extension request
-      await onAccept();
-      
-      setAccepted(true);
-      toast.success('Extension request submitted successfully!');
-      
-      // Close modal after a short delay
-      setTimeout(() => {
-        onClose();
-      }, 1500);
+        if (cashfree) {
+          // Close modal before opening payment gateway
+          onClose();
+          
+          cashfree.checkout({
+            paymentSessionId: paymentResponse.data.paymentSessionId
+          });
+        } else {
+          throw new Error('Failed to load Cashfree SDK');
+        }
+      } catch (sdkError: any) {
+        console.error('Cashfree SDK error:', sdkError);
+        toast.error('Failed to open payment gateway. Please try again.');
+        
+        // Fallback: redirect to checkout URL
+        if (paymentResponse.data.checkoutUrl) {
+          window.location.href = paymentResponse.data.checkoutUrl;
+        } else {
+          throw new Error('No payment session available');
+        }
+      }
     } catch (error: any) {
       console.error('Error accepting extension:', error);
       toast.error(error.message || 'Failed to submit extension request');
-    } finally {
       setAccepting(false);
     }
   };
@@ -117,14 +142,6 @@ export function ExtensionLetterModal({ loanId, isOpen, onClose, onAccept }: Exte
               <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
               <span className="ml-3 text-gray-600">Loading extension letter...</span>
             </div>
-          ) : accepted ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <CheckCircle className="w-16 h-16 text-green-600 mb-4" />
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Extension Request Submitted!</h3>
-              <p className="text-gray-600 text-center">
-                Your extension request has been submitted and the extension letter has been sent to your email.
-              </p>
-            </div>
           ) : extensionData ? (
             <div className="extension-letter-content">
               <SharedExtensionLetterDocument extensionData={extensionData} />
@@ -140,7 +157,7 @@ export function ExtensionLetterModal({ loanId, isOpen, onClose, onAccept }: Exte
         {!loading && !accepted && extensionData && (
           <div className="p-4 border-t bg-gray-50 flex items-center justify-between">
             <p className="text-sm text-gray-600">
-              Please read the extension letter carefully before accepting.
+              Please read the extension letter carefully. After accepting, you will be redirected to payment gateway to pay the extension fee.
             </p>
             <div className="flex gap-3">
               <Button
@@ -163,7 +180,7 @@ export function ExtensionLetterModal({ loanId, isOpen, onClose, onAccept }: Exte
                 ) : (
                   <>
                     <CheckCircle className="w-4 h-4 mr-2" />
-                    Accept & Submit Request
+                    Accept & Pay Extension Fee
                   </>
                 )}
               </Button>

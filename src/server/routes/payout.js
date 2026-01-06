@@ -9,6 +9,8 @@ const { authenticateAdmin } = require('../middleware/auth');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const cashfreePayout = require('../services/cashfreePayout');
 
+console.log('[Payout Routes] Module loaded, registering routes...');
+
 /**
  * POST /api/payout/disburse-loan
  * Disburse loan amount to user's bank account via Cashfree Payout API
@@ -22,6 +24,7 @@ const cashfreePayout = require('../services/cashfreePayout');
  * 6. Updates loan status
  */
 router.post('/disburse-loan', authenticateAdmin, async (req, res) => {
+    console.log('[Payout] POST /disburse-loan route handler called');
     let transferId = null;
     
     try {

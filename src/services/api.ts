@@ -1393,9 +1393,23 @@ class ApiService {
 
   /**
    * Send extension letter to email
+   * @deprecated Email is now sent automatically on payment success
    */
   async sendExtensionLetterEmail(loanId: number, htmlContent: string): Promise<ApiResponse<any>> {
     return this.request('POST', `/kfs/user/${loanId}/extension-letter/send-email`, { htmlContent });
+  }
+
+  /**
+   * Create payment order for extension fee
+   */
+  async createExtensionPayment(extensionId: number): Promise<ApiResponse<{
+    orderId: string;
+    paymentSessionId: string;
+    checkoutUrl: string;
+    extension_id: number;
+    amount: number;
+  }>> {
+    return this.request('POST', `/loan-extensions/${extensionId}/payment`);
   }
 
   /**

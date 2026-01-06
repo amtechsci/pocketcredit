@@ -132,10 +132,10 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     let bankDetails = null;
     try {
       if (loan.user_bank_id) {
-        const bankDetailsQuery = await executeQuery(`
-          SELECT bd.* FROM bank_details bd
+    const bankDetailsQuery = await executeQuery(`
+      SELECT bd.* FROM bank_details bd
           WHERE bd.id = ?
-          LIMIT 1
+      LIMIT 1
         `, [loan.user_bank_id]);
         bankDetails = bankDetailsQuery && bankDetailsQuery.length > 0 ? bankDetailsQuery[0] : null;
       }
@@ -368,8 +368,8 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         actualExhaustedDays = calculateDaysBetween(processedDateStr, currentDateStr);
         // Ensure at least 1 day
         if (actualExhaustedDays < 1) {
-          actualExhaustedDays = 1;
-        }
+        actualExhaustedDays = 1;
+      }
         console.log(`📅 Using actual exhausted days: ${actualExhaustedDays} (from processed_at ${processedDateStr} to ${currentDateStr})`);
       }
     } else if (useActualDays && loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)) {
@@ -468,7 +468,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         // CRITICAL: Don't override loanValues.interest.days - keep planned term days for total amount calculation
       }
     } else {
-      // Calculate loan values using actual exhausted days (not plan days) for interest calculation
+    // Calculate loan values using actual exhausted days (not plan days) for interest calculation
       loanValues = calculateCompleteLoanValues(loanData, planData, userData, calculationOptions);
     }
 
@@ -632,13 +632,13 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             : (loanPlan.interest_percent_per_day 
               ? parseFloat((loanPlan.interest_percent_per_day * 365 * 100).toFixed(2)) 
               : 0),
-          rate_per_day: planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001,
-          type: 'Reducing Balance',
-          calculation_method: 'Daily',
-          annual_rate: ((planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001) * 365 * 100).toFixed(2),
-          days: loanValues.interest?.days || 0,
+        rate_per_day: planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001,
+        type: 'Reducing Balance',
+        calculation_method: 'Daily',
+        annual_rate: ((planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001) * 365 * 100).toFixed(2),
+        days: loanValues.interest?.days || 0,
           amount: loanValues.interest?.amount || 0, // Will be updated below for multi-EMI
-          calculation_days: loanValues.interest?.days || 0  // Actual days used for interest calculation
+        calculation_days: loanValues.interest?.days || 0  // Actual days used for interest calculation
         };
       })(),
       fees: {
@@ -778,7 +778,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
         }
         if (baseDate && !isNaN(baseDate.getTime())) {
-          baseDate.setHours(0, 0, 0, 0);
+        baseDate.setHours(0, 0, 0, 0);
         } else {
           baseDate = new Date();
           baseDate.setHours(0, 0, 0, 0);
@@ -903,14 +903,14 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               
           // Calculate days for this EMI period using string-based calculation
           // First period (disbursement to first EMI): inclusive
-          // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
+              // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
           let previousDateStr;
-          if (i === 0) {
+              if (i === 0) {
             // Use baseDateStr (disbursement/processed date as string) directly
             // This avoids any timezone conversion issues
             previousDateStr = baseDateStr || getTodayString();
-          } else {
-            // Start from day AFTER previous EMI date
+              } else {
+                // Start from day AFTER previous EMI date
             const prevEmiDate = allEmiDates[i - 1] instanceof Date ? allEmiDates[i - 1] : new Date(allEmiDates[i - 1]);
             const prevEmiDateStr = formatDateToString(prevEmiDate) || parseDateToString(prevEmiDate);
                 if (prevEmiDateStr) {
@@ -2853,7 +2853,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           return {
             fee_name: fee.fee_name || fee.name || 'Fee',
             fee_percent: feePercent || 0,
-            application_method: fee.application_method || 'deduct_from_disbursal'
+        application_method: fee.application_method || 'deduct_from_disbursal'
           };
         });
       } else if (loan.loan_plan_id) {
@@ -3322,7 +3322,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
                 const [year, month, day] = processedDateStr.split('-').map(Number);
                 baseDateForEmi = new Date(year, month - 1, day); // month is 0-indexed
                 console.log(`📅 Using processed_at as base date for EMI calculation: ${processedDateStr}`);
-              } else {
+      } else {
                 baseDateForEmi = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
               }
               baseDateForEmi.setHours(0, 0, 0, 0);
@@ -3565,12 +3565,12 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           })),
           ...calculations.fees.addToTotal.map(fee => ({
             // Fee amounts are already multiplied by EMI count in loanCalculations.js
-            fee_name: fee.fee_name,
-            fee_percent: fee.fee_percent,
+              fee_name: fee.fee_name,
+              fee_percent: fee.fee_percent,
             fee_amount: fee.fee_amount,
             gst_amount: fee.gst_amount,
             total_with_gst: fee.total_with_gst,
-            application_method: 'add_to_total',
+              application_method: 'add_to_total',
             amount: fee.fee_amount
           }))
         ],
@@ -3752,13 +3752,13 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           const postServiceFee = calculations.totals.repayableFee || 0;
           const postServiceFeeGST = calculations.totals.repayableFeeGST || 0;
           schedule.push({
-            instalment_no: 1,
-            outstanding_principal: principal,
-            principal: principal,
-            interest: interest,
+              instalment_no: 1,
+              outstanding_principal: principal,
+              principal: principal,
+              interest: interest,
             post_service_fee: postServiceFee,
             gst_on_post_service_fee: postServiceFeeGST,
-            instalment_amount: totalRepayable,
+              instalment_amount: totalRepayable,
             due_date: formatDateLocal(dueDate)
           });
         }
@@ -3926,18 +3926,18 @@ router.post('/:loanId/generate-pdf', authenticateAdmin, async (req, res) => {
     // Get loan data for filename
     let applicationNumber = null;
     try {
-      const db = await initializeDatabase();
-      const [loans] = await db.execute(
-        'SELECT application_number FROM loan_applications WHERE id = ?',
-        [loanId]
-      );
+    const db = await initializeDatabase();
+    const [loans] = await db.execute(
+      'SELECT application_number FROM loan_applications WHERE id = ?',
+      [loanId]
+    );
 
       if (!loans || loans.length === 0 || !loans[0]) {
-        return res.status(404).json({
-          success: false,
-          message: 'Loan not found'
-        });
-      }
+      return res.status(404).json({
+        success: false,
+        message: 'Loan not found'
+      });
+    }
 
       applicationNumber = loans[0].application_number || `LOAN_${loanId}`;
     } catch (dbError) {
@@ -4068,11 +4068,11 @@ router.post('/:loanId/generate-pdf', authenticateAdmin, async (req, res) => {
       const accepts = req.headers.accept || '';
       
       if (accepts.includes('application/json')) {
-        res.status(500).json({
-          success: false,
-          message: 'Failed to generate PDF',
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate PDF',
           error: error.message || 'Unknown error occurred'
-        });
+    });
       } else {
         // Send as plain text error message
         res.status(500).setHeader('Content-Type', 'text/plain');

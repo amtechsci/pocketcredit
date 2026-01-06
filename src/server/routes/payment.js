@@ -9,6 +9,7 @@ const { executeQuery } = require('../config/database');
 const cashfreePayment = require('../services/cashfreePayment');
 const { authenticateToken } = require('../middleware/auth');
 
+
 /**
  * POST /api/payment/create-order
  * Create a payment order for loan repayment
@@ -116,8 +117,8 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         try {
             await executeQuery(
                 `INSERT INTO payment_orders (
-            order_id, loan_id, user_id, amount, status, created_at
-          ) VALUES (?, ?, ?, ?, 'PENDING', NOW())`,
+            order_id, loan_id, user_id, amount, payment_type, status, created_at
+          ) VALUES (?, ?, ?, ?, 'loan_repayment', 'PENDING', NOW())`,
                 [orderId, loanId, userId, amount]
             );
             console.log(`[Payment] Payment order created in DB: ${orderId}`);
@@ -374,34 +375,187 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
             [orderStatus, JSON.stringify(payload), orderId]
         );
 
-        // If payment succeeded, update loan
+        // If payment succeeded, process based on payment type
         if (orderStatus === 'PAID') {
             const [paymentOrder] = await executeQuery(
-                'SELECT loan_id FROM payment_orders WHERE order_id = ?',
+                'SELECT loan_id, extension_id, payment_type FROM payment_orders WHERE order_id = ?',
                 [orderId]
             );
 
             if (paymentOrder) {
-                // Create payment record
-                await executeQuery(
-                    `INSERT INTO loan_payments (
-            loan_id, amount, payment_method, transaction_id, status, payment_date
-          ) VALUES (?, ?, 'CASHFREE', ?, 'SUCCESS', NOW())`,
-                    [paymentOrder.loan_id, orderAmount, orderId]
-                );
+                // Check if this is an extension payment
+                if (paymentOrder.payment_type === 'extension_fee' && paymentOrder.extension_id) {
+                    console.log('✅ Extension payment successful, auto-approving extension:', {
+                        extensionId: paymentOrder.extension_id,
+                        orderId,
+                        amount: orderAmount
+                    });
 
-                // Update loan status (you may want more sophisticated logic here)
-                await executeQuery(
-                    `UPDATE loan_applications 
-           SET status = 'paid', updated_at = NOW() 
-           WHERE id = ?`,
-                    [paymentOrder.loan_id]
-                );
+                    try {
+                        // Import and use the approval function
+                        const { approveExtension } = require('../utils/extensionApproval');
+                        const approvalResult = await approveExtension(
+                            paymentOrder.extension_id,
+                            orderId, // Use orderId as reference number
+                            null // No admin ID for auto-approval
+                        );
 
-                console.log('✅ Loan payment processed:', {
-                    loanId: paymentOrder.loan_id,
-                    amount: orderAmount
-                });
+                        console.log('✅ Extension auto-approved:', approvalResult);
+
+                        // Send extension letter email after successful payment
+                        try {
+                            const emailService = require('../services/emailService');
+                            const pdfService = require('../services/pdfService');
+                            
+                            // Get extension and loan details for email
+                            const extensionDetails = await executeQuery(`
+                                SELECT 
+                                    le.*,
+                                    la.application_number,
+                                    la.processed_at,
+                                    la.processed_due_date,
+                                    la.plan_snapshot,
+                                    u.first_name,
+                                    u.last_name,
+                                    u.email,
+                                    u.personal_email,
+                                    u.official_email,
+                                    u.salary_date
+                                FROM loan_extensions le
+                                INNER JOIN loan_applications la ON le.loan_application_id = la.id
+                                INNER JOIN users u ON la.user_id = u.id
+                                WHERE le.id = ?
+                            `, [paymentOrder.extension_id]);
+
+                            if (extensionDetails && extensionDetails.length > 0) {
+                                const ext = extensionDetails[0];
+                                const recipientEmail = ext.personal_email || ext.official_email || ext.email;
+                                
+                                if (recipientEmail) {
+                                    try {
+                                        // Reuse the existing extension letter email logic
+                                        // Get extension letter data using the same logic as the GET endpoint
+                                        // We'll call the extension letter data generation internally
+                                        const { generateExtensionLetterData } = require('../utils/extensionLetterHelper');
+                                        
+                                        // Get loan details
+                                        const loanDetails = await executeQuery(`
+                                            SELECT 
+                                                la.*,
+                                                u.first_name, u.last_name, u.email, u.personal_email, u.official_email,
+                                                u.salary_date
+                                            FROM loan_applications la
+                                            INNER JOIN users u ON la.user_id = u.id
+                                            WHERE la.id = ?
+                                        `, [ext.loan_application_id]);
+                                        
+                                        if (!loanDetails || loanDetails.length === 0) {
+                                            console.warn('⚠️ Loan not found for extension letter email');
+                                            return;
+                                        }
+                                        
+                                        const loan = loanDetails[0];
+                                        
+                                        // Get extension letter data (reuse existing logic from kfs.js)
+                                        // For now, we'll generate a simple HTML from extension data
+                                        // In production, you might want to use the full extension letter template
+                                        
+                                        // Parse extension dates
+                                        let originalDueDate = ext.original_due_date;
+                                        let newDueDate = ext.new_due_date;
+                                        try {
+                                            if (typeof originalDueDate === 'string' && originalDueDate.startsWith('[')) {
+                                                const parsed = JSON.parse(originalDueDate);
+                                                originalDueDate = Array.isArray(parsed) ? parsed[0] : originalDueDate;
+                                            }
+                                            if (typeof newDueDate === 'string' && newDueDate.startsWith('[')) {
+                                                const parsed = JSON.parse(newDueDate);
+                                                newDueDate = Array.isArray(parsed) ? parsed[0] : newDueDate;
+                                            }
+                                        } catch (e) {
+                                            // Keep original values if parsing fails
+                                        }
+                                        
+                                        // Generate HTML content (simplified - you can enhance this to match your template)
+                                        const htmlContent = `
+                                            <!DOCTYPE html>
+                                            <html>
+                                            <head>
+                                                <meta charset="UTF-8">
+                                                <title>Extension Letter</title>
+                                            </head>
+                                            <body style="font-family: Arial, sans-serif; padding: 20px;">
+                                                <h1>Loan Extension Letter</h1>
+                                                <p><strong>Application Number:</strong> ${loan.application_number}</p>
+                                                <p><strong>Extension Number:</strong> ${ext.extension_number}</p>
+                                                <h2>Extension Details</h2>
+                                                <p>Extension Fee: ₹${ext.extension_fee}</p>
+                                                <p>GST: ₹${ext.gst_amount}</p>
+                                                <p>Interest Till Date: ₹${ext.interest_till_date}</p>
+                                                <p>Total Amount: ₹${ext.total_extension_amount}</p>
+                                                <p>Original Due Date: ${originalDueDate}</p>
+                                                <p>New Due Date: ${newDueDate}</p>
+                                                <p>Extension Period: ${ext.extension_period_days} days</p>
+                                            </body>
+                                            </html>
+                                        `;
+                                        
+                                        // Generate PDF from HTML (reuse existing logic from kfs.js)
+                                        const filename = `Extension_Letter_${loan.application_number}.pdf`;
+                                        const pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
+
+                                        // Send email with PDF (reuse existing function from kfs.js)
+                                        await emailService.sendExtensionLetterEmail({
+                                            loanId: ext.loan_application_id,
+                                            recipientEmail,
+                                            recipientName: `${ext.first_name} ${ext.last_name || ''}`.trim(),
+                                            loanData: {
+                                                application_number: loan.application_number
+                                            },
+                                            pdfBuffer: pdfResult.buffer,
+                                            pdfFilename: filename,
+                                            sentBy: 'system'
+                                        });
+
+                                        console.log('✅ Extension letter email sent to:', recipientEmail);
+                                    } catch (emailError) {
+                                        console.error('❌ Error sending extension letter email (non-fatal):', emailError);
+                                        // Don't fail the webhook if email fails
+                                    }
+                                }
+                            }
+                        } catch (emailError) {
+                            console.error('❌ Error sending extension letter email (non-fatal):', emailError);
+                            // Don't fail the webhook if email fails
+                        }
+
+                    } catch (approvalError) {
+                        console.error('❌ Error auto-approving extension:', approvalError);
+                        // Log error but don't fail the webhook - payment was successful
+                    }
+                } else {
+                    // Regular loan repayment
+                    // Create payment record
+                    await executeQuery(
+                        `INSERT INTO loan_payments (
+                loan_id, amount, payment_method, transaction_id, status, payment_date
+              ) VALUES (?, ?, 'CASHFREE', ?, 'SUCCESS', NOW())`,
+                        [paymentOrder.loan_id, orderAmount, orderId]
+                    );
+
+                    // Update loan status (you may want more sophisticated logic here)
+                    await executeQuery(
+                        `UPDATE loan_applications 
+             SET status = 'paid', updated_at = NOW() 
+             WHERE id = ?`,
+                        [paymentOrder.loan_id]
+                    );
+
+                    console.log('✅ Loan payment processed:', {
+                        loanId: paymentOrder.loan_id,
+                        amount: orderAmount
+                    });
+                }
             }
         }
 

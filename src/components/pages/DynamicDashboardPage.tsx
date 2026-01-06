@@ -21,7 +21,6 @@ import {
   Home,
   Phone,
   Mail,
-  Headphones,
   ChevronRight,
   Share2,
   Info,
@@ -72,6 +71,7 @@ interface DashboardData {
   };
   summary: {
     credit_score: number;
+    experian_score: number | null;
     available_credit: number;
     total_loans: number;
     active_loans: number;
@@ -683,12 +683,23 @@ export function DynamicDashboardPage() {
               <div className="bg-white/10 rounded-lg p-4">
                 <div className="flex items-center gap-2 mb-2">
                   <TrendingUp className="w-5 h-5" />
-                  <p className="text-blue-100 text-sm">Credit Score</p>
+                  <p className="text-blue-100 text-sm">Pocket Credit Score</p>
                 </div>
                 <p className="text-3xl font-bold">{summary.credit_score}</p>
                 <p className={`text-xs ${getCreditScoreColor(summary.credit_score)}`}>
                   {getCreditScoreCategory(summary.credit_score)} (+25 this month)
                 </p>
+                {summary.experian_score !== null && summary.experian_score !== undefined ? (
+                  <div className="mt-2 pt-2 border-t border-white/20">
+                    <p className="text-blue-100 text-xs mb-1">Experian Score</p>
+                    <p className="text-lg font-semibold">{summary.experian_score}</p>
+                  </div>
+                ) : (
+                  <div className="mt-2 pt-2 border-t border-white/20">
+                    <p className="text-blue-100 text-xs mb-1">Experian Score</p>
+                    <p className="text-lg font-semibold text-blue-200">N/A</p>
+                  </div>
+                )}
                 <div className="mt-3 pt-3 border-t border-white/20">
                   <p className="text-[10px] text-blue-100 leading-tight">
                     For any dispute related concerns please reach out to{' '}
@@ -757,11 +768,22 @@ export function DynamicDashboardPage() {
             {/* Hide Credit Score for students */}
             {userData.employment_type !== 'student' && (
               <div className="bg-white/10 rounded-lg p-3">
-                <p className="text-blue-100 text-xs">Credit Score</p>
+                <p className="text-blue-100 text-xs">Pocket Credit Score</p>
                 <p className="text-xl font-bold">{summary.credit_score}</p>
                 <p className={`text-xs ${getCreditScoreColor(summary.credit_score)}`}>
                   {getCreditScoreCategory(summary.credit_score)}
                 </p>
+                {summary.experian_score !== null && summary.experian_score !== undefined ? (
+                  <div className="mt-2 pt-2 border-t border-white/20">
+                    <p className="text-blue-100 text-[10px] mb-1">Experian Score</p>
+                    <p className="text-base font-semibold">{summary.experian_score}</p>
+                  </div>
+                ) : (
+                  <div className="mt-2 pt-2 border-t border-white/20">
+                    <p className="text-blue-100 text-[10px] mb-1">Experian Score</p>
+                    <p className="text-base font-semibold text-blue-200">N/A</p>
+                  </div>
+                )}
                 <div className="mt-2 pt-2 border-t border-white/20">
                   <p className="text-[10px] text-blue-100 leading-tight">
                     For any dispute related concerns please reach out to{' '}
@@ -977,7 +999,18 @@ export function DynamicDashboardPage() {
                 <p className={`text-4xl font-bold mb-2 ${getCreditScoreColor(summary.credit_score)}`}>
                   {summary.credit_score}
                 </p>
-                <p className="text-sm text-gray-600 mb-4">Credit Score</p>
+                <p className="text-sm text-gray-600 mb-2">Pocket Credit Score</p>
+                {summary.experian_score !== null && summary.experian_score !== undefined ? (
+                  <div className="mb-2">
+                    <p className="text-xs text-gray-500 mb-1">Experian Score</p>
+                    <p className="text-2xl font-semibold text-gray-700">{summary.experian_score}</p>
+                  </div>
+                ) : (
+                  <div className="mb-2">
+                    <p className="text-xs text-gray-500 mb-1">Experian Score</p>
+                    <p className="text-2xl font-semibold text-gray-400">N/A</p>
+                  </div>
+                )}
                 <div className="flex justify-center mb-4">
                   <Badge className="bg-blue-100 text-blue-800">
                     {getCreditScoreCategory(summary.credit_score)}
@@ -1389,7 +1422,7 @@ export function DynamicDashboardPage() {
                     <div className="space-y-2">
                       {/* Send E-mail */}
                       <button
-                        onClick={() => window.location.href = 'mailto:support@pocketcredit.in'}
+                        onClick={() => navigate('/send-email')}
                         className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
                       >
                         <div className="flex items-center gap-3">
@@ -1401,23 +1434,9 @@ export function DynamicDashboardPage() {
                         <ChevronRight className="w-5 h-5 text-gray-400" />
                       </button>
 
-                      {/* Help Desk */}
-                      <button
-                        onClick={() => navigate('/contact')}
-                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                            <Headphones className="w-5 h-5 text-blue-600" />
-                          </div>
-                          <span className="text-base font-medium text-gray-900">Help Desk</span>
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-gray-400" />
-                      </button>
-
                       {/* Change Mobile Number */}
                       <button
-                        onClick={() => navigate('/profile-completion')}
+                        onClick={() => navigate('/change-mobile-number')}
                         className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
                       >
                         <div className="flex items-center gap-3">
@@ -1429,16 +1448,50 @@ export function DynamicDashboardPage() {
                         <ChevronRight className="w-5 h-5 text-gray-400" />
                       </button>
 
-                      {/* Change Email ID */}
+                      {/* Delete Account */}
                       <button
-                        onClick={() => navigate('/profile-completion')}
+                        onClick={() => {
+                          alert('Write a mail to support@pocketcredit.in');
+                        }}
                         className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                            <Mail className="w-5 h-5 text-blue-600" />
+                          <div className="w-10 h-10 bg-red-50 rounded-full flex items-center justify-center">
+                            <X className="w-5 h-5 text-red-600" />
                           </div>
-                          <span className="text-base font-medium text-gray-900">Change Email ID</span>
+                          <span className="text-base font-medium text-gray-900">Delete Account</span>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+
+                      {/* Cancel E-mandate / Auto-debit */}
+                      <button
+                        onClick={() => {
+                          alert('Write a mail to support@pocketcredit.in');
+                        }}
+                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-orange-50 rounded-full flex items-center justify-center">
+                            <CreditCard className="w-5 h-5 text-orange-600" />
+                          </div>
+                          <span className="text-base font-medium text-gray-900">Cancel E-mandate / Auto-debit</span>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-400" />
+                      </button>
+
+                      {/* Coupons & Rewards */}
+                      <button
+                        onClick={() => {
+                          alert('Coming Soon');
+                        }}
+                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-purple-50 rounded-full flex items-center justify-center">
+                            <Star className="w-5 h-5 text-purple-600" />
+                          </div>
+                          <span className="text-base font-medium text-gray-900">Coupons & Rewards</span>
                         </div>
                         <ChevronRight className="w-5 h-5 text-gray-400" />
                       </button>
@@ -1450,28 +1503,6 @@ export function DynamicDashboardPage() {
                     <h3 className="text-lg font-semibold text-gray-900 mb-4">App</h3>
 
                     <div className="space-y-2">
-                      {/* Rate Us */}
-                      <button
-                        onClick={() => {
-                          // Open app store/play store for rating
-                          const userAgent = navigator.userAgent || navigator.vendor;
-                          if (/android/i.test(userAgent)) {
-                            window.open('https://play.google.com/store/apps/details?id=com.pocketcredit', '_blank');
-                          } else if (/iPad|iPhone|iPod/.test(userAgent)) {
-                            window.open('https://apps.apple.com/app/pocketcredit', '_blank');
-                          }
-                        }}
-                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                            <Star className="w-5 h-5 text-blue-600" />
-                          </div>
-                          <span className="text-base font-medium text-gray-900">Rate Us</span>
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-gray-400" />
-                      </button>
-
                       {/* Share App */}
                       <button
                         onClick={() => {
@@ -1494,20 +1525,6 @@ export function DynamicDashboardPage() {
                             <Share2 className="w-5 h-5 text-blue-600" />
                           </div>
                           <span className="text-base font-medium text-gray-900">Share App</span>
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-gray-400" />
-                      </button>
-
-                      {/* App Security */}
-                      <button
-                        onClick={() => navigate('/profile-completion')}
-                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                            <ShieldCheck className="w-5 h-5 text-blue-600" />
-                          </div>
-                          <span className="text-base font-medium text-gray-900">App Security</span>
                         </div>
                         <ChevronRight className="w-5 h-5 text-gray-400" />
                       </button>
@@ -1535,7 +1552,7 @@ export function DynamicDashboardPage() {
 
                       {/* Terms & Conditions */}
                       <button
-                        onClick={() => navigate('/terms-conditions')}
+                        onClick={() => navigate('/terms')}
                         className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
                       >
                         <div className="flex items-center gap-3">
@@ -1549,7 +1566,7 @@ export function DynamicDashboardPage() {
 
                       {/* Privacy Policy */}
                       <button
-                        onClick={() => navigate('/privacy-policy')}
+                        onClick={() => navigate('/privacy')}
                         className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
                       >
                         <div className="flex items-center gap-3">

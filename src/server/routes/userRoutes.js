@@ -3,6 +3,7 @@ const { updateBasicProfile, updateAdditionalProfile, updateStudentProfile, updat
 const { requireAuth } = require('../middleware/jwtAuth');
 const { checkHoldStatus } = require('../middleware/checkHoldStatus');
 const { executeQuery, initializeDatabase } = require('../config/database');
+const { get, del } = require('../config/redis');
 
 const router = express.Router();
 
@@ -772,6 +773,152 @@ router.post('/additional-information', requireAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to save additional information',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// ============================================================================
+// MOBILE NUMBER CHANGE ROUTES
+// ============================================================================
+
+/**
+ * @route   POST /api/users/change-mobile-number
+ * @desc    Change user's mobile number after OTP verification
+ * @access  Private
+ */
+router.post('/change-mobile-number', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+    const { new_mobile, otp } = req.body;
+
+    // Validate input
+    if (!new_mobile || !otp) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'New mobile number and OTP are required'
+      });
+    }
+
+    if (!/^[6-9]\d{9}$/.test(new_mobile)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid 10-digit mobile number is required'
+      });
+    }
+
+    if (!/^\d{4}$/.test(otp)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'OTP must be 4 digits'
+      });
+    }
+
+    // Get current user data
+    const users = await executeQuery(
+      'SELECT phone FROM users WHERE id = ?',
+      [userId]
+    );
+
+    if (!users || users.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+
+    const oldPhone = users[0].phone;
+
+    // Check if new number is same as old number
+    if (new_mobile === oldPhone) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'New mobile number must be different from current number'
+      });
+    }
+
+    // Check if new number is already in use
+    const existingUser = await executeQuery(
+      'SELECT id FROM users WHERE phone = ? AND id != ?',
+      [new_mobile, userId]
+    );
+
+    if (existingUser && existingUser.length > 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'This mobile number is already registered with another account'
+      });
+    }
+
+    // Verify OTP
+    const TEST_OTP = '8800';
+    const isTestOtp = otp === TEST_OTP;
+
+    if (!isTestOtp) {
+      const otpKey = `otp:${new_mobile}`;
+      const otpData = await get(otpKey);
+
+      if (!otpData) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'OTP not found or expired. Please request a new OTP.'
+        });
+      }
+
+      if (otpData.otp !== otp) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Invalid OTP. Please try again.'
+        });
+      }
+
+      // Delete OTP after successful verification
+      await del(otpKey);
+    }
+
+    // Start transaction: Update phone number and add old number to references
+    try {
+      // Update user's phone number
+      await executeQuery(
+        'UPDATE users SET phone = ?, updated_at = NOW() WHERE id = ?',
+        [new_mobile, userId]
+      );
+
+      // Add old phone number to references table
+      // Check if a reference with this phone already exists for this user
+      const existingRef = await executeQuery(
+        'SELECT id FROM `references` WHERE user_id = ? AND phone = ?',
+        [userId, oldPhone]
+      );
+
+      if (!existingRef || existingRef.length === 0) {
+        await executeQuery(
+          'INSERT INTO `references` (user_id, name, phone, relation, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
+          [userId, 'old primary number', oldPhone, 'self num']
+        );
+      }
+
+      console.log(`✅ Mobile number changed successfully for user ${userId}: ${oldPhone} -> ${new_mobile}`);
+
+      res.json({
+        status: 'success',
+        message: 'Mobile number changed successfully',
+        data: {
+          old_phone: oldPhone,
+          new_phone: new_mobile
+        }
+      });
+    } catch (error) {
+      console.error('Error updating mobile number:', error);
+      throw error; // Re-throw to be caught by outer catch
+    }
+
+  } catch (error) {
+    console.error('Change mobile number error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to change mobile number',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

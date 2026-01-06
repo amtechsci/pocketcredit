@@ -1119,8 +1119,8 @@ export function UserProfileDetail() {
   };
 
   const handleEditBankDetails = () => {
-    const bankId = getUserData('bankInfo.id') || getUserData('bankDetails.0.id');
-    if (!bankId) {
+    const bankId = getUserData('bankInfo.id', null) || getUserData('bankDetails.0.id', null);
+    if (!bankId || bankId === 'N/A') {
       alert('Bank details ID not found');
       return;
     }

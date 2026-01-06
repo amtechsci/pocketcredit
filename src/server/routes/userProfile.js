@@ -1180,70 +1180,7 @@ router.put('/:userId/employment-info', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Update bank details status
-router.put('/:userId/bank-details/:bankId', authenticateAdmin, async (req, res) => {
-  try {
-    console.log('🏦 Updating bank details status:', req.params.bankId);
-    await initializeDatabase();
-    const { userId, bankId } = req.params;
-    const { verificationStatus, rejectionReason } = req.body;
-
-    // Map status to is_verified (1 for verified, 0 for others)
-    const isVerified = verificationStatus === 'verified' ? 1 : 0;
-
-    // Update query
-    // We try to update verification_status column too if it exists, otherwise just is_verified
-    // Since we can't easily check column existence in query, we'll try to update both
-    // If verification_status doesn't exist, this might fail, so we should check schema or use a safer approach
-    // For now, let's assume is_verified is the main flag and we'll try to update verification_status if possible
-
-    // First check if verification_status column exists
-    const columns = await executeQuery(`SHOW COLUMNS FROM bank_details LIKE 'verification_status'`);
-    const hasVerificationStatus = columns.length > 0;
-
-    const rejectionReasonColumn = await executeQuery(`SHOW COLUMNS FROM bank_details LIKE 'rejection_reason'`);
-    const hasRejectionReason = rejectionReasonColumn.length > 0;
-
-    let updateQuery = 'UPDATE bank_details SET is_verified = ?, updated_at = NOW()';
-    const params = [isVerified];
-
-    if (hasVerificationStatus) {
-      updateQuery += ', verification_status = ?';
-      params.push(verificationStatus);
-    }
-
-    if (hasRejectionReason && rejectionReason) {
-      updateQuery += ', rejection_reason = ?';
-      params.push(rejectionReason);
-    }
-
-    updateQuery += ' WHERE id = ? AND user_id = ?';
-    params.push(bankId, userId);
-
-    await executeQuery(updateQuery, params);
-
-    console.log('✅ Bank details status updated successfully');
-    res.json({
-      status: 'success',
-      message: 'Bank details status updated successfully',
-      data: {
-        id: bankId,
-        isVerified,
-        verificationStatus,
-        rejectionReason
-      }
-    });
-
-  } catch (error) {
-    console.error('Update bank details status error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to update bank details status'
-    });
-  }
-});
-
-// Update bank details (edit)
+// Update bank details (edit) - More specific route must come first
 router.put('/:userId/bank-details/:bankId/edit', authenticateAdmin, async (req, res) => {
   try {
     console.log('🏦 Updating bank details:', req.params.bankId);
@@ -1317,6 +1254,69 @@ router.put('/:userId/bank-details/:bankId/edit', authenticateAdmin, async (req, 
     res.status(500).json({
       status: 'error',
       message: 'Failed to update bank details'
+    });
+  }
+});
+
+// Update bank details status
+router.put('/:userId/bank-details/:bankId', authenticateAdmin, async (req, res) => {
+  try {
+    console.log('🏦 Updating bank details status:', req.params.bankId);
+    await initializeDatabase();
+    const { userId, bankId } = req.params;
+    const { verificationStatus, rejectionReason } = req.body;
+
+    // Map status to is_verified (1 for verified, 0 for others)
+    const isVerified = verificationStatus === 'verified' ? 1 : 0;
+
+    // Update query
+    // We try to update verification_status column too if it exists, otherwise just is_verified
+    // Since we can't easily check column existence in query, we'll try to update both
+    // If verification_status doesn't exist, this might fail, so we should check schema or use a safer approach
+    // For now, let's assume is_verified is the main flag and we'll try to update verification_status if possible
+
+    // First check if verification_status column exists
+    const columns = await executeQuery(`SHOW COLUMNS FROM bank_details LIKE 'verification_status'`);
+    const hasVerificationStatus = columns.length > 0;
+
+    const rejectionReasonColumn = await executeQuery(`SHOW COLUMNS FROM bank_details LIKE 'rejection_reason'`);
+    const hasRejectionReason = rejectionReasonColumn.length > 0;
+
+    let updateQuery = 'UPDATE bank_details SET is_verified = ?, updated_at = NOW()';
+    const params = [isVerified];
+
+    if (hasVerificationStatus) {
+      updateQuery += ', verification_status = ?';
+      params.push(verificationStatus);
+    }
+
+    if (hasRejectionReason && rejectionReason) {
+      updateQuery += ', rejection_reason = ?';
+      params.push(rejectionReason);
+    }
+
+    updateQuery += ' WHERE id = ? AND user_id = ?';
+    params.push(bankId, userId);
+
+    await executeQuery(updateQuery, params);
+
+    console.log('✅ Bank details status updated successfully');
+    res.json({
+      status: 'success',
+      message: 'Bank details status updated successfully',
+      data: {
+        id: bankId,
+        isVerified,
+        verificationStatus,
+        rejectionReason
+      }
+    });
+
+  } catch (error) {
+    console.error('Update bank details status error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update bank details status'
     });
   }
 });

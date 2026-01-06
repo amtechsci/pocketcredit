@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import { adminApiService } from '../../services/adminApi';
+import { toast } from 'sonner';
 
 
 interface LoanApplication {
@@ -29,7 +30,7 @@ interface LoanApplication {
   email: string;
   loanAmount: number;
   loanType: 'personal' | 'business';
-  status: 'applied' | 'under_review' | 'follow_up' | 'disbursal' | 'account_manager' | 'cleared' | 'rejected' | 'pending_documents';
+  status: 'applied' | 'under_review' | 'follow_up' | 'disbursal' | 'account_manager' | 'cleared' | 'rejected' | 'pending_documents' | 'ready_for_disbursement';
   applicationDate: string;
   assignedManager: string;
   recoveryOfficer: string;
@@ -80,11 +81,13 @@ export function LoanApplicationsQueue() {
   const [searchInput, setSearchInput] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchCountdown, setSearchCountdown] = useState(0);
+  const [processingPayouts, setProcessingPayouts] = useState<string[]>([]);
+  const [payoutResults, setPayoutResults] = useState<{ success: string[]; failed: Array<{ id: string; error: string }> } | null>(null);
 
   // Initialize status filter from URL parameters
   useEffect(() => {
     const statusFromUrl = searchParams.get('status');
-    if (statusFromUrl && ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'cleared', 'rejected'].includes(statusFromUrl)) {
+    if (statusFromUrl && ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'cleared', 'rejected', 'ready_for_disbursement'].includes(statusFromUrl)) {
       setStatusFilter(statusFromUrl);
     }
   }, [searchParams]);
@@ -119,7 +122,12 @@ export function LoanApplicationsQueue() {
     setCurrentPage(1); // Reset to first page when changing page size
   }, []);
 
-  const handleSelectApplication = useCallback((applicationId: string) => {
+  const handleSelectApplication = useCallback((applicationId: string, status: string) => {
+    // Only allow selection of ready_for_disbursement loans
+    if (status !== 'ready_for_disbursement') {
+      toast.warning('Only loans with "Ready for Disbursement" status can be selected for payout');
+      return;
+    }
     setSelectedApplications(prev => 
       prev.includes(applicationId) 
         ? prev.filter(id => id !== applicationId)
@@ -129,12 +137,29 @@ export function LoanApplicationsQueue() {
 
   const handleSelectAll = useCallback(() => {
     const apps = applications.length > 0 ? applications : mockApplications;
-    if (selectedApplications.length === apps.length) {
-      setSelectedApplications([]);
+    // Only select ready_for_disbursement loans
+    const readyLoans = apps.filter(app => app.status === 'ready_for_disbursement');
+    const readyLoanIds = readyLoans.map(app => app.id);
+    
+    // Check if all ready loans are selected
+    const allReadySelected = readyLoanIds.every(id => selectedApplications.includes(id));
+    
+    if (allReadySelected) {
+      // Deselect all ready loans
+      setSelectedApplications(prev => prev.filter(id => !readyLoanIds.includes(id)));
     } else {
-      setSelectedApplications(apps.map(app => app.id));
+      // Select all ready loans
+      setSelectedApplications(prev => {
+        const newSelection = [...prev];
+        readyLoanIds.forEach(id => {
+          if (!newSelection.includes(id)) {
+            newSelection.push(id);
+          }
+        });
+        return newSelection;
+      });
     }
-  }, [selectedApplications.length, applications]);
+  }, [selectedApplications, applications]);
 
   // Fetch applications data
   useEffect(() => {
@@ -426,6 +451,87 @@ export function LoanApplicationsQueue() {
     alert(`Assigning ${selectedApplications.length} selected applications - Feature coming soon!`);
   };
 
+  const handleBulkPayout = async () => {
+    const readyLoans = selectedApplications.filter(id => {
+      const app = applications.find(a => a.id === id);
+      return app && app.status === 'ready_for_disbursement';
+    });
+
+    if (readyLoans.length === 0) {
+      toast.error('Please select loans with "Ready for Disbursement" status');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to process payout for ${readyLoans.length} loan(s)? This action cannot be undone.`)) {
+      return;
+    }
+
+    setProcessingPayouts(readyLoans);
+    setPayoutResults(null);
+
+    const results = {
+      success: [] as string[],
+      failed: [] as Array<{ id: string; error: string }>
+    };
+
+    // Process payouts sequentially to avoid overwhelming the API
+    for (const loanId of readyLoans) {
+      try {
+        toast.loading(`Processing payout for loan ${loanId}...`, { id: `payout-${loanId}` });
+        const response = await adminApiService.disburseLoan(loanId);
+        
+        if (response.success) {
+          results.success.push(loanId);
+          toast.success(`Loan ${loanId} disbursed successfully`, { id: `payout-${loanId}` });
+        } else {
+          results.failed.push({ id: loanId, error: response.message || 'Unknown error' });
+          toast.error(`Failed to disburse loan ${loanId}: ${response.message}`, { id: `payout-${loanId}` });
+        }
+      } catch (error: any) {
+        const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
+        results.failed.push({ id: loanId, error: errorMessage });
+        toast.error(`Failed to disburse loan ${loanId}: ${errorMessage}`, { id: `payout-${loanId}` });
+      }
+      
+      // Small delay between requests
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    setProcessingPayouts([]);
+    setPayoutResults(results);
+    setSelectedApplications([]);
+
+    // Show summary
+    if (results.success.length > 0 && results.failed.length === 0) {
+      toast.success(`Successfully processed ${results.success.length} payout(s)!`);
+    } else if (results.success.length > 0 && results.failed.length > 0) {
+      toast.warning(`Processed ${results.success.length} payout(s) successfully, ${results.failed.length} failed`);
+    } else {
+      toast.error(`Failed to process all ${results.failed.length} payout(s)`);
+    }
+
+    // Refresh applications list
+    const refreshResponse = await adminApiService.getApplications({
+      page: currentPage,
+      limit: pageSize,
+      status: statusFilter,
+      search: searchTerm,
+      sortBy,
+      sortOrder
+    });
+    
+    if (refreshResponse.status === 'success') {
+      setApplications(refreshResponse.data.applications);
+      setPagination(refreshResponse.data.pagination);
+    }
+
+    // Refresh stats
+    const statsResponse = await adminApiService.getApplicationStats();
+    if (statsResponse.status === 'success') {
+      setStats(statsResponse.data);
+    }
+  };
+
 
   return (
     <div className="p-6 space-y-6">
@@ -616,6 +722,65 @@ export function LoanApplicationsQueue() {
         </div>
       </div>
 
+      {/* Bulk Payout Action Bar */}
+      {selectedApplications.length > 0 && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-indigo-900">
+                {selectedApplications.length} loan(s) selected for payout
+              </span>
+              <span className="text-xs text-indigo-700">
+                (Only loans with "Ready for Disbursement" status)
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSelectedApplications([])}
+                className="px-4 py-2 text-sm font-medium text-indigo-700 hover:text-indigo-900 border border-indigo-300 rounded-md hover:bg-indigo-100 transition-colors"
+              >
+                Clear Selection
+              </button>
+              <button
+                onClick={handleBulkPayout}
+                disabled={processingPayouts.length > 0}
+                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {processingPayouts.length > 0 ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Processing {processingPayouts.length} payout(s)...
+                  </>
+                ) : (
+                  `Process Payout (${selectedApplications.length})`
+                )}
+              </button>
+            </div>
+          </div>
+          
+          {/* Payout Results */}
+          {payoutResults && (
+            <div className="mt-4 pt-4 border-t border-indigo-200">
+              {payoutResults.success.length > 0 && (
+                <div className="mb-2">
+                  <span className="text-sm font-medium text-green-700">✓ Successfully processed: {payoutResults.success.length}</span>
+                </div>
+              )}
+              {payoutResults.failed.length > 0 && (
+                <div>
+                  <span className="text-sm font-medium text-red-700">✗ Failed: {payoutResults.failed.length}</span>
+                  <ul className="mt-1 text-xs text-red-600 list-disc list-inside">
+                    {payoutResults.failed.map(({ id, error }) => (
+                      <li key={id}>Loan {id}: {error}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Applications Table */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
@@ -640,12 +805,22 @@ export function LoanApplicationsQueue() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
-                  <input
-                    type="checkbox"
-                    checked={selectedApplications.length === currentApplications.length && currentApplications.length > 0}
-                    onChange={handleSelectAll}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
+                  {(() => {
+                    const readyLoans = currentApplications.filter(app => app.status === 'ready_for_disbursement');
+                    const readyLoanIds = readyLoans.map(app => app.id);
+                    const allReadySelected = readyLoanIds.length > 0 && readyLoanIds.every(id => selectedApplications.includes(id));
+                    
+                    return (
+                      <input
+                        type="checkbox"
+                        checked={allReadySelected}
+                        onChange={handleSelectAll}
+                        disabled={readyLoans.length === 0}
+                        title={readyLoans.length === 0 ? 'No loans ready for disbursement' : 'Select all ready for disbursement'}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      />
+                    );
+                  })()}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   <button 
@@ -704,14 +879,21 @@ export function LoanApplicationsQueue() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredApplications.map((application) => (
-                <tr key={application.id} className="hover:bg-gray-50">
+              {filteredApplications.map((application) => {
+                const isReadyForDisbursement = application.status === 'ready_for_disbursement';
+                const isSelected = selectedApplications.includes(application.id);
+                const isProcessing = processingPayouts.includes(application.id);
+                
+                return (
+                <tr key={application.id} className={`hover:bg-gray-50 ${isProcessing ? 'bg-yellow-50' : ''}`}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <input
                       type="checkbox"
-                      checked={selectedApplications.includes(application.id)}
-                      onChange={() => handleSelectApplication(application.id)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      checked={isSelected}
+                      onChange={() => handleSelectApplication(application.id, application.status)}
+                      disabled={!isReadyForDisbursement || isProcessing}
+                      title={!isReadyForDisbursement ? 'Only loans with "Ready for Disbursement" status can be selected' : 'Select for payout'}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
@@ -800,13 +982,22 @@ export function LoanApplicationsQueue() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex flex-col gap-1">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColors[application.status]}`}>
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColors[application.status] || 'bg-gray-100 text-gray-800'}`}>
                         {getStatusLabel(application.status)}
                       </span>
                       {application.extension_status === 'pending' && (
                         <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
                           Extension Requested
                         </span>
+                      )}
+                      {isReadyForDisbursement && (
+                        <button
+                          onClick={() => handleSelectApplication(application.id, application.status)}
+                          disabled={isProcessing}
+                          className="inline-flex items-center justify-center px-2 py-1 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isProcessing ? 'Processing...' : isSelected ? 'Selected' : 'Payout'}
+                        </button>
                       )}
                     </div>
                   </td>
@@ -817,7 +1008,8 @@ export function LoanApplicationsQueue() {
                     </div>
                   </td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>

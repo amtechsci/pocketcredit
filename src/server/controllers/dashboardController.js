@@ -173,7 +173,7 @@ const fetchDashboardData = async (userId) => {
   const userQuery = `
     SELECT 
       id, first_name, last_name, phone, email, created_at, 
-      credit_score, loan_limit, status, eligibility_status,
+      credit_score, experian_score, loan_limit, status, eligibility_status,
       application_hold_reason, hold_until_date,
       employment_type, graduation_status
     FROM users 
@@ -431,6 +431,7 @@ const fetchDashboardData = async (userId) => {
     },
     summary: {
       credit_score: user.credit_score || 0,
+      experian_score: user.experian_score || null,
       available_credit: user.loan_limit || availableCredit,
       total_loans: parseInt(stats.total_loans) || 0,
       active_loans: parseInt(stats.active_loans) || 0,

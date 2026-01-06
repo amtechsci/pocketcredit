@@ -19,6 +19,7 @@ const {
 } = require('../utils/loanCalculations');
 
 const router = express.Router();
+const { approveExtension } = require('../utils/extensionApproval');
 
 /**
  * GET /api/loan-extensions/eligibility/:loanId
@@ -49,11 +50,11 @@ router.get('/eligibility/:loanId', requireAuth, async (req, res) => {
 
     const loan = loans[0];
 
-    // Check for pending extension request
+    // Check for pending extension request (both 'pending' and 'pending_payment')
     const pendingExtension = await executeQuery(`
       SELECT id, extension_number, created_at, status
       FROM loan_extensions
-      WHERE loan_application_id = ? AND status = 'pending'
+      WHERE loan_application_id = ? AND (status = 'pending' OR status = 'pending_payment')
       ORDER BY created_at DESC
       LIMIT 1
     `, [loanId]);
@@ -388,7 +389,7 @@ router.post('/request', requireAuth, async (req, res) => {
         payment_status,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending', NOW(), NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_payment', 'pending', NOW(), NOW())
     `;
 
     // For multi-EMI loans, store all EMI dates as JSON string
@@ -421,10 +422,10 @@ router.post('/request', requireAuth, async (req, res) => {
     // Note: Transaction will be created by admin when approving the extension
     // No transaction created at request time
 
-    // Update loan application - set extension_status to pending and increment extension_count
+    // Update loan application - set extension_status to pending_payment and increment extension_count
     await executeQuery(
       `UPDATE loan_applications 
-       SET extension_status = 'pending',
+       SET extension_status = 'pending_payment',
            extension_count = extension_count + 1
        WHERE id = ?`,
       [loan_application_id]
@@ -445,7 +446,7 @@ router.post('/request', requireAuth, async (req, res) => {
         new_emi_dates: newDueDateResult.newEmiDates,
         extension_period_days: newDueDateResult.extensionPeriodDays,
         total_tenure_days: totalTenureDays,
-        status: 'pending'
+        status: 'pending_payment'
       }
     });
   } catch (error) {
@@ -453,6 +454,186 @@ router.post('/request', requireAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to request extension',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/loan-extensions/:extensionId/payment
+ * Create payment order for extension fee
+ */
+router.post('/:extensionId/payment', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { extensionId } = req.params;
+    const userId = req.user.id;
+
+    // Get extension details
+    const extensions = await executeQuery(`
+      SELECT 
+        le.*,
+        la.id as loan_id,
+        la.user_id,
+        la.application_number,
+        u.phone,
+        u.email,
+        u.personal_email,
+        u.official_email,
+        u.first_name,
+        u.last_name
+      FROM loan_extensions le
+      INNER JOIN loan_applications la ON le.loan_application_id = la.id
+      INNER JOIN users u ON la.user_id = u.id
+      WHERE le.id = ? AND la.user_id = ?
+    `, [extensionId, userId]);
+
+    if (!extensions || extensions.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Extension request not found'
+      });
+    }
+
+    const extension = extensions[0];
+
+    // Check if extension is in pending_payment status
+    if (extension.status !== 'pending_payment') {
+      return res.status(400).json({
+        success: false,
+        message: `Extension request is ${extension.status}. Payment can only be made for pending_payment requests.`
+      });
+    }
+
+    // Get email - use personal_email, official_email, or email (in that priority order)
+    const customerEmail = extension.personal_email || extension.official_email || extension.email || 'user@example.com';
+
+    // Generate unique order ID
+    const orderId = `EXT_${extension.application_number}_${extension.extension_number}_${Date.now()}`;
+    console.log(`[Extension Payment] Generated order ID: ${orderId} for extension ${extensionId}`);
+
+    // Import cashfree payment service
+    const cashfreePayment = require('../services/cashfreePayment');
+
+    // Create Cashfree order
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const backendUrl = process.env.BACKEND_URL || process.env.APP_URL || 'http://localhost:3001';
+    const returnUrl = `${frontendUrl}/payment/return?orderId=${orderId}`;
+    const notifyUrl = `${backendUrl}/api/payment/webhook`;
+
+    console.log(`[Extension Payment] Creating Cashfree order:`, {
+      orderId,
+      amount: extension.total_extension_amount,
+      customerEmail,
+      customerPhone: extension.phone || '9999999999',
+      returnUrl,
+      notifyUrl
+    });
+
+    const orderResult = await cashfreePayment.createOrder({
+      orderId,
+      orderAmount: extension.total_extension_amount,
+      orderCurrency: 'INR',
+      customerDetails: {
+        customerId: userId.toString(),
+        customerEmail,
+        customerPhone: extension.phone || '9999999999'
+      },
+      returnUrl,
+      notifyUrl
+    });
+
+    if (!orderResult.success) {
+      console.error('[Extension Payment] Cashfree order creation failed:', orderResult.error);
+      return res.status(500).json({
+        success: false,
+        message: orderResult.error || 'Failed to create payment order',
+        error: orderResult.error
+      });
+    }
+
+    const paymentSessionId = orderResult.data?.payment_session_id;
+    if (!paymentSessionId) {
+      console.error('[Extension Payment] No payment session ID in response');
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to get payment session from gateway'
+      });
+    }
+
+    // Clean the session ID
+    const cleanSessionId = paymentSessionId
+      .trim()
+      .split(/\s+/)[0]
+      .replace(/[^a-zA-Z0-9_\-]/g, '')
+      .replace(/paymentpayment$/i, '');
+
+    if (!cleanSessionId.startsWith('session_')) {
+      return res.status(500).json({
+        success: false,
+        message: 'Invalid payment session received. Please try again.'
+      });
+    }
+
+    // Create payment order in database
+    try {
+      await executeQuery(`
+        INSERT INTO payment_orders (
+          order_id, 
+          loan_id, 
+          extension_id,
+          user_id, 
+          amount, 
+          payment_type,
+          status, 
+          payment_session_id, 
+          cashfree_response,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, 'extension_fee', 'PENDING', ?, ?, NOW())
+      `, [
+        orderId,
+        extension.loan_id,
+        extensionId,
+        userId,
+        extension.total_extension_amount,
+        cleanSessionId,
+        JSON.stringify(orderResult.data)
+      ]);
+      console.log(`[Extension Payment] Payment order created in DB: ${orderId}`);
+    } catch (insertError) {
+      console.error('[Extension Payment] Failed to insert payment order:', insertError);
+      if (!insertError.message || !insertError.message.includes('Duplicate entry')) {
+        throw insertError;
+      }
+      console.log(`[Extension Payment] Order ${orderId} already exists, continuing...`);
+    }
+
+    // Get checkout URL
+    const checkoutUrl = cashfreePayment.getCheckoutUrl(orderResult.data);
+
+    console.log('✅ Extension payment order created:', { 
+      orderId, 
+      checkoutUrl,
+      extensionId,
+      environment: cashfreePayment.isProduction ? 'PRODUCTION' : 'SANDBOX'
+    });
+
+    res.json({
+      success: true,
+      data: {
+        orderId,
+        paymentSessionId: cleanSessionId,
+        checkoutUrl,
+        extension_id: extensionId,
+        amount: extension.total_extension_amount
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating extension payment order:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to create payment order',
       error: error.message
     });
   }
@@ -625,231 +806,26 @@ router.post('/:extensionId/approve', authenticateAdmin, async (req, res) => {
     const adminId = req.admin.id;
     const { reference_number } = req.body; // Optional UTR/reference number
 
-    // Get extension details with user info
-    const extensions = await executeQuery(`
-      SELECT 
-        le.*,
-        la.id as loan_id,
-        la.user_id,
-        la.processed_due_date,
-        la.extension_count,
-        la.plan_snapshot,
-        la.emi_schedule,
-        la.interest_paid
-      FROM loan_extensions le
-      INNER JOIN loan_applications la ON le.loan_application_id = la.id
-      WHERE le.id = ?
-    `, [extensionId]);
-
-    if (!extensions || extensions.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Extension request not found'
-      });
-    }
-
-    const extension = extensions[0];
-
-    if (extension.status !== 'pending') {
-      return res.status(400).json({
-        success: false,
-        message: `Extension request is already ${extension.status}`
-      });
-    }
-
-    // Determine transaction type based on extension number
-    const transactionType = `loan_extension_${extension.extension_number === 1 ? '1st' : extension.extension_number === 2 ? '2nd' : extension.extension_number === 3 ? '3rd' : '4th'}`;
-
-    // Create transaction automatically
-    const transactionQuery = `
-      INSERT INTO transactions (
-        user_id, 
-        loan_application_id, 
-        transaction_type, 
-        amount, 
-        description, 
-        reference_number,
-        transaction_date, 
-        status, 
-        created_by, 
-        created_at, 
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, CURDATE(), 'completed', ?, NOW(), NOW())
-    `;
-
-    const transactionDescription = `Loan Extension #${extension.extension_number} - Extension Fee: ₹${extension.extension_fee}, GST: ₹${extension.gst_amount}, Interest: ₹${extension.interest_till_date}`;
-    
-    const transactionValues = [
-      extension.user_id,
-      extension.loan_application_id,
-      transactionType,
-      extension.total_extension_amount,
-      transactionDescription,
-      reference_number || `EXT-${extension.loan_application_id}-${extension.extension_number}-${Date.now()}`,
-      adminId
-    ];
-
-    const transactionResult = await executeQuery(transactionQuery, transactionValues);
-    const paymentTransactionId = transactionResult.insertId;
-
-    console.log(`✅ Created transaction ${paymentTransactionId} for extension ${extensionId}`);
-
-    // Update extension status
-    // Note: Using minimal table structure - only update columns that exist
-    await executeQuery(
-      `UPDATE loan_extensions 
-       SET status = 'approved',
-           payment_status = 'paid',
-           updated_at = NOW()
-       WHERE id = ?`,
-      [extensionId]
-    );
-    
-    console.log(`✅ Updated extension ${extensionId} status to approved. Transaction ID: ${paymentTransactionId}`);
-
-    // Update loan application
-    const newExtensionCount = (extension.extension_count || 0) + 1;
-    const newDueDate = extension.new_due_date;
-    
-    // Parse newDueDate - it can be a JSON array for multi-EMI or a single date string
-    let lastExtensionDueDate = null; // For DATE column - use last date from array or single date
-    let updatedProcessedDueDate = newDueDate; // For TEXT column - can store JSON array
-    
-    try {
-      // Check if newDueDate is a JSON array
-      if (typeof newDueDate === 'string' && newDueDate.startsWith('[')) {
-        const dateArray = JSON.parse(newDueDate);
-        if (Array.isArray(dateArray) && dateArray.length > 0) {
-          // For multi-EMI: use the last date for last_extension_due_date (DATE column)
-          lastExtensionDueDate = dateArray[dateArray.length - 1];
-          // Keep full JSON array for processed_due_date (TEXT column)
-          updatedProcessedDueDate = newDueDate;
-        } else {
-          // Fallback to single date
-          lastExtensionDueDate = newDueDate;
-        }
-      } else {
-        // Single date string
-        lastExtensionDueDate = newDueDate;
-        updatedProcessedDueDate = newDueDate;
-      }
-    } catch (parseError) {
-      // If parsing fails, treat as single date
-      console.warn('Could not parse newDueDate as JSON, treating as single date:', parseError);
-      lastExtensionDueDate = newDueDate;
-      updatedProcessedDueDate = newDueDate;
-    }
-
-    // Update interest_paid: Add interest_till_date from extension
-    const currentInterestPaid = parseFloat(extension.interest_paid || 0);
-    const interestTillDate = parseFloat(extension.interest_till_date || 0);
-    const updatedInterestPaid = currentInterestPaid + interestTillDate;
-    
-    console.log(`💰 Updating interest_paid: ${currentInterestPaid} + ${interestTillDate} = ${updatedInterestPaid}`);
-
-    // Update emi_schedule with new due dates
-    let updatedEmiSchedule = extension.emi_schedule;
-    try {
-      // Parse current emi_schedule
-      let emiScheduleArray = null;
-      if (extension.emi_schedule) {
-        emiScheduleArray = typeof extension.emi_schedule === 'string' 
-          ? JSON.parse(extension.emi_schedule) 
-          : extension.emi_schedule;
-      }
-
-      // Parse new_due_date (can be JSON array for multi-EMI or single date)
-      let newDueDates = [];
-      if (typeof newDueDate === 'string' && newDueDate.startsWith('[')) {
-        newDueDates = JSON.parse(newDueDate);
-      } else {
-        newDueDates = [newDueDate];
-      }
-
-      // Update emi_schedule if it exists and we have new dates
-      if (Array.isArray(emiScheduleArray) && emiScheduleArray.length > 0 && newDueDates.length > 0) {
-        // Update each EMI's due_date with corresponding new date
-        emiScheduleArray = emiScheduleArray.map((emi, index) => {
-          if (index < newDueDates.length) {
-            return {
-              ...emi,
-              due_date: newDueDates[index]
-            };
-          }
-          return emi;
-        });
-        updatedEmiSchedule = JSON.stringify(emiScheduleArray);
-        console.log(`📅 Updated emi_schedule with new due dates: ${newDueDates.join(', ')}`);
-      } else if (newDueDates.length > 0) {
-        // If emi_schedule doesn't exist but we have new dates, create a basic schedule
-        // This is a fallback - ideally emi_schedule should already exist
-        console.warn(`⚠️ emi_schedule not found, creating basic schedule with dates: ${newDueDates.join(', ')}`);
-        const basicSchedule = newDueDates.map((date, index) => ({
-          emi_number: index + 1,
-          due_date: date,
-          status: 'pending'
-        }));
-        updatedEmiSchedule = JSON.stringify(basicSchedule);
-      }
-    } catch (scheduleError) {
-      console.error('❌ Error updating emi_schedule:', scheduleError);
-      // Continue without updating emi_schedule if there's an error
-    }
-
-    // Update loan application
-    // last_extension_due_date is DATE type - must be single date
-    // processed_due_date is TEXT type - can store JSON array
-    // interest_paid: Add interest_till_date
-    // emi_schedule: Update with new due dates
-    const updateParams = [
-      newExtensionCount,
-      lastExtensionDueDate,
-      updatedProcessedDueDate,
-      updatedInterestPaid
-    ];
-    
-    let updateQuery = `
-      UPDATE loan_applications 
-      SET extension_count = ?,
-          extension_status = 'approved',
-          last_extension_date = CURDATE(),
-          last_extension_due_date = ?,
-          processed_due_date = ?,
-          interest_paid = ?`;
-    
-    // Only update emi_schedule if it was changed
-    if (updatedEmiSchedule !== extension.emi_schedule && updatedEmiSchedule !== null) {
-      updateQuery += `,
-          emi_schedule = ?`;
-      updateParams.push(updatedEmiSchedule);
-    }
-    
-    updateQuery += `,
-          updated_at = NOW()
-      WHERE id = ?`;
-    
-    updateParams.push(extension.loan_application_id);
-    
-    await executeQuery(updateQuery, updateParams);
-    
-    console.log(`✅ Updated loan application ${extension.loan_application_id}: extension_count=${newExtensionCount}, last_extension_due_date=${lastExtensionDueDate}, interest_paid=${updatedInterestPaid}`);
+    // Use reusable approval function
+    const result = await approveExtension(extensionId, reference_number, adminId);
 
     res.json({
       success: true,
       message: 'Extension approved successfully. Transaction created automatically.',
       data: {
-        extension_id: extensionId,
-        extension_number: extension.extension_number,
-        new_due_date: newDueDate,
-        new_emi_dates: null,
-        transaction_id: paymentTransactionId
+        extension_id: result.extension_id,
+        extension_number: result.extension_number,
+        new_due_date: result.new_due_date,
+        transaction_id: result.transaction_id
       }
     });
   } catch (error) {
     console.error('Error approving extension:', error);
-    res.status(500).json({
+    const statusCode = error.message.includes('not found') ? 404 : 
+                       error.message.includes('already') ? 400 : 500;
+    res.status(statusCode).json({
       success: false,
-      message: 'Failed to approve extension',
+      message: error.message || 'Failed to approve extension',
       error: error.message
     });
   }
