@@ -473,10 +473,10 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             <td className="border border-black p-2"></td>
                             <td className="border border-black p-2">(v) Any other charges (please specify)</td>
                             <td className="border border-black p-2">
-                                Loan Tenure Extension 1: 14% of (2) + GST<br />
-                                Loan Tenure Extension 2: 14% of (2) + GST<br />
-                                Loan Tenure Extension 3: 14% of (2) + GST<br />
-                                Loan Tenure Extension 4: 14% of (2) + GST
+                                Loan Tenure Extension 1: 21% of (2) + GST<br />
+                                Loan Tenure Extension 2: 21% of (2) + GST<br />
+                                Loan Tenure Extension 3: 21% of (2) + GST<br />
+                                Loan Tenure Extension 4: 21% of (2) + GST
                             </td>
                         </tr>
                     </tbody>

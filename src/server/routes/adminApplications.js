@@ -530,6 +530,18 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
 
     const loan = applicationResult[0];
 
+    // Block status changes for loans in account_manager status
+    // Loans in account_manager status cannot be changed to: not_process, re_process, delete, cancel, process, hold
+    if (loan.status === 'account_manager') {
+      const blockedStatuses = ['submitted', 'under_review', 'follow_up', 'rejected', 'cancelled', 'disbursal', 'ready_for_disbursement'];
+      if (blockedStatuses.includes(status)) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Cannot change loan status from account_manager to "${status}". Loans in account_manager status cannot be modified.`
+        });
+      }
+    }
+
     // Prevent status changes to pre-processing statuses if loan is already processed
     // Once processed, loan can only move to: account_manager, cleared, active, closed, defaulted
     const preProcessingStatuses = ['submitted', 'under_review', 'disbursement_ready', 'ready_for_disbursement'];

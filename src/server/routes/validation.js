@@ -144,6 +144,24 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       });
     }
 
+    // Block certain actions if user has any loan in account_manager status
+    const blockedActions = ['not_process', 're_process', 'delete', 'cancel', 'process'];
+    if (blockedActions.includes(actionType)) {
+      // Check if user has any loan with account_manager status
+      const accountManagerLoans = await executeQuery(
+        'SELECT id, application_number, status FROM loan_applications WHERE user_id = ? AND status = ?',
+        [userId, 'account_manager']
+      );
+
+      if (accountManagerLoans && accountManagerLoans.length > 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Cannot perform "${actionType}" action. User has loan(s) in account_manager status. Loans in account_manager status cannot be modified.`,
+          blockedLoanIds: accountManagerLoans.map(loan => loan.id)
+        });
+      }
+    }
+
     // Ensure the status enum includes 'on_hold' and 'deleted' values
     try {
       await executeQuery(

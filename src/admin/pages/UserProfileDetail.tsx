@@ -378,6 +378,17 @@ export function UserProfileDetail() {
   const submitValidationAction = async () => {
     if (!selectedAction || !userData?.id) return;
 
+    // Check if user has any loan in account_manager status
+    const loans = getArray('loans');
+    const accountManagerLoans = loans ? loans.filter((loan: any) => loan.status === 'account_manager') : [];
+    
+    // Block certain actions if user has loans in account_manager status
+    const blockedActions = ['not_process', 're_process', 'delete', 'cancel', 'process'];
+    if (blockedActions.includes(selectedAction) && accountManagerLoans.length > 0) {
+      alert(`Cannot perform "${selectedAction}" action. User has loan(s) in account_manager status. Loans in account_manager status cannot be modified.`);
+      return;
+    }
+
     try {
       // Get admin ID from the admin context
       const adminId = currentUser?.id || 'unknown';
@@ -468,10 +479,15 @@ export function UserProfileDetail() {
 
         // Show success message
         alert('Validation action submitted successfully! Loan status updated to Follow Up.');
+      } else {
+        // Show error message from response
+        alert(response.message || 'Failed to submit validation action. Please try again.');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error submitting validation action:', error);
-      alert('Failed to submit validation action. Please try again.');
+      // Check if error is due to account_manager loan
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to submit validation action. Please try again.';
+      alert(errorMessage);
     }
   };
 
@@ -5568,6 +5584,13 @@ export function UserProfileDetail() {
 
   // Validation Tab
   const renderValidationTab = () => {
+    // Check if user has any loan in account_manager status
+    const loans = getArray('loans');
+    const accountManagerLoans = loans ? loans.filter((loan: any) => loan.status === 'account_manager') : [];
+    const hasAccountManagerLoan = accountManagerLoans.length > 0;
+    
+    // Blocked actions when account_manager loan exists
+    const blockedActions = ['not_process', 're_process', 'delete', 'cancel', 'process'];
 
     return (
       <div className="space-y-6">
@@ -5576,6 +5599,14 @@ export function UserProfileDetail() {
             <h3 className="text-lg font-semibold text-gray-900">Validation Status</h3>
           </div>
 
+          {/* Warning message if account_manager loan exists */}
+          {hasAccountManagerLoan && (
+            <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <p className="text-sm text-yellow-800">
+                ⚠️ User has loan(s) in account_manager status. Certain actions (Not Process, Re-process, Delete, Cancel, Process) are disabled.
+              </p>
+            </div>
+          )}
 
           {/* Quick Follow-up Form and History Layout */}
           <div className="flex gap-6">
@@ -5594,12 +5625,42 @@ export function UserProfileDetail() {
                   >
                     <option value="">Choose an action...</option>
                     <option value="need_document">Need Document</option>
-                    <option value="process">Process</option>
-                    <option value="not_process">Not Process</option>
-                    <option value="re_process">Re-process</option>
+                    <option 
+                      value="process" 
+                      disabled={hasAccountManagerLoan}
+                      style={{ color: hasAccountManagerLoan ? '#999' : 'inherit' }}
+                    >
+                      Process{hasAccountManagerLoan ? ' (Disabled - Account Manager Loan)' : ''}
+                    </option>
+                    <option 
+                      value="not_process" 
+                      disabled={hasAccountManagerLoan}
+                      style={{ color: hasAccountManagerLoan ? '#999' : 'inherit' }}
+                    >
+                      Not Process{hasAccountManagerLoan ? ' (Disabled - Account Manager Loan)' : ''}
+                    </option>
+                    <option 
+                      value="re_process" 
+                      disabled={hasAccountManagerLoan}
+                      style={{ color: hasAccountManagerLoan ? '#999' : 'inherit' }}
+                    >
+                      Re-process{hasAccountManagerLoan ? ' (Disabled - Account Manager Loan)' : ''}
+                    </option>
                     <option value="unhold">Unhold</option>
-                    <option value="delete">Delete</option>
-                    <option value="cancel">Cancel</option>
+                    <option 
+                      value="delete" 
+                      disabled={hasAccountManagerLoan}
+                      style={{ color: hasAccountManagerLoan ? '#999' : 'inherit' }}
+                    >
+                      Delete{hasAccountManagerLoan ? ' (Disabled - Account Manager Loan)' : ''}
+                    </option>
+                    <option 
+                      value="cancel" 
+                      disabled={hasAccountManagerLoan}
+                      style={{ color: hasAccountManagerLoan ? '#999' : 'inherit' }}
+                    >
+                      Cancel{hasAccountManagerLoan ? ' (Disabled - Account Manager Loan)' : ''}
+                    </option>
                   </select>
                 </div>
 
