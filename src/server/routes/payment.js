@@ -395,14 +395,36 @@ router.post('/webhook', async (req, res) => {
         //   return res.status(401).json({ message: 'Invalid signature' });
         // }
 
-        const { order } = payload.data || {};
+        const { order, payment } = payload.data || {};
         if (!order) {
             return res.status(400).json({ message: 'Invalid payload' });
         }
 
         const orderId = order.order_id;
-        const orderStatus = order.order_status;
         const orderAmount = order.order_amount;
+        
+        // Determine order status from webhook
+        // Cashfree webhook doesn't include order_status directly
+        // We need to derive it from payment_status or webhook type
+        let orderStatus = 'PENDING'; // Default
+        
+        if (payment) {
+            // If payment_status is SUCCESS, order is PAID
+            if (payment.payment_status === 'SUCCESS') {
+                orderStatus = 'PAID';
+            } else if (payment.payment_status === 'FAILED') {
+                orderStatus = 'FAILED';
+            }
+        }
+        
+        // Also check webhook type
+        if (payload.type === 'PAYMENT_SUCCESS_WEBHOOK') {
+            orderStatus = 'PAID';
+        } else if (payload.type === 'PAYMENT_FAILED_WEBHOOK' || payload.type === 'PAYMENT_USER_DROPPED_WEBHOOK') {
+            orderStatus = 'FAILED';
+        }
+
+        console.log(`💰 Webhook order status determined: ${orderStatus} (from payment_status: ${payment?.payment_status}, type: ${payload.type})`);
 
         // Update payment order status
         await executeQuery(
@@ -415,7 +437,7 @@ router.post('/webhook', async (req, res) => {
         // If payment succeeded, process based on payment type
         if (orderStatus === 'PAID') {
             const [paymentOrder] = await executeQuery(
-                'SELECT loan_id, extension_id, payment_type FROM payment_orders WHERE order_id = ?',
+                'SELECT loan_id, extension_id, payment_type, user_id FROM payment_orders WHERE order_id = ?',
                 [orderId]
             );
 
@@ -429,23 +451,44 @@ router.post('/webhook', async (req, res) => {
                     });
 
                     try {
-                        // Import and use the approval function
-                        const { approveExtension } = require('../utils/extensionApproval');
-                        const approvalResult = await approveExtension(
-                            paymentOrder.extension_id,
-                            orderId, // Use orderId as reference number
-                            null // No admin ID for auto-approval
+                        // First check if extension is already approved (by order-status check) - skip if so
+                        const extensionStatusCheck = await executeQuery(
+                            `SELECT status, payment_status FROM loan_extensions WHERE id = ?`,
+                            [paymentOrder.extension_id]
                         );
+                        
+                        if (extensionStatusCheck.length > 0) {
+                            const extStatus = extensionStatusCheck[0];
+                            if (extStatus.status === 'approved' && extStatus.payment_status === 'paid') {
+                                console.log(`ℹ️ Extension #${paymentOrder.extension_id} is already approved (by order-status check), skipping webhook processing`);
+                                // Skip processing if already approved, but continue to send webhook response
+                            } else {
+                                // Check if transaction already exists for this order to avoid duplicates
+                                const existingTransaction = await executeQuery(
+                                    `SELECT id FROM transactions WHERE reference_number = ? AND loan_application_id = ? AND transaction_type LIKE 'loan_extension_%'`,
+                                    [orderId, paymentOrder.loan_id]
+                                );
+                                
+                                if (existingTransaction.length > 0) {
+                                    console.log(`ℹ️ Transaction already exists for extension payment order ${orderId}, skipping duplicate`);
+                                } else {
+                                    // Import and use the approval function
+                                    const { approveExtension } = require('../utils/extensionApproval');
+                                    const approvalResult = await approveExtension(
+                                        paymentOrder.extension_id,
+                                        orderId, // Use orderId as reference number
+                                        null // No admin ID for auto-approval
+                                    );
 
-                        console.log('✅ Extension auto-approved:', approvalResult);
+                                    console.log('✅ Extension auto-approved:', approvalResult);
 
-                        // Send extension letter email after successful payment
-                        try {
-                            const emailService = require('../services/emailService');
-                            const pdfService = require('../services/pdfService');
-                            
-                            // Get extension and loan details for email
-                            const extensionDetails = await executeQuery(`
+                                    // Send extension letter email after successful payment
+                                    try {
+                                        const emailService = require('../services/emailService');
+                                        const pdfService = require('../services/pdfService');
+                                        
+                                        // Get extension and loan details for email
+                                        const extensionDetails = await executeQuery(`
                                 SELECT 
                                     le.*,
                                     la.application_number,
@@ -461,22 +504,17 @@ router.post('/webhook', async (req, res) => {
                                 FROM loan_extensions le
                                 INNER JOIN loan_applications la ON le.loan_application_id = la.id
                                 INNER JOIN users u ON la.user_id = u.id
-                                WHERE le.id = ?
-                            `, [paymentOrder.extension_id]);
+                                            WHERE le.id = ?
+                                        `, [paymentOrder.extension_id]);
 
-                            if (extensionDetails && extensionDetails.length > 0) {
-                                const ext = extensionDetails[0];
-                                const recipientEmail = ext.personal_email || ext.official_email || ext.email;
-                                
-                                if (recipientEmail) {
-                                    try {
-                                        // Reuse the existing extension letter email logic
-                                        // Get extension letter data using the same logic as the GET endpoint
-                                        // We'll call the extension letter data generation internally
-                                        const { generateExtensionLetterData } = require('../utils/extensionLetterHelper');
-                                        
-                                        // Get loan details
-                                        const loanDetails = await executeQuery(`
+                                        if (extensionDetails && extensionDetails.length > 0) {
+                                            const ext = extensionDetails[0];
+                                            const recipientEmail = ext.personal_email || ext.official_email || ext.email;
+                                            
+                                            if (recipientEmail) {
+                                                try {
+                                                    // Get loan details
+                                                    const loanDetails = await executeQuery(`
                                             SELECT 
                                                 la.*,
                                                 u.first_name, u.last_name, u.email, u.personal_email, u.official_email,
@@ -534,51 +572,106 @@ router.post('/webhook', async (req, res) => {
                                                 <p>New Due Date: ${newDueDate}</p>
                                                 <p>Extension Period: ${ext.extension_period_days} days</p>
                                             </body>
-                                            </html>
-                                        `;
-                                        
-                                        // Generate PDF from HTML (reuse existing logic from kfs.js)
-                                        const filename = `Extension_Letter_${loan.application_number}.pdf`;
-                                        const pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
+                                                        </html>
+                                                    `;
+                                                    
+                                                    // Generate PDF from HTML
+                                                    const filename = `Extension_Letter_${loan.application_number}.pdf`;
+                                                    const pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
 
-                                        // Send email with PDF (reuse existing function from kfs.js)
-                                        await emailService.sendExtensionLetterEmail({
-                                            loanId: ext.loan_application_id,
-                                            recipientEmail,
-                                            recipientName: `${ext.first_name} ${ext.last_name || ''}`.trim(),
-                                            loanData: {
-                                                application_number: loan.application_number
-                                            },
-                                            pdfBuffer: pdfResult.buffer,
-                                            pdfFilename: filename,
-                                            sentBy: 'system'
-                                        });
+                                                    // Send email with PDF
+                                                    await emailService.sendExtensionLetterEmail({
+                                                        loanId: ext.loan_application_id,
+                                                        recipientEmail,
+                                                        recipientName: `${ext.first_name} ${ext.last_name || ''}`.trim(),
+                                                        loanData: {
+                                                            application_number: loan.application_number
+                                                        },
+                                                        pdfBuffer: pdfResult.buffer,
+                                                        pdfFilename: filename,
+                                                        sentBy: 'system'
+                                                    });
 
-                                        console.log('✅ Extension letter email sent to:', recipientEmail);
+                                                    console.log('✅ Extension letter email sent to:', recipientEmail);
+                                                } catch (emailError) {
+                                                    console.error('❌ Error sending extension letter email (non-fatal):', emailError);
+                                                    // Don't fail the webhook if email fails
+                                                }
+                                            }
+                                        }
                                     } catch (emailError) {
                                         console.error('❌ Error sending extension letter email (non-fatal):', emailError);
                                         // Don't fail the webhook if email fails
                                     }
                                 }
                             }
-                        } catch (emailError) {
-                            console.error('❌ Error sending extension letter email (non-fatal):', emailError);
-                            // Don't fail the webhook if email fails
+                        } else {
+                            console.warn(`⚠️ Extension #${paymentOrder.extension_id} not found`);
                         }
-
                     } catch (approvalError) {
                         console.error('❌ Error auto-approving extension:', approvalError);
                         // Log error but don't fail the webhook - payment was successful
                     }
                 } else {
                     // Regular loan repayment
-                    // Create payment record
-                    await executeQuery(
-                        `INSERT INTO loan_payments (
-                loan_id, amount, payment_method, transaction_id, status, payment_date
-              ) VALUES (?, ?, 'CASHFREE', ?, 'SUCCESS', NOW())`,
-                        [paymentOrder.loan_id, orderAmount, orderId]
+                    // First check if loan is already cleared (by order-status check) - skip if so
+                    const loanStatusCheck = await executeQuery(
+                        `SELECT status FROM loan_applications WHERE id = ?`,
+                        [paymentOrder.loan_id]
                     );
+                    
+                    if (loanStatusCheck.length > 0 && loanStatusCheck[0].status === 'cleared') {
+                        console.log(`ℹ️ Loan #${paymentOrder.loan_id} is already cleared (by order-status check), skipping webhook processing`);
+                        // Skip processing if already cleared, but continue to send webhook response
+                    } else {
+                        // Check if payment record already exists to avoid duplicates
+                    const existingPayment = await executeQuery(
+                        `SELECT id FROM loan_payments WHERE transaction_id = ? AND loan_id = ?`,
+                        [orderId, paymentOrder.loan_id]
+                    );
+                    
+                    if (existingPayment.length === 0) {
+                        // Create payment record
+                        await executeQuery(
+                            `INSERT INTO loan_payments (
+                    loan_id, amount, payment_method, transaction_id, status, payment_date
+                  ) VALUES (?, ?, 'CASHFREE', ?, 'SUCCESS', NOW())`,
+                            [paymentOrder.loan_id, orderAmount, orderId]
+                        );
+                        console.log(`✅ Loan payment record created for loan: ${paymentOrder.loan_id}`);
+                        
+                        // Get loan details to determine transaction type and get user_id
+                        const loanInfo = await executeQuery(
+                            `SELECT user_id, application_number FROM loan_applications WHERE id = ?`,
+                            [paymentOrder.loan_id]
+                        );
+                        
+                        if (loanInfo.length > 0) {
+                            const userId = paymentOrder.user_id || loanInfo[0].user_id;
+                            const applicationNumber = loanInfo[0].application_number;
+                            
+                            // Create transaction record for admin visibility
+                            // Transaction type will be determined after checking if loan is fully paid
+                            // For now, we'll use 'emi_paid' and update to 'full_payment' if loan is cleared
+                            await executeQuery(
+                                `INSERT INTO transactions (
+                                    user_id, loan_application_id, transaction_type, amount, description,
+                                    category, payment_method, reference_number, transaction_date,
+                                    status, priority, created_at, updated_at
+                                ) VALUES (?, ?, 'emi_paid', ?, ?, 'loan', 'cashfree', ?, CURDATE(), 'completed', 'high', NOW(), NOW())`,
+                                [
+                                    userId,
+                                    paymentOrder.loan_id,
+                                    orderAmount,
+                                    `Loan repayment via Cashfree - Order ID: ${orderId}, Application: ${applicationNumber}`,
+                                    orderId
+                                ]
+                            );
+                            console.log(`✅ Transaction record created for loan repayment`);
+                        }
+                    } else {
+                        console.log(`ℹ️ Payment record already exists for order ${orderId}, skipping duplicate`);
+                    }
 
                     // Check if loan is fully paid and should be marked as cleared
                     try {
@@ -597,6 +690,7 @@ router.post('/webhook', async (req, res) => {
                             const loan = loanDetails[0];
                             
                             // Only check for cleared status if loan is in account_manager status
+                            // (Skip if already cleared by order-status check)
                             if (loan.status === 'account_manager') {
                                 // Calculate total payments made for this loan (including the one we just added)
                                 const totalPaymentsResult = await executeQuery(
@@ -628,6 +722,15 @@ router.post('/webhook', async (req, res) => {
                                         [paymentOrder.loan_id]
                                     );
                                     
+                                    // Update transaction type to 'full_payment' if it was created as 'emi_paid'
+                                    await executeQuery(
+                                        `UPDATE transactions 
+                                         SET transaction_type = 'full_payment',
+                                             description = CONCAT(description, ' - Full payment received, loan cleared')
+                                         WHERE reference_number = ? AND transaction_type = 'emi_paid' AND loan_application_id = ?`,
+                                        [orderId, paymentOrder.loan_id]
+                                    );
+                                    
                                     console.log(`✅ Loan #${paymentOrder.loan_id} fully paid and marked as CLEARED`, {
                                         totalPaid: totalPaid,
                                         outstandingBalance: outstandingBalance
@@ -653,6 +756,7 @@ router.post('/webhook', async (req, res) => {
                         loanId: paymentOrder.loan_id,
                         amount: orderAmount
                     });
+                    }
                 }
             }
         }
@@ -812,7 +916,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
             // Process the payment (similar to webhook processing)
             try {
                 const [paymentOrder] = await executeQuery(
-                    'SELECT loan_id, extension_id, payment_type FROM payment_orders WHERE order_id = ?',
+                    'SELECT loan_id, extension_id, payment_type, amount, user_id FROM payment_orders WHERE order_id = ?',
                     [orderId]
                 );
 
@@ -820,11 +924,169 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                     if (paymentOrder.payment_type === 'loan_repayment') {
                         // Process loan repayment
                         console.log(`💳 Processing loan repayment for loan: ${paymentOrder.loan_id}`);
-                        // The webhook handler logic would go here, but for now we just update status
+                        
+                        // First check if loan is already cleared (by webhook) - skip if so
+                        const loanStatusCheck = await executeQuery(
+                            `SELECT status FROM loan_applications WHERE id = ?`,
+                            [paymentOrder.loan_id]
+                        );
+                        
+                        if (loanStatusCheck.length > 0 && loanStatusCheck[0].status === 'cleared') {
+                            console.log(`ℹ️ Loan #${paymentOrder.loan_id} is already cleared (by webhook), skipping order-status processing`);
+                            // Still return the order data, just skip processing
+                        } else {
+                            // Check if payment record already exists to avoid duplicates
+                            const existingPayment = await executeQuery(
+                                `SELECT id FROM loan_payments WHERE transaction_id = ? AND loan_id = ?`,
+                                [orderId, paymentOrder.loan_id]
+                            );
+                            
+                            if (existingPayment.length === 0) {
+                                // Create payment record
+                                await executeQuery(
+                                    `INSERT INTO loan_payments (
+                                        loan_id, amount, payment_method, transaction_id, status, payment_date
+                                    ) VALUES (?, ?, 'CASHFREE', ?, 'SUCCESS', NOW())`,
+                                    [paymentOrder.loan_id, paymentOrder.amount, orderId]
+                                );
+                                console.log(`✅ Loan payment record created for loan: ${paymentOrder.loan_id}`);
+                                
+                                // Get loan details to determine transaction type and get user_id
+                                const loanInfo = await executeQuery(
+                                    `SELECT user_id, application_number FROM loan_applications WHERE id = ?`,
+                                    [paymentOrder.loan_id]
+                                );
+                                
+                                if (loanInfo.length > 0) {
+                                    const userId = paymentOrder.user_id || loanInfo[0].user_id;
+                                    const applicationNumber = loanInfo[0].application_number;
+                                    
+                                    // Create transaction record for admin visibility
+                                    await executeQuery(
+                                        `INSERT INTO transactions (
+                                            user_id, loan_application_id, transaction_type, amount, description,
+                                            category, payment_method, reference_number, transaction_date,
+                                            status, priority, created_at, updated_at
+                                        ) VALUES (?, ?, 'emi_paid', ?, ?, 'loan', 'cashfree', ?, CURDATE(), 'completed', 'high', NOW(), NOW())`,
+                                        [
+                                            userId,
+                                            paymentOrder.loan_id,
+                                            paymentOrder.amount,
+                                            `Loan repayment via Cashfree - Order ID: ${orderId}, Application: ${applicationNumber}`,
+                                            orderId
+                                        ]
+                                    );
+                                    console.log(`✅ Transaction record created for loan repayment`);
+                                }
+                                
+                                // Check if loan should be marked as cleared
+                                try {
+                                    const loanDetails = await executeQuery(
+                                        `SELECT 
+                                            id, processed_amount, sanctioned_amount, loan_amount,
+                                            processed_post_service_fee, fees_breakdown, plan_snapshot,
+                                            status
+                                        FROM loan_applications 
+                                        WHERE id = ?`,
+                                        [paymentOrder.loan_id]
+                                    );
+
+                                    if (loanDetails.length > 0) {
+                                        const loan = loanDetails[0];
+                                        
+                                        // Only process if not already cleared (double-check)
+                                        if (loan.status === 'account_manager') {
+                                            const totalPaymentsResult = await executeQuery(
+                                                `SELECT COALESCE(SUM(amount), 0) as total_paid 
+                                                 FROM loan_payments 
+                                                 WHERE loan_id = ? AND status = 'SUCCESS'`,
+                                                [paymentOrder.loan_id]
+                                            );
+                                            
+                                            const totalPaid = parseFloat(totalPaymentsResult[0]?.total_paid || 0);
+                                            
+                                            const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
+                                            const outstandingBalance = calculateOutstandingBalance(loan);
+                                            
+                                            console.log(`💰 Payment check for loan #${paymentOrder.loan_id}:`, {
+                                                totalPaid: totalPaid,
+                                                outstandingBalance: outstandingBalance,
+                                                remaining: outstandingBalance - totalPaid
+                                            });
+                                            
+                                        if (totalPaid >= outstandingBalance - 0.01) {
+                                            await executeQuery(
+                                                `UPDATE loan_applications 
+                                                 SET status = 'cleared', updated_at = NOW() 
+                                                 WHERE id = ?`,
+                                                [paymentOrder.loan_id]
+                                            );
+                                            
+                                            // Update transaction type to 'full_payment' if it was created as 'emi_paid'
+                                            await executeQuery(
+                                                `UPDATE transactions 
+                                                 SET transaction_type = 'full_payment',
+                                                     description = CONCAT(description, ' - Full payment received, loan cleared')
+                                                 WHERE reference_number = ? AND transaction_type = 'emi_paid' AND loan_application_id = ?`,
+                                                [orderId, paymentOrder.loan_id]
+                                            );
+                                            
+                                            console.log(`✅ Loan #${paymentOrder.loan_id} fully paid and marked as CLEARED`);
+                                        } else {
+                                                console.log(`ℹ️ Loan #${paymentOrder.loan_id} payment received but not fully paid yet`);
+                                            }
+                                        } else {
+                                            console.log(`ℹ️ Loan #${paymentOrder.loan_id} status is '${loan.status}', skipping clearance check`);
+                                        }
+                                    }
+                                } catch (clearanceError) {
+                                    console.error('❌ Error checking if loan should be cleared:', clearanceError);
+                                }
+                            } else {
+                                console.log(`ℹ️ Payment record already exists for order ${orderId}, skipping duplicate`);
+                            }
+                        }
                     } else if (paymentOrder.payment_type === 'extension_fee' && paymentOrder.extension_id) {
                         // Process extension payment
                         console.log(`📅 Processing extension payment for extension: ${paymentOrder.extension_id}`);
-                        // Extension processing logic would go here
+                        
+                        // First check if extension is already approved (by webhook) - skip if so
+                        const extensionStatusCheck = await executeQuery(
+                            `SELECT status, payment_status FROM loan_extensions WHERE id = ?`,
+                            [paymentOrder.extension_id]
+                        );
+                        
+                        if (extensionStatusCheck.length > 0) {
+                            const extStatus = extensionStatusCheck[0];
+                            if (extStatus.status === 'approved' && extStatus.payment_status === 'paid') {
+                                console.log(`ℹ️ Extension #${paymentOrder.extension_id} is already approved (by webhook), skipping order-status processing`);
+                                // Skip processing if already approved
+                            } else {
+                                // Check if transaction already exists for this order to avoid duplicates
+                                const existingTransaction = await executeQuery(
+                                    `SELECT id FROM transactions WHERE reference_number = ? AND loan_application_id = ? AND transaction_type LIKE 'loan_extension_%'`,
+                                    [orderId, paymentOrder.loan_id]
+                                );
+                                
+                                if (existingTransaction.length > 0) {
+                                    console.log(`ℹ️ Transaction already exists for extension payment order ${orderId}, skipping duplicate`);
+                                } else {
+                                    try {
+                                        const { approveExtension } = require('../utils/extensionApproval');
+                                        const approvalResult = await approveExtension(
+                                            paymentOrder.extension_id,
+                                            orderId,
+                                            null
+                                        );
+                                        console.log('✅ Extension auto-approved:', approvalResult);
+                                    } catch (approvalError) {
+                                        console.error('❌ Error auto-approving extension:', approvalError);
+                                    }
+                                }
+                            }
+                        } else {
+                            console.warn(`⚠️ Extension #${paymentOrder.extension_id} not found`);
+                        }
                     }
                 }
             } catch (processError) {
