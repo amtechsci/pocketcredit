@@ -760,6 +760,38 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
 
     await executeQuery(updateQuery, updateParams);
 
+    // Update partner leads if status changed to account_manager and loan is disbursed
+    if (status === 'account_manager') {
+      try {
+        const updatedLoan = await executeQuery(
+          `SELECT id, loan_amount, disbursal_amount, disbursed_at FROM loan_applications WHERE id = ?`,
+          [applicationId]
+        );
+        
+        if (updatedLoan && updatedLoan.length > 0 && updatedLoan[0].disbursed_at) {
+          const { updateLeadPayout } = require('../services/partnerPayoutService');
+          const partnerLeads = await executeQuery(
+            `SELECT id FROM partner_leads WHERE loan_application_id = ? LIMIT 1`,
+            [applicationId]
+          );
+          
+          if (partnerLeads && partnerLeads.length > 0) {
+            const disbursalAmount = updatedLoan[0].disbursal_amount || updatedLoan[0].loan_amount;
+            const disbursedAt = new Date(updatedLoan[0].disbursed_at);
+            await updateLeadPayout(
+              partnerLeads[0].id,
+              disbursalAmount,
+              disbursedAt
+            );
+            console.log(`✅ Updated partner lead payout for lead ${partnerLeads[0].id} (from admin status update)`);
+          }
+        }
+      } catch (partnerError) {
+        console.error('Error updating partner lead payout:', partnerError);
+        // Don't fail the status update if partner update fails
+      }
+    }
+
     res.json({
       status: 'success',
       message: 'Application status updated successfully',

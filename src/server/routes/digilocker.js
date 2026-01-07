@@ -157,7 +157,18 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
   const { mobile_number, application_id, first_name, last_name, email } = req.body;
   const userId = req.userId;
 
+  console.log('🔍 Digilocker KYC URL Request:', {
+    userId,
+    hasMobileNumber: !!mobile_number,
+    mobileNumber: mobile_number ? `${mobile_number.substring(0, 3)}***` : 'missing',
+    hasFirstName: !!first_name,
+    hasLastName: !!last_name,
+    hasEmail: !!email,
+    applicationId: application_id
+  });
+
   if (!mobile_number) {
+    console.log('❌ Validation failed: Mobile number is required');
     return res.status(400).json({
       success: false,
       message: 'Mobile number is required'
@@ -166,22 +177,35 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
 
   // Validate mobile number format
   if (!/^[6-9]\d{9}$/.test(mobile_number)) {
+    console.log('❌ Validation failed: Invalid mobile number format', { mobile_number });
     return res.status(400).json({
       success: false,
-      message: 'Invalid mobile number format'
+      message: 'Invalid mobile number format. Must be 10 digits starting with 6-9.'
     });
   }
 
   // Optional name validation per provider rules
   const nameRegex = /^[A-Za-z][A-Za-z .\-_' ]{0,44}$/; // start alpha, allowed ., -, ', space, _ up to 45
   if (first_name && !nameRegex.test(first_name)) {
-    return res.status(400).json({ success: false, message: 'Invalid first name format' });
+    console.log('❌ Validation failed: Invalid first name format', { first_name });
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Invalid first name format. Must start with a letter and contain only letters, spaces, dots, hyphens, underscores, or apostrophes (max 45 characters).' 
+    });
   }
   if (last_name && !nameRegex.test(last_name)) {
-    return res.status(400).json({ success: false, message: 'Invalid last name format' });
+    console.log('❌ Validation failed: Invalid last name format', { last_name });
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Invalid last name format. Must start with a letter and contain only letters, spaces, dots, hyphens, underscores, or apostrophes (max 45 characters).' 
+    });
   }
   if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
-    return res.status(400).json({ success: false, message: 'Invalid email format' });
+    console.log('❌ Validation failed: Invalid email format', { email: email ? `${email.substring(0, 5)}***` : 'missing' });
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Invalid email format' 
+    });
   }
 
   try {

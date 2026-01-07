@@ -402,6 +402,12 @@ app.use('/api/credit-analytics', creditAnalyticsRoutes);
 const policiesRoutes = require('./routes/policies');
 app.use('/api/policies', policiesRoutes);
 
+// Partner API routes (separate from main API)
+const partnerApiRoutes = require('./routes/partnerApi');
+const partnerDashboardRoutes = require('./routes/partnerDashboard');
+app.use('/api/v1/partner', partnerApiRoutes);
+app.use('/api/v1/partner/dashboard', partnerDashboardRoutes);
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({

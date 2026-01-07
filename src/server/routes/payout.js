@@ -235,6 +235,28 @@ router.post('/disburse-loan', authenticateAdmin, async (req, res) => {
 
         console.log(`[Payout] Loan ${loanApplicationId} status updated to account_manager`);
 
+        // Step 6: Update partner leads if this loan is linked to a partner lead
+        try {
+            const { updateLeadPayout } = require('../services/partnerPayoutService');
+            const partnerLeads = await executeQuery(
+                `SELECT id FROM partner_leads WHERE loan_application_id = ? LIMIT 1`,
+                [loanApplicationId]
+            );
+            
+            if (partnerLeads && partnerLeads.length > 0) {
+                const disbursalAmount = loan.disbursal_amount || loan.loan_amount;
+                await updateLeadPayout(
+                    partnerLeads[0].id,
+                    disbursalAmount,
+                    new Date()
+                );
+                console.log(`[Payout] Updated partner lead payout for lead ${partnerLeads[0].id}`);
+            }
+        } catch (partnerError) {
+            console.error('[Payout] Error updating partner lead payout:', partnerError);
+            // Don't fail the disbursal if partner update fails
+        }
+
         // Return success response
         res.json({
             success: true,

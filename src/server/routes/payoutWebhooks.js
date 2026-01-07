@@ -191,6 +191,43 @@ async function processPayoutWebhookAsync(reqBody, requestId, eventId, signature)
                     `, [JSON.stringify(transferData), transferId]);
                     processed = true;
                     console.log(`[PayoutWebhook ${requestId}] Transfer ${transferId} marked as SUCCESS`);
+
+                    // Update partner leads if loan is linked and disbursed
+                    try {
+                        const payoutTransaction = await executeQuery(
+                            `SELECT loan_application_id, amount FROM payout_transactions WHERE transfer_id = ? LIMIT 1`,
+                            [transferId]
+                        );
+                        
+                        if (payoutTransaction && payoutTransaction.length > 0 && payoutTransaction[0].loan_application_id) {
+                            const loanAppId = payoutTransaction[0].loan_application_id;
+                            const loan = await executeQuery(
+                                `SELECT id, loan_amount, disbursal_amount, disbursed_at, status FROM loan_applications WHERE id = ?`,
+                                [loanAppId]
+                            );
+                            
+                            if (loan && loan.length > 0 && loan[0].disbursed_at && loan[0].status === 'account_manager') {
+                                const { updateLeadPayout } = require('../services/partnerPayoutService');
+                                const partnerLeads = await executeQuery(
+                                    `SELECT id FROM partner_leads WHERE loan_application_id = ? LIMIT 1`,
+                                    [loanAppId]
+                                );
+                                
+                                if (partnerLeads && partnerLeads.length > 0) {
+                                    const disbursalAmount = loan[0].disbursal_amount || loan[0].loan_amount;
+                                    await updateLeadPayout(
+                                        partnerLeads[0].id,
+                                        disbursalAmount,
+                                        new Date(loan[0].disbursed_at)
+                                    );
+                                    console.log(`[PayoutWebhook ${requestId}] Updated partner lead payout for lead ${partnerLeads[0].id} (from webhook)`);
+                                }
+                            }
+                        }
+                    } catch (partnerError) {
+                        console.error(`[PayoutWebhook ${requestId}] Error updating partner lead payout:`, partnerError);
+                        // Don't fail webhook processing if partner update fails
+                    }
                     break;
 
                 case 'TRANSFER_FAILED':

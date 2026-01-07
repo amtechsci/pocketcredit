@@ -201,7 +201,16 @@ const logRequestActivity = async (req, res, data) => {
     console.log('🔄 Activity Middleware Called:', { method: req.method, path: req.path, statusCode: res.statusCode });
     
     const { method, path, user, admin } = req;
-    const responseData = typeof data === 'string' ? JSON.parse(data) : data;
+    
+    // Safely parse response data
+    let responseData;
+    try {
+      responseData = typeof data === 'string' ? JSON.parse(data) : data;
+    } catch (parseError) {
+      // If parsing fails, treat as non-JSON response
+      console.warn('⚠️ Failed to parse response data as JSON:', parseError.message);
+      responseData = { raw: data };
+    }
     
     // Debug response data parsing
     console.log('📊 Response data debug:', {
@@ -209,7 +218,9 @@ const logRequestActivity = async (req, res, data) => {
       isString: typeof data === 'string',
       responseDataKeys: responseData ? Object.keys(responseData) : 'null',
       responseDataStatus: responseData?.status,
-      responseDataData: responseData?.data
+      responseDataSuccess: responseData?.success,
+      responseDataData: responseData?.data,
+      responseDataMessage: responseData?.message
     });
     
     let activityType = ACTIVITY_TYPES.SYSTEM_EVENT;

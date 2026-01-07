@@ -2102,6 +2102,32 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
             console.log('Update result:', updateResult);
             console.log(`✅ Updated loan #${loanIdInt} status to account_manager and saved calculated values`);
+
+            // Update partner leads if this loan is linked to a partner lead
+            try {
+              const { updateLeadPayout } = require('../services/partnerPayoutService');
+              const partnerLeads = await executeQuery(
+                `SELECT id FROM partner_leads WHERE loan_application_id = ? LIMIT 1`,
+                [loanIdInt]
+              );
+              
+              if (partnerLeads && partnerLeads.length > 0) {
+                const loanData = await executeQuery(
+                  `SELECT loan_amount, disbursal_amount FROM loan_applications WHERE id = ?`,
+                  [loanIdInt]
+                );
+                const disbursalAmount = (loanData[0]?.disbursal_amount || loanData[0]?.loan_amount);
+                await updateLeadPayout(
+                  partnerLeads[0].id,
+                  disbursalAmount,
+                  new Date()
+                );
+                console.log(`✅ Updated partner lead payout for lead ${partnerLeads[0].id}`);
+              }
+            } catch (partnerError) {
+              console.error('Error updating partner lead payout:', partnerError);
+              // Don't fail the transaction if partner update fails
+            }
           }
 
           loanStatusUpdated = true;
