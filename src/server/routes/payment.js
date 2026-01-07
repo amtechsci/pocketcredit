@@ -81,7 +81,13 @@ router.post('/create-order', authenticateToken, async (req, res) => {
 
         // Determine payment type if not provided
         let finalPaymentType = paymentType;
-        if (!finalPaymentType) {
+        
+        // If paymentType is explicitly provided (especially 'pre-close' or 'full_payment'), use it
+        if (finalPaymentType === 'pre-close' || finalPaymentType === 'full_payment') {
+            // Explicitly provided pre-close or full_payment - use it as-is
+            console.log(`[Payment] Using explicitly provided payment type: ${finalPaymentType}`);
+        } else if (!finalPaymentType) {
+            // Auto-detect payment type only if not provided
             // Check if this is a single payment loan (emi_count = 1)
             if (emiCount === 1) {
                 // For single payment loans, use 'full_payment' which will clear immediately
@@ -983,7 +989,7 @@ router.post('/webhook', async (req, res) => {
                                                 paymentOrder.loan_id,
                                                 transactionType,
                                                 orderAmount,
-                                                `${paymentType === 'pre-close' ? 'Pre-close' : paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} via Cashfree - Order: ${orderId}, App: ${applicationNumber}`,
+                                                `${paymentType === 'pre-close' || paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} via Cashfree - Order: ${orderId}, App: ${applicationNumber}`,
                                                 orderId,
                                                 systemAdminId  // created_by = system admin for automated payments
                                             ]
@@ -1362,7 +1368,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                                     paymentOrder.loan_id,
                                                     transactionType,
                                                     paymentOrder.amount,
-                                                    `${paymentType === 'pre-close' ? 'Pre-close' : paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} via Cashfree - Order: ${orderId}, App: ${applicationNumber}`,
+                                                    `${paymentType === 'pre-close' || paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} via Cashfree - Order: ${orderId}, App: ${applicationNumber}`,
                                                     orderId,
                                                     systemAdminId  // created_by = system admin for automated payments
                                                 ]
