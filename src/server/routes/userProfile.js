@@ -169,125 +169,6 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       ORDER BY created_at ASC
     `, [userId]);
 
-    // Check for duplicate accounts
-    const duplicateChecks = {
-      panExists: false,
-      panDuplicateUsers: [],
-      bankAccountExists: false,
-      bankAccountDuplicateUsers: [],
-      mobileExists: false,
-      mobileDuplicateUsers: [],
-      referencePhoneExists: false,
-      referencePhoneDuplicateUsers: []
-    };
-
-    // Check PAN number duplicates
-    if (user.pan_number) {
-      const panDuplicates = await executeQuery(`
-        SELECT id, first_name, last_name, phone, email, created_at
-        FROM users
-        WHERE pan_number = ? AND id != ?
-        ORDER BY created_at DESC
-      `, [user.pan_number, userId]);
-      
-      if (panDuplicates && panDuplicates.length > 0) {
-        duplicateChecks.panExists = true;
-        duplicateChecks.panDuplicateUsers = panDuplicates.map(u => ({
-          id: u.id,
-          name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'Unknown',
-          phone: u.phone || 'N/A',
-          email: u.email || 'N/A',
-          created_at: u.created_at
-        }));
-      }
-    }
-
-    // Check bank account number duplicates
-    if (bankDetails && bankDetails.length > 0) {
-      const accountNumbers = bankDetails.map(b => b.accountNumber).filter(Boolean);
-      if (accountNumbers.length > 0) {
-        const bankDuplicates = await executeQuery(`
-          SELECT DISTINCT bd.user_id, u.id, u.first_name, u.last_name, u.phone, u.email, bd.account_number, bd.created_at
-          FROM bank_details bd
-          INNER JOIN users u ON bd.user_id = u.id
-          WHERE bd.account_number IN (${accountNumbers.map(() => '?').join(',')}) 
-            AND bd.user_id != ?
-          ORDER BY bd.created_at DESC
-        `, [...accountNumbers, userId]);
-        
-        if (bankDuplicates && bankDuplicates.length > 0) {
-          duplicateChecks.bankAccountExists = true;
-          duplicateChecks.bankAccountDuplicateUsers = bankDuplicates.map(u => ({
-            id: u.id,
-            name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'Unknown',
-            phone: u.phone || 'N/A',
-            email: u.email || 'N/A',
-            accountNumber: u.account_number,
-            created_at: u.created_at
-          }));
-        }
-      }
-    }
-
-    // Check mobile number duplicates
-    if (user.phone) {
-      const mobileDuplicates = await executeQuery(`
-        SELECT id, first_name, last_name, phone, email, pan_number, created_at
-        FROM users
-        WHERE phone = ? AND id != ?
-        ORDER BY created_at DESC
-      `, [user.phone, userId]);
-      
-      if (mobileDuplicates && mobileDuplicates.length > 0) {
-        duplicateChecks.mobileExists = true;
-        duplicateChecks.mobileDuplicateUsers = mobileDuplicates.map(u => ({
-          id: u.id,
-          name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'Unknown',
-          phone: u.phone || 'N/A',
-          email: u.email || 'N/A',
-          panNumber: u.pan_number || 'N/A',
-          created_at: u.created_at
-        }));
-      }
-    }
-
-    // Check reference phone number duplicates
-    if (references && references.length > 0) {
-      const referencePhones = references.map(r => r.phone).filter(Boolean);
-      if (referencePhones.length > 0) {
-        // Check if any reference phone matches other users' primary mobile or alternate mobile
-        // Build query with proper placeholders
-        const placeholders = referencePhones.map(() => '?').join(',');
-        const allParams = [...referencePhones, ...referencePhones, userId];
-        
-        const referencePhoneDuplicates = await executeQuery(`
-          SELECT DISTINCT u.id, u.first_name, u.last_name, u.phone, u.email, u.alternate_mobile, u.created_at,
-                 COALESCE(
-                   CASE WHEN u.phone IN (${placeholders}) THEN u.phone END,
-                   CASE WHEN u.alternate_mobile IN (${placeholders}) THEN u.alternate_mobile END,
-                   NULL
-                 ) as matching_phone
-          FROM users u
-          WHERE (u.phone IN (${placeholders}) 
-             OR u.alternate_mobile IN (${placeholders}))
-            AND u.id != ?
-          ORDER BY u.created_at DESC
-        `, allParams);
-        
-        if (referencePhoneDuplicates && referencePhoneDuplicates.length > 0) {
-          duplicateChecks.referencePhoneExists = true;
-          duplicateChecks.referencePhoneDuplicateUsers = referencePhoneDuplicates.map(u => ({
-            id: u.id,
-            name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'Unknown',
-            phone: u.phone || 'N/A',
-            email: u.email || 'N/A',
-            matchingPhone: u.matching_phone || (u.phone && referencePhones.includes(u.phone) ? u.phone : (u.alternate_mobile && referencePhones.includes(u.alternate_mobile) ? u.alternate_mobile : 'N/A')),
-            created_at: u.created_at
-          }));
-        }
-      }
-    }
-
     // Calculate age from date_of_birth
     const calculateAge = (dateOfBirth) => {
       if (!dateOfBirth) return 'N/A';
@@ -581,6 +462,125 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       }
     } catch (e) {
       console.error('Error fetching bank details:', e);
+    }
+
+    // Check for duplicate accounts (after bankDetails is fetched)
+    const duplicateChecks = {
+      panExists: false,
+      panDuplicateUsers: [],
+      bankAccountExists: false,
+      bankAccountDuplicateUsers: [],
+      mobileExists: false,
+      mobileDuplicateUsers: [],
+      referencePhoneExists: false,
+      referencePhoneDuplicateUsers: []
+    };
+
+    // Check PAN number duplicates
+    if (user.pan_number) {
+      const panDuplicates = await executeQuery(`
+        SELECT id, first_name, last_name, phone, email, created_at
+        FROM users
+        WHERE pan_number = ? AND id != ?
+        ORDER BY created_at DESC
+      `, [user.pan_number, userId]);
+      
+      if (panDuplicates && panDuplicates.length > 0) {
+        duplicateChecks.panExists = true;
+        duplicateChecks.panDuplicateUsers = panDuplicates.map(u => ({
+          id: u.id,
+          name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'Unknown',
+          phone: u.phone || 'N/A',
+          email: u.email || 'N/A',
+          created_at: u.created_at
+        }));
+      }
+    }
+
+    // Check bank account number duplicates
+    if (bankDetails && bankDetails.length > 0) {
+      const accountNumbers = bankDetails.map(b => b.accountNumber).filter(Boolean);
+      if (accountNumbers.length > 0) {
+        const bankDuplicates = await executeQuery(`
+          SELECT DISTINCT bd.user_id, u.id, u.first_name, u.last_name, u.phone, u.email, bd.account_number, bd.created_at
+          FROM bank_details bd
+          INNER JOIN users u ON bd.user_id = u.id
+          WHERE bd.account_number IN (${accountNumbers.map(() => '?').join(',')}) 
+            AND bd.user_id != ?
+          ORDER BY bd.created_at DESC
+        `, [...accountNumbers, userId]);
+        
+        if (bankDuplicates && bankDuplicates.length > 0) {
+          duplicateChecks.bankAccountExists = true;
+          duplicateChecks.bankAccountDuplicateUsers = bankDuplicates.map(u => ({
+            id: u.id,
+            name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'Unknown',
+            phone: u.phone || 'N/A',
+            email: u.email || 'N/A',
+            accountNumber: u.account_number,
+            created_at: u.created_at
+          }));
+        }
+      }
+    }
+
+    // Check mobile number duplicates
+    if (user.phone) {
+      const mobileDuplicates = await executeQuery(`
+        SELECT id, first_name, last_name, phone, email, pan_number, created_at
+        FROM users
+        WHERE phone = ? AND id != ?
+        ORDER BY created_at DESC
+      `, [user.phone, userId]);
+      
+      if (mobileDuplicates && mobileDuplicates.length > 0) {
+        duplicateChecks.mobileExists = true;
+        duplicateChecks.mobileDuplicateUsers = mobileDuplicates.map(u => ({
+          id: u.id,
+          name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'Unknown',
+          phone: u.phone || 'N/A',
+          email: u.email || 'N/A',
+          panNumber: u.pan_number || 'N/A',
+          created_at: u.created_at
+        }));
+      }
+    }
+
+    // Check reference phone number duplicates
+    if (references && references.length > 0) {
+      const referencePhones = references.map(r => r.phone).filter(Boolean);
+      if (referencePhones.length > 0) {
+        // Check if any reference phone matches other users' primary mobile or alternate mobile
+        // Build query with proper placeholders
+        const placeholders = referencePhones.map(() => '?').join(',');
+        const allParams = [...referencePhones, ...referencePhones, userId];
+        
+        const referencePhoneDuplicates = await executeQuery(`
+          SELECT DISTINCT u.id, u.first_name, u.last_name, u.phone, u.email, u.alternate_mobile, u.created_at,
+                 COALESCE(
+                   CASE WHEN u.phone IN (${placeholders}) THEN u.phone END,
+                   CASE WHEN u.alternate_mobile IN (${placeholders}) THEN u.alternate_mobile END,
+                   NULL
+                 ) as matching_phone
+          FROM users u
+          WHERE (u.phone IN (${placeholders}) 
+             OR u.alternate_mobile IN (${placeholders}))
+            AND u.id != ?
+          ORDER BY u.created_at DESC
+        `, allParams);
+        
+        if (referencePhoneDuplicates && referencePhoneDuplicates.length > 0) {
+          duplicateChecks.referencePhoneExists = true;
+          duplicateChecks.referencePhoneDuplicateUsers = referencePhoneDuplicates.map(u => ({
+            id: u.id,
+            name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'Unknown',
+            phone: u.phone || 'N/A',
+            email: u.email || 'N/A',
+            matchingPhone: u.matching_phone || (u.phone && referencePhones.includes(u.phone) ? u.phone : (u.alternate_mobile && referencePhones.includes(u.alternate_mobile) ? u.alternate_mobile : 'N/A')),
+            created_at: u.created_at
+          }));
+        }
+      }
     }
 
     // Construct bankInfo object for frontend compatibility (UserProfileDetail.tsx expects this structure)
