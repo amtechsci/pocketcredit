@@ -200,8 +200,16 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
       message: 'Invalid last name format. Must start with a letter and contain only letters, spaces, dots, hyphens, underscores, or apostrophes (max 45 characters).' 
     });
   }
-  if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
-    console.log('❌ Validation failed: Invalid email format', { email: email ? `${email.substring(0, 5)}***` : 'missing' });
+  
+  // Email is optional for Digilocker - only validate if a real email is provided
+  // Treat placeholder values (N/A, NA, etc.) and empty strings as optional
+  const placeholderEmails = ['N/A', 'NA', 'n/a', 'na', 'NONE', 'none', 'NULL', 'null', ''];
+  const isPlaceholderEmail = !email || placeholderEmails.includes(email.trim().toUpperCase());
+  const emailForRequest = isPlaceholderEmail ? null : email;
+  
+  // Only validate email format if a real email is provided
+  if (!isPlaceholderEmail && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+    console.log('❌ Validation failed: Invalid email format', { email: `${email.substring(0, 5)}***` });
     return res.status(400).json({ 
       success: false, 
       message: 'Invalid email format' 
@@ -217,7 +225,7 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
     // Prepare Digilocker API request
     const digilockerRequest = {
       uid: uid,
-      emailId: email || "",
+      emailId: emailForRequest || "",
       firstName: first_name || "",
       lastName: last_name || "",
       isHideExplanationScreen: false,
