@@ -6087,18 +6087,50 @@ export function UserProfileDetail() {
       );
     }
 
-    const { credit_score, is_eligible, rejection_reasons, full_report, checked_at, request_id, client_ref_num } = creditAnalyticsData;
+    const { credit_score, is_eligible, rejection_reasons, full_report, pdf_url, checked_at, request_id, client_ref_num } = creditAnalyticsData;
 
     // Parse the full report to extract detailed information
     const reportData = full_report?.result?.result_json?.INProfileResponse || {};
     
-    // Extract PDF URL from various possible locations in the Experian response
-    const experianPdfUrl = full_report?.result?.pdf_url 
-      || full_report?.pdf_url 
-      || full_report?.result?.pdfUrl 
-      || full_report?.pdfUrl
-      || reportData?.pdf_url
-      || null;
+    // Extract PDF URL - first check if it's stored directly in the database
+    // Then check various possible locations in the Experian response
+    let experianPdfUrl = pdf_url || null;
+    
+    if (!experianPdfUrl && full_report) {
+      // Check multiple nested paths where PDF URL might be stored in the response
+      experianPdfUrl = 
+        full_report?.result?.model?.pdf_url ||
+        full_report?.result?.data?.pdf_url ||
+        full_report?.result?.pdf_url ||
+        full_report?.result?.model?.pdfUrl ||
+        full_report?.result?.data?.pdfUrl ||
+        full_report?.result?.pdfUrl ||
+        full_report?.model?.pdf_url ||
+        full_report?.data?.pdf_url ||
+        full_report?.pdf_url ||
+        full_report?.model?.pdfUrl ||
+        full_report?.data?.pdfUrl ||
+        full_report?.pdfUrl ||
+        reportData?.pdf_url ||
+        reportData?.pdfUrl ||
+        null;
+    }
+    
+    // Debug logging to help identify where PDF URL is located
+    if (full_report && !experianPdfUrl) {
+      console.log('🔍 PDF URL not found. Checking full_report structure:', {
+        hasPdfUrlInDb: !!pdf_url,
+        hasResult: !!full_report.result,
+        hasModel: !!full_report.result?.model,
+        hasData: !!full_report.result?.data,
+        resultKeys: full_report.result ? Object.keys(full_report.result) : [],
+        modelKeys: full_report.result?.model ? Object.keys(full_report.result.model) : [],
+        dataKeys: full_report.result?.data ? Object.keys(full_report.result.data) : [],
+        topLevelKeys: Object.keys(full_report)
+      });
+    } else if (experianPdfUrl) {
+      console.log('✅ PDF URL found:', experianPdfUrl);
+    }
     const accountSummary = reportData.CAIS_Account?.CAIS_Account_DETAILS || [];
     const enquirySummary = reportData.CAPS?.CAPS_Summary || {};
     const capsApplications = reportData.CAPS?.CAPS_Application_Details || [];
@@ -6162,7 +6194,7 @@ export function UserProfileDetail() {
               <h3 className="text-lg font-semibold text-gray-900">Experian Credit Score</h3>
             </div>
             {/* Experian PDF Download Button */}
-            {experianPdfUrl && (
+            {experianPdfUrl ? (
               <button
                 onClick={() => {
                   if (experianPdfUrl) {
@@ -6176,7 +6208,20 @@ export function UserProfileDetail() {
                 <Download className="w-4 h-4" />
                 Download Experian PDF
               </button>
-            )}
+            ) : full_report ? (
+              // Show debug button if PDF URL not found but report exists
+              <button
+                onClick={() => {
+                  console.log('📄 Full Report Structure:', JSON.stringify(full_report, null, 2));
+                  toast.info('Check browser console for full report structure. PDF URL may be in a different location.');
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
+                title="PDF URL not found - Click to see report structure in console"
+              >
+                <FileText className="w-4 h-4" />
+                Debug: View Report Structure
+              </button>
+            ) : null}
           </div>
           <p className="text-sm text-orange-600 italic mb-6">Your Experian Credit Report is summarized in the form of Experian Credit Score which ranges from 300 - 900.</p>
 

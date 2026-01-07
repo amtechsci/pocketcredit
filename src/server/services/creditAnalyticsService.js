@@ -113,7 +113,7 @@ class CreditAnalyticsService {
       otp: "123456", // Demo OTP
       timestamp,
       device_ip,
-      report_type: "3"
+      report_type: "4" // Report type 4 includes PDF URL in response
     };
 
     try {
@@ -289,6 +289,57 @@ class CreditAnalyticsService {
     // }
 
     return validation;
+  }
+
+  /**
+   * Extract PDF URL from credit report response
+   * Checks multiple possible locations where PDF URL might be stored
+   * @param {Object} apiResponse - The full API response
+   * @returns {string|null} - PDF URL if found, null otherwise
+   */
+  extractPdfUrl(apiResponse) {
+    if (!apiResponse || typeof apiResponse !== 'object') {
+      return null;
+    }
+
+    // Check multiple possible locations
+    const possiblePaths = [
+      apiResponse?.result?.model?.pdf_url,
+      apiResponse?.result?.data?.pdf_url,
+      apiResponse?.result?.pdf_url,
+      apiResponse?.result?.model?.pdfUrl,
+      apiResponse?.result?.data?.pdfUrl,
+      apiResponse?.result?.pdfUrl,
+      apiResponse?.model?.pdf_url,
+      apiResponse?.data?.pdf_url,
+      apiResponse?.pdf_url,
+      apiResponse?.model?.pdfUrl,
+      apiResponse?.data?.pdfUrl,
+      apiResponse?.pdfUrl,
+      apiResponse?.result?.result_json?.pdf_url,
+      apiResponse?.result?.result_json?.pdfUrl,
+      // Check nested in INProfileResponse
+      apiResponse?.result?.result_json?.INProfileResponse?.pdf_url,
+      apiResponse?.result?.result_json?.INProfileResponse?.pdfUrl,
+    ];
+
+    for (const url of possiblePaths) {
+      if (url && typeof url === 'string' && url.trim().length > 0) {
+        console.log('✅ PDF URL found at path:', url);
+        return url.trim();
+      }
+    }
+
+    // Log structure for debugging if PDF URL not found
+    console.log('⚠️ PDF URL not found in response. Checking structure:', {
+      hasResult: !!apiResponse.result,
+      hasModel: !!apiResponse.result?.model,
+      hasData: !!apiResponse.result?.data,
+      resultKeys: apiResponse.result ? Object.keys(apiResponse.result) : [],
+      topLevelKeys: Object.keys(apiResponse)
+    });
+
+    return null;
   }
 }
 

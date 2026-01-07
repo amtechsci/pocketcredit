@@ -397,6 +397,7 @@ router.get('/:id/credit-analytics', authenticateAdmin, async (req, res) => {
         has_wilful_default,
         negative_indicators,
         full_report,
+        pdf_url,
         checked_at,
         created_at,
         updated_at
@@ -610,6 +611,14 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
       throw new Error(`Failed to validate eligibility: ${validationError.message}`);
     }
 
+    // Extract PDF URL from response
+    const pdfUrl = creditAnalyticsService.extractPdfUrl(creditReportResponse);
+    if (pdfUrl) {
+      console.log('📄 PDF URL extracted from response:', pdfUrl);
+    } else {
+      console.log('⚠️ PDF URL not found in credit report response');
+    }
+
     // Save credit check to database
     try {
       await executeQuery(
@@ -618,8 +627,8 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
           credit_score, result_code, api_message, 
           is_eligible, rejection_reasons,
           has_settlements, has_writeoffs, has_suit_files, has_wilful_default,
-          negative_indicators, full_report, checked_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          negative_indicators, full_report, pdf_url, checked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [
           userId,
           creditReportResponse.request_id || null,
@@ -634,7 +643,8 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
           validation.negativeIndicators.hasSuitFiles ? 1 : 0,
           validation.negativeIndicators.hasWilfulDefault ? 1 : 0,
           JSON.stringify(validation.negativeIndicators),
-          JSON.stringify(creditReportResponse)
+          JSON.stringify(creditReportResponse),
+          pdfUrl || null
         ]
       );
       console.log('✅ Credit check saved to database');
