@@ -4540,6 +4540,7 @@ export function UserProfileDetail() {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan ID</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Apply Date & Time</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Principal Amount</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan Plan</th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Disb Amount</th>
@@ -4611,6 +4612,30 @@ export function UserProfileDetail() {
                             {/* Loan ID */}
                             <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                               {shortLoanId}
+                            </td>
+
+                            {/* Apply Date & Time */}
+                            <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {loan.created_at ? (
+                                <div>
+                                  <div className="font-medium">
+                                    {new Date(loan.created_at).toLocaleDateString('en-IN', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                      year: 'numeric'
+                                    })}
+                                  </div>
+                                  <div className="text-xs text-gray-500">
+                                    {new Date(loan.created_at).toLocaleTimeString('en-IN', {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                      hour12: true
+                                    })}
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-gray-400">N/A</span>
+                              )}
                             </td>
 
                             {/* Principal Amount - Editable */}

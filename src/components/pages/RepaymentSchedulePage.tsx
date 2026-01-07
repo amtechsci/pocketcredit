@@ -581,7 +581,7 @@ export const RepaymentSchedulePage = () => {
                                 return;
                               }
 
-                              const response = await apiService.createPaymentOrder(loanId, precloseAmount);
+                              const response = await apiService.createPaymentOrder(loanId, precloseAmount, 'pre-close');
 
                               if (response.success && response.data?.paymentSessionId) {
                                 toast.success('Opening payment gateway...');
@@ -842,7 +842,8 @@ export const RepaymentSchedulePage = () => {
                                 return;
                               }
 
-                              const response = await apiService.createPaymentOrder(loanId, totalAmount);
+                              // For single payment loans, use 'loan_repayment' as default
+                              const response = await apiService.createPaymentOrder(loanId, totalAmount, 'loan_repayment');
 
                               if (response.success && response.data?.paymentSessionId) {
                                 toast.success('Opening payment gateway...');
@@ -1251,13 +1252,21 @@ export const RepaymentSchedulePage = () => {
 
                                     const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
                                     const amount = emi.instalment_amount || 0;
+                                    
+                                    // Determine payment type based on EMI number (1st, 2nd, 3rd, 4th)
+                                    const emiNumber = emi.instalment_no || index + 1;
+                                    let paymentType = 'emi_1st';
+                                    if (emiNumber === 1) paymentType = 'emi_1st';
+                                    else if (emiNumber === 2) paymentType = 'emi_2nd';
+                                    else if (emiNumber === 3) paymentType = 'emi_3rd';
+                                    else if (emiNumber === 4) paymentType = 'emi_4th';
 
                                     if (!loanId || !amount) {
                                       toast.error('Unable to process payment');
                                       return;
                                     }
 
-                                    const response = await apiService.createPaymentOrder(loanId, amount);
+                                    const response = await apiService.createPaymentOrder(loanId, amount, paymentType);
 
                                     if (response.success && response.data?.paymentSessionId) {
                                       toast.success('Opening payment gateway...');

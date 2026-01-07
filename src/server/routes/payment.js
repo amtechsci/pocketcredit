@@ -19,7 +19,7 @@ router.post('/create-order', authenticateToken, async (req, res) => {
     
     try {
         const userId = req.user.id;
-        const { loanId, amount } = req.body;
+        const { loanId, amount, paymentType } = req.body; // paymentType: 'pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', etc.
 
         // Validate input
         if (!loanId || !amount) {
@@ -29,7 +29,15 @@ router.post('/create-order', authenticateToken, async (req, res) => {
             });
         }
 
-        // Fetch loan details with all email fields (similar to eNACH implementation)
+        // Validate paymentType if provided
+        if (paymentType && !['pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th'].includes(paymentType)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid payment type. Must be: pre-close, emi_1st, emi_2nd, emi_3rd, or emi_4th'
+            });
+        }
+
+        // Fetch loan details with all email fields and plan snapshot
         const [loan] = await executeQuery(
             `SELECT la.*, 
                     CONCAT(u.first_name, ' ', u.last_name) as name,
@@ -57,6 +65,114 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                 success: false,
                 message: 'Loan application number is missing. Please contact support.'
             });
+        }
+
+        // Parse plan snapshot to get EMI count
+        let planSnapshot = {};
+        let emiCount = 1;
+        try {
+            planSnapshot = typeof loan.plan_snapshot === 'string' 
+                ? JSON.parse(loan.plan_snapshot) 
+                : loan.plan_snapshot || {};
+            emiCount = planSnapshot.emi_count || 1;
+        } catch (e) {
+            console.error('[Payment] Error parsing plan_snapshot:', e);
+        }
+
+        // Determine payment type if not provided
+        let finalPaymentType = paymentType;
+        if (!finalPaymentType) {
+            // Check if this is a pre-close payment (amount matches pre-close calculation)
+            // For now, if amount is very close to outstanding balance, assume pre-close
+            const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
+            const outstandingBalance = calculateOutstandingBalance(loan);
+            const amountDiff = Math.abs(parseFloat(amount) - outstandingBalance);
+            
+            if (amountDiff < 10) { // Within ₹10 tolerance
+                finalPaymentType = 'pre-close';
+            } else {
+                // Check which EMIs have been paid
+                const paidEmis = await executeQuery(
+                    `SELECT transaction_type 
+                     FROM transactions 
+                     WHERE loan_application_id = ? 
+                     AND transaction_type IN ('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th')
+                     AND status = 'completed'
+                     ORDER BY transaction_type`,
+                    [loanId]
+                );
+                
+                const paidEmiNumbers = paidEmis.map(t => {
+                    if (t.transaction_type === 'emi_1st') return 1;
+                    if (t.transaction_type === 'emi_2nd') return 2;
+                    if (t.transaction_type === 'emi_3rd') return 3;
+                    if (t.transaction_type === 'emi_4th') return 4;
+                    return 0;
+                }).sort((a, b) => a - b);
+                
+                // Find next unpaid EMI
+                let nextEmi = 1;
+                for (let i = 1; i <= emiCount; i++) {
+                    if (!paidEmiNumbers.includes(i)) {
+                        nextEmi = i;
+                        break;
+                    }
+                }
+                
+                if (nextEmi === 1) finalPaymentType = 'emi_1st';
+                else if (nextEmi === 2) finalPaymentType = 'emi_2nd';
+                else if (nextEmi === 3) finalPaymentType = 'emi_3rd';
+                else if (nextEmi === 4) finalPaymentType = 'emi_4th';
+                else finalPaymentType = 'loan_repayment'; // Fallback
+            }
+        }
+
+        // Validate sequential EMI payments
+        if (finalPaymentType && finalPaymentType.startsWith('emi_')) {
+            // Get which EMIs have been paid
+            const paidEmis = await executeQuery(
+                `SELECT transaction_type 
+                 FROM transactions 
+                 WHERE loan_application_id = ? 
+                 AND transaction_type IN ('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th')
+                 AND status = 'completed'
+                 ORDER BY transaction_type`,
+                [loanId]
+            );
+            
+            const paidEmiNumbers = paidEmis.map(t => {
+                if (t.transaction_type === 'emi_1st') return 1;
+                if (t.transaction_type === 'emi_2nd') return 2;
+                if (t.transaction_type === 'emi_3rd') return 3;
+                if (t.transaction_type === 'emi_4th') return 4;
+                return 0;
+            }).sort((a, b) => a - b);
+            
+            // Determine which EMI user is trying to pay
+            let requestedEmiNumber = 0;
+            if (finalPaymentType === 'emi_1st') requestedEmiNumber = 1;
+            else if (finalPaymentType === 'emi_2nd') requestedEmiNumber = 2;
+            else if (finalPaymentType === 'emi_3rd') requestedEmiNumber = 3;
+            else if (finalPaymentType === 'emi_4th') requestedEmiNumber = 4;
+            
+            // Check if this EMI was already paid
+            if (paidEmiNumbers.includes(requestedEmiNumber)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `${finalPaymentType.replace('_', ' ').toUpperCase()} has already been paid. Please pay the next unpaid EMI.`
+                });
+            }
+            
+            // Check if previous EMIs are paid (sequential validation)
+            for (let i = 1; i < requestedEmiNumber; i++) {
+                if (!paidEmiNumbers.includes(i)) {
+                    const emiName = i === 1 ? '1st' : i === 2 ? '2nd' : i === 3 ? '3rd' : `${i}th`;
+                    return res.status(400).json({
+                        success: false,
+                        message: `Please pay ${emiName} EMI first before paying ${finalPaymentType.replace('_', ' ').toUpperCase()}. EMIs must be paid in sequential order.`
+                    });
+                }
+            }
         }
 
         // Get email - use personal_email, official_email, or email (in that priority order)
@@ -243,13 +359,15 @@ router.post('/create-order', authenticateToken, async (req, res) => {
             }
         }
 
-        // Insert payment order
+        // Insert payment order with payment type
         try {
+            // Use finalPaymentType or default to 'loan_repayment'
+            const orderPaymentType = finalPaymentType || 'loan_repayment';
             await executeQuery(
                 `INSERT INTO payment_orders (
             order_id, loan_id, user_id, amount, payment_type, status, created_at
-          ) VALUES (?, ?, ?, ?, 'loan_repayment', 'PENDING', NOW())`,
-                [orderId, loanId, userId, amount]
+          ) VALUES (?, ?, ?, ?, ?, 'PENDING', NOW())`,
+                [orderId, loanId, userId, amount, orderPaymentType]
             );
             console.log(`[Payment] Payment order created in DB: ${orderId}`);
         } catch (insertError) {
@@ -567,7 +685,7 @@ router.post('/webhook', async (req, res) => {
         // If payment succeeded, process based on payment type
         if (orderStatus === 'PAID') {
             const [paymentOrder] = await executeQuery(
-                'SELECT loan_id, extension_id, payment_type, user_id FROM payment_orders WHERE order_id = ?',
+                'SELECT loan_id, extension_id, payment_type, user_id, amount FROM payment_orders WHERE order_id = ?',
                 [orderId]
             );
 
@@ -743,7 +861,10 @@ router.post('/webhook', async (req, res) => {
                         // Log error but don't fail the webhook - payment was successful
                     }
                 } else {
-                    // Regular loan repayment
+                    // Loan repayment (pre-close or EMI)
+                    const paymentType = paymentOrder.payment_type || 'loan_repayment';
+                    console.log(`💳 Processing ${paymentType} payment for loan: ${paymentOrder.loan_id}`);
+                    
                     // First check if loan is already cleared (by order-status check) - skip if so
                     const loanStatusCheck = await executeQuery(
                         `SELECT status FROM loan_applications WHERE id = ?`,
@@ -755,50 +876,57 @@ router.post('/webhook', async (req, res) => {
                         // Skip processing if already cleared, but continue to send webhook response
                     } else {
                         // Check if payment record already exists to avoid duplicates
-                    const existingPayment = await executeQuery(
-                        `SELECT id FROM loan_payments WHERE transaction_id = ? AND loan_id = ?`,
-                        [orderId, paymentOrder.loan_id]
-                    );
-                    
-                    if (existingPayment.length === 0) {
-                        // Create payment record
-                        await executeQuery(
-                            `INSERT INTO loan_payments (
-                    loan_id, amount, payment_method, transaction_id, status, payment_date
-                  ) VALUES (?, ?, 'CASHFREE', ?, 'SUCCESS', NOW())`,
-                            [paymentOrder.loan_id, orderAmount, orderId]
-                        );
-                        console.log(`✅ Loan payment record created for loan: ${paymentOrder.loan_id}`);
-                        
-                        // Get loan details to determine transaction type and get user_id
-                        const loanInfo = await executeQuery(
-                            `SELECT user_id, application_number FROM loan_applications WHERE id = ?`,
-                            [paymentOrder.loan_id]
+                        const existingPayment = await executeQuery(
+                            `SELECT id FROM loan_payments WHERE transaction_id = ? AND loan_id = ?`,
+                            [orderId, paymentOrder.loan_id]
                         );
                         
-                        if (loanInfo.length > 0) {
-                            const userId = paymentOrder.user_id || loanInfo[0].user_id;
-                            const applicationNumber = loanInfo[0].application_number;
-                            
-                            // Create transaction record for admin visibility
-                            // Transaction type will be determined after checking if loan is fully paid
-                            // For now, we'll use 'emi_paid' and update to 'full_payment' if loan is cleared
+                        if (existingPayment.length === 0) {
+                            // Create payment record
                             await executeQuery(
-                                `INSERT INTO transactions (
-                                    user_id, loan_application_id, transaction_type, amount, description,
-                                    category, payment_method, reference_number, transaction_date,
-                                    status, priority, created_at, updated_at
-                                ) VALUES (?, ?, 'emi_paid', ?, ?, 'loan', 'cashfree', ?, CURDATE(), 'completed', 'high', NOW(), NOW())`,
-                                [
-                                    userId,
-                                    paymentOrder.loan_id,
-                                    orderAmount,
-                                    `Loan repayment via Cashfree - Order ID: ${orderId}, Application: ${applicationNumber}`,
-                                    orderId
-                                ]
+                                `INSERT INTO loan_payments (
+                                    loan_id, amount, payment_method, transaction_id, status, payment_date
+                                ) VALUES (?, ?, 'CASHFREE', ?, 'SUCCESS', NOW())`,
+                                [paymentOrder.loan_id, orderAmount, orderId]
                             );
-                            console.log(`✅ Transaction record created for loan repayment`);
-                        }
+                            console.log(`✅ Loan payment record created for loan: ${paymentOrder.loan_id}`);
+                            
+                            // Get loan details to determine transaction type and get user_id
+                            const loanInfo = await executeQuery(
+                                `SELECT user_id, application_number, plan_snapshot FROM loan_applications WHERE id = ?`,
+                                [paymentOrder.loan_id]
+                            );
+                            
+                            if (loanInfo.length > 0) {
+                                const userId = paymentOrder.user_id || loanInfo[0].user_id;
+                                const applicationNumber = loanInfo[0].application_number;
+                                
+                                // Determine transaction type based on payment type
+                                let transactionType = 'emi_paid'; // Default
+                                if (paymentType === 'pre-close') {
+                                    transactionType = 'full_payment';
+                                } else if (paymentType.startsWith('emi_')) {
+                                    transactionType = paymentType; // emi_1st, emi_2nd, etc.
+                                }
+                                
+                                // Create transaction record for admin visibility
+                                await executeQuery(
+                                    `INSERT INTO transactions (
+                                        user_id, loan_application_id, transaction_type, amount, description,
+                                        category, payment_method, reference_number, transaction_date,
+                                        status, priority, created_at, updated_at
+                                    ) VALUES (?, ?, ?, ?, ?, 'loan', 'cashfree', ?, CURDATE(), 'completed', 'high', NOW(), NOW())`,
+                                    [
+                                        userId,
+                                        paymentOrder.loan_id,
+                                        transactionType,
+                                        orderAmount,
+                                        `${paymentType === 'pre-close' ? 'Pre-close' : paymentType.replace('_', ' ').toUpperCase()} payment via Cashfree - Order ID: ${orderId}, Application: ${applicationNumber}`,
+                                        orderId
+                                    ]
+                                );
+                                console.log(`✅ Transaction record created: ${transactionType}`);
+                            }
                     } else {
                         console.log(`ℹ️ Payment record already exists for order ${orderId}, skipping duplicate`);
                     }
@@ -822,29 +950,68 @@ router.post('/webhook', async (req, res) => {
                             // Only check for cleared status if loan is in account_manager status
                             // (Skip if already cleared by order-status check)
                             if (loan.status === 'account_manager') {
-                                // Calculate total payments made for this loan (including the one we just added)
-                                const totalPaymentsResult = await executeQuery(
-                                    `SELECT COALESCE(SUM(amount), 0) as total_paid 
-                                     FROM loan_payments 
-                                     WHERE loan_id = ? AND status = 'SUCCESS'`,
-                                    [paymentOrder.loan_id]
-                                );
+                                let shouldClearLoan = false;
                                 
-                                const totalPaid = parseFloat(totalPaymentsResult[0]?.total_paid || 0);
+                                // Pre-close payment: Immediately clear the loan
+                                if (paymentType === 'pre-close') {
+                                    shouldClearLoan = true;
+                                    console.log(`💰 Pre-close payment received - loan will be cleared immediately`);
+                                } else if (paymentType.startsWith('emi_')) {
+                                    // EMI payment: Only clear if this is the last EMI
+                                    // Parse plan snapshot to get EMI count
+                                    let planSnapshot = {};
+                                    let emiCount = 1;
+                                    try {
+                                        planSnapshot = typeof loan.plan_snapshot === 'string' 
+                                            ? JSON.parse(loan.plan_snapshot) 
+                                            : loan.plan_snapshot || {};
+                                        emiCount = planSnapshot.emi_count || 1;
+                                    } catch (e) {
+                                        console.error('Error parsing plan_snapshot:', e);
+                                    }
+                                    
+                                    // Determine which EMI this is
+                                    let currentEmiNumber = 0;
+                                    if (paymentType === 'emi_1st') currentEmiNumber = 1;
+                                    else if (paymentType === 'emi_2nd') currentEmiNumber = 2;
+                                    else if (paymentType === 'emi_3rd') currentEmiNumber = 3;
+                                    else if (paymentType === 'emi_4th') currentEmiNumber = 4;
+                                    
+                                    // Check if this is the last EMI
+                                    if (currentEmiNumber === emiCount) {
+                                        shouldClearLoan = true;
+                                        console.log(`💰 Last EMI (${currentEmiNumber}/${emiCount}) paid - loan will be cleared`);
+                                    } else {
+                                        console.log(`ℹ️ EMI ${currentEmiNumber}/${emiCount} paid - loan will not be cleared yet`);
+                                    }
+                                } else {
+                                    // Fallback: Use old logic (sum all payments)
+                                    const totalPaymentsResult = await executeQuery(
+                                        `SELECT COALESCE(SUM(amount), 0) as total_paid 
+                                         FROM loan_payments 
+                                         WHERE loan_id = ? AND status = 'SUCCESS'`,
+                                        [paymentOrder.loan_id]
+                                    );
+                                    
+                                    const totalPaid = parseFloat(totalPaymentsResult[0]?.total_paid || 0);
+                                    
+                                    const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
+                                    const outstandingBalance = calculateOutstandingBalance(loan);
+                                    
+                                    console.log(`💰 Payment check for loan #${paymentOrder.loan_id}:`, {
+                                        totalPaid: totalPaid,
+                                        outstandingBalance: outstandingBalance,
+                                        remaining: outstandingBalance - totalPaid
+                                    });
+                                    
+                                    // If total payments >= outstanding balance (with small tolerance for rounding)
+                                    if (totalPaid >= outstandingBalance - 0.01) {
+                                        shouldClearLoan = true;
+                                    }
+                                }
                                 
-                                // Calculate outstanding balance using the same logic as extension calculations
-                                const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
-                                const outstandingBalance = calculateOutstandingBalance(loan);
-                                
-                                console.log(`💰 Payment check for loan #${paymentOrder.loan_id}:`, {
-                                    totalPaid: totalPaid,
-                                    outstandingBalance: outstandingBalance,
-                                    remaining: outstandingBalance - totalPaid
-                                });
-                                
-                                // If total payments >= outstanding balance (with small tolerance for rounding)
-                                if (totalPaid >= outstandingBalance - 0.01) {
-                                    // Mark loan as cleared
+                                // Clear the loan if conditions are met
+                                if (shouldClearLoan) {
                                     await executeQuery(
                                         `UPDATE loan_applications 
                                          SET status = 'cleared', updated_at = NOW() 
@@ -852,26 +1019,20 @@ router.post('/webhook', async (req, res) => {
                                         [paymentOrder.loan_id]
                                     );
                                     
-                                    // Update transaction type to 'full_payment' if it was created as 'emi_paid'
-                                    await executeQuery(
-                                        `UPDATE transactions 
-                                         SET transaction_type = 'full_payment',
-                                             description = CONCAT(description, ' - Full payment received, loan cleared')
-                                         WHERE reference_number = ? AND transaction_type = 'emi_paid' AND loan_application_id = ?`,
-                                        [orderId, paymentOrder.loan_id]
-                                    );
+                                    // Update transaction type to 'full_payment' if it was created as EMI type
+                                    if (paymentType.startsWith('emi_')) {
+                                        await executeQuery(
+                                            `UPDATE transactions 
+                                             SET transaction_type = 'full_payment',
+                                                 description = CONCAT(description, ' - Last EMI paid, loan cleared')
+                                             WHERE reference_number = ? AND transaction_type = ? AND loan_application_id = ?`,
+                                            [orderId, paymentType, paymentOrder.loan_id]
+                                        );
+                                    }
                                     
-                                    console.log(`✅ Loan #${paymentOrder.loan_id} fully paid and marked as CLEARED`, {
-                                        totalPaid: totalPaid,
-                                        outstandingBalance: outstandingBalance
-                                    });
+                                    console.log(`✅ Loan #${paymentOrder.loan_id} marked as CLEARED (${paymentType})`);
                                 } else {
-                                    // Loan not fully paid yet, keep as account_manager (don't update status)
-                                    console.log(`ℹ️ Loan #${paymentOrder.loan_id} payment received but not fully paid yet`, {
-                                        totalPaid: totalPaid,
-                                        outstandingBalance: outstandingBalance,
-                                        remaining: outstandingBalance - totalPaid
-                                    });
+                                    console.log(`ℹ️ Loan #${paymentOrder.loan_id} payment received but not cleared yet (${paymentType})`);
                                 }
                             } else {
                                 console.log(`ℹ️ Loan #${paymentOrder.loan_id} status is '${loan.status}', skipping clearance check`);
@@ -1058,9 +1219,12 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                 );
 
                 if (paymentOrder) {
-                    if (paymentOrder.payment_type === 'loan_repayment') {
+                    const paymentType = paymentOrder.payment_type || 'loan_repayment';
+                    
+                    // Handle loan repayments (pre-close, EMI, or general repayment)
+                    if (paymentType === 'loan_repayment' || paymentType === 'pre-close' || paymentType.startsWith('emi_')) {
                         // Process loan repayment
-                        console.log(`💳 Processing loan repayment for loan: ${paymentOrder.loan_id}`);
+                        console.log(`💳 Processing ${paymentType} payment for loan: ${paymentOrder.loan_id}`);
                         
                         // First check if loan is already cleared (by webhook) - skip if so
                         const loanStatusCheck = await executeQuery(
@@ -1090,7 +1254,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                 
                                 // Get loan details to determine transaction type and get user_id
                                 const loanInfo = await executeQuery(
-                                    `SELECT user_id, application_number FROM loan_applications WHERE id = ?`,
+                                    `SELECT user_id, application_number, plan_snapshot FROM loan_applications WHERE id = ?`,
                                     [paymentOrder.loan_id]
                                 );
                                 
@@ -1098,22 +1262,31 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                     const userId = paymentOrder.user_id || loanInfo[0].user_id;
                                     const applicationNumber = loanInfo[0].application_number;
                                     
+                                    // Determine transaction type based on payment type
+                                    let transactionType = 'emi_paid'; // Default
+                                    if (paymentType === 'pre-close') {
+                                        transactionType = 'full_payment';
+                                    } else if (paymentType.startsWith('emi_')) {
+                                        transactionType = paymentType; // emi_1st, emi_2nd, etc.
+                                    }
+                                    
                                     // Create transaction record for admin visibility
                                     await executeQuery(
                                         `INSERT INTO transactions (
                                             user_id, loan_application_id, transaction_type, amount, description,
                                             category, payment_method, reference_number, transaction_date,
                                             status, priority, created_at, updated_at
-                                        ) VALUES (?, ?, 'emi_paid', ?, ?, 'loan', 'cashfree', ?, CURDATE(), 'completed', 'high', NOW(), NOW())`,
+                                        ) VALUES (?, ?, ?, ?, ?, 'loan', 'cashfree', ?, CURDATE(), 'completed', 'high', NOW(), NOW())`,
                                         [
                                             userId,
                                             paymentOrder.loan_id,
+                                            transactionType,
                                             paymentOrder.amount,
-                                            `Loan repayment via Cashfree - Order ID: ${orderId}, Application: ${applicationNumber}`,
+                                            `${paymentType === 'pre-close' ? 'Pre-close' : paymentType.replace('_', ' ').toUpperCase()} payment via Cashfree - Order ID: ${orderId}, Application: ${applicationNumber}`,
                                             orderId
                                         ]
                                     );
-                                    console.log(`✅ Transaction record created for loan repayment`);
+                                    console.log(`✅ Transaction record created: ${transactionType}`);
                                 }
                                 
                                 // Check if loan should be marked as cleared
@@ -1133,44 +1306,88 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                         
                                         // Only process if not already cleared (double-check)
                                         if (loan.status === 'account_manager') {
-                                            const totalPaymentsResult = await executeQuery(
-                                                `SELECT COALESCE(SUM(amount), 0) as total_paid 
-                                                 FROM loan_payments 
-                                                 WHERE loan_id = ? AND status = 'SUCCESS'`,
-                                                [paymentOrder.loan_id]
-                                            );
+                                            let shouldClearLoan = false;
                                             
-                                            const totalPaid = parseFloat(totalPaymentsResult[0]?.total_paid || 0);
+                                            // Pre-close payment: Immediately clear the loan
+                                            if (paymentType === 'pre-close') {
+                                                shouldClearLoan = true;
+                                                console.log(`💰 Pre-close payment received - loan will be cleared immediately`);
+                                            } else if (paymentType.startsWith('emi_')) {
+                                                // EMI payment: Only clear if this is the last EMI
+                                                let planSnapshot = {};
+                                                let emiCount = 1;
+                                                try {
+                                                    planSnapshot = typeof loan.plan_snapshot === 'string' 
+                                                        ? JSON.parse(loan.plan_snapshot) 
+                                                        : loan.plan_snapshot || {};
+                                                    emiCount = planSnapshot.emi_count || 1;
+                                                } catch (e) {
+                                                    console.error('Error parsing plan_snapshot:', e);
+                                                }
+                                                
+                                                // Determine which EMI this is
+                                                let currentEmiNumber = 0;
+                                                if (paymentType === 'emi_1st') currentEmiNumber = 1;
+                                                else if (paymentType === 'emi_2nd') currentEmiNumber = 2;
+                                                else if (paymentType === 'emi_3rd') currentEmiNumber = 3;
+                                                else if (paymentType === 'emi_4th') currentEmiNumber = 4;
+                                                
+                                                // Check if this is the last EMI
+                                                if (currentEmiNumber === emiCount) {
+                                                    shouldClearLoan = true;
+                                                    console.log(`💰 Last EMI (${currentEmiNumber}/${emiCount}) paid - loan will be cleared`);
+                                                } else {
+                                                    console.log(`ℹ️ EMI ${currentEmiNumber}/${emiCount} paid - loan will not be cleared yet`);
+                                                }
+                                            } else {
+                                                // Fallback: Use old logic (sum all payments)
+                                                const totalPaymentsResult = await executeQuery(
+                                                    `SELECT COALESCE(SUM(amount), 0) as total_paid 
+                                                     FROM loan_payments 
+                                                     WHERE loan_id = ? AND status = 'SUCCESS'`,
+                                                    [paymentOrder.loan_id]
+                                                );
+                                                
+                                                const totalPaid = parseFloat(totalPaymentsResult[0]?.total_paid || 0);
+                                                
+                                                const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
+                                                const outstandingBalance = calculateOutstandingBalance(loan);
+                                                
+                                                console.log(`💰 Payment check for loan #${paymentOrder.loan_id}:`, {
+                                                    totalPaid: totalPaid,
+                                                    outstandingBalance: outstandingBalance,
+                                                    remaining: outstandingBalance - totalPaid
+                                                });
+                                                
+                                                // If total payments >= outstanding balance (with small tolerance for rounding)
+                                                if (totalPaid >= outstandingBalance - 0.01) {
+                                                    shouldClearLoan = true;
+                                                }
+                                            }
                                             
-                                            const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
-                                            const outstandingBalance = calculateOutstandingBalance(loan);
-                                            
-                                            console.log(`💰 Payment check for loan #${paymentOrder.loan_id}:`, {
-                                                totalPaid: totalPaid,
-                                                outstandingBalance: outstandingBalance,
-                                                remaining: outstandingBalance - totalPaid
-                                            });
-                                            
-                                        if (totalPaid >= outstandingBalance - 0.01) {
-                                            await executeQuery(
-                                                `UPDATE loan_applications 
-                                                 SET status = 'cleared', updated_at = NOW() 
-                                                 WHERE id = ?`,
-                                                [paymentOrder.loan_id]
-                                            );
-                                            
-                                            // Update transaction type to 'full_payment' if it was created as 'emi_paid'
-                                            await executeQuery(
-                                                `UPDATE transactions 
-                                                 SET transaction_type = 'full_payment',
-                                                     description = CONCAT(description, ' - Full payment received, loan cleared')
-                                                 WHERE reference_number = ? AND transaction_type = 'emi_paid' AND loan_application_id = ?`,
-                                                [orderId, paymentOrder.loan_id]
-                                            );
-                                            
-                                            console.log(`✅ Loan #${paymentOrder.loan_id} fully paid and marked as CLEARED`);
-                                        } else {
-                                                console.log(`ℹ️ Loan #${paymentOrder.loan_id} payment received but not fully paid yet`);
+                                            // Clear the loan if conditions are met
+                                            if (shouldClearLoan) {
+                                                await executeQuery(
+                                                    `UPDATE loan_applications 
+                                                     SET status = 'cleared', updated_at = NOW() 
+                                                     WHERE id = ?`,
+                                                    [paymentOrder.loan_id]
+                                                );
+                                                
+                                                // Update transaction type to 'full_payment' if it was created as EMI type
+                                                if (paymentType.startsWith('emi_')) {
+                                                    await executeQuery(
+                                                        `UPDATE transactions 
+                                                         SET transaction_type = 'full_payment',
+                                                             description = CONCAT(description, ' - Last EMI paid, loan cleared')
+                                                         WHERE reference_number = ? AND transaction_type = ? AND loan_application_id = ?`,
+                                                        [orderId, paymentType, paymentOrder.loan_id]
+                                                    );
+                                                }
+                                                
+                                                console.log(`✅ Loan #${paymentOrder.loan_id} marked as CLEARED (${paymentType})`);
+                                            } else {
+                                                console.log(`ℹ️ Loan #${paymentOrder.loan_id} payment received but not cleared yet (${paymentType})`);
                                             }
                                         } else {
                                             console.log(`ℹ️ Loan #${paymentOrder.loan_id} status is '${loan.status}', skipping clearance check`);

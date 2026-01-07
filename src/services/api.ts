@@ -1347,13 +1347,16 @@ class ApiService {
 
   /**
    * Create payment order for loan repayment
+   * @param loanId - Loan application ID
+   * @param amount - Payment amount
+   * @param paymentType - Payment type: 'pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th' (optional)
    */
-  async createPaymentOrder(loanId: number, amount: number): Promise<ApiResponse<{
+  async createPaymentOrder(loanId: number, amount: number, paymentType?: string): Promise<ApiResponse<{
     orderId: string;
     paymentSessionId: string;
     checkoutUrl: string;
   }>> {
-    return this.request('POST', '/payment/create-order', { loanId, amount });
+    return this.request('POST', '/payment/create-order', { loanId, amount, paymentType });
   }
 
   /**
