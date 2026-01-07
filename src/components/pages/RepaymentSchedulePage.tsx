@@ -521,14 +521,33 @@ export const RepaymentSchedulePage = () => {
                     isDueToday = daysRemaining === 0;
                   }
                 
+                // Calculate last available date (DPD = -6 means 6 days before due date)
+                // So last available date = due_date - 6 days
+                let lastAvailableDate = null;
+                let lastAvailableDateFormatted = '';
+                if (dueDateObj) {
+                  lastAvailableDate = new Date(dueDateObj);
+                  lastAvailableDate.setDate(lastAvailableDate.getDate() - 6);
+                  lastAvailableDateFormatted = lastAvailableDate.toLocaleDateString('en-GB', { 
+                    day: '2-digit', 
+                    month: '2-digit', 
+                    year: 'numeric' 
+                  });
+                }
+
                 return (
                   <>
                     {/* Single Row Layout: Amount | Due Date | Button */}
                     <div className="flex flex-col md:flex-row md:items-center gap-4 p-4 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
-                      {/* Column 1: Preclose Amount */}
+                      {/* Column 1: Preclose Amount with message */}
                       <div className="flex-1">
-                        <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">Preclose Amount</p>
-                        <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900">
+                        <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">
+                          Now & save interest: {formatCurrency(precloseAmount)}
+                        </p>
+                        <p className="text-xs sm:text-sm text-gray-500 italic">
+                          (Available till {lastAvailableDateFormatted || 'N/A'} only)
+                        </p>
+                        <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 mt-2">
                           {formatCurrency(precloseAmount)}
                         </h2>
                       </div>
@@ -1046,14 +1065,33 @@ export const RepaymentSchedulePage = () => {
                     isDueToday = daysRemaining === 0;
                   }
                   
+                  // Calculate last available date (DPD = -6 means 6 days before due date)
+                  // So last available date = due_date - 6 days
+                  let lastAvailableDate = null;
+                  let lastAvailableDateFormatted = '';
+                  if (dueDateObj) {
+                    lastAvailableDate = new Date(dueDateObj);
+                    lastAvailableDate.setDate(lastAvailableDate.getDate() - 6);
+                    lastAvailableDateFormatted = lastAvailableDate.toLocaleDateString('en-GB', { 
+                      day: '2-digit', 
+                      month: '2-digit', 
+                      year: 'numeric' 
+                    });
+                  }
+
                   return (
                     <>
                       {/* Single Row Layout: Amount | Due Date | Button */}
                       <div className="flex flex-col md:flex-row md:items-center gap-4 p-4 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
-                        {/* Column 1: Preclose Amount */}
+                        {/* Column 1: Preclose Amount with message */}
                         <div className="flex-1">
-                          <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">Preclose Amount</p>
-                          <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900">
+                          <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">
+                            Now & save interest: {formatCurrency(precloseAmount)}
+                          </p>
+                          <p className="text-xs sm:text-sm text-gray-500 italic">
+                            (Available till {lastAvailableDateFormatted || 'N/A'} only)
+                          </p>
+                          <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 mt-2">
                             {formatCurrency(precloseAmount)}
                           </h2>
                         </div>

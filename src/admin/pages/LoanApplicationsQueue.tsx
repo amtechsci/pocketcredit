@@ -83,11 +83,12 @@ export function LoanApplicationsQueue() {
   const [searchCountdown, setSearchCountdown] = useState(0);
   const [processingPayouts, setProcessingPayouts] = useState<string[]>([]);
   const [payoutResults, setPayoutResults] = useState<{ success: string[]; failed: Array<{ id: string; error: string }> } | null>(null);
+  const [downloadingExcel, setDownloadingExcel] = useState<string | null>(null);
 
   // Initialize status filter from URL parameters
   useEffect(() => {
     const statusFromUrl = searchParams.get('status');
-    if (statusFromUrl && ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'cleared', 'rejected', 'ready_for_disbursement'].includes(statusFromUrl)) {
+    if (statusFromUrl && ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'cleared', 'rejected', 'ready_for_disbursement', 'repeat_disbursal', 'ready_to_repeat_disbursal'].includes(statusFromUrl)) {
       setStatusFilter(statusFromUrl);
     }
   }, [searchParams]);
@@ -243,6 +244,33 @@ export function LoanApplicationsQueue() {
 
     fetchStats();
   }, []);
+
+  // Handle Excel export
+  const handleExportExcel = async (status: string) => {
+    try {
+      setDownloadingExcel(status);
+      const filters: any = { status };
+      const blob = await adminApiService.exportApplicationsExcel(filters);
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const statusLabel = status === 'all' ? 'All' : status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+      link.download = `loan_applications_${statusLabel}_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      toast.success(`Excel file downloaded successfully for ${statusLabel}`);
+    } catch (error: any) {
+      console.error('Error exporting Excel:', error);
+      toast.error('Failed to export Excel file: ' + (error.message || 'Unknown error'));
+    } finally {
+      setDownloadingExcel(null);
+    }
+  };
 
   // No mock data - using real database only
   const mockApplications: LoanApplication[] = [];
@@ -564,96 +592,226 @@ export function LoanApplicationsQueue() {
 
           {/* Quick Filter Buttons */}
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => handleStatusFilter('all')}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                statusFilter === 'all'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
-              }`}
-            >
-              All <span className="ml-1 px-2 py-0.5 bg-gray-100 text-gray-800 rounded-full text-xs">{pagination?.totalApplications || 0}</span>
-            </button>
-            <button
-              onClick={() => handleStatusFilter('submitted')}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                statusFilter === 'submitted'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
-              }`}
-            >
-              Submitted <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'submitted' ? 'bg-purple-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.submittedApplications || 0}</span>
-            </button>
-            <button
-              onClick={() => handleStatusFilter('under_review')}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                statusFilter === 'under_review'
-                  ? 'bg-orange-600 text-white shadow-sm'
-                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
-              }`}
-            >
-              Under Review <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'under_review' ? 'bg-orange-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.pendingApplications || 0}</span>
-            </button>
-            <button
-              onClick={() => handleStatusFilter('follow_up')}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                statusFilter === 'follow_up'
-                  ? 'bg-green-600 text-white shadow-sm'
-                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
-              }`}
-            >
-              Follow Up <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'follow_up' ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.followUpApplications || 0}</span>
-            </button>
-            <button
-              onClick={() => handleStatusFilter('disbursal')}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                statusFilter === 'disbursal'
-                  ? 'bg-teal-600 text-white shadow-sm'
-                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
-              }`}
-            >
-              Disbursal <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'disbursal' ? 'bg-teal-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.disbursalApplications || 0}</span>
-            </button>
-            <button
-              onClick={() => handleStatusFilter('ready_for_disbursement')}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                statusFilter === 'ready_for_disbursement'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
-              }`}
-            >
-              Ready for Disbursement <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'ready_for_disbursement' ? 'bg-indigo-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.readyForDisbursementApplications || 0}</span>
-            </button>
-            <button
-              onClick={() => handleStatusFilter('account_manager')}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                statusFilter === 'account_manager'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
-              }`}
-            >
-              Account Manager <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'account_manager' ? 'bg-purple-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.accountManagerApplications || 0}</span>
-            </button>
-            <button
-              onClick={() => handleStatusFilter('cleared')}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                statusFilter === 'cleared'
-                  ? 'bg-gray-600 text-white shadow-sm'
-                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
-              }`}
-            >
-              Cleared <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'cleared' ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.clearedApplications || 0}</span>
-            </button>
-            <button
-              onClick={() => handleStatusFilter('rejected')}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                statusFilter === 'rejected'
-                  ? 'bg-red-600 text-white shadow-sm'
-                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
-              }`}
-            >
-              Rejected <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'rejected' ? 'bg-red-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.rejectedApplications || 0}</span>
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleStatusFilter('all')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  statusFilter === 'all'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                All <span className="ml-1 px-2 py-0.5 bg-gray-100 text-gray-800 rounded-full text-xs">{pagination?.totalApplications || 0}</span>
+              </button>
+              <button
+                onClick={() => handleExportExcel('all')}
+                disabled={downloadingExcel === 'all'}
+                className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                title="Download Excel"
+              >
+                <Download className={`w-4 h-4 ${downloadingExcel === 'all' ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleStatusFilter('submitted')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  statusFilter === 'submitted'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                Submitted <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'submitted' ? 'bg-purple-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.submittedApplications || 0}</span>
+              </button>
+              <button
+                onClick={() => handleExportExcel('submitted')}
+                disabled={downloadingExcel === 'submitted'}
+                className="p-2 text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50"
+                title="Download Excel"
+              >
+                <Download className={`w-4 h-4 ${downloadingExcel === 'submitted' ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleStatusFilter('under_review')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  statusFilter === 'under_review'
+                    ? 'bg-orange-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                Under Review <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'under_review' ? 'bg-orange-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.pendingApplications || 0}</span>
+              </button>
+              <button
+                onClick={() => handleExportExcel('under_review')}
+                disabled={downloadingExcel === 'under_review'}
+                className="p-2 text-gray-600 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors disabled:opacity-50"
+                title="Download Excel"
+              >
+                <Download className={`w-4 h-4 ${downloadingExcel === 'under_review' ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleStatusFilter('follow_up')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  statusFilter === 'follow_up'
+                    ? 'bg-green-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                Follow Up <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'follow_up' ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.followUpApplications || 0}</span>
+              </button>
+              <button
+                onClick={() => handleExportExcel('follow_up')}
+                disabled={downloadingExcel === 'follow_up'}
+                className="p-2 text-gray-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50"
+                title="Download Excel"
+              >
+                <Download className={`w-4 h-4 ${downloadingExcel === 'follow_up' ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleStatusFilter('disbursal')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  statusFilter === 'disbursal'
+                    ? 'bg-teal-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                Disbursal <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'disbursal' ? 'bg-teal-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.disbursalApplications || 0}</span>
+              </button>
+              <button
+                onClick={() => handleExportExcel('disbursal')}
+                disabled={downloadingExcel === 'disbursal'}
+                className="p-2 text-gray-600 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors disabled:opacity-50"
+                title="Download Excel"
+              >
+                <Download className={`w-4 h-4 ${downloadingExcel === 'disbursal' ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleStatusFilter('ready_for_disbursement')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  statusFilter === 'ready_for_disbursement'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                Ready for Disbursement <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'ready_for_disbursement' ? 'bg-indigo-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.readyForDisbursementApplications || 0}</span>
+              </button>
+              <button
+                onClick={() => handleExportExcel('ready_for_disbursement')}
+                disabled={downloadingExcel === 'ready_for_disbursement'}
+                className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50"
+                title="Download Excel"
+              >
+                <Download className={`w-4 h-4 ${downloadingExcel === 'ready_for_disbursement' ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleStatusFilter('repeat_disbursal')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  statusFilter === 'repeat_disbursal'
+                    ? 'bg-cyan-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                Repeat Loan Disbursal <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'repeat_disbursal' ? 'bg-cyan-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.repeatDisbursalApplications || 0}</span>
+              </button>
+              <button
+                onClick={() => handleExportExcel('repeat_disbursal')}
+                disabled={downloadingExcel === 'repeat_disbursal'}
+                className="p-2 text-gray-600 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors disabled:opacity-50"
+                title="Download Excel"
+              >
+                <Download className={`w-4 h-4 ${downloadingExcel === 'repeat_disbursal' ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleStatusFilter('ready_to_repeat_disbursal')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  statusFilter === 'ready_to_repeat_disbursal'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                Repeat Loan Ready for Disbursal <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'ready_to_repeat_disbursal' ? 'bg-blue-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.readyToRepeatDisbursalApplications || 0}</span>
+              </button>
+              <button
+                onClick={() => handleExportExcel('ready_to_repeat_disbursal')}
+                disabled={downloadingExcel === 'ready_to_repeat_disbursal'}
+                className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                title="Download Excel"
+              >
+                <Download className={`w-4 h-4 ${downloadingExcel === 'ready_to_repeat_disbursal' ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleStatusFilter('account_manager')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  statusFilter === 'account_manager'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                Account Manager <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'account_manager' ? 'bg-purple-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.accountManagerApplications || 0}</span>
+              </button>
+              <button
+                onClick={() => handleExportExcel('account_manager')}
+                disabled={downloadingExcel === 'account_manager'}
+                className="p-2 text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50"
+                title="Download Excel"
+              >
+                <Download className={`w-4 h-4 ${downloadingExcel === 'account_manager' ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleStatusFilter('cleared')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  statusFilter === 'cleared'
+                    ? 'bg-gray-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                Cleared <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'cleared' ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.clearedApplications || 0}</span>
+              </button>
+              <button
+                onClick={() => handleExportExcel('cleared')}
+                disabled={downloadingExcel === 'cleared'}
+                className="p-2 text-gray-600 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors disabled:opacity-50"
+                title="Download Excel"
+              >
+                <Download className={`w-4 h-4 ${downloadingExcel === 'cleared' ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleStatusFilter('rejected')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  statusFilter === 'rejected'
+                    ? 'bg-red-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                Rejected <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'rejected' ? 'bg-red-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.rejectedApplications || 0}</span>
+              </button>
+              <button
+                onClick={() => handleExportExcel('rejected')}
+                disabled={downloadingExcel === 'rejected'}
+                className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                title="Download Excel"
+              >
+                <Download className={`w-4 h-4 ${downloadingExcel === 'rejected' ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
           </div>
         </div>
         </div>

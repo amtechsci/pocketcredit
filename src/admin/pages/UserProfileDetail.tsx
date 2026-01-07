@@ -95,7 +95,8 @@ export function UserProfileDetail() {
     phone: '',
     alternatePhone: '',
     personalEmail: '',
-    officialEmail: ''
+    officialEmail: '',
+    companyEmail: ''
   });
   const [addressInfoForm, setAddressInfoForm] = useState({
     address_line1: '',
@@ -785,7 +786,8 @@ export function UserProfileDetail() {
         phone: userData.mobile || '',
         alternatePhone: userData.alternateMobile || '',
         personalEmail: userData.personalEmail || '',
-        officialEmail: userData.officialEmail || ''
+        officialEmail: userData.officialEmail || '',
+        companyEmail: userData.companyEmail || ''
       });
     }
   }, [userData, showContactModal]);
@@ -2262,12 +2264,26 @@ export function UserProfileDetail() {
             <div className="text-xs font-medium text-gray-500 mb-1">Gender</div>
             <div className="text-sm font-semibold text-gray-900">{getUserData('personalInfo.gender')}</div>
           </div>
-          <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
-            <div className="text-xs font-medium text-gray-500 mb-1">PAN</div>
+          <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm relative">
+            <div className="text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
+              PAN
+              {userData?.duplicateChecks?.panExists && (
+                <span className="text-red-600" title={`PAN exists in ${userData.duplicateChecks.panDuplicateUsers.length} other profile(s)`}>
+                  ⚠️
+                </span>
+              )}
+            </div>
             <div className="text-sm font-semibold text-gray-900">{userData?.panNumber || 'N/A'}</div>
           </div>
-          <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
-            <div className="text-xs font-medium text-gray-500 mb-1">Mobile</div>
+          <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm relative">
+            <div className="text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
+              Mobile
+              {userData?.duplicateChecks?.mobileExists && (
+                <span className="text-red-600" title={`Mobile exists in ${userData.duplicateChecks.mobileDuplicateUsers.length} other profile(s)`}>
+                  ⚠️
+                </span>
+              )}
+            </div>
             <div className="text-sm font-semibold text-gray-900">{getUserData('mobile')}</div>
           </div>
           <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
@@ -2365,7 +2381,8 @@ export function UserProfileDetail() {
                       phone: getUserData('mobile') || '',
                       alternatePhone: userData?.alternateMobile || '',
                       personalEmail: userData?.personalEmail || '',
-                      officialEmail: userData?.officialEmail || ''
+                      officialEmail: userData?.officialEmail || '',
+                      companyEmail: userData?.companyEmail || ''
                     });
                     setShowContactModal(true);
                   }}
@@ -2965,7 +2982,14 @@ export function UserProfileDetail() {
             <p className="text-gray-900">{getUserData('bankInfo.bankName')}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+              Account Number
+              {userData?.duplicateChecks?.bankAccountExists && (
+                <span className="text-red-600" title={`Bank account exists in ${userData.duplicateChecks.bankAccountDuplicateUsers.length} other profile(s)`}>
+                  ⚠️
+                </span>
+              )}
+            </label>
             <p className="text-gray-900 font-mono">{getUserData('bankInfo.accountNumber')}</p>
           </div>
           <div>
@@ -3888,7 +3912,17 @@ export function UserProfileDetail() {
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-600">Phone:</span>
+                      <span className="text-gray-600 flex items-center gap-1">
+                        Phone:
+                        {userData?.duplicateChecks?.referencePhoneExists && 
+                         userData.duplicateChecks.referencePhoneDuplicateUsers.some((u: any) => 
+                           u.matchingPhone === ref.phone || u.phone === ref.phone || u.alternate_mobile === ref.phone
+                         ) && (
+                          <span className="text-red-600" title="This reference phone matches another user's mobile number">
+                            ⚠️
+                          </span>
+                        )}
+                      </span>
                       {editingReference === ref.id && editingReferenceField[ref.id] === 'phone' ? (
                         <div className="flex items-center gap-2 flex-1">
                           <input
@@ -7648,6 +7682,16 @@ export function UserProfileDetail() {
                   placeholder="Enter official email"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Company Email</label>
+                <input
+                  type="email"
+                  value={contactInfoForm.companyEmail}
+                  onChange={(e) => setContactInfoForm({ ...contactInfoForm, companyEmail: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter company email"
+                />
+              </div>
               <div className="flex gap-3 pt-4">
                 <button
                   onClick={handleContactInfoSubmit}
@@ -9601,6 +9645,85 @@ export function UserProfileDetail() {
           </div>
         </div>
       </div>
+
+      {/* Duplicate Account Alerts */}
+      {(userData?.duplicateChecks?.panExists || 
+        userData?.duplicateChecks?.bankAccountExists || 
+        userData?.duplicateChecks?.mobileExists || 
+        userData?.duplicateChecks?.referencePhoneExists) && (
+        <div className="bg-red-50 border-l-4 border-red-500 px-6 py-4">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <span className="text-red-600 text-2xl">⚠️</span>
+            </div>
+            <div className="ml-3 flex-1">
+              <h3 className="text-sm font-medium text-red-800 mb-2">Duplicate Account Detected</h3>
+              <div className="text-sm text-red-700 space-y-1">
+                {userData.duplicateChecks.panExists && (
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold">PAN:</span>
+                    <span>Exists in {userData.duplicateChecks.panDuplicateUsers.length} other profile(s)</span>
+                    <button
+                      onClick={() => {
+                        const userIds = userData.duplicateChecks.panDuplicateUsers.map((u: any) => u.id).join(',');
+                        window.open(`/admin/users?search=${userIds}`, '_blank');
+                      }}
+                      className="text-red-800 underline hover:text-red-900"
+                    >
+                      View
+                    </button>
+                  </div>
+                )}
+                {userData.duplicateChecks.bankAccountExists && (
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold">Bank Account:</span>
+                    <span>Exists in {userData.duplicateChecks.bankAccountDuplicateUsers.length} other profile(s)</span>
+                    <button
+                      onClick={() => {
+                        const userIds = userData.duplicateChecks.bankAccountDuplicateUsers.map((u: any) => u.id).join(',');
+                        window.open(`/admin/users?search=${userIds}`, '_blank');
+                      }}
+                      className="text-red-800 underline hover:text-red-900"
+                    >
+                      View
+                    </button>
+                  </div>
+                )}
+                {userData.duplicateChecks.mobileExists && (
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold">Mobile:</span>
+                    <span>Exists in {userData.duplicateChecks.mobileDuplicateUsers.length} other profile(s)</span>
+                    <button
+                      onClick={() => {
+                        const userIds = userData.duplicateChecks.mobileDuplicateUsers.map((u: any) => u.id).join(',');
+                        window.open(`/admin/users?search=${userIds}`, '_blank');
+                      }}
+                      className="text-red-800 underline hover:text-red-900"
+                    >
+                      View
+                    </button>
+                  </div>
+                )}
+                {userData.duplicateChecks.referencePhoneExists && (
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold">Reference Phone:</span>
+                    <span>Matches {userData.duplicateChecks.referencePhoneDuplicateUsers.length} other profile(s)</span>
+                    <button
+                      onClick={() => {
+                        const userIds = userData.duplicateChecks.referencePhoneDuplicateUsers.map((u: any) => u.id).join(',');
+                        window.open(`/admin/users?search=${userIds}`, '_blank');
+                      }}
+                      className="text-red-800 underline hover:text-red-900"
+                    >
+                      View
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Simplified Header */}
       <div className="bg-white border-b border-gray-200 px-6 py-6">

@@ -147,6 +147,17 @@ router.get('/', authenticateAdmin, async (req, res) => {
     if (status && status !== 'all') {
       whereConditions.push('la.status = ?');
       queryParams.push(status);
+      
+      // Special handling for cleared status: only show cleared loans where user has no current active loan
+      if (status === 'cleared') {
+        whereConditions.push(`NOT EXISTS (
+          SELECT 1 
+          FROM loan_applications la2 
+          WHERE la2.user_id = la.user_id 
+            AND la2.id != la.id
+            AND la2.status NOT IN ('cleared', 'rejected', 'cancelled')
+        )`);
+      }
     }
 
     // Search filter
@@ -1081,6 +1092,8 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       rejectedApplications: statusCounts['rejected'] || 0,
       disbursalApplications: statusCounts['disbursal'] || 0,
       readyForDisbursementApplications: statusCounts['ready_for_disbursement'] || 0,
+      repeatDisbursalApplications: statusCounts['repeat_disbursal'] || 0,
+      readyToRepeatDisbursalApplications: statusCounts['ready_to_repeat_disbursal'] || 0,
       accountManagerApplications: statusCounts['account_manager'] || 0,
       clearedApplications: statusCounts['cleared'] || 0,
       newApplications: statusCounts['submitted'] || 0, // New applications are typically submitted
@@ -1112,73 +1125,246 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Export applications
-router.get('/export/csv', authenticateAdmin, async (req, res) => {
+// Export applications to Excel (CSV format that Excel can open)
+router.get('/export/excel', authenticateAdmin, async (req, res) => {
   try {
-    const { status = 'all', loanType = 'all' } = req.query;
+    await initializeDatabase();
     
-    let applications = LoanApplication.findAll();
-    
-    // Apply filters
-    if (status !== 'all') {
-      applications = applications.filter(app => app.status === status);
-    }
-    if (loanType !== 'all') {
-      applications = applications.filter(app => app.loanType === loanType);
+    const {
+      status = 'all',
+      loanType = 'all',
+      search = '',
+      dateFrom = '',
+      dateTo = ''
+    } = req.query;
+
+    // Build the same query as the main GET endpoint but without pagination
+    let baseQuery = `
+      SELECT DISTINCT
+        la.id,
+        la.application_number as applicationNumber,
+        la.user_id as userId,
+        la.loan_amount as loanAmount,
+        la.loan_purpose as loanType,
+        la.tenure_months as tenure,
+        la.interest_percent_per_day,
+        la.emi_amount as emiAmount,
+        la.status,
+        la.rejection_reason as rejectionReason,
+        la.approved_by as approvedBy,
+        la.approved_at as approvedDate,
+        la.disbursed_at as disbursedDate,
+        la.created_at as applicationDate,
+        la.updated_at as updatedAt,
+        la.processing_fee,
+        la.processing_fee_percent,
+        la.disbursal_amount,
+        la.total_interest,
+        la.total_repayable,
+        u.first_name,
+        u.last_name,
+        u.phone as mobile,
+        u.email,
+        u.kyc_completed,
+        u.status as userStatus,
+        u.date_of_birth,
+        u.gender,
+        u.marital_status,
+        u.income_range,
+        u.pan_number,
+        COALESCE(ed.employment_type, '') as employment_type,
+        COALESCE(ed.company_name, '') as company_name,
+        COALESCE(ed.designation, '') as designation,
+        COALESCE(ed.work_experience_years, 0) as work_experience_years,
+        COALESCE(a.city, '') as city,
+        COALESCE(a.state, '') as state,
+        COALESCE(a.pincode, '') as pincode,
+        COALESCE(a.address_line1, '') as address_line1,
+        COALESCE(a.address_line2, '') as address_line2,
+        COALESCE(lp.plan_code, '') as plan_code,
+        COALESCE(lp.plan_name, '') as plan_name,
+        la.extension_status,
+        la.extension_count
+      FROM loan_applications la
+      LEFT JOIN users u ON la.user_id = u.id
+      LEFT JOIN (
+        SELECT ed1.user_id, 
+               ed1.employment_type, 
+               ed1.company_name, 
+               ed1.designation, 
+               ed1.work_experience_years
+        FROM employment_details ed1
+        WHERE ed1.id = (
+          SELECT MAX(ed2.id)
+          FROM employment_details ed2
+          WHERE ed2.user_id = ed1.user_id
+        )
+      ) ed ON u.id = ed.user_id
+      LEFT JOIN (
+        SELECT a1.user_id,
+               a1.city,
+               a1.state,
+               a1.pincode,
+               a1.address_line1,
+               a1.address_line2
+        FROM addresses a1
+        WHERE a1.is_primary = 1
+          AND a1.id = (
+            SELECT MAX(a2.id)
+            FROM addresses a2
+            WHERE a2.user_id = a1.user_id AND a2.is_primary = 1
+          )
+      ) a ON u.id = a.user_id
+      LEFT JOIN loan_plans lp ON la.loan_plan_id = lp.id
+    `;
+
+    let whereConditions = [];
+    let queryParams = [];
+
+    // Status filter
+    if (status && status !== 'all') {
+      whereConditions.push('la.status = ?');
+      queryParams.push(status);
+      
+      // Special handling for cleared status: only show cleared loans where user has no current active loan
+      if (status === 'cleared') {
+        whereConditions.push(`NOT EXISTS (
+          SELECT 1 
+          FROM loan_applications la2 
+          WHERE la2.user_id = la.user_id 
+            AND la2.id != la.id
+            AND la2.status NOT IN ('cleared', 'rejected', 'cancelled')
+        )`);
+      }
     }
 
-    // Get user data for each application
-    const applicationsWithUserData = applications.map(app => {
-      const user = User.findById(app.userId);
+    // Search filter
+    if (search) {
+      whereConditions.push(`(
+        u.first_name LIKE ? OR 
+        u.last_name LIKE ? OR 
+        u.phone LIKE ? OR 
+        u.email LIKE ? OR 
+        la.application_number LIKE ?
+      )`);
+      const searchTerm = `%${search}%`;
+      queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+    }
+
+    // Loan type filter
+    if (loanType && loanType !== 'all') {
+      whereConditions.push('la.loan_purpose = ?');
+      queryParams.push(loanType);
+    }
+
+    // Date filters
+    if (dateFrom) {
+      whereConditions.push('DATE(la.created_at) >= ?');
+      queryParams.push(dateFrom);
+    }
+    if (dateTo) {
+      whereConditions.push('DATE(la.created_at) <= ?');
+      queryParams.push(dateTo);
+    }
+
+    // Add WHERE clause if conditions exist
+    if (whereConditions.length > 0) {
+      baseQuery += ' WHERE ' + whereConditions.join(' AND ');
+    }
+
+    // Order by application date descending
+    baseQuery += ' ORDER BY la.created_at DESC';
+
+    // Execute query
+    const applications = await executeQuery(baseQuery, queryParams);
+
+    // Transform data for export
+    const exportData = applications.map(app => {
+      const applicantName = `${app.first_name || ''} ${app.last_name || ''}`.trim() || 'Unknown User';
+      const address = app.address_line1 ? `${app.address_line1}${app.address_line2 ? ', ' + app.address_line2 : ''}` : '';
+      
       return {
-        ...app,
-        applicantName: user ? user.name : 'Unknown User',
-        mobile: user ? user.mobile : '',
-        email: user ? user.email : '',
-        cibilScore: user ? user.creditScore : 0,
-        monthlyIncome: user ? user.personalInfo?.monthlyIncome || 0 : 0,
-        employment: user ? user.personalInfo?.employment || '' : '',
-        company: user ? user.personalInfo?.company || '' : '',
-        city: user ? user.personalInfo?.city || '' : '',
-        state: user ? user.personalInfo?.state || '' : '',
-        pincode: user ? user.personalInfo?.pincode || '' : ''
+        'Application ID': app.applicationNumber || app.id,
+        'Applicant Name': applicantName,
+        'Mobile': app.mobile || '',
+        'Email': app.email || '',
+        'PAN Number': app.pan_number || '',
+        'Date of Birth': app.date_of_birth || '',
+        'Gender': app.gender || '',
+        'Marital Status': app.marital_status || '',
+        'Loan Amount': parseFloat(app.loanAmount) || 0,
+        'Loan Type': app.loanType || '',
+        'Tenure (Months)': app.tenure || 0,
+        'Interest Rate (% per day)': app.interest_percent_per_day ? parseFloat(app.interest_percent_per_day) : 0,
+        'EMI Amount': app.emiAmount ? parseFloat(app.emiAmount) : 0,
+        'Status': app.status || '',
+        'Application Date': app.applicationDate ? formatDateLocal(app.applicationDate) : '',
+        'Approved Date': app.approvedDate ? formatDateLocal(app.approvedDate) : '',
+        'Disbursed Date': app.disbursedDate ? formatDateLocal(app.disbursedDate) : '',
+        'Processing Fee': app.processing_fee ? parseFloat(app.processing_fee) : 0,
+        'Processing Fee %': app.processing_fee_percent ? parseFloat(app.processing_fee_percent) : 0,
+        'Disbursal Amount': app.disbursal_amount ? parseFloat(app.disbursal_amount) : 0,
+        'Total Interest': app.total_interest ? parseFloat(app.total_interest) : 0,
+        'Total Repayable': app.total_repayable ? parseFloat(app.total_repayable) : 0,
+        'Monthly Income Range': app.income_range || '',
+        'Employment Type': app.employment_type || '',
+        'Company Name': app.company_name || '',
+        'Designation': app.designation || '',
+        'Work Experience (Years)': app.work_experience_years || 0,
+        'Address Line 1': app.address_line1 || '',
+        'Address Line 2': app.address_line2 || '',
+        'City': app.city || '',
+        'State': app.state || '',
+        'Pincode': app.pincode || '',
+        'Plan Code': app.plan_code || '',
+        'Plan Name': app.plan_name || '',
+        'KYC Completed': app.kyc_completed ? 'Yes' : 'No',
+        'User Status': app.userStatus || '',
+        'Extension Status': app.extension_status || 'none',
+        'Extension Count': app.extension_count || 0,
+        'Rejection Reason': app.rejectionReason || '',
+        'Updated At': app.updatedAt ? formatDateLocal(app.updatedAt) : ''
       };
     });
 
-    // Convert to CSV
-    const csvHeaders = [
-      'ID', 'Applicant Name', 'Mobile', 'Email', 'Loan Amount', 'Loan Type',
-      'Status', 'Application Date', 'Assigned Manager', 'Recovery Officer',
-      'Cibil Score', 'Monthly Income', 'Employment', 'Company', 'City', 'State', 'Pincode'
-    ];
+    // Convert to CSV (Excel-compatible)
+    if (exportData.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'No applications found to export'
+      });
+    }
 
-    const csvRows = applicationsWithUserData.map(app => [
-      app.id,
-      app.applicantName,
-      app.mobile,
-      app.email,
-      app.loanAmount,
-      app.loanType,
-      app.status,
-      app.applicationDate,
-      app.assignedManager,
-      app.recoveryOfficer,
-      app.cibilScore,
-      app.monthlyIncome,
-      app.employment,
-      app.company,
-      app.city,
-      app.state,
-      app.pincode
-    ]);
+    const headers = Object.keys(exportData[0]);
+    const csvRows = exportData.map(row => 
+      headers.map(header => {
+        const value = row[header];
+        // Escape quotes and wrap in quotes if contains comma, newline, or quote
+        if (value === null || value === undefined) return '""';
+        const stringValue = String(value);
+        if (stringValue.includes(',') || stringValue.includes('\n') || stringValue.includes('"')) {
+          return `"${stringValue.replace(/"/g, '""')}"`;
+        }
+        return stringValue;
+      })
+    );
 
-    const csvContent = [csvHeaders, ...csvRows]
-      .map(row => row.map(field => `"${field}"`).join(','))
-      .join('\n');
+    const csvContent = [
+      headers.join(','),
+      ...csvRows.map(row => row.join(','))
+    ].join('\n');
 
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename=loan_applications.csv');
-    res.send(csvContent);
+    // Add BOM for Excel UTF-8 support
+    const BOM = '\uFEFF';
+    const excelContent = BOM + csvContent;
+
+    // Generate filename with status
+    const statusLabel = status === 'all' ? 'All' : status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    const filename = `loan_applications_${statusLabel}_${new Date().toISOString().split('T')[0]}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(excelContent);
 
   } catch (error) {
     console.error('Export applications error:', error);

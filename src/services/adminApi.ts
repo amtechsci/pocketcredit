@@ -447,6 +447,29 @@ class AdminApiService {
     return this.request('GET', '/applications/export/csv', undefined, filters);
   }
 
+  async exportApplicationsExcel(filters: any = {}): Promise<Blob> {
+    const token = localStorage.getItem('adminToken');
+    const params = new URLSearchParams();
+    Object.keys(filters).forEach(key => {
+      if (filters[key]) {
+        params.append(key, filters[key]);
+      }
+    });
+    
+    const response = await fetch(`${this.api.defaults.baseURL}/applications/export/excel?${params.toString()}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to export applications');
+    }
+
+    return await response.blob();
+  }
+
   // Admin Settings - Member Tiers
   async getMemberTiers(): Promise<ApiResponse<any>> {
     return this.request('GET', '/settings/member-tiers');
@@ -585,6 +608,7 @@ class AdminApiService {
     alternatePhone?: string;
     personalEmail?: string;
     officialEmail?: string;
+    companyEmail?: string;
   }): Promise<ApiResponse<any>> {
     return this.request('PUT', `/user-profile/${userId}/contact-info`, data);
   }

@@ -82,10 +82,20 @@ export function ChangeMobileNumberPage() {
 
     setLoading(true);
     try {
+      // Get JWT token from localStorage
+      const token = localStorage.getItem('pocket_user_token');
+      
+      if (!token) {
+        toast.error('Please login again');
+        navigate('/auth');
+        return;
+      }
+
       const response = await fetch('/api/user/change-mobile-number', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
         credentials: 'include',
         body: JSON.stringify({ 

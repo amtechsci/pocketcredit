@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Shield, Clock, Award, Star, CheckCircle, CreditCard, Building, Smartphone, Users, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -12,6 +12,17 @@ export function HomePage() {
   const navigate = useNavigate();
   const [activeCalculator, setActiveCalculator] = useState<'eligibility' | 'emi'>('eligibility');
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [showFloatingButton, setShowFloatingButton] = useState(false);
+
+  // Show floating button after scrolling
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowFloatingButton(window.scrollY > 300);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const trustMetrics = [
     { icon: Users, label: '50k+ Satisfied Users', color: '#00C49A' },
@@ -539,6 +550,22 @@ export function HomePage() {
           </Button>
         </div>
       </section>
+
+      {/* Floating Apply Now Button */}
+      {showFloatingButton && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <Button
+            size="lg"
+            onClick={() => navigate('/application')}
+            style={{ backgroundColor: '#0052FF' }}
+            className="text-white hover:opacity-90 shadow-2xl rounded-full px-6 py-6 h-auto flex items-center gap-2 text-base sm:text-lg font-semibold hover:scale-105 transition-all duration-300"
+          >
+            <span className="hidden sm:inline">Apply Now</span>
+            <span className="sm:hidden">Apply</span>
+            <ArrowRight className="h-5 w-5" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
