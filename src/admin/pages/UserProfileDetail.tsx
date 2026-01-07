@@ -6098,7 +6098,9 @@ export function UserProfileDetail() {
     
     if (!experianPdfUrl && full_report) {
       // Check multiple nested paths where PDF URL might be stored in the response
+      // Priority: result_pdf field (for report_type "4")
       experianPdfUrl = 
+        full_report?.result?.result_pdf || // Primary location for report_type "4"
         full_report?.result?.model?.pdf_url ||
         full_report?.result?.data?.pdf_url ||
         full_report?.result?.pdf_url ||

@@ -302,8 +302,11 @@ class CreditAnalyticsService {
       return null;
     }
 
-    // Check multiple possible locations
+    // Check multiple possible locations - prioritize result_pdf field
     const possiblePaths = [
+      // Primary location: result.result_pdf (for report_type "4")
+      apiResponse?.result?.result_pdf,
+      // Alternative locations
       apiResponse?.result?.model?.pdf_url,
       apiResponse?.result?.data?.pdf_url,
       apiResponse?.result?.pdf_url,
@@ -325,19 +328,31 @@ class CreditAnalyticsService {
 
     for (const url of possiblePaths) {
       if (url && typeof url === 'string' && url.trim().length > 0) {
-        console.log('✅ PDF URL found at path:', url);
+        console.log('✅ PDF URL found:', url);
         return url.trim();
       }
     }
 
     // Log structure for debugging if PDF URL not found
-    console.log('⚠️ PDF URL not found in response. Checking structure:', {
-      hasResult: !!apiResponse.result,
-      hasModel: !!apiResponse.result?.model,
-      hasData: !!apiResponse.result?.data,
-      resultKeys: apiResponse.result ? Object.keys(apiResponse.result) : [],
-      topLevelKeys: Object.keys(apiResponse)
-    });
+    if (apiResponse.result) {
+      const resultPdfValue = apiResponse.result.result_pdf;
+      console.log('⚠️ PDF URL not found in response. Checking structure:', {
+        hasResult: !!apiResponse.result,
+        hasResultPdf: resultPdfValue !== undefined && resultPdfValue !== null,
+        resultPdfValue: resultPdfValue,
+        resultPdfType: typeof resultPdfValue,
+        hasResultXml: !!apiResponse.result.result_xml,
+        hasModel: !!apiResponse.result.model,
+        hasData: !!apiResponse.result.data,
+        resultKeys: Object.keys(apiResponse.result),
+        topLevelKeys: Object.keys(apiResponse)
+      });
+      
+      // If result_pdf exists but is null, log a warning
+      if (apiResponse.result.hasOwnProperty('result_pdf') && resultPdfValue === null) {
+        console.warn('⚠️ result_pdf field exists but is null. PDF may not be ready yet or may require a separate API call.');
+      }
+    }
 
     return null;
   }
