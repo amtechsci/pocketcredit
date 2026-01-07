@@ -113,7 +113,7 @@ class CreditAnalyticsService {
       otp: "123456", // Demo OTP
       timestamp,
       device_ip,
-      report_type: "4" // Report type 4 includes PDF URL in response
+      report_type: "1" // Testing report_type 1 (will try 2 if 1 doesn't work)
     };
 
     try {
