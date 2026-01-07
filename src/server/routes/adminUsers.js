@@ -562,6 +562,15 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
       email: userData.email
     });
 
+    // Normalize email - treat placeholder values as empty
+    const placeholderEmails = ['N/A', 'NA', 'n/a', 'na', 'NONE', 'none', 'NULL', 'null', ''];
+    const normalizedEmail = userData.email && !placeholderEmails.includes(userData.email.trim().toUpperCase())
+      ? userData.email
+      : null;
+    
+    // Use default email if normalized email is null/empty
+    const emailForRequest = normalizedEmail || `user${userId}@pocketcredit.in`;
+
     let creditReportResponse;
     try {
       creditReportResponse = await creditAnalyticsService.requestCreditReport({
@@ -570,7 +579,7 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
         first_name: userData.first_name || 'User',
         last_name: userData.last_name || '',
         date_of_birth: userData.date_of_birth, // YYYY-MM-DD
-        email: userData.email || `user${userId}@pocketcredit.in`,
+        email: emailForRequest,
         pan: userData.pan_number,
         device_ip: req.ip || '192.168.1.1'
       });

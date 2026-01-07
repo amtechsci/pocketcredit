@@ -46,11 +46,6 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
         return parts.join(', ') || 'N/A';
     };
 
-    const maskAadhar = (aadhar: string) => {
-        if (!aadhar || aadhar === 'N/A') return 'N/A';
-        return 'XXXXXXXX' + aadhar.slice(-4);
-    };
-
     const formatDate = (dateString: string) => {
         if (!dateString || dateString === 'N/A') return 'N/A';
         try {
@@ -284,10 +279,6 @@ export function SharedLoanAgreementDocument({ agreementData }: SharedLoanAgreeme
                         <tr>
                             <td className="border border-black p-2"><strong>PAN Number</strong></td>
                             <td className="border border-black p-2">{agreementData.borrower.pan || agreementData.borrower.pan_number || 'N/A'}</td>
-                        </tr>
-                        <tr>
-                            <td className="border border-black p-2"><strong>Aadhar Number</strong></td>
-                            <td className="border border-black p-2">{maskAadhar(agreementData.borrower.aadhar || agreementData.borrower.aadhar_number || 'N/A')}</td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2"><strong>Address</strong></td>

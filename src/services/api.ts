@@ -1357,6 +1357,31 @@ class ApiService {
   }
 
   /**
+   * Get all pending payment orders for the user
+   */
+  async getPendingPayments(): Promise<ApiResponse<{
+    orders: Array<{
+      id: number;
+      order_id: string;
+      loan_id: number;
+      extension_id: number | null;
+      amount: string;
+      payment_type: string;
+      status: string;
+      payment_session_id: string | null;
+      created_at: string;
+      updated_at: string;
+      application_number: string | null;
+      loan_amount: string | null;
+      loan_status: string | null;
+      cashfreeStatus: any;
+    }>;
+    count: number;
+  }>> {
+    return this.request('GET', '/payment/pending');
+  }
+
+  /**
    * Get payment order status
    */
   async getPaymentOrderStatus(orderId: string): Promise<ApiResponse<any>> {

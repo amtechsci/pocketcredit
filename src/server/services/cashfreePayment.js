@@ -155,14 +155,53 @@ class CashfreePaymentService {
     }
 
     /**
-     * Get order status
+     * Get order status from Cashfree API
+     * This is called from backend only to check if payment is received
      * @param {string} orderId - Cashfree order ID
-     * @returns {Promise<Object>} - Order status
+     * @returns {Promise<Object>} - Order status with payment information
      */
     async getOrderStatus(orderId) {
         try {
+            console.log(`[CashfreePayment] Fetching order status for: ${orderId}`);
             const response = await axios.get(
                 `${this.baseURL}/orders/${orderId}`,
+                { headers: this.getHeaders() }
+            );
+
+            const orderData = response.data;
+            const orderStatus = orderData.order_status || orderData.order?.order_status;
+            
+            console.log(`[CashfreePayment] Order ${orderId} status: ${orderStatus}`);
+
+            return {
+                success: true,
+                data: orderData,
+                orderStatus: orderStatus,
+                paymentReceived: orderStatus === 'PAID'
+            };
+
+        } catch (error) {
+            console.error('❌ Failed to fetch order status from Cashfree:', error.response?.data || error.message);
+
+            return {
+                success: false,
+                error: error.response?.data?.message || error.message,
+                data: null
+            };
+        }
+    }
+
+    /**
+     * Get payment details for an order
+     * Returns all payment attempts for a specific order
+     * @param {string} orderId - Cashfree order ID
+     * @returns {Promise<Object>} - Payment details
+     */
+    async getOrderPayments(orderId) {
+        try {
+            console.log(`[CashfreePayment] Fetching payment details for order: ${orderId}`);
+            const response = await axios.get(
+                `${this.baseURL}/orders/${orderId}/payments`,
                 { headers: this.getHeaders() }
             );
 
@@ -172,11 +211,12 @@ class CashfreePaymentService {
             };
 
         } catch (error) {
-            console.error('❌ Failed to fetch order status:', error.response?.data || error.message);
+            console.error('❌ Failed to fetch payment details from Cashfree:', error.response?.data || error.message);
 
             return {
                 success: false,
-                error: error.response?.data?.message || error.message
+                error: error.response?.data?.message || error.message,
+                data: null
             };
         }
     }

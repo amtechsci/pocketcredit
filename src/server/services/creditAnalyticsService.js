@@ -78,6 +78,26 @@ class CreditAnalyticsService {
     // Ensure mobile number is 10 digits only (no country code)
     const formattedMobile = mobile_no.toString().replace(/^\+?91/, '').replace(/\D/g, '').slice(-10);
 
+    // Normalize email - treat placeholder values and validate format
+    let normalizedEmail = email;
+    if (email) {
+      const placeholderEmails = ['N/A', 'NA', 'n/a', 'na', 'NONE', 'none', 'NULL', 'null', ''];
+      if (placeholderEmails.includes(email.trim().toUpperCase())) {
+        normalizedEmail = null;
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        // Invalid email format - use null instead
+        console.warn(`⚠️ Invalid email format: ${email}, using default`);
+        normalizedEmail = null;
+      }
+    }
+    
+    // Use a valid default email format if email is null/invalid
+    // Extract user ID from client_ref_num if possible (format: PC{userId}_{timestamp})
+    const emailMatch = client_ref_num.match(/^PC(\d+)_/);
+    const defaultEmail = emailMatch 
+      ? `user${emailMatch[1]}@pocketcredit.in`
+      : `user@pocketcredit.in`;
+
     const requestBody = {
       client_ref_num,
       mobile_no: formattedMobile,
@@ -85,7 +105,7 @@ class CreditAnalyticsService {
       first_name,
       last_name,
       date_of_birth: formattedDob, // YYYY-MM-DD format
-      email,
+      email: normalizedEmail || defaultEmail, // Use valid default email if null/invalid
       pan: pan.toUpperCase(), // Ensure PAN is uppercase
       consent_message: "I hereby authorize Experian to pull my credit report for loan application purpose",
       consent_acceptance: "yes",

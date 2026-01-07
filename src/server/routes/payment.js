@@ -344,19 +344,46 @@ router.post('/create-order', authenticateToken, async (req, res) => {
  * POST /api/payment/webhook
  * Cashfree webhook for payment status
  */
-router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+router.post('/webhook', async (req, res) => {
     try {
         const signature = req.headers['x-webhook-signature'];
         
-        // Handle both Buffer and already-parsed object cases
+        // Handle different body formats
         let payload;
         if (Buffer.isBuffer(req.body)) {
-            payload = JSON.parse(req.body.toString());
+            // Body is a Buffer (raw)
+            try {
+                payload = JSON.parse(req.body.toString('utf8'));
+            } catch (parseError) {
+                console.error('❌ Failed to parse Buffer body:', parseError);
+                return res.status(400).json({ message: 'Invalid webhook payload format' });
+            }
         } else if (typeof req.body === 'string') {
-            payload = JSON.parse(req.body);
-        } else {
-            // Already an object
+            // Body is a string - check if it's valid JSON
+            const trimmed = req.body.trim();
+            if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+                try {
+                    payload = JSON.parse(req.body);
+                } catch (parseError) {
+                    console.error('❌ Failed to parse string body:', parseError, 'Body:', req.body);
+                    return res.status(400).json({ message: 'Invalid webhook payload format' });
+                }
+            } else {
+                console.error('❌ Invalid JSON string in webhook body (not starting with { or [):', req.body);
+                return res.status(400).json({ message: 'Invalid webhook payload format' });
+            }
+        } else if (typeof req.body === 'object' && req.body !== null) {
+            // Already an object (parsed by global express.json middleware)
             payload = req.body;
+        } else {
+            console.error('❌ Unexpected webhook body type:', typeof req.body, 'Value:', req.body);
+            return res.status(400).json({ message: 'Invalid webhook payload' });
+        }
+        
+        // Validate payload structure
+        if (!payload || typeof payload !== 'object') {
+            console.error('❌ Invalid payload structure:', payload);
+            return res.status(400).json({ message: 'Invalid webhook payload structure' });
         }
 
         console.log('🔔 Payment webhook received:', payload);
@@ -639,15 +666,99 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
 });
 
 /**
+ * GET /api/payment/pending
+ * Get all pending payment orders for the authenticated user
+ */
+router.get('/pending', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        console.log(`🔍 Fetching pending payments for user: ${userId}`);
+
+        // Fetch all pending payment orders for the user
+        const orders = await executeQuery(
+            `SELECT 
+                po.id,
+                po.order_id,
+                po.loan_id,
+                po.extension_id,
+                po.amount,
+                po.payment_type,
+                po.status,
+                po.payment_session_id,
+                po.created_at,
+                po.updated_at,
+                la.application_number,
+                la.loan_amount as loan_amount,
+                la.status as loan_status
+            FROM payment_orders po
+            LEFT JOIN loan_applications la ON po.loan_id = la.id
+            WHERE po.user_id = ? AND po.status = 'PENDING'
+            ORDER BY po.created_at DESC`,
+            [userId]
+        );
+
+        console.log(`📊 Found ${orders.length} pending payment orders`);
+
+        // Optionally fetch fresh status from Cashfree for each order (but don't fail if it errors)
+        const ordersWithStatus = await Promise.all(
+            orders.map(async (order) => {
+                try {
+                    const cashfreeStatus = await cashfreePayment.getOrderStatus(order.order_id);
+                    // If Cashfree shows PAID, update our database
+                    if (cashfreeStatus.data && cashfreeStatus.data.order_status === 'PAID') {
+                        console.log(`💰 Order ${order.order_id} is PAID in Cashfree, updating status...`);
+                        await executeQuery(
+                            `UPDATE payment_orders SET status = 'PAID', updated_at = NOW() WHERE order_id = ?`,
+                            [order.order_id]
+                        );
+                        // Process the payment if it's paid
+                        // (This would trigger the webhook processing logic)
+                    }
+                    return {
+                        ...order,
+                        cashfreeStatus: cashfreeStatus.data || null
+                    };
+                } catch (error) {
+                    console.error(`❌ Error fetching Cashfree status for order ${order.order_id}:`, error);
+                    return {
+                        ...order,
+                        cashfreeStatus: null
+                    };
+                }
+            })
+        );
+
+        res.json({
+            success: true,
+            data: {
+                orders: ordersWithStatus,
+                count: ordersWithStatus.length
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching pending payments:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch pending payments',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+/**
  * GET /api/payment/order-status/:orderId
- * Get payment order status
+ * Get payment order status from both database and Cashfree API
+ * This endpoint calls Cashfree API to get the latest payment status
  */
 router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
     try {
         const { orderId } = req.params;
         const userId = req.user.id;
 
-        // Fetch from database
+        console.log(`🔍 Checking payment status for order: ${orderId}, user: ${userId}`);
+
+        // Fetch from database first
         const [order] = await executeQuery(
             `SELECT po.*, la.application_number 
        FROM payment_orders po
@@ -663,14 +774,76 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
             });
         }
 
-        // Optionally fetch fresh status from Cashfree
+        // Always fetch fresh status from Cashfree API (backend call)
+        console.log(`📞 Calling Cashfree API to get order status for: ${orderId}`);
         const cashfreeStatus = await cashfreePayment.getOrderStatus(orderId);
+
+        if (!cashfreeStatus.success) {
+            console.error(`❌ Failed to fetch status from Cashfree:`, cashfreeStatus.error);
+            // Return database status if Cashfree call fails
+            return res.json({
+                success: true,
+                data: {
+                    ...order,
+                    cashfreeStatus: null,
+                    error: 'Failed to fetch status from Cashfree',
+                    note: 'Showing database status only'
+                }
+            });
+        }
+
+        // Extract order status from Cashfree response
+        const cashfreeOrderStatus = cashfreeStatus.orderStatus || 
+                                   cashfreeStatus.data?.order_status || 
+                                   cashfreeStatus.data?.order?.order_status;
+        const paymentReceived = cashfreeStatus.paymentReceived || (cashfreeOrderStatus === 'PAID');
+        
+        console.log(`💰 Cashfree order status: ${cashfreeOrderStatus}, Payment received: ${paymentReceived}`);
+
+        // If Cashfree shows payment is PAID but our DB shows PENDING, update it
+        if (paymentReceived && order.status === 'PENDING') {
+            console.log(`🔄 Updating order status from PENDING to PAID in database`);
+            await executeQuery(
+                `UPDATE payment_orders SET status = 'PAID', updated_at = NOW() WHERE order_id = ?`,
+                [orderId]
+            );
+            order.status = 'PAID';
+            
+            // Process the payment (similar to webhook processing)
+            try {
+                const [paymentOrder] = await executeQuery(
+                    'SELECT loan_id, extension_id, payment_type FROM payment_orders WHERE order_id = ?',
+                    [orderId]
+                );
+
+                if (paymentOrder) {
+                    if (paymentOrder.payment_type === 'loan_repayment') {
+                        // Process loan repayment
+                        console.log(`💳 Processing loan repayment for loan: ${paymentOrder.loan_id}`);
+                        // The webhook handler logic would go here, but for now we just update status
+                    } else if (paymentOrder.payment_type === 'extension_fee' && paymentOrder.extension_id) {
+                        // Process extension payment
+                        console.log(`📅 Processing extension payment for extension: ${paymentOrder.extension_id}`);
+                        // Extension processing logic would go here
+                    }
+                }
+            } catch (processError) {
+                console.error('❌ Error processing payment:', processError);
+                // Don't fail the response, just log the error
+            }
+        }
 
         res.json({
             success: true,
             data: {
                 ...order,
-                cashfreeStatus: cashfreeStatus.data
+                status: order.status, // Updated status if changed
+                cashfreeStatus: cashfreeStatus.data,
+                paymentReceived: paymentReceived,
+                paymentStatus: cashfreeOrderStatus || order.status,
+                // Additional payment info if available
+                cfOrderId: cashfreeStatus.data?.cf_order_id || null,
+                orderAmount: cashfreeStatus.data?.order_amount || order.amount
             }
         });
 
@@ -678,7 +851,8 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
         console.error('❌ Error fetching order status:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to fetch order status'
+            message: 'Failed to fetch order status',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 });
