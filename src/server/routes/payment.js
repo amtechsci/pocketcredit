@@ -231,7 +231,7 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                     try {
                         const loanDetails = await executeQuery(
                             `SELECT 
-                                id, processed_amount, sanctioned_amount, loan_amount,
+                                id, processed_amount, loan_amount,
                                 processed_post_service_fee, fees_breakdown, plan_snapshot,
                                 status
                             FROM loan_applications 
@@ -369,54 +369,45 @@ router.post('/create-order', authenticateToken, async (req, res) => {
 
         // Add payment_type column if it doesn't exist (for existing tables)
         try {
-            await executeQuery(`
-                ALTER TABLE payment_orders 
-                ADD COLUMN IF NOT EXISTS payment_type VARCHAR(30) DEFAULT 'loan_repayment'
+            // Check if column exists first (MySQL doesn't support IF NOT EXISTS for ADD COLUMN)
+            const [paymentTypeExists] = await executeQuery(`
+                SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'payment_orders' 
+                AND COLUMN_NAME = 'payment_type'
             `);
-        } catch (alterError) {
-            // Column might already exist, or MySQL version doesn't support IF NOT EXISTS
-            // Try without IF NOT EXISTS
-            try {
+            if (!paymentTypeExists || paymentTypeExists.cnt === 0) {
                 await executeQuery(`
                     ALTER TABLE payment_orders 
-                    MODIFY COLUMN payment_type VARCHAR(30) DEFAULT 'loan_repayment'
+                    ADD COLUMN payment_type VARCHAR(30) DEFAULT 'loan_repayment'
                 `);
-            } catch (modifyError) {
-                // Column might not exist, try adding it
-                if (modifyError.message.includes("doesn't exist") || modifyError.message.includes("Unknown column")) {
-                    try {
-                        await executeQuery(`
-                            ALTER TABLE payment_orders 
-                            ADD COLUMN payment_type VARCHAR(30) DEFAULT 'loan_repayment'
-                        `);
-                    } catch (addError) {
-                        console.warn('[Payment] Could not add payment_type column:', addError.message);
-                    }
-                } else {
-                    console.warn('[Payment] Could not modify payment_type column:', modifyError.message);
-                }
+            }
+        } catch (alterError) {
+            // Column might already exist
+            if (!alterError.message.includes("Duplicate column")) {
+                console.warn('[Payment] Could not add payment_type column:', alterError.message);
             }
         }
 
         // Add extension_id column if it doesn't exist (for extension payments)
         try {
-            await executeQuery(`
-                ALTER TABLE payment_orders 
-                ADD COLUMN IF NOT EXISTS extension_id INT DEFAULT NULL
+            // Check if column exists first (MySQL doesn't support IF NOT EXISTS for ADD COLUMN)
+            const [extensionIdExists] = await executeQuery(`
+                SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'payment_orders' 
+                AND COLUMN_NAME = 'extension_id'
             `);
-        } catch (alterError) {
-            // Column might already exist, or MySQL version doesn't support IF NOT EXISTS
-            // Try without IF NOT EXISTS
-            try {
+            if (!extensionIdExists || extensionIdExists.cnt === 0) {
                 await executeQuery(`
                     ALTER TABLE payment_orders 
                     ADD COLUMN extension_id INT DEFAULT NULL
                 `);
-            } catch (addError) {
-                // Column already exists, ignore
-                if (!addError.message.includes("Duplicate column") && !addError.message.includes("already exists")) {
-                    console.warn('[Payment] Could not add extension_id column:', addError.message);
-                }
+            }
+        } catch (alterError) {
+            // Column already exists, ignore
+            if (!alterError.message.includes("Duplicate column")) {
+                console.warn('[Payment] Could not add extension_id column:', alterError.message);
             }
         }
 
@@ -969,21 +960,22 @@ router.post('/webhook', async (req, res) => {
                                         transactionType = 'credit';
                                     }
                                     
-                                    // Note: We skip created_by as it requires admin ID
                                     // Use 'other' for payment_method since 'cashfree' isn't in ENUM
+                                    // Include created_by with user_id as the creator (system payment)
                                     await executeQuery(
                                         `INSERT INTO transactions (
                                             user_id, loan_application_id, transaction_type, amount, description,
                                             category, payment_method, reference_number, transaction_date,
-                                            status, priority, created_at, updated_at
-                                        ) VALUES (?, ?, ?, ?, ?, 'loan', 'other', ?, CURDATE(), 'completed', 'high', NOW(), NOW())`,
+                                            status, priority, created_by, created_at, updated_at
+                                        ) VALUES (?, ?, ?, ?, ?, 'loan', 'other', ?, CURDATE(), 'completed', 'high', ?, NOW(), NOW())`,
                                         [
                                             paymentOrder.user_id,
                                             paymentOrder.loan_id,
                                             transactionType,
                                             orderAmount,
                                             `${paymentType === 'pre-close' ? 'Pre-close' : paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} via Cashfree - Order: ${orderId}, App: ${applicationNumber}`,
-                                            orderId
+                                            orderId,
+                                            paymentOrder.user_id  // created_by = user making the payment
                                         ]
                                     );
                                     console.log(`✅ Transaction record created: ${transactionType}`);
@@ -1002,7 +994,7 @@ router.post('/webhook', async (req, res) => {
                         // Get loan details to calculate outstanding balance
                         const loanDetails = await executeQuery(
                             `SELECT 
-                                id, processed_amount, sanctioned_amount, loan_amount,
+                                id, processed_amount, loan_amount,
                                 processed_post_service_fee, fees_breakdown, plan_snapshot,
                                 status
                             FROM loan_applications 
@@ -1336,19 +1328,21 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                             transactionType = 'credit';
                                         }
                                         
+                                        // Include created_by with user_id as the creator (system payment)
                                         await executeQuery(
                                             `INSERT INTO transactions (
                                                 user_id, loan_application_id, transaction_type, amount, description,
                                                 category, payment_method, reference_number, transaction_date,
-                                                status, priority, created_at, updated_at
-                                            ) VALUES (?, ?, ?, ?, ?, 'loan', 'other', ?, CURDATE(), 'completed', 'high', NOW(), NOW())`,
+                                                status, priority, created_by, created_at, updated_at
+                                            ) VALUES (?, ?, ?, ?, ?, 'loan', 'other', ?, CURDATE(), 'completed', 'high', ?, NOW(), NOW())`,
                                             [
                                                 paymentOrder.user_id,
                                                 paymentOrder.loan_id,
                                                 transactionType,
                                                 paymentOrder.amount,
                                                 `${paymentType === 'pre-close' ? 'Pre-close' : paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} via Cashfree - Order: ${orderId}, App: ${applicationNumber}`,
-                                                orderId
+                                                orderId,
+                                                paymentOrder.user_id  // created_by = user making the payment
                                             ]
                                         );
                                         console.log(`✅ Transaction record created: ${transactionType}`);
@@ -1364,7 +1358,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                             try {
                                     const loanDetails = await executeQuery(
                                         `SELECT 
-                                            id, processed_amount, sanctioned_amount, loan_amount,
+                                            id, processed_amount, loan_amount,
                                             processed_post_service_fee, fees_breakdown, plan_snapshot,
                                             status
                                         FROM loan_applications 
