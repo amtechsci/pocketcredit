@@ -30,10 +30,10 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         }
 
         // Validate paymentType if provided
-        if (paymentType && !['pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th'].includes(paymentType)) {
+        if (paymentType && !['pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'full_payment', 'loan_repayment'].includes(paymentType)) {
             return res.status(400).json({
                 success: false,
-                message: 'Invalid payment type. Must be: pre-close, emi_1st, emi_2nd, emi_3rd, or emi_4th'
+                message: 'Invalid payment type. Must be: pre-close, emi_1st, emi_2nd, emi_3rd, emi_4th, full_payment, or loan_repayment'
             });
         }
 
@@ -82,48 +82,53 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         // Determine payment type if not provided
         let finalPaymentType = paymentType;
         if (!finalPaymentType) {
-            // Check if this is a pre-close payment (amount matches pre-close calculation)
-            // For now, if amount is very close to outstanding balance, assume pre-close
-            const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
-            const outstandingBalance = calculateOutstandingBalance(loan);
-            const amountDiff = Math.abs(parseFloat(amount) - outstandingBalance);
-            
-            if (amountDiff < 10) { // Within ₹10 tolerance
-                finalPaymentType = 'pre-close';
+            // Check if this is a single payment loan (emi_count = 1)
+            if (emiCount === 1) {
+                // For single payment loans, use 'full_payment' which will clear immediately
+                finalPaymentType = 'full_payment';
             } else {
-                // Check which EMIs have been paid
-                const paidEmis = await executeQuery(
-                    `SELECT transaction_type 
-                     FROM transactions 
-                     WHERE loan_application_id = ? 
-                     AND transaction_type IN ('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th')
-                     AND status = 'completed'
-                     ORDER BY transaction_type`,
-                    [loanId]
-                );
+                // Multi-EMI loan: Check if this is a pre-close payment (amount matches pre-close calculation)
+                const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
+                const outstandingBalance = calculateOutstandingBalance(loan);
+                const amountDiff = Math.abs(parseFloat(amount) - outstandingBalance);
                 
-                const paidEmiNumbers = paidEmis.map(t => {
-                    if (t.transaction_type === 'emi_1st') return 1;
-                    if (t.transaction_type === 'emi_2nd') return 2;
-                    if (t.transaction_type === 'emi_3rd') return 3;
-                    if (t.transaction_type === 'emi_4th') return 4;
-                    return 0;
-                }).sort((a, b) => a - b);
-                
-                // Find next unpaid EMI
-                let nextEmi = 1;
-                for (let i = 1; i <= emiCount; i++) {
-                    if (!paidEmiNumbers.includes(i)) {
-                        nextEmi = i;
-                        break;
+                if (amountDiff < 10) { // Within ₹10 tolerance
+                    finalPaymentType = 'pre-close';
+                } else {
+                    // Check which EMIs have been paid
+                    const paidEmis = await executeQuery(
+                        `SELECT transaction_type 
+                         FROM transactions 
+                         WHERE loan_application_id = ? 
+                         AND transaction_type IN ('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th')
+                         AND status = 'completed'
+                         ORDER BY transaction_type`,
+                        [loanId]
+                    );
+                    
+                    const paidEmiNumbers = paidEmis.map(t => {
+                        if (t.transaction_type === 'emi_1st') return 1;
+                        if (t.transaction_type === 'emi_2nd') return 2;
+                        if (t.transaction_type === 'emi_3rd') return 3;
+                        if (t.transaction_type === 'emi_4th') return 4;
+                        return 0;
+                    }).sort((a, b) => a - b);
+                    
+                    // Find next unpaid EMI
+                    let nextEmi = 1;
+                    for (let i = 1; i <= emiCount; i++) {
+                        if (!paidEmiNumbers.includes(i)) {
+                            nextEmi = i;
+                            break;
+                        }
                     }
+                    
+                    if (nextEmi === 1) finalPaymentType = 'emi_1st';
+                    else if (nextEmi === 2) finalPaymentType = 'emi_2nd';
+                    else if (nextEmi === 3) finalPaymentType = 'emi_3rd';
+                    else if (nextEmi === 4) finalPaymentType = 'emi_4th';
+                    else finalPaymentType = 'loan_repayment'; // Fallback
                 }
-                
-                if (nextEmi === 1) finalPaymentType = 'emi_1st';
-                else if (nextEmi === 2) finalPaymentType = 'emi_2nd';
-                else if (nextEmi === 3) finalPaymentType = 'emi_3rd';
-                else if (nextEmi === 4) finalPaymentType = 'emi_4th';
-                else finalPaymentType = 'loan_repayment'; // Fallback
             }
         }
 
@@ -337,6 +342,8 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                     loan_id INT NOT NULL,
                     user_id INT NOT NULL,
                     amount DECIMAL(12, 2) NOT NULL,
+                    payment_type VARCHAR(30) DEFAULT 'loan_repayment',
+                    extension_id INT DEFAULT NULL,
                     status ENUM('PENDING', 'PAID', 'FAILED', 'CANCELLED', 'EXPIRED') DEFAULT 'PENDING',
                     payment_session_id VARCHAR(255) DEFAULT NULL,
                     cashfree_response JSON DEFAULT NULL,
@@ -349,13 +356,67 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                     UNIQUE KEY unique_order_id (order_id),
                     KEY idx_loan_id (loan_id),
                     KEY idx_user_id (user_id),
-                    KEY idx_status (status)
+                    KEY idx_status (status),
+                    KEY idx_payment_type (payment_type)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             `);
         } catch (tableError) {
             // Table might already exist, continue
             if (!tableError.message.includes('already exists')) {
                 console.warn('[Payment] Table creation warning:', tableError.message);
+            }
+        }
+
+        // Add payment_type column if it doesn't exist (for existing tables)
+        try {
+            await executeQuery(`
+                ALTER TABLE payment_orders 
+                ADD COLUMN IF NOT EXISTS payment_type VARCHAR(30) DEFAULT 'loan_repayment'
+            `);
+        } catch (alterError) {
+            // Column might already exist, or MySQL version doesn't support IF NOT EXISTS
+            // Try without IF NOT EXISTS
+            try {
+                await executeQuery(`
+                    ALTER TABLE payment_orders 
+                    MODIFY COLUMN payment_type VARCHAR(30) DEFAULT 'loan_repayment'
+                `);
+            } catch (modifyError) {
+                // Column might not exist, try adding it
+                if (modifyError.message.includes("doesn't exist") || modifyError.message.includes("Unknown column")) {
+                    try {
+                        await executeQuery(`
+                            ALTER TABLE payment_orders 
+                            ADD COLUMN payment_type VARCHAR(30) DEFAULT 'loan_repayment'
+                        `);
+                    } catch (addError) {
+                        console.warn('[Payment] Could not add payment_type column:', addError.message);
+                    }
+                } else {
+                    console.warn('[Payment] Could not modify payment_type column:', modifyError.message);
+                }
+            }
+        }
+
+        // Add extension_id column if it doesn't exist (for extension payments)
+        try {
+            await executeQuery(`
+                ALTER TABLE payment_orders 
+                ADD COLUMN IF NOT EXISTS extension_id INT DEFAULT NULL
+            `);
+        } catch (alterError) {
+            // Column might already exist, or MySQL version doesn't support IF NOT EXISTS
+            // Try without IF NOT EXISTS
+            try {
+                await executeQuery(`
+                    ALTER TABLE payment_orders 
+                    ADD COLUMN extension_id INT DEFAULT NULL
+                `);
+            } catch (addError) {
+                // Column already exists, ignore
+                if (!addError.message.includes("Duplicate column") && !addError.message.includes("already exists")) {
+                    console.warn('[Payment] Could not add extension_id column:', addError.message);
+                }
             }
         }
 
@@ -903,7 +964,7 @@ router.post('/webhook', async (req, res) => {
                                 
                                 // Determine transaction type based on payment type
                                 let transactionType = 'emi_paid'; // Default
-                                if (paymentType === 'pre-close') {
+                                if (paymentType === 'pre-close' || paymentType === 'full_payment') {
                                     transactionType = 'full_payment';
                                 } else if (paymentType.startsWith('emi_')) {
                                     transactionType = paymentType; // emi_1st, emi_2nd, etc.
@@ -952,10 +1013,10 @@ router.post('/webhook', async (req, res) => {
                             if (loan.status === 'account_manager') {
                                 let shouldClearLoan = false;
                                 
-                                // Pre-close payment: Immediately clear the loan
-                                if (paymentType === 'pre-close') {
+                                // Pre-close or full_payment: Immediately clear the loan
+                                if (paymentType === 'pre-close' || paymentType === 'full_payment') {
                                     shouldClearLoan = true;
-                                    console.log(`💰 Pre-close payment received - loan will be cleared immediately`);
+                                    console.log(`💰 ${paymentType === 'pre-close' ? 'Pre-close' : 'Full payment'} received - loan will be cleared immediately`);
                                 } else if (paymentType.startsWith('emi_')) {
                                     // EMI payment: Only clear if this is the last EMI
                                     // Parse plan snapshot to get EMI count
@@ -1221,8 +1282,8 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                 if (paymentOrder) {
                     const paymentType = paymentOrder.payment_type || 'loan_repayment';
                     
-                    // Handle loan repayments (pre-close, EMI, or general repayment)
-                    if (paymentType === 'loan_repayment' || paymentType === 'pre-close' || paymentType.startsWith('emi_')) {
+                    // Handle loan repayments (pre-close, full_payment, EMI, or general repayment)
+                    if (paymentType === 'loan_repayment' || paymentType === 'pre-close' || paymentType === 'full_payment' || paymentType.startsWith('emi_')) {
                         // Process loan repayment
                         console.log(`💳 Processing ${paymentType} payment for loan: ${paymentOrder.loan_id}`);
                         
@@ -1264,7 +1325,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                     
                                     // Determine transaction type based on payment type
                                     let transactionType = 'emi_paid'; // Default
-                                    if (paymentType === 'pre-close') {
+                                    if (paymentType === 'pre-close' || paymentType === 'full_payment') {
                                         transactionType = 'full_payment';
                                     } else if (paymentType.startsWith('emi_')) {
                                         transactionType = paymentType; // emi_1st, emi_2nd, etc.
@@ -1282,7 +1343,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                             paymentOrder.loan_id,
                                             transactionType,
                                             paymentOrder.amount,
-                                            `${paymentType === 'pre-close' ? 'Pre-close' : paymentType.replace('_', ' ').toUpperCase()} payment via Cashfree - Order ID: ${orderId}, Application: ${applicationNumber}`,
+                                            `${paymentType === 'pre-close' ? 'Pre-close' : paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} payment via Cashfree - Order ID: ${orderId}, Application: ${applicationNumber}`,
                                             orderId
                                         ]
                                     );
@@ -1308,10 +1369,10 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                         if (loan.status === 'account_manager') {
                                             let shouldClearLoan = false;
                                             
-                                            // Pre-close payment: Immediately clear the loan
-                                            if (paymentType === 'pre-close') {
+                                            // Pre-close or full_payment: Immediately clear the loan
+                                            if (paymentType === 'pre-close' || paymentType === 'full_payment') {
                                                 shouldClearLoan = true;
-                                                console.log(`💰 Pre-close payment received - loan will be cleared immediately`);
+                                                console.log(`💰 ${paymentType === 'pre-close' ? 'Pre-close' : 'Full payment'} received - loan will be cleared immediately`);
                                             } else if (paymentType.startsWith('emi_')) {
                                                 // EMI payment: Only clear if this is the last EMI
                                                 let planSnapshot = {};

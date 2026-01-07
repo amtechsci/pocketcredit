@@ -842,8 +842,8 @@ export const RepaymentSchedulePage = () => {
                                 return;
                               }
 
-                              // For single payment loans, use 'loan_repayment' as default
-                              const response = await apiService.createPaymentOrder(loanId, totalAmount, 'loan_repayment');
+                              // For single payment loans, use 'full_payment' which will clear immediately
+                              const response = await apiService.createPaymentOrder(loanId, totalAmount, 'full_payment');
 
                               if (response.success && response.data?.paymentSessionId) {
                                 toast.success('Opening payment gateway...');
