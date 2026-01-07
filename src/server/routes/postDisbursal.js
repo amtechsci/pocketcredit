@@ -42,6 +42,21 @@ router.get('/progress/:applicationId', requireAuth, async (req, res) => {
       });
     }
 
+    // Check if user is a repeat customer (has cleared loans)
+    let isRepeatCustomer = false;
+    try {
+      const clearedLoans = await executeQuery(
+        'SELECT id FROM loan_applications WHERE user_id = ? AND status = "cleared" LIMIT 1',
+        [userId]
+      );
+      if (clearedLoans && clearedLoans.length > 0) {
+        isRepeatCustomer = true;
+        console.log(`🔄 Repeat customer detected for user ${userId}`);
+      }
+    } catch (repeatCheckError) {
+      console.error('Error checking for repeat customer:', repeatCheckError);
+    }
+
     // Check if columns exist first
     let existingColumns = [];
     try {
@@ -50,7 +65,7 @@ router.get('/progress/:applicationId', requireAuth, async (req, res) => {
         FROM INFORMATION_SCHEMA.COLUMNS 
         WHERE TABLE_SCHEMA = DATABASE() 
           AND TABLE_NAME = 'loan_applications' 
-          AND COLUMN_NAME IN ('enach_done', 'selfie_captured', 'selfie_verified', 'references_completed', 'kfs_viewed', 'agreement_signed', 'post_disbursal_step')
+          AND COLUMN_NAME IN ('enach_done', 'selfie_captured', 'selfie_verified', 'references_completed', 'kfs_viewed', 'agreement_signed', 'bank_confirm_done', 'post_disbursal_step')
       `);
 
       if (columnsResult && Array.isArray(columnsResult) && columnsResult.length > 0) {
@@ -69,6 +84,7 @@ router.get('/progress/:applicationId', requireAuth, async (req, res) => {
     if (existingColumns.includes('references_completed')) selectFields.push('references_completed');
     if (existingColumns.includes('kfs_viewed')) selectFields.push('kfs_viewed');
     if (existingColumns.includes('agreement_signed')) selectFields.push('agreement_signed');
+    if (existingColumns.includes('bank_confirm_done')) selectFields.push('bank_confirm_done');
     if (existingColumns.includes('post_disbursal_step')) selectFields.push('post_disbursal_step as current_step');
 
     // If no columns exist, return default values
@@ -210,6 +226,8 @@ router.get('/progress/:applicationId', requireAuth, async (req, res) => {
         references_completed: hasCompletedReferences,
         kfs_viewed: progress.kfs_viewed || false,
         agreement_signed: progress.agreement_signed || false,
+        bank_confirm_done: progress.bank_confirm_done || false,
+        is_repeat_customer: isRepeatCustomer,
         current_step: progress.current_step || 1
       }
     });
@@ -235,6 +253,7 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
       references_completed,
       kfs_viewed,
       agreement_signed,
+      bank_confirm_done,
       current_step
     } = req.body;
 
@@ -259,7 +278,7 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
         FROM INFORMATION_SCHEMA.COLUMNS 
         WHERE TABLE_SCHEMA = DATABASE() 
           AND TABLE_NAME = 'loan_applications' 
-          AND COLUMN_NAME IN ('enach_done', 'selfie_captured', 'selfie_verified', 'references_completed', 'kfs_viewed', 'agreement_signed', 'post_disbursal_step')
+          AND COLUMN_NAME IN ('enach_done', 'selfie_captured', 'selfie_verified', 'references_completed', 'kfs_viewed', 'agreement_signed', 'bank_confirm_done', 'post_disbursal_step')
       `);
 
       if (columnsResult && Array.isArray(columnsResult) && columnsResult.length > 0) {
@@ -363,6 +382,10 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
         updates.push('status = ?');
         params.push('ready_for_disbursement');
       }
+    }
+    if (bank_confirm_done !== undefined && existingColumns.includes('bank_confirm_done')) {
+      updates.push('bank_confirm_done = ?');
+      params.push(bank_confirm_done ? 1 : 0);
     }
     if (current_step !== undefined && existingColumns.includes('post_disbursal_step')) {
       updates.push('post_disbursal_step = ?');

@@ -543,13 +543,74 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
                         [paymentOrder.loan_id, orderAmount, orderId]
                     );
 
-                    // Update loan status (you may want more sophisticated logic here)
-                    await executeQuery(
-                        `UPDATE loan_applications 
-             SET status = 'paid', updated_at = NOW() 
-             WHERE id = ?`,
-                        [paymentOrder.loan_id]
-                    );
+                    // Check if loan is fully paid and should be marked as cleared
+                    try {
+                        // Get loan details to calculate outstanding balance
+                        const loanDetails = await executeQuery(
+                            `SELECT 
+                                id, processed_amount, sanctioned_amount, loan_amount,
+                                processed_post_service_fee, fees_breakdown, plan_snapshot,
+                                status
+                            FROM loan_applications 
+                            WHERE id = ?`,
+                            [paymentOrder.loan_id]
+                        );
+
+                        if (loanDetails.length > 0) {
+                            const loan = loanDetails[0];
+                            
+                            // Only check for cleared status if loan is in account_manager status
+                            if (loan.status === 'account_manager') {
+                                // Calculate total payments made for this loan (including the one we just added)
+                                const totalPaymentsResult = await executeQuery(
+                                    `SELECT COALESCE(SUM(amount), 0) as total_paid 
+                                     FROM loan_payments 
+                                     WHERE loan_id = ? AND status = 'SUCCESS'`,
+                                    [paymentOrder.loan_id]
+                                );
+                                
+                                const totalPaid = parseFloat(totalPaymentsResult[0]?.total_paid || 0);
+                                
+                                // Calculate outstanding balance using the same logic as extension calculations
+                                const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
+                                const outstandingBalance = calculateOutstandingBalance(loan);
+                                
+                                console.log(`💰 Payment check for loan #${paymentOrder.loan_id}:`, {
+                                    totalPaid: totalPaid,
+                                    outstandingBalance: outstandingBalance,
+                                    remaining: outstandingBalance - totalPaid
+                                });
+                                
+                                // If total payments >= outstanding balance (with small tolerance for rounding)
+                                if (totalPaid >= outstandingBalance - 0.01) {
+                                    // Mark loan as cleared
+                                    await executeQuery(
+                                        `UPDATE loan_applications 
+                                         SET status = 'cleared', updated_at = NOW() 
+                                         WHERE id = ?`,
+                                        [paymentOrder.loan_id]
+                                    );
+                                    
+                                    console.log(`✅ Loan #${paymentOrder.loan_id} fully paid and marked as CLEARED`, {
+                                        totalPaid: totalPaid,
+                                        outstandingBalance: outstandingBalance
+                                    });
+                                } else {
+                                    // Loan not fully paid yet, keep as account_manager (don't update status)
+                                    console.log(`ℹ️ Loan #${paymentOrder.loan_id} payment received but not fully paid yet`, {
+                                        totalPaid: totalPaid,
+                                        outstandingBalance: outstandingBalance,
+                                        remaining: outstandingBalance - totalPaid
+                                    });
+                                }
+                            } else {
+                                console.log(`ℹ️ Loan #${paymentOrder.loan_id} status is '${loan.status}', skipping clearance check`);
+                            }
+                        }
+                    } catch (clearanceError) {
+                        console.error('❌ Error checking if loan should be cleared:', clearanceError);
+                        // Don't fail the webhook - payment was successful, just log the error
+                    }
 
                     console.log('✅ Loan payment processed:', {
                         loanId: paymentOrder.loan_id,

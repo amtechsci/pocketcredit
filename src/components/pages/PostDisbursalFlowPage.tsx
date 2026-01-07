@@ -34,6 +34,8 @@ interface PostDisbursalProgress {
   references_completed: boolean;
   kfs_viewed: boolean;
   agreement_signed: boolean;
+  bank_confirm_done?: boolean;
+  is_repeat_customer?: boolean;
   current_step: number;
 }
 
@@ -55,6 +57,8 @@ export const PostDisbursalFlowPage = () => {
     references_completed: false,
     kfs_viewed: false,
     agreement_signed: false,
+    bank_confirm_done: false,
+    is_repeat_customer: false,
     current_step: 1
   });
 
@@ -239,9 +243,9 @@ export const PostDisbursalFlowPage = () => {
 
           console.log(`🔒 Status guard check for App ${appId}: status='${app.status}'`);
 
-          // Only 'disbursal' status is allowed
-          if (app.status !== 'disbursal') {
-            console.warn(`⛔ Unauthorized access attempt: App ${appId} has status '${app.status}', not 'disbursal'`);
+          // Only 'disbursal' or 'repeat_disbursal' status is allowed
+          if (app.status !== 'disbursal' && app.status !== 'repeat_disbursal') {
+            console.warn(`⛔ Unauthorized access attempt: App ${appId} has status '${app.status}', not 'disbursal' or 'repeat_disbursal'`);
             
             // Redirect based on actual status
             if (app.status === 'account_manager') {
@@ -259,7 +263,7 @@ export const PostDisbursalFlowPage = () => {
           }
 
           // Status is valid - proceed
-          console.log(`✅ Access granted: App ${appId} is in 'disbursal' status`);
+          console.log(`✅ Access granted: App ${appId} is in '${app.status}' status`);
           setApplicationId(appId);
         } else {
           console.error('Failed to fetch applications for status verification', { 
@@ -293,7 +297,7 @@ export const PostDisbursalFlowPage = () => {
           }
 
           const disbursalApp = response.data.applications.find(
-            (app: any) => app.status === 'disbursal'
+            (app: any) => app.status === 'disbursal' || app.status === 'repeat_disbursal'
           );
           if (disbursalApp) {
             console.log(`✅ Found disbursal loan ${disbursalApp.id}`);
@@ -338,28 +342,45 @@ export const PostDisbursalFlowPage = () => {
         // Determine step based on individual columns, NOT current_step
         // This allows admin to reset individual steps (e.g., enach_done = 0) without resetting all steps
         let determinedStep = 1;
+        const isRepeatCustomer = progressData.is_repeat_customer || false;
         
-        if (!progressData.enach_done) {
-          determinedStep = 1; // Step 1: eNACH
-        } else if (!progressData.selfie_captured) {
-          determinedStep = 2; // Step 2: Selfie Capture
-        } else if (!progressData.selfie_verified) {
-          determinedStep = 2; // Still on selfie step if not verified
-        } else if (!progressData.references_completed) {
-          determinedStep = 3; // Step 3: References
-        } else if (!progressData.kfs_viewed) {
-          determinedStep = 4; // Step 4: KFS View
-        } else if (!progressData.agreement_signed) {
-          determinedStep = 5; // Step 5: Agreement Sign
+        if (isRepeatCustomer) {
+          // Repeat loan flow: Bank Confirm -> KFS -> Agreement -> Confirmation
+          if (!progressData.bank_confirm_done) {
+            determinedStep = 1; // Step 1: Bank Confirm
+          } else if (!progressData.kfs_viewed) {
+            determinedStep = 2; // Step 2: KFS View
+          } else if (!progressData.agreement_signed) {
+            determinedStep = 3; // Step 3: Agreement Sign
+          } else {
+            determinedStep = 4; // Step 4: Confirmation (all done)
+          }
         } else {
-          determinedStep = 6; // Step 6: Confirmation (all done)
+          // New customer flow: eNACH -> Selfie -> References -> KFS -> Agreement -> Confirmation
+          if (!progressData.enach_done) {
+            determinedStep = 1; // Step 1: eNACH
+          } else if (!progressData.selfie_captured) {
+            determinedStep = 2; // Step 2: Selfie Capture
+          } else if (!progressData.selfie_verified) {
+            determinedStep = 2; // Still on selfie step if not verified
+          } else if (!progressData.references_completed) {
+            determinedStep = 3; // Step 3: References
+          } else if (!progressData.kfs_viewed) {
+            determinedStep = 4; // Step 4: KFS View
+          } else if (!progressData.agreement_signed) {
+            determinedStep = 5; // Step 5: Agreement Sign
+          } else {
+            determinedStep = 6; // Step 6: Confirmation (all done)
+          }
         }
         
         console.log('🎯 Determined step based on columns:', {
+          is_repeat_customer: isRepeatCustomer,
           enach_done: progressData.enach_done,
           selfie_captured: progressData.selfie_captured,
           selfie_verified: progressData.selfie_verified,
           references_completed: progressData.references_completed,
+          bank_confirm_done: progressData.bank_confirm_done,
           kfs_viewed: progressData.kfs_viewed,
           agreement_signed: progressData.agreement_signed,
           determinedStep
@@ -457,55 +478,92 @@ export const PostDisbursalFlowPage = () => {
         {/* Step Content */}
         <Card>
           <CardContent className="p-6">
-            {currentStep === 1 && (
-              <ENachStep
-                applicationId={applicationId}
-                onComplete={() => handleStepComplete(1, { enach_done: true })}
-                saving={saving}
-              />
-            )}
+            {progress.is_repeat_customer ? (
+              // Repeat loan flow: Bank Confirm -> KFS -> Agreement -> Confirmation
+              <>
+                {currentStep === 1 && (
+                  <BankConfirmStep
+                    applicationId={applicationId}
+                    onComplete={() => handleStepComplete(1, { bank_confirm_done: true })}
+                    saving={saving}
+                  />
+                )}
 
-            {currentStep === 2 && (
-              <SelfieCaptureStep
-                applicationId={applicationId}
-                onComplete={(verified: boolean) =>
-                  handleStepComplete(2, {
-                    selfie_captured: true,
-                    selfie_verified: verified
-                  })
-                }
-                saving={saving}
-                progress={progress}
-              />
-            )}
+                {currentStep === 2 && (
+                  <KFSViewStep
+                    applicationId={applicationId}
+                    onComplete={() => handleStepComplete(2, { kfs_viewed: true })}
+                    saving={saving}
+                  />
+                )}
 
-            {currentStep === 3 && (
-              <ReferencesStep
-                applicationId={applicationId}
-                onComplete={() => handleStepComplete(3, { references_completed: true })}
-                saving={saving}
-              />
-            )}
+                {currentStep === 3 && (
+                  <AgreementSignStep
+                    applicationId={applicationId}
+                    onComplete={() => handleStepComplete(3, { agreement_signed: true })}
+                    saving={saving}
+                    progress={progress}
+                  />
+                )}
 
-            {currentStep === 4 && (
-              <KFSViewStep
-                applicationId={applicationId}
-                onComplete={() => handleStepComplete(4, { kfs_viewed: true })}
-                saving={saving}
-              />
-            )}
+                {currentStep === 4 && (
+                  <ConfirmationStep />
+                )}
+              </>
+            ) : (
+              // New customer flow: eNACH -> Selfie -> References -> KFS -> Agreement -> Confirmation
+              <>
+                {currentStep === 1 && (
+                  <ENachStep
+                    applicationId={applicationId}
+                    onComplete={() => handleStepComplete(1, { enach_done: true })}
+                    saving={saving}
+                  />
+                )}
 
-            {currentStep === 5 && (
-              <AgreementSignStep
-                applicationId={applicationId}
-                onComplete={() => handleStepComplete(5, { agreement_signed: true })}
-                saving={saving}
-                progress={progress}
-              />
-            )}
+                {currentStep === 2 && (
+                  <SelfieCaptureStep
+                    applicationId={applicationId}
+                    onComplete={(verified: boolean) =>
+                      handleStepComplete(2, {
+                        selfie_captured: true,
+                        selfie_verified: verified
+                      })
+                    }
+                    saving={saving}
+                    progress={progress}
+                  />
+                )}
 
-            {currentStep === 6 && (
-              <ConfirmationStep />
+                {currentStep === 3 && (
+                  <ReferencesStep
+                    applicationId={applicationId}
+                    onComplete={() => handleStepComplete(3, { references_completed: true })}
+                    saving={saving}
+                  />
+                )}
+
+                {currentStep === 4 && (
+                  <KFSViewStep
+                    applicationId={applicationId}
+                    onComplete={() => handleStepComplete(4, { kfs_viewed: true })}
+                    saving={saving}
+                  />
+                )}
+
+                {currentStep === 5 && (
+                  <AgreementSignStep
+                    applicationId={applicationId}
+                    onComplete={() => handleStepComplete(5, { agreement_signed: true })}
+                    saving={saving}
+                    progress={progress}
+                  />
+                )}
+
+                {currentStep === 6 && (
+                  <ConfirmationStep />
+                )}
+              </>
             )}
 
             {/* Fallback if currentStep is not set or invalid */}
@@ -1552,6 +1610,159 @@ const ConfirmationStep = () => {
         Your loan application has been processed successfully. Funds will be disbursed to your registered bank account shortly.
       </p>
       {/* No Continue button - user just sees the confirmation message and stays on this page */}
+    </div>
+  );
+};
+
+// Bank Confirm Step (for repeat loans)
+const BankConfirmStep = ({ applicationId, onComplete, saving }: StepProps) => {
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [bankDetails, setBankDetails] = useState<any>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+
+  useEffect(() => {
+    fetchBankDetails();
+  }, [applicationId]);
+
+  const fetchBankDetails = async () => {
+    try {
+      setLoading(true);
+      if (user?.id) {
+        const response = await apiService.getUserBankDetails(user.id);
+        if (response.success && response.data && response.data.length > 0) {
+          // Find primary bank or use the first one
+          const primaryBank = response.data.find((bank: any) => bank.is_primary) || response.data[0];
+          setBankDetails(primaryBank);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching bank details:', err);
+      toast.error('Failed to load bank details');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (!bankDetails) {
+      toast.error('Bank details not found');
+      return;
+    }
+
+    setConfirming(true);
+    try {
+      // Mark bank confirmation as done
+      await onComplete();
+      setConfirmed(true);
+      toast.success('Bank details confirmed successfully');
+    } catch (error: any) {
+      console.error('Error confirming bank details:', error);
+      toast.error(error.message || 'Failed to confirm bank details');
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="space-y-6 text-center py-8">
+        <Loader2 className="w-12 h-12 animate-spin text-blue-600 mx-auto mb-4" />
+        <p className="text-gray-600">Loading bank details...</p>
+      </div>
+    );
+  }
+
+  if (!bankDetails) {
+    return (
+      <div className="space-y-6 text-center py-8">
+        <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
+        <h2 className="text-xl font-semibold mb-2">No Bank Details Found</h2>
+        <p className="text-gray-600 mb-4">
+          Please add your bank details before proceeding.
+        </p>
+      </div>
+    );
+  }
+
+  if (confirmed) {
+    return (
+      <div className="space-y-6 text-center py-8">
+        <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+        <h2 className="text-xl font-semibold mb-2">Bank Details Confirmed</h2>
+        <p className="text-gray-600">Proceeding to next step...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="text-center">
+        <CreditCard className="w-16 h-16 text-blue-600 mx-auto mb-4" />
+        <h2 className="text-2xl font-bold mb-2">Confirm Bank Details</h2>
+        <p className="text-gray-600">
+          Please confirm your bank account details for loan disbursement
+        </p>
+      </div>
+
+      <Card className="p-6 bg-blue-50 border-blue-200">
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <p className="text-sm text-gray-500 mb-1">Bank Name</p>
+              <p className="font-semibold text-gray-900">{bankDetails.bank_name || 'N/A'}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 mb-1">Account Number</p>
+              <p className="font-semibold text-gray-900">
+                {bankDetails.account_number 
+                  ? `****${bankDetails.account_number.slice(-4)}`
+                  : 'N/A'}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 mb-1">IFSC Code</p>
+              <p className="font-semibold text-gray-900">{bankDetails.ifsc_code || 'N/A'}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 mb-1">Account Holder Name</p>
+              <p className="font-semibold text-gray-900">
+                {bankDetails.account_holder_name || 'N/A'}
+              </p>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+        <p className="text-sm text-yellow-800">
+          <strong>Important:</strong> Please verify that the bank account details shown above are correct. 
+          The loan amount will be disbursed to this account only. If the information is incorrect, 
+          please update your bank details before proceeding.
+        </p>
+      </div>
+
+      <div className="flex justify-center pt-4">
+        <Button
+          onClick={handleConfirm}
+          disabled={confirming || saving}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-2"
+          size="lg"
+        >
+          {confirming || saving ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Confirming...
+            </>
+          ) : (
+            <>
+              <CheckCircle className="w-4 h-4 mr-2" />
+              Confirm Bank Details
+            </>
+          )}
+        </Button>
+      </div>
     </div>
   );
 };

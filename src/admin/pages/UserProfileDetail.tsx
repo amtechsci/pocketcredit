@@ -1853,6 +1853,20 @@ export function UserProfileDetail() {
     return `${year}-${month}-${day}`;
   };
 
+  // Format loan ID to short format (PLL + last 4 digits)
+  const formatLoanId = (applicationNumber: string | null | undefined, loanApplicationId: number | null | undefined) => {
+    if (applicationNumber) {
+      // Extract last 4 digits from application number (e.g., PC06543530515 -> 0515)
+      const last4 = applicationNumber.slice(-4);
+      return `PLL${last4}`;
+    }
+    if (loanApplicationId) {
+      // Use loan_application_id and take last 4 digits
+      return `PLL${String(loanApplicationId).padStart(4, '0').slice(-4)}`;
+    }
+    return '-';
+  };
+
   const formatDate = (dateString: string | null | undefined) => {
     if (!dateString || dateString === 'null' || dateString === 'undefined' || dateString === '') return 'N/A';
     
@@ -7240,10 +7254,7 @@ export function UserProfileDetail() {
                     <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
                       {transaction.loan_application_id ? (
                         <span className="text-blue-600 hover:underline cursor-pointer">
-                          {transaction.application_number || 
-                           (transaction.loan_application_id ? 
-                             `PLL${String(transaction.loan_application_id).padStart(4, '0').slice(-4)}` : 
-                             '-')}
+                          {formatLoanId(transaction.application_number, transaction.loan_application_id)}
                         </span>
                       ) : '-'}
                     </td>

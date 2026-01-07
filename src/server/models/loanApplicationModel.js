@@ -168,8 +168,8 @@ const createApplication = async (userId, applicationData) => {
       
       if (clearedLoans && clearedLoans.length > 0) {
         hasCompletedLoan = true;
-        initialStatus = 'disbursal';
-        console.log(`🎉 Repeat customer detected! User ${userId} has cleared loan(s). Fast-tracking to disbursal status.`);
+        initialStatus = 'repeat_disbursal';
+        console.log(`🎉 Repeat customer detected! User ${userId} has cleared loan(s). Fast-tracking to repeat_disbursal status.`);
       } else {
         console.log(`📝 New customer: User ${userId} has no cleared loans. Starting with submitted status.`);
       }

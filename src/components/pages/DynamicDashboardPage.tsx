@@ -398,7 +398,7 @@ export function DynamicDashboardPage() {
         // Check for disbursal status - redirect to post-disbursal flow
         // But check if user has already completed all steps first
         const disbursalApp = uniqueApplications.find((app: any) =>
-          app.status === 'disbursal'
+          app.status === 'disbursal' || app.status === 'repeat_disbursal'
         );
 
         if (disbursalApp) {
