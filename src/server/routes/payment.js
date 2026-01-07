@@ -347,7 +347,17 @@ router.post('/create-order', authenticateToken, async (req, res) => {
 router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
     try {
         const signature = req.headers['x-webhook-signature'];
-        const payload = JSON.parse(req.body.toString());
+        
+        // Handle both Buffer and already-parsed object cases
+        let payload;
+        if (Buffer.isBuffer(req.body)) {
+            payload = JSON.parse(req.body.toString());
+        } else if (typeof req.body === 'string') {
+            payload = JSON.parse(req.body);
+        } else {
+            // Already an object
+            payload = req.body;
+        }
 
         console.log('🔔 Payment webhook received:', payload);
 
