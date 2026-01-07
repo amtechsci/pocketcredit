@@ -105,6 +105,63 @@ router.post('/create-order', authenticateToken, async (req, res) => {
 
                 if (paymentRecord.length > 0) {
                     console.log(`[Payment] Payment already processed for order ${existingOrder.order_id}`);
+                    
+                    // Even if payment is processed, check if loan should be cleared
+                    try {
+                        const loanDetails = await executeQuery(
+                            `SELECT 
+                                id, processed_amount, sanctioned_amount, loan_amount,
+                                processed_post_service_fee, fees_breakdown, plan_snapshot,
+                                status
+                            FROM loan_applications 
+                            WHERE id = ?`,
+                            [loanId]
+                        );
+
+                        if (loanDetails.length > 0) {
+                            const loan = loanDetails[0];
+                            
+                            // Only check for cleared status if loan is in account_manager status
+                            if (loan.status === 'account_manager') {
+                                // Calculate total payments made for this loan
+                                const totalPaymentsResult = await executeQuery(
+                                    `SELECT COALESCE(SUM(amount), 0) as total_paid 
+                                     FROM loan_payments 
+                                     WHERE loan_id = ? AND status = 'SUCCESS'`,
+                                    [loanId]
+                                );
+                                
+                                const totalPaid = parseFloat(totalPaymentsResult[0]?.total_paid || 0);
+                                
+                                // Calculate outstanding balance
+                                const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
+                                const outstandingBalance = calculateOutstandingBalance(loan);
+                                
+                                console.log(`💰 Checking if loan #${loanId} should be cleared:`, {
+                                    totalPaid: totalPaid,
+                                    outstandingBalance: outstandingBalance,
+                                    remaining: outstandingBalance - totalPaid
+                                });
+                                
+                                // If total payments >= outstanding balance (with small tolerance for rounding)
+                                if (totalPaid >= outstandingBalance - 0.01) {
+                                    // Mark loan as cleared
+                                    await executeQuery(
+                                        `UPDATE loan_applications 
+                                         SET status = 'cleared', updated_at = NOW() 
+                                         WHERE id = ?`,
+                                        [loanId]
+                                    );
+                                    
+                                    console.log(`✅ Loan #${loanId} fully paid and marked as CLEARED`);
+                                }
+                            }
+                        }
+                    } catch (clearanceError) {
+                        console.error('❌ Error checking if loan should be cleared:', clearanceError);
+                        // Don't fail the response, just log the error
+                    }
+                    
                     return res.json({
                         success: true,
                         message: 'Payment already processed',
