@@ -960,25 +960,36 @@ router.post('/webhook', async (req, res) => {
                                         transactionType = 'credit';
                                     }
                                     
-                                    // Use 'other' for payment_method since 'cashfree' isn't in ENUM
-                                    // Include created_by with user_id as the creator (system payment)
-                                    await executeQuery(
-                                        `INSERT INTO transactions (
-                                            user_id, loan_application_id, transaction_type, amount, description,
-                                            category, payment_method, reference_number, transaction_date,
-                                            status, priority, created_by, created_at, updated_at
-                                        ) VALUES (?, ?, ?, ?, ?, 'loan', 'other', ?, CURDATE(), 'completed', 'high', ?, NOW(), NOW())`,
-                                        [
-                                            paymentOrder.user_id,
-                                            paymentOrder.loan_id,
-                                            transactionType,
-                                            orderAmount,
-                                            `${paymentType === 'pre-close' ? 'Pre-close' : paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} via Cashfree - Order: ${orderId}, App: ${applicationNumber}`,
-                                            orderId,
-                                            paymentOrder.user_id  // created_by = user making the payment
-                                        ]
+                                    // Get system admin ID for created_by (required foreign key to admins table)
+                                    const systemAdmins = await executeQuery(
+                                        'SELECT id FROM admins WHERE is_active = 1 AND role = ? ORDER BY created_at ASC LIMIT 1',
+                                        ['superadmin']
                                     );
-                                    console.log(`✅ Transaction record created: ${transactionType}`);
+                                    const systemAdminId = systemAdmins.length > 0 ? systemAdmins[0].id : null;
+                                    
+                                    if (!systemAdminId) {
+                                        // If no system admin found, skip transaction creation
+                                        console.warn('⚠️ No system admin found, skipping transaction record creation');
+                                    } else {
+                                        // Use 'other' for payment_method since 'cashfree' isn't in ENUM
+                                        await executeQuery(
+                                            `INSERT INTO transactions (
+                                                user_id, loan_application_id, transaction_type, amount, description,
+                                                category, payment_method, reference_number, transaction_date,
+                                                status, priority, created_by, created_at, updated_at
+                                            ) VALUES (?, ?, ?, ?, ?, 'loan', 'other', ?, CURDATE(), 'completed', 'high', ?, NOW(), NOW())`,
+                                            [
+                                                paymentOrder.user_id,
+                                                paymentOrder.loan_id,
+                                                transactionType,
+                                                orderAmount,
+                                                `${paymentType === 'pre-close' ? 'Pre-close' : paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} via Cashfree - Order: ${orderId}, App: ${applicationNumber}`,
+                                                orderId,
+                                                systemAdminId  // created_by = system admin for automated payments
+                                            ]
+                                        );
+                                        console.log(`✅ Transaction record created: ${transactionType}`);
+                                    }
                                 } catch (txnError) {
                                     // Transaction creation failed (possibly due to created_by constraint)
                                     // This is non-fatal - continue with loan clearance
@@ -1328,24 +1339,36 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                             transactionType = 'credit';
                                         }
                                         
-                                        // Include created_by with user_id as the creator (system payment)
-                                        await executeQuery(
-                                            `INSERT INTO transactions (
-                                                user_id, loan_application_id, transaction_type, amount, description,
-                                                category, payment_method, reference_number, transaction_date,
-                                                status, priority, created_by, created_at, updated_at
-                                            ) VALUES (?, ?, ?, ?, ?, 'loan', 'other', ?, CURDATE(), 'completed', 'high', ?, NOW(), NOW())`,
-                                            [
-                                                paymentOrder.user_id,
-                                                paymentOrder.loan_id,
-                                                transactionType,
-                                                paymentOrder.amount,
-                                                `${paymentType === 'pre-close' ? 'Pre-close' : paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} via Cashfree - Order: ${orderId}, App: ${applicationNumber}`,
-                                                orderId,
-                                                paymentOrder.user_id  // created_by = user making the payment
-                                            ]
+                                        // Get system admin ID for created_by (required foreign key to admins table)
+                                        const systemAdmins = await executeQuery(
+                                            'SELECT id FROM admins WHERE is_active = 1 AND role = ? ORDER BY created_at ASC LIMIT 1',
+                                            ['superadmin']
                                         );
-                                        console.log(`✅ Transaction record created: ${transactionType}`);
+                                        const systemAdminId = systemAdmins.length > 0 ? systemAdmins[0].id : null;
+                                        
+                                        if (!systemAdminId) {
+                                            // If no system admin found, skip transaction creation
+                                            console.warn('⚠️ No system admin found, skipping transaction record creation');
+                                        } else {
+                                            // Use 'other' for payment_method since 'cashfree' isn't in ENUM
+                                            await executeQuery(
+                                                `INSERT INTO transactions (
+                                                    user_id, loan_application_id, transaction_type, amount, description,
+                                                    category, payment_method, reference_number, transaction_date,
+                                                    status, priority, created_by, created_at, updated_at
+                                                ) VALUES (?, ?, ?, ?, ?, 'loan', 'other', ?, CURDATE(), 'completed', 'high', ?, NOW(), NOW())`,
+                                                [
+                                                    paymentOrder.user_id,
+                                                    paymentOrder.loan_id,
+                                                    transactionType,
+                                                    paymentOrder.amount,
+                                                    `${paymentType === 'pre-close' ? 'Pre-close' : paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} via Cashfree - Order: ${orderId}, App: ${applicationNumber}`,
+                                                    orderId,
+                                                    systemAdminId  // created_by = system admin for automated payments
+                                                ]
+                                            );
+                                            console.log(`✅ Transaction record created: ${transactionType}`);
+                                        }
                                     } catch (txnError) {
                                         console.warn(`⚠️ Could not create transaction record (non-fatal): ${txnError.message}`);
                                     }
