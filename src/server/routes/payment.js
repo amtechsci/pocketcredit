@@ -77,6 +77,79 @@ router.post('/create-order', authenticateToken, async (req, res) => {
             });
         }
 
+        // Check if there's an existing pending or paid order for this loan
+        const existingOrders = await executeQuery(
+            `SELECT order_id, status, amount, payment_session_id, created_at 
+             FROM payment_orders 
+             WHERE loan_id = ? AND user_id = ? AND status IN ('PENDING', 'PAID')
+             ORDER BY created_at DESC 
+             LIMIT 1`,
+            [loanId, userId]
+        );
+
+        if (existingOrders.length > 0) {
+            const existingOrder = existingOrders[0];
+            console.log(`[Payment] Found existing order for loan ${loanId}:`, {
+                orderId: existingOrder.order_id,
+                status: existingOrder.status,
+                amount: existingOrder.amount
+            });
+
+            // If there's a PAID order, check if payment was actually processed
+            if (existingOrder.status === 'PAID') {
+                // Check if loan payment record exists
+                const paymentRecord = await executeQuery(
+                    `SELECT id FROM loan_payments WHERE transaction_id = ? AND loan_id = ?`,
+                    [existingOrder.order_id, loanId]
+                );
+
+                if (paymentRecord.length > 0) {
+                    console.log(`[Payment] Payment already processed for order ${existingOrder.order_id}`);
+                    return res.json({
+                        success: true,
+                        message: 'Payment already processed',
+                        data: {
+                            orderId: existingOrder.order_id,
+                            status: 'PAID',
+                            alreadyProcessed: true
+                        }
+                    });
+                } else {
+                    // Payment marked as PAID but not processed - trigger processing
+                    console.log(`[Payment] Order ${existingOrder.order_id} is PAID but not processed, will trigger processing`);
+                    // Continue to create new order or return existing one with note to check status
+                    return res.json({
+                        success: true,
+                        message: 'Payment order exists but needs verification',
+                        data: {
+                            orderId: existingOrder.order_id,
+                            status: existingOrder.status,
+                            paymentSessionId: existingOrder.payment_session_id,
+                            needsVerification: true,
+                            checkoutUrl: existingOrder.payment_session_id 
+                                ? `https://payments.cashfree.com/checkout/${existingOrder.payment_session_id}`
+                                : null
+                        }
+                    });
+                }
+            } else if (existingOrder.status === 'PENDING') {
+                // Return existing pending order
+                console.log(`[Payment] Returning existing pending order ${existingOrder.order_id}`);
+                return res.json({
+                    success: true,
+                    message: 'Existing payment order found',
+                    data: {
+                        orderId: existingOrder.order_id,
+                        status: 'PENDING',
+                        paymentSessionId: existingOrder.payment_session_id,
+                        checkoutUrl: existingOrder.payment_session_id 
+                            ? `https://payments.cashfree.com/checkout/${existingOrder.payment_session_id}`
+                            : null
+                    }
+                });
+            }
+        }
+
         // Generate unique order ID
         orderId = `LOAN_${loan.application_number}_${Date.now()}`;
         console.log(`[Payment] Generated order ID: ${orderId} for loan ${loanId}`);
@@ -904,16 +977,23 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
         
         console.log(`💰 Cashfree order status: ${cashfreeOrderStatus}, Payment received: ${paymentReceived}`);
 
-        // If Cashfree shows payment is PAID but our DB shows PENDING, update it
-        if (paymentReceived && order.status === 'PENDING') {
-            console.log(`🔄 Updating order status from PENDING to PAID in database`);
-            await executeQuery(
-                `UPDATE payment_orders SET status = 'PAID', updated_at = NOW() WHERE order_id = ?`,
-                [orderId]
-            );
-            order.status = 'PAID';
+        // If Cashfree shows payment is PAID, process it regardless of DB status
+        // This handles cases where payment was successful but processing failed
+        if (paymentReceived) {
+            // Update DB status if it's still PENDING
+            if (order.status === 'PENDING') {
+                console.log(`🔄 Updating order status from PENDING to PAID in database`);
+                await executeQuery(
+                    `UPDATE payment_orders SET status = 'PAID', updated_at = NOW() WHERE order_id = ?`,
+                    [orderId]
+                );
+                order.status = 'PAID';
+            } else if (order.status === 'PAID') {
+                console.log(`ℹ️ Order is already PAID in database, but checking if payment needs to be processed`);
+            }
             
             // Process the payment (similar to webhook processing)
+            // This will handle cases where payment is PAID but loan/extension wasn't processed
             try {
                 const [paymentOrder] = await executeQuery(
                     'SELECT loan_id, extension_id, payment_type, amount, user_id FROM payment_orders WHERE order_id = ?',
