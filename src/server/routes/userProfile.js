@@ -553,7 +553,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         // Check if any reference phone matches other users' primary mobile or alternate mobile
         // Build query with proper placeholders
         const placeholders = referencePhones.map(() => '?').join(',');
-        const allParams = [...referencePhones, ...referencePhones, userId];
+        // Need 4 copies: one for each CASE and two for WHERE clause
+        const allParams = [...referencePhones, ...referencePhones, ...referencePhones, ...referencePhones, userId];
         
         const referencePhoneDuplicates = await executeQuery(`
           SELECT DISTINCT u.id, u.first_name, u.last_name, u.phone, u.email, u.alternate_mobile, u.created_at,
