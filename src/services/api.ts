@@ -1356,7 +1356,15 @@ class ApiService {
     paymentSessionId: string;
     checkoutUrl: string;
   }>> {
-    return this.request('POST', '/payment/create-order', { loanId, amount, paymentType });
+    // Always include paymentType in the request body
+    // Use null instead of undefined so it's included in JSON serialization
+    const requestBody = { 
+      loanId, 
+      amount, 
+      paymentType: paymentType || null  // Use null instead of undefined so it's sent in JSON
+    };
+    console.log('[API] createPaymentOrder called with:', { loanId, amount, paymentType, requestBody });
+    return this.request('POST', '/payment/create-order', requestBody);
   }
 
   /**

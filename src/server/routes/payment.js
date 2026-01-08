@@ -19,6 +19,12 @@ router.post('/create-order', authenticateToken, async (req, res) => {
     
     try {
         const userId = req.user.id;
+        
+        // Log the RAW request body BEFORE destructuring to see everything
+        console.log(`[Payment] 🔍 RAW request body:`, JSON.stringify(req.body, null, 2));
+        console.log(`[Payment] 🔍 Request body type:`, typeof req.body);
+        console.log(`[Payment] 🔍 Request body keys:`, Object.keys(req.body || {}));
+        
         const { loanId, amount, paymentType } = req.body; // paymentType: 'pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', etc.
 
         // Log the received request body for debugging
@@ -26,8 +32,9 @@ router.post('/create-order', authenticateToken, async (req, res) => {
             userId,
             loanId,
             amount,
-            paymentType: paymentType || '(not provided)',
-            bodyKeys: Object.keys(req.body),
+            paymentType: paymentType !== undefined ? paymentType : '(undefined - not provided)',
+            paymentTypeType: typeof paymentType,
+            bodyKeys: Object.keys(req.body || {}),
             bodyValues: req.body
         });
 
@@ -94,10 +101,11 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         
         console.log(`[Payment] Received paymentType from request: ${paymentType}, loanId: ${loanId}, amount: ${amount}`);
         
-        // If paymentType is explicitly provided (especially 'pre-close' or 'full_payment'), use it and skip auto-detection
+        // CRITICAL: If paymentType is explicitly provided (especially 'pre-close' or 'full_payment'), ALWAYS use it and skip ALL auto-detection
         if (finalPaymentType === 'pre-close' || finalPaymentType === 'full_payment') {
-            // Explicitly provided pre-close or full_payment - use it as-is, skip all auto-detection
-            console.log(`[Payment] Using explicitly provided payment type: ${finalPaymentType} - skipping auto-detection`);
+            // Explicitly provided pre-close or full_payment - use it as-is, skip ALL auto-detection
+            console.log(`[Payment] ✅ Using explicitly provided payment type: ${finalPaymentType} - skipping ALL auto-detection logic`);
+            // DO NOT fall through to auto-detection - finalPaymentType is already set correctly
         } else if (!finalPaymentType) {
             // Auto-detect payment type only if not provided
             // Check if this is a single payment loan (emi_count = 1)

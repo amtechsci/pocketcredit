@@ -442,7 +442,7 @@ function calculateExtensionFees(loan, extensionDate = null) {
  * @returns {number} Outstanding loan balance
  */
 function calculateOutstandingBalance(loan) {
-  const principal = parseFloat(loan.processed_amount || loan.sanctioned_amount || loan.loan_amount || 0);
+  const principal = parseFloat(loan.processed_amount || loan.sanctioned_amount || loan.loan_amount || loan.principal_amount || 0);
   
   // Get post service fee (total, already multiplied by EMI count if multi-EMI)
   let postServiceFee = 0;
@@ -453,35 +453,47 @@ function calculateOutstandingBalance(loan) {
     : loan.plan_snapshot;
   const emiCount = planSnapshot?.emi_count || 1;
   
+  console.log(`[Outstanding Balance] Debug: principal=${principal}, emiCount=${emiCount}, processed_post_service_fee=${loan.processed_post_service_fee}`);
+  
   if (loan.processed_post_service_fee) {
     postServiceFee = parseFloat(loan.processed_post_service_fee) || 0;
     
-    // For multi-EMI, check if processed_post_service_fee is per EMI or total
-    if (emiCount > 1) {
-      try {
-        const feesBreakdown = typeof loan.fees_breakdown === 'string' 
-          ? JSON.parse(loan.fees_breakdown) 
-          : loan.fees_breakdown;
-        
-        if (Array.isArray(feesBreakdown)) {
-          const postServiceFeeEntry = feesBreakdown.find(f => 
-            f.name?.toLowerCase().includes('post service') || 
-            f.fee_name?.toLowerCase().includes('post service')
-          );
+    // VALIDATION: If postServiceFee seems unreasonably high (more than 10x principal), it's likely wrong
+    // This can happen if the fee was stored incorrectly or if it's a percentage that was calculated wrong
+    if (postServiceFee > principal * 10 && principal > 0) {
+      console.warn(`[Outstanding Balance] ⚠️ WARNING: postServiceFee (₹${postServiceFee}) is more than 10x principal (₹${principal}). This seems incorrect. Recalculating from fees_breakdown...`);
+      postServiceFee = 0; // Reset and recalculate from fees_breakdown
+    } else {
+      // For multi-EMI, check if processed_post_service_fee is per EMI or total
+      if (emiCount > 1) {
+        try {
+          const feesBreakdown = typeof loan.fees_breakdown === 'string' 
+            ? JSON.parse(loan.fees_breakdown) 
+            : loan.fees_breakdown;
           
-          // If application_method is NOT 'add_to_total', it means it's per EMI, so multiply
-          if (postServiceFeeEntry && postServiceFeeEntry.application_method !== 'add_to_total') {
-            postServiceFee = postServiceFee * emiCount;
+          if (Array.isArray(feesBreakdown)) {
+            const postServiceFeeEntry = feesBreakdown.find(f => 
+              f.name?.toLowerCase().includes('post service') || 
+              f.fee_name?.toLowerCase().includes('post service')
+            );
+            
+            // If application_method is NOT 'add_to_total', it means it's per EMI, so multiply
+            if (postServiceFeeEntry && postServiceFeeEntry.application_method !== 'add_to_total') {
+              postServiceFee = postServiceFee * emiCount;
+            }
+            // If application_method is 'add_to_total', processed_post_service_fee is already total
           }
-          // If application_method is 'add_to_total', processed_post_service_fee is already total
+        } catch (e) {
+          console.error('Error parsing fees_breakdown for outstanding balance:', e);
+          // If parsing fails, assume processed_post_service_fee is total for multi-EMI
         }
-      } catch (e) {
-        console.error('Error parsing fees_breakdown for outstanding balance:', e);
-        // If parsing fails, assume processed_post_service_fee is total for multi-EMI
       }
     }
-  } else {
-    // Fallback to fees_breakdown if processed_post_service_fee is not available
+  }
+  
+  // If postServiceFee is still 0 or seems wrong, try to get from fees_breakdown
+  if (postServiceFee === 0 || (postServiceFee > principal * 10 && principal > 0)) {
+    // Fallback to fees_breakdown if processed_post_service_fee is not available or seems wrong
     try {
       const feesBreakdown = typeof loan.fees_breakdown === 'string' 
         ? JSON.parse(loan.fees_breakdown) 
@@ -494,11 +506,21 @@ function calculateOutstandingBalance(loan) {
         );
         
         if (postServiceFeeEntry) {
-          postServiceFee = parseFloat(postServiceFeeEntry.amount || postServiceFeeEntry.fee_amount || 0);
+          const feeFromBreakdown = parseFloat(postServiceFeeEntry.amount || postServiceFeeEntry.fee_amount || 0);
           
-          // For multi-EMI, if application_method is NOT 'add_to_total', multiply by EMI count
-          if (emiCount > 1 && postServiceFeeEntry.application_method !== 'add_to_total') {
-            postServiceFee = postServiceFee * emiCount;
+          // Validate: fee should be reasonable (not more than 50% of principal for small loans, or reasonable percentage)
+          if (feeFromBreakdown > 0 && (principal === 0 || feeFromBreakdown <= principal * 0.5)) {
+            postServiceFee = feeFromBreakdown;
+            
+            // For multi-EMI, if application_method is NOT 'add_to_total', multiply by EMI count
+            if (emiCount > 1 && postServiceFeeEntry.application_method !== 'add_to_total') {
+              postServiceFee = postServiceFee * emiCount;
+            }
+            
+            console.log(`[Outstanding Balance] ✅ Using fee from fees_breakdown: ₹${feeFromBreakdown}${emiCount > 1 ? ` × ${emiCount} = ₹${postServiceFee}` : ''}`);
+          } else {
+            console.warn(`[Outstanding Balance] ⚠️ Fee from breakdown (₹${feeFromBreakdown}) seems unreasonable for principal (₹${principal}). Using 0.`);
+            postServiceFee = 0;
           }
         }
       }
