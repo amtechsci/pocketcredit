@@ -795,12 +795,12 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           const interestRatePerDay = loanValues.interest?.rate_per_day || planData.interest_percent_per_day || (interest / (principal * days));
           
           // Generate all EMI dates for APR calculation
-          // PRIORITY 1: Use processed_due_date if available (source of truth)
-          // PRIORITY 2: Use emi_schedule if available
-          // PRIORITY 3: Recalculate only if neither exists
+          // PRIORITY 1: Use processed_due_date if available (source of truth for processed loans)
+          // PRIORITY 2: Recalculate from today (for non-processed loans)
+          // NOTE: We do NOT use emi_schedule as it can have stale/incorrect dates from when loan was applied
           let allEmiDates = [];
           
-          // PRIORITY 1: Check processed_due_date first
+          // PRIORITY 1: Check processed_due_date first (for processed loans)
           if (loan.processed_due_date) {
             try {
               const parsedDueDate = typeof loan.processed_due_date === 'string' 
@@ -824,34 +824,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             }
           }
           
-          // PRIORITY 2: Check emi_schedule if processed_due_date not available
-          if (allEmiDates.length === 0 && loan.emi_schedule) {
-            try {
-              const parsedEmiSchedule = typeof loan.emi_schedule === 'string' 
-                ? JSON.parse(loan.emi_schedule) 
-                : loan.emi_schedule;
-              
-              if (Array.isArray(parsedEmiSchedule) && parsedEmiSchedule.length > 0) {
-                allEmiDates = parsedEmiSchedule
-                  .map(emi => emi.due_date)
-                  .filter(date => date)
-                  .map(date => {
-                    if (typeof date === 'string') {
-                      return date.split('T')[0].split(' ')[0];
-                    }
-                    return date;
-                  });
-                
-                if (allEmiDates.length > 0) {
-                  console.log(`📅 [User APR] Using emi_schedule for EMI dates: ${allEmiDates.join(', ')}`);
-                }
-              }
-            } catch (e) {
-              console.error('❌ [User APR] Error parsing emi_schedule:', e);
-            }
-          }
-          
-          // PRIORITY 3: Recalculate only if neither processed_due_date nor emi_schedule exists
+          // PRIORITY 2: Recalculate from today (for non-processed loans)
           if (allEmiDates.length === 0 && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
             const salaryDate = parseInt(userData.salary_date);
             if (salaryDate >= 1 && salaryDate <= 31) {
@@ -1115,19 +1088,18 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         }
 
         // Generate all EMI dates for Multi-EMI plans
-        // PRIORITY: For processed loans, use processed_due_date if available (it's the source of truth)
+        // PRIORITY 1: Use processed_due_date if available (source of truth for processed loans)
+        // PRIORITY 2: Recalculate from today (for non-processed loans)
+        // NOTE: We do NOT use emi_schedule as it can have stale/incorrect dates from when loan was applied
         let allEmiDates = [];
         
-        // PRIORITY 1: Check if loan has processed_due_date
-        // ALWAYS use processed_due_date if it exists (it's the source of truth)
+        // PRIORITY 1: Check if loan has processed_due_date (for processed loans)
         if (loan.processed_due_date) {
           try {
-            console.log(`📅 [User] Attempting to use processed_due_date: ${loan.processed_due_date}`);
+            console.log(`📅 [User Repayment] Attempting to use processed_due_date: ${loan.processed_due_date}`);
             const parsedDueDate = typeof loan.processed_due_date === 'string' 
               ? JSON.parse(loan.processed_due_date) 
               : loan.processed_due_date;
-            
-            console.log(`📅 [User] Parsed processed_due_date:`, parsedDueDate);
             
             if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
               allEmiDates = parsedDueDate.map(date => {
@@ -1136,45 +1108,17 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
                 }
                 return date;
               });
-              console.log(`✅ [User] Using processed_due_date for EMI dates: ${allEmiDates.join(', ')}`);
+              console.log(`✅ [User Repayment] Using processed_due_date for EMI dates: ${allEmiDates.join(', ')}`);
             } else if (typeof parsedDueDate === 'string') {
               allEmiDates = [parsedDueDate.split('T')[0].split(' ')[0]];
-              console.log(`✅ [User] Using processed_due_date for single payment: ${allEmiDates[0]}`);
+              console.log(`✅ [User Repayment] Using processed_due_date for single payment: ${allEmiDates[0]}`);
             }
           } catch (e) {
-            console.error('❌ [User] Error parsing processed_due_date:', e, loan.processed_due_date);
+            console.error('❌ [User Repayment] Error parsing processed_due_date:', e, loan.processed_due_date);
           }
         }
         
-        // PRIORITY 2: If processed_due_date not available, try emi_schedule
-        if (allEmiDates.length === 0 && loan.emi_schedule) {
-          try {
-            console.log(`📅 [User] Attempting to use emi_schedule: ${loan.emi_schedule}`);
-            const parsedEmiSchedule = typeof loan.emi_schedule === 'string' 
-              ? JSON.parse(loan.emi_schedule) 
-              : loan.emi_schedule;
-            
-            if (Array.isArray(parsedEmiSchedule) && parsedEmiSchedule.length > 0) {
-              allEmiDates = parsedEmiSchedule
-                .map(emi => emi.due_date)
-                .filter(date => date)
-                .map(date => {
-                  if (typeof date === 'string') {
-                    return date.split('T')[0].split(' ')[0];
-                  }
-                  return date;
-                });
-            
-              if (allEmiDates.length > 0) {
-                console.log(`✅ [User] Using emi_schedule for EMI dates: ${allEmiDates.join(', ')}`);
-              }
-            }
-          } catch (e) {
-            console.error('❌ [User] Error parsing emi_schedule:', e, loan.emi_schedule);
-          }
-        }
-        
-        // PRIORITY 3: If allEmiDates is still empty, calculate from plan data
+        // PRIORITY 2: Recalculate from today (for non-processed loans)
         if (allEmiDates.length === 0 && isMultiEmi && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
           const salaryDate = parseInt(userData.salary_date);
           if (salaryDate >= 1 && salaryDate <= 31) {
@@ -1268,8 +1212,12 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           const interestRatePerDay = loanValues.interest?.rate_per_day || planData.interest_percent_per_day || (interestDays > 0 ? (interest / (principal * interestDays)) : 0.001);
           const principalPerEmi = Math.floor(principal / emiCount * 100) / 100;
           const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
-          const postServiceFeePerEmi = loanValues.totals?.repayableFee || 0;
-          const postServiceFeeGSTPerEmi = loanValues.totals?.repayableFeeGST || 0;
+          // IMPORTANT: totals.repayableFee is ALREADY multiplied by emiCount in loanCalculations.js
+          // So we need to divide by emiCount to get the per-EMI fee
+          const totalRepayableFee = loanValues.totals?.repayableFee || 0;
+          const totalRepayableFeeGST = loanValues.totals?.repayableFeeGST || 0;
+          const postServiceFeePerEmi = Math.round((totalRepayableFee / emiCount) * 100) / 100;
+          const postServiceFeeGSTPerEmi = Math.round((totalRepayableFeeGST / emiCount) * 100) / 100;
           
           let outstandingPrincipal = principal;
           // For processed loans, use processed_at as base date; otherwise use disbursed_at
@@ -3167,10 +3115,9 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     const emiCount = planData.emi_count || 1;
     
     const processingFee = calculations.totals.disbursalFee;
-    // For EMI loans, multiply repayable fee GST by EMI count
-    const repayableFeeGST = emiCount > 1 
-      ? calculations.totals.repayableFeeGST * emiCount 
-      : calculations.totals.repayableFeeGST;
+    // NOTE: repayableFeeGST is ALREADY multiplied by emiCount in loanCalculations.js
+    // Do NOT multiply again here!
+    const repayableFeeGST = calculations.totals.repayableFeeGST;
     const gst = calculations.totals.disbursalFeeGST + repayableFeeGST;
     const disbAmount = calculations.disbursal.amount;
     const interest = calculations.interest.amount;
@@ -3249,11 +3196,9 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
 
     // Calculate APR (Annual Percentage Rate)
     // APR = ((All Fees + GST + Interest) / Loan Amount) / Days * 36500
-    // For EMI loans, multiply repayable fee by EMI count
-    // For Multi-EMI loans, calculate total interest by summing interest for each EMI period
-    const repayableFee = emiCount > 1 
-      ? calculations.totals.repayableFee * emiCount 
-      : calculations.totals.repayableFee;
+    // NOTE: repayableFee is ALREADY multiplied by emiCount in loanCalculations.js
+    // Do NOT multiply again here!
+    const repayableFee = calculations.totals.repayableFee;
     
     // For Multi-EMI loans, calculate total interest by summing interest for each EMI period
     // Each EMI period has interest calculated on the outstanding principal for that period
@@ -3310,19 +3255,18 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       const interestRatePerDay = calculations.interest.rate_per_day || (interest / (principal * days));
       
       // Generate all EMI dates
-      // PRIORITY: For processed loans, use processed_due_date if available (it's the source of truth)
+      // PRIORITY 1: Use processed_due_date if available (source of truth for processed loans)
+      // PRIORITY 2: Recalculate from today (for non-processed loans)
+      // NOTE: We do NOT use emi_schedule as it can have stale/incorrect dates from when loan was applied
       let allEmiDates = [];
       
-      // PRIORITY 1: Check if loan has processed_due_date
-      // ALWAYS use processed_due_date if it exists (it's the source of truth)
+      // PRIORITY 1: Check if loan has processed_due_date (for processed loans)
       if (loan.processed_due_date) {
         try {
-          console.log(`📅 [Admin] Attempting to use processed_due_date: ${loan.processed_due_date}`);
+          console.log(`📅 [Admin APR] Attempting to use processed_due_date: ${loan.processed_due_date}`);
           const parsedDueDate = typeof loan.processed_due_date === 'string' 
             ? JSON.parse(loan.processed_due_date) 
             : loan.processed_due_date;
-          
-          console.log(`📅 [Admin] Parsed processed_due_date:`, parsedDueDate);
           
           if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
             allEmiDates = parsedDueDate.map(date => {
@@ -3331,45 +3275,17 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
               }
               return date;
             });
-            console.log(`✅ [Admin] Using processed_due_date for EMI dates: ${allEmiDates.join(', ')}`);
+            console.log(`✅ [Admin APR] Using processed_due_date for EMI dates: ${allEmiDates.join(', ')}`);
           } else if (typeof parsedDueDate === 'string') {
             allEmiDates = [parsedDueDate.split('T')[0].split(' ')[0]];
-            console.log(`✅ [Admin] Using processed_due_date for single payment: ${allEmiDates[0]}`);
+            console.log(`✅ [Admin APR] Using processed_due_date for single payment: ${allEmiDates[0]}`);
           }
         } catch (e) {
-          console.error('❌ [Admin] Error parsing processed_due_date:', e, loan.processed_due_date);
+          console.error('❌ [Admin APR] Error parsing processed_due_date:', e, loan.processed_due_date);
         }
       }
       
-      // PRIORITY 2: If processed_due_date not available, try emi_schedule
-      if (allEmiDates.length === 0 && loan.emi_schedule) {
-        try {
-          console.log(`📅 [Admin] Attempting to use emi_schedule: ${loan.emi_schedule}`);
-          const parsedEmiSchedule = typeof loan.emi_schedule === 'string' 
-            ? JSON.parse(loan.emi_schedule) 
-            : loan.emi_schedule;
-          
-          if (Array.isArray(parsedEmiSchedule) && parsedEmiSchedule.length > 0) {
-            allEmiDates = parsedEmiSchedule
-              .map(emi => emi.due_date)
-              .filter(date => date)
-              .map(date => {
-                if (typeof date === 'string') {
-                  return date.split('T')[0].split(' ')[0];
-                }
-                return date;
-              });
-            
-            if (allEmiDates.length > 0) {
-              console.log(`✅ [Admin] Using emi_schedule for EMI dates: ${allEmiDates.join(', ')}`);
-            }
-          }
-        } catch (e) {
-          console.error('❌ [Admin] Error parsing emi_schedule:', e, loan.emi_schedule);
-        }
-      }
-      
-      // PRIORITY 3: If allEmiDates is still empty, calculate from plan data
+      // PRIORITY 2: Recalculate from today (for non-processed loans)
       if (allEmiDates.length === 0 && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
         const salaryDate = parseInt(userData.salary_date);
         if (salaryDate >= 1 && salaryDate <= 31) {
@@ -3689,8 +3605,38 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         const isMultiEmi = emiCount && emiCount > 1;
         
         // Generate all EMI dates for Multi-EMI plans
+        // PRIORITY 1: Use processed_due_date if available (source of truth for processed loans)
+        // PRIORITY 2: Recalculate from today (for non-processed loans)
+        // NOTE: We do NOT use emi_schedule as it can have stale/incorrect dates from when loan was applied
         let allEmiDates = [];
-        if (isMultiEmi && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
+        
+        // PRIORITY 1: Check processed_due_date first (for processed loans)
+        if (loan.processed_due_date) {
+          try {
+            console.log(`📅 [Admin Repayment] Attempting to use processed_due_date: ${loan.processed_due_date}`);
+            const parsedDueDate = typeof loan.processed_due_date === 'string' 
+              ? JSON.parse(loan.processed_due_date) 
+              : loan.processed_due_date;
+            
+            if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
+              allEmiDates = parsedDueDate.map(date => {
+                if (typeof date === 'string') {
+                  return date.split('T')[0].split(' ')[0];
+                }
+                return date;
+              });
+              console.log(`✅ [Admin Repayment] Using processed_due_date for EMI dates: ${allEmiDates.join(', ')}`);
+            } else if (typeof parsedDueDate === 'string') {
+              allEmiDates = [parsedDueDate.split('T')[0].split(' ')[0]];
+              console.log(`✅ [Admin Repayment] Using processed_due_date for single payment: ${allEmiDates[0]}`);
+            }
+          } catch (e) {
+            console.error('❌ [Admin Repayment] Error parsing processed_due_date:', e, loan.processed_due_date);
+          }
+        }
+        
+        // PRIORITY 2: Recalculate from today (for non-processed loans)
+        if (allEmiDates.length === 0 && isMultiEmi && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
           const salaryDate = parseInt(userData.salary_date);
           if (salaryDate >= 1 && salaryDate <= 31) {
             // For processed loans, use processed_at as base date (per rulebook)
@@ -3698,29 +3644,24 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
             let baseDate;
             if (loan.processed_at) {
               // Extract date portion only to avoid timezone issues
-              // Handle both string and Date object formats
               let processedDateStr;
-                if (typeof loan.processed_at === 'string') {
-                  // Handle MySQL datetime format: "2025-12-25 23:19:50" or ISO format: "2025-12-25T23:19:50.000Z"
-                  if (loan.processed_at.includes('T')) {
-                    processedDateStr = loan.processed_at.split('T')[0];
-                  } else if (loan.processed_at.includes(' ')) {
-                    processedDateStr = loan.processed_at.split(' ')[0];
-                  } else {
-                    processedDateStr = loan.processed_at.substring(0, 10);
-                  }
-                } else if (loan.processed_at instanceof Date) {
+              if (typeof loan.processed_at === 'string') {
+                if (loan.processed_at.includes('T')) {
+                  processedDateStr = loan.processed_at.split('T')[0];
+                } else if (loan.processed_at.includes(' ')) {
+                  processedDateStr = loan.processed_at.split(' ')[0];
+                } else {
+                  processedDateStr = loan.processed_at.substring(0, 10);
+                }
+              } else if (loan.processed_at instanceof Date) {
                 processedDateStr = loan.processed_at.toISOString().split('T')[0];
               } else {
-                // Fallback: try to convert to Date first
                 const processedDate = new Date(loan.processed_at);
                 processedDateStr = processedDate.toISOString().split('T')[0];
               }
-              // Parse date components directly to avoid timezone issues
-              // processedDateStr is in format "YYYY-MM-DD"
               const [year, month, day] = processedDateStr.split('-').map(Number);
-              baseDate = new Date(year, month - 1, day); // month is 0-indexed
-              console.log(`📅 Using processed_at as base date for EMI calculation: ${processedDateStr}`);
+              baseDate = new Date(year, month - 1, day);
+              console.log(`📅 [Admin Repayment] Using processed_at as base date for EMI calculation: ${processedDateStr}`);
             } else {
               baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
             }
@@ -3743,9 +3684,9 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
             }
             
             // Debug: Log all generated EMI dates for repayment schedule
-            console.log('📅 Repayment Schedule - All EMI Dates:', allEmiDates);
+            console.log('📅 [Admin Repayment] Generated EMI Dates:', allEmiDates);
           }
-        } else if (isMultiEmi) {
+        } else if (allEmiDates.length === 0 && isMultiEmi) {
           // For non-salary date Multi-EMI, calculate based on frequency
           const baseDate = dueDate;
           const daysPerEmi = {
@@ -3766,7 +3707,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
             emiDate.setHours(0, 0, 0, 0);
             allEmiDates.push(formatDateLocal(emiDate));
           }
-        } else {
+        } else if (allEmiDates.length === 0) {
           // Single payment loan
           allEmiDates = [formatDateLocal(dueDate)];
         }
@@ -3779,8 +3720,12 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           const interestRatePerDay = calculations.interest.rate_per_day || (interest / (principal * days));
           const principalPerEmi = Math.floor(principal / emiCount * 100) / 100;
           const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
-          const postServiceFeePerEmi = calculations.totals.repayableFee || 0;
-          const postServiceFeeGSTPerEmi = calculations.totals.repayableFeeGST || 0;
+          // IMPORTANT: totals.repayableFee is ALREADY multiplied by emiCount in loanCalculations.js
+          // So we need to divide by emiCount to get the per-EMI fee
+          const totalRepayableFee = calculations.totals.repayableFee || 0;
+          const totalRepayableFeeGST = calculations.totals.repayableFeeGST || 0;
+          const postServiceFeePerEmi = Math.round((totalRepayableFee / emiCount) * 100) / 100;
+          const postServiceFeeGSTPerEmi = Math.round((totalRepayableFeeGST / emiCount) * 100) / 100;
           
           let outstandingPrincipal = principal;
           // For processed loans, use processed_at as base date; otherwise use disbursed_at
