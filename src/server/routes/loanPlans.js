@@ -259,8 +259,13 @@ router.post('/calculate', requireAuth, async (req, res) => {
       let startDate = new Date();
       startDate.setHours(0, 0, 0, 0); // Normalize to start of day
       
+      // Check if calculate_by_salary_date is enabled (handle both boolean and integer values)
+      const useSalaryDate = plan.calculate_by_salary_date === 1 || plan.calculate_by_salary_date === true;
+      
+      console.log(`📅 [EMI Schedule] User salary_date: ${user.salary_date}, Plan calculate_by_salary_date: ${plan.calculate_by_salary_date} (useSalaryDate: ${useSalaryDate}), emi_frequency: ${plan.emi_frequency}`);
+      
       // If calculate_by_salary_date is enabled and user has salary date, start from next salary date
-      if (plan.calculate_by_salary_date === 1 && user.salary_date && plan.emi_frequency === 'monthly') {
+      if (useSalaryDate && user.salary_date && plan.emi_frequency === 'monthly') {
         const salaryDate = parseInt(user.salary_date);
         if (salaryDate >= 1 && salaryDate <= 31) {
           // Get next salary date
@@ -271,20 +276,25 @@ router.post('/calculate', requireAuth, async (req, res) => {
           
           // If duration (repayment_days) is set and days to next salary is less than duration, extend to next month
           const minDuration = plan.repayment_days || 15;
+          console.log(`📅 [EMI Schedule] Next salary date: ${nextSalaryDate.toISOString()}, daysToNextSalary: ${daysToNextSalary}, minDuration: ${minDuration}`);
+          
           if (daysToNextSalary < minDuration) {
             // Move to next month's salary date
             nextSalaryDate = getSalaryDateForMonth(startDate, salaryDate, 1);
+            console.log(`📅 [EMI Schedule] Extended to next month: ${nextSalaryDate.toISOString()}`);
           }
           
           startDate = nextSalaryDate;
         }
-      } else if (plan.calculate_by_salary_date === 1 && user.salary_date) {
+      } else if (useSalaryDate && user.salary_date) {
         // For non-monthly frequencies, just use next salary date as starting point
         const salaryDate = parseInt(user.salary_date);
         if (salaryDate >= 1 && salaryDate <= 31) {
           startDate = getNextSalaryDate(startDate, salaryDate);
         }
       }
+      
+      console.log(`📅 [EMI Schedule] Final startDate for EMI generation: ${startDate.toISOString()}`);
 
       // Generate EMI schedule starting from startDate
       for (let i = 0; i < plan.emi_count; i++) {
@@ -302,7 +312,7 @@ router.post('/calculate', requireAuth, async (req, res) => {
           dueDate.setDate(dueDate.getDate() + (i * 14));
         } else if (plan.emi_frequency === 'monthly') {
           // For monthly with salary date, use getSalaryDateForMonth to handle edge cases
-          if (plan.calculate_by_salary_date === 1 && user.salary_date) {
+          if (useSalaryDate && user.salary_date) {
             const salaryDate = parseInt(user.salary_date);
             if (salaryDate >= 1 && salaryDate <= 31) {
               // Get salary date for the i-th month from startDate
@@ -319,10 +329,16 @@ router.post('/calculate', requireAuth, async (req, res) => {
           dueDate = new Date(startDate);
         }
         
+        // Use local date formatting to avoid timezone issues with toISOString()
+        const year = dueDate.getFullYear();
+        const month = String(dueDate.getMonth() + 1).padStart(2, '0');
+        const day = String(dueDate.getDate()).padStart(2, '0');
+        const dueDateStr = `${year}-${month}-${day}`;
+        
         emiSchedule.push({
           emi_number: i + 1,
           emi_amount: i === plan.emi_count - 1 ? lastEmiAmount : emiAmount,
-          due_date: dueDate.toISOString().split('T')[0],
+          due_date: dueDateStr,
           status: 'pending'
         });
       }

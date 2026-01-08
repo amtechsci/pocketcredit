@@ -480,27 +480,29 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           ? JSON.parse(loan.fees_breakdown)
           : loan.fees_breakdown;
 
-
-        // Transform old fee structure to new structure
+        // Transform fee structure - handle both old and new field names
         feesBreakdown = parsedFees.map(fee => {
-          // If fee already has application_method, use as-is
-          if (fee.application_method) {
-            return {
-              fee_name: fee.fee_name || fee.name,
-              amount: fee.amount,
-              application_method: fee.application_method,
-              gst_amount: fee.gst_amount,
-              total_with_gst: fee.total_with_gst
-            };
+          const feeName = (fee.fee_name || fee.name || '').toLowerCase();
+          // Use fee_amount (new) or amount (old) - database stores fee_amount
+          const feeAmount = fee.fee_amount || fee.amount || 0;
+          
+          // Determine application_method from stored value or infer from fee name
+          let applicationMethod = fee.application_method;
+          if (!applicationMethod) {
+            // Infer from fee name: "post service fee" is add_to_total, others are deduct_from_disbursal
+            applicationMethod = feeName.includes('post service') || feeName.includes('post_service') 
+              ? 'add_to_total' 
+              : 'deduct_from_disbursal';
           }
-
-          // Transform old structure: assume processing fees are deducted from disbursal
+          
           return {
-            fee_name: fee.name || 'Processing Fee',
-            amount: fee.amount,
-            application_method: 'deduct_from_disbursal', // Default for old fees
-            gst_amount: fee.gst_amount,
-            total_with_gst: fee.total_with_gst
+            fee_name: fee.fee_name || fee.name || 'Fee',
+            fee_amount: feeAmount,  // Use fee_amount for frontend compatibility
+            amount: feeAmount,      // Also include amount for backward compatibility
+            application_method: applicationMethod,
+            gst_amount: fee.gst_amount || 0,
+            total_with_gst: fee.total_with_gst || (feeAmount + (fee.gst_amount || 0)),
+            fee_percent: fee.fee_percent || fee.percent || 0
           };
         });
 
@@ -646,10 +648,31 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         // Fees are already calculated with EMI multiplication in loanCalculations.js
         total_add_to_total: loanValues.totals?.repayableFee || loanValues.totalAddToTotal || 0,
         gst_on_add_to_total: loanValues.totals?.repayableFeeGST || 0,
+        gst_on_deduct_from_disbursal: loanValues.totals?.disbursalFeeGST || 0,
         gst: (loanValues.totals?.disbursalFeeGST || 0) + (loanValues.totals?.repayableFeeGST || 0) || loanValues.processingFeeGST || 0,
-        // Fees breakdown is already calculated with EMI multiplication in loanCalculations.js
-        // and saved to database with correct amounts, so no need to multiply again
-        fees_breakdown: feesBreakdown
+        // Use calculated fees from loanCalculations.js for consistency with admin endpoint
+        // This ensures both admin and user see the same fee amounts
+        fees_breakdown: [
+          ...(loanValues.fees?.deductFromDisbursal || []).map(fee => ({
+            fee_name: fee.fee_name,
+            fee_percent: fee.fee_percent,
+            fee_amount: fee.fee_amount,
+            gst_amount: fee.gst_amount,
+            total_with_gst: fee.total_with_gst,
+            application_method: 'deduct_from_disbursal',
+            amount: fee.fee_amount
+          })),
+          ...(loanValues.fees?.addToTotal || []).map(fee => ({
+            // Fee amounts are already multiplied by EMI count in loanCalculations.js
+            fee_name: fee.fee_name,
+            fee_percent: fee.fee_percent,
+            fee_amount: fee.fee_amount,
+            gst_amount: fee.gst_amount,
+            total_with_gst: fee.total_with_gst,
+            application_method: 'add_to_total',
+            amount: fee.fee_amount
+          }))
+        ]
       },
       calculations: (() => {
         const principal = loanValues.principal || loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0;
@@ -2806,27 +2829,29 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           ? JSON.parse(loan.fees_breakdown)
           : loan.fees_breakdown;
 
-
-        // Transform old fee structure to new structure
+        // Transform fee structure - handle both old and new field names
         feesBreakdown = parsedFees.map(fee => {
-          // If fee already has application_method, use as-is
-          if (fee.application_method) {
-            return {
-              fee_name: fee.fee_name || fee.name,
-              amount: fee.amount,
-              application_method: fee.application_method,
-              gst_amount: fee.gst_amount,
-              total_with_gst: fee.total_with_gst
-            };
+          const feeName = (fee.fee_name || fee.name || '').toLowerCase();
+          // Use fee_amount (new) or amount (old) - database stores fee_amount
+          const feeAmount = fee.fee_amount || fee.amount || 0;
+          
+          // Determine application_method from stored value or infer from fee name
+          let applicationMethod = fee.application_method;
+          if (!applicationMethod) {
+            // Infer from fee name: "post service fee" is add_to_total, others are deduct_from_disbursal
+            applicationMethod = feeName.includes('post service') || feeName.includes('post_service') 
+              ? 'add_to_total' 
+              : 'deduct_from_disbursal';
           }
-
-          // Transform old structure: assume processing fees are deducted from disbursal
+          
           return {
-            fee_name: fee.name || 'Processing Fee',
-            amount: fee.amount,
-            application_method: 'deduct_from_disbursal', // Default for old fees
-            gst_amount: fee.gst_amount,
-            total_with_gst: fee.total_with_gst
+            fee_name: fee.fee_name || fee.name || 'Fee',
+            fee_amount: feeAmount,  // Use fee_amount for frontend compatibility
+            amount: feeAmount,      // Also include amount for backward compatibility
+            application_method: applicationMethod,
+            gst_amount: fee.gst_amount || 0,
+            total_with_gst: fee.total_with_gst || (feeAmount + (fee.gst_amount || 0)),
+            fee_percent: fee.fee_percent || fee.percent || 0
           };
         });
 
