@@ -1244,6 +1244,29 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
   const [generating, setGenerating] = useState(false);
   const [kfsLoaded, setKfsLoaded] = useState(false);
 
+  // Check when KFS content is loaded
+  useEffect(() => {
+    const checkKFSLoaded = () => {
+      const kfsElement = document.getElementById('kfs-document-content');
+      if (kfsElement && kfsElement.innerHTML.trim().length > 0) {
+        // Check if it's not just the loading spinner
+        const hasContent = !kfsElement.querySelector('.animate-spin') && 
+                          kfsElement.textContent && 
+                          kfsElement.textContent.trim().length > 100;
+        if (hasContent) {
+          setKfsLoaded(true);
+          return;
+        }
+      }
+      // Retry after a short delay
+      setTimeout(checkKFSLoaded, 500);
+    };
+
+    // Start checking after component mounts
+    const timer = setTimeout(checkKFSLoaded, 1000);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Extract HTML content from the KFS document
   const getKFSHTML = (): string => {
     const kfsElement = document.getElementById('kfs-document-content');
@@ -1320,7 +1343,7 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
       <div className="flex justify-end gap-4">
         <Button
           onClick={handleIveReviewed}
-          disabled={saving || generating || !kfsLoaded}
+          disabled={saving || generating}
           className="min-w-[150px]"
         >
           {generating ? (
