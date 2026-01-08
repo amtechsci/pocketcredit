@@ -772,6 +772,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           reason: app.rejection_reason || app.loan_purpose || 'N/A',
           statusDate: app.approved_at || app.disbursed_at || app.created_at,
           createdAt: app.created_at,
+          created_at: app.created_at, // Add created_at for frontend compatibility
           updatedAt: app.updated_at || app.created_at,
           plan_snapshot: app.plan_snapshot,
           // Processed values (frozen at processing time)
