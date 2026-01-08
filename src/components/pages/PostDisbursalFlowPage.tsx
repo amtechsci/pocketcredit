@@ -1258,7 +1258,7 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
     return clonedElement.innerHTML;
   };
 
-  const handleGenerateAndSave = async () => {
+  const handleIveReviewed = async () => {
     try {
       setGenerating(true);
 
@@ -1285,7 +1285,7 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
       }
 
       console.log('✅ KFS PDF generated and saved:', response.data);
-      toast.success('KFS PDF generated and sent to your email!');
+      toast.success('KFS PDF generated, saved, and sent to your email!');
       
       // Automatically mark as reviewed after generating
       setTimeout(() => {
@@ -1295,7 +1295,6 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
     } catch (error: any) {
       console.error('Error generating KFS PDF:', error);
       toast.error(error.message || 'Failed to generate KFS PDF. Please try again.');
-    } finally {
       setGenerating(false);
     }
   };
@@ -1306,7 +1305,7 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
         <FileText className="w-16 h-16 text-blue-600 mx-auto mb-4" />
         <h2 className="text-2xl font-bold mb-2">Key Facts Statement</h2>
         <p className="text-gray-600">
-          Please review your loan details and terms. We'll generate a PDF and send it to your email.
+          Please review your loan details and terms. Click "I've Reviewed" to generate a PDF and send it to your email.
         </p>
       </div>
 
@@ -1320,9 +1319,9 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
 
       <div className="flex justify-end gap-4">
         <Button
-          onClick={handleGenerateAndSave}
+          onClick={handleIveReviewed}
           disabled={saving || generating || !kfsLoaded}
-          className="min-w-[200px]"
+          className="min-w-[150px]"
         >
           {generating ? (
             <>
@@ -1331,18 +1330,10 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
             </>
           ) : (
             <>
-              <FileText className="w-4 h-4 mr-2" />
-              Generate PDF & Send Email
+              <CheckCircle className="w-4 h-4 mr-2" />
+              I've Reviewed
             </>
           )}
-        </Button>
-        <Button
-          onClick={onComplete}
-          disabled={saving || generating}
-          variant="outline"
-          className="min-w-[120px]"
-        >
-          I've Reviewed
         </Button>
       </div>
     </div>
@@ -1723,10 +1714,8 @@ const BankConfirmStep = ({ applicationId, onComplete, saving }: StepProps) => {
             </div>
             <div>
               <p className="text-sm text-gray-500 mb-1">Account Number</p>
-              <p className="font-semibold text-gray-900">
-                {bankDetails.account_number 
-                  ? `****${bankDetails.account_number.slice(-4)}`
-                  : 'N/A'}
+              <p className="font-semibold text-gray-900 font-mono">
+                {bankDetails.account_number || 'N/A'}
               </p>
             </div>
             <div>

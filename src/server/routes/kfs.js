@@ -4281,14 +4281,48 @@ router.post('/:loanId/generate-and-save', requireAuth, async (req, res) => {
     // Save S3 key to database
     console.log('💾 Saving KFS PDF URL to database...');
     try {
-      await executeQuery(
-        `UPDATE loan_applications 
-         SET kfs_pdf_url = ?,
-             updated_at = NOW()
-         WHERE id = ?`,
-        [s3Key, loanId]
-      );
-      console.log('✅ KFS PDF URL saved to database');
+      // Check if column exists first
+      const columnCheck = await executeQuery(`
+        SELECT COLUMN_NAME 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+          AND TABLE_NAME = 'loan_applications' 
+          AND COLUMN_NAME = 'kfs_pdf_url'
+      `);
+      
+      if (columnCheck && columnCheck.length > 0) {
+        await executeQuery(
+          `UPDATE loan_applications 
+           SET kfs_pdf_url = ?,
+               updated_at = NOW()
+           WHERE id = ?`,
+          [s3Key, loanId]
+        );
+        console.log('✅ KFS PDF URL saved to database');
+      } else {
+        // Column doesn't exist, try to add it
+        console.log('⚠️ kfs_pdf_url column not found, attempting to add it...');
+        try {
+          await executeQuery(
+            `ALTER TABLE loan_applications 
+             ADD COLUMN kfs_pdf_url VARCHAR(500) NULL COMMENT 'S3 key/URL for the generated KFS PDF'`
+          );
+          console.log('✅ Added kfs_pdf_url column');
+          
+          // Now save the URL
+          await executeQuery(
+            `UPDATE loan_applications 
+             SET kfs_pdf_url = ?,
+                 updated_at = NOW()
+             WHERE id = ?`,
+            [s3Key, loanId]
+          );
+          console.log('✅ KFS PDF URL saved to database');
+        } catch (alterError) {
+          console.error('❌ Error adding kfs_pdf_url column:', alterError);
+          // Continue anyway - we still want to send email
+        }
+      }
     } catch (dbError) {
       console.error('❌ Error saving KFS PDF URL to database:', dbError);
       // Continue anyway - we still want to send email
