@@ -21,6 +21,16 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         const userId = req.user.id;
         const { loanId, amount, paymentType } = req.body; // paymentType: 'pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', etc.
 
+        // Log the received request body for debugging
+        console.log(`[Payment] Create order request received:`, {
+            userId,
+            loanId,
+            amount,
+            paymentType: paymentType || '(not provided)',
+            bodyKeys: Object.keys(req.body),
+            bodyValues: req.body
+        });
+
         // Validate input
         if (!loanId || !amount) {
             return res.status(400).json({
@@ -82,10 +92,12 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         // Determine payment type if not provided
         let finalPaymentType = paymentType;
         
-        // If paymentType is explicitly provided (especially 'pre-close' or 'full_payment'), use it
+        console.log(`[Payment] Received paymentType from request: ${paymentType}, loanId: ${loanId}, amount: ${amount}`);
+        
+        // If paymentType is explicitly provided (especially 'pre-close' or 'full_payment'), use it and skip auto-detection
         if (finalPaymentType === 'pre-close' || finalPaymentType === 'full_payment') {
-            // Explicitly provided pre-close or full_payment - use it as-is
-            console.log(`[Payment] Using explicitly provided payment type: ${finalPaymentType}`);
+            // Explicitly provided pre-close or full_payment - use it as-is, skip all auto-detection
+            console.log(`[Payment] Using explicitly provided payment type: ${finalPaymentType} - skipping auto-detection`);
         } else if (!finalPaymentType) {
             // Auto-detect payment type only if not provided
             // Check if this is a single payment loan (emi_count = 1)
@@ -137,8 +149,20 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                 }
             }
         }
+        
+        // CRITICAL: If paymentType was explicitly 'pre-close' or 'full_payment', ensure it's preserved
+        // This is a defensive check to prevent any accidental overrides
+        if (paymentType === 'pre-close' || paymentType === 'full_payment') {
+            if (finalPaymentType !== paymentType) {
+                console.warn(`[Payment] ⚠️ WARNING: paymentType was "${paymentType}" but finalPaymentType became "${finalPaymentType}". Correcting to preserve original type.`);
+                finalPaymentType = paymentType;
+            }
+            console.log(`[Payment] ✅ Preserved explicit payment type: ${finalPaymentType}`);
+        }
+        
+        console.log(`[Payment] Final payment type determined: ${finalPaymentType} (original from request: ${paymentType})`);
 
-        // Validate sequential EMI payments
+        // Validate sequential EMI payments (only for EMI types, skip for pre-close/full_payment)
         if (finalPaymentType && finalPaymentType.startsWith('emi_')) {
             // Get which EMIs have been paid using payment_orders table
             const paidEmis = await executeQuery(
@@ -421,13 +445,14 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         try {
             // Use finalPaymentType or default to 'loan_repayment'
             const orderPaymentType = finalPaymentType || 'loan_repayment';
+            console.log(`[Payment] Saving payment order - Original paymentType: ${paymentType}, finalPaymentType: ${finalPaymentType}, orderPaymentType: ${orderPaymentType}`);
             await executeQuery(
                 `INSERT INTO payment_orders (
             order_id, loan_id, user_id, amount, payment_type, status, created_at
           ) VALUES (?, ?, ?, ?, ?, 'PENDING', NOW())`,
                 [orderId, loanId, userId, amount, orderPaymentType]
             );
-            console.log(`[Payment] Payment order created in DB: ${orderId}`);
+            console.log(`[Payment] Payment order created in DB: ${orderId} with payment_type: ${orderPaymentType}`);
         } catch (insertError) {
             console.error('[Payment] Failed to insert payment order:', insertError);
             // If it's a duplicate key error, that's okay - order already exists
