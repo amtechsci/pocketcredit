@@ -800,36 +800,48 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
             const salaryDate = parseInt(userData.salary_date);
             if (salaryDate >= 1 && salaryDate <= 31) {
-              // For processed loans, use processed_at as base date (per rulebook)
-              // For non-processed loans, use disbursed_at
+              // For processed loans, use processed_at_date (from SQL DATE()) to avoid timezone issues
+              // For non-processed loans, use disbursed_at_date
               let baseDateForEmi;
-              if (loan.processed_at) {
-                // Extract date portion only to avoid timezone issues
-                // Handle both string and Date object formats
+              if (loan.processed_at_date) {
+                // Use processed_at_date from SQL DATE() function (already extracted, no timezone issues)
                 let processedDateStr;
-                if (typeof loan.processed_at === 'string') {
-                  // Handle MySQL datetime format: "2025-12-25 23:19:50" or ISO format: "2025-12-25T23:19:50.000Z"
-                  if (loan.processed_at.includes('T')) {
-                    processedDateStr = loan.processed_at.split('T')[0];
-                  } else if (loan.processed_at.includes(' ')) {
-                    processedDateStr = loan.processed_at.split(' ')[0];
-                  } else {
-                    processedDateStr = loan.processed_at.substring(0, 10);
-                  }
-                } else if (loan.processed_at instanceof Date) {
-                  processedDateStr = loan.processed_at.toISOString().split('T')[0];
+                if (typeof loan.processed_at_date === 'string') {
+                  processedDateStr = loan.processed_at_date;
+                } else if (loan.processed_at_date instanceof Date) {
+                  // MySQL DATE() returns as Date object - extract UTC components to avoid timezone shift
+                  const year = loan.processed_at_date.getUTCFullYear();
+                  const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
+                  const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
+                  processedDateStr = `${year}-${month}-${day}`;
                 } else {
-                  // Fallback: try to convert to Date first
-                  const processedDate = new Date(loan.processed_at);
-                  processedDateStr = processedDate.toISOString().split('T')[0];
+                  // Fallback: parse from processed_at
+                  processedDateStr = parseDateToString(loan.processed_at) || getTodayString();
                 }
                 // Parse date components directly to avoid timezone issues
-                // processedDateStr is in format "YYYY-MM-DD"
                 const [year, month, day] = processedDateStr.split('-').map(Number);
                 baseDateForEmi = new Date(year, month - 1, day); // month is 0-indexed
-                console.log(`📅 Using processed_at as base date for EMI calculation: ${processedDateStr}`);
+                console.log(`📅 [User APR] Using processed_at_date as base date for EMI calculation: ${processedDateStr}`);
+              } else if (loan.disbursed_at_date) {
+                // Use disbursed_at_date from SQL DATE() function
+                let disbursedDateStr;
+                if (typeof loan.disbursed_at_date === 'string') {
+                  disbursedDateStr = loan.disbursed_at_date;
+                } else if (loan.disbursed_at_date instanceof Date) {
+                  const year = loan.disbursed_at_date.getUTCFullYear();
+                  const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
+                  const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
+                  disbursedDateStr = `${year}-${month}-${day}`;
+                } else {
+                  disbursedDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
+                }
+                const [year, month, day] = disbursedDateStr.split('-').map(Number);
+                baseDateForEmi = new Date(year, month - 1, day);
+                console.log(`📅 [User APR] Using disbursed_at_date as base date: ${disbursedDateStr}`);
               } else {
-                baseDateForEmi = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+                // Fallback: use today
+                baseDateForEmi = new Date();
+                console.log(`📅 [User APR] Using today as base date`);
               }
               baseDateForEmi.setHours(0, 0, 0, 0);
               let nextSalaryDate = getNextSalaryDate(baseDateForEmi, salaryDate);
@@ -1100,37 +1112,48 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           const salaryDate = parseInt(userData.salary_date);
           console.log(`📅 EMI Calculation Debug - salaryDate: ${salaryDate}, processed_at: ${loan.processed_at}, disbursed_at: ${loan.disbursed_at}`);
           if (salaryDate >= 1 && salaryDate <= 31) {
-            // For processed loans, use processed_at as base date (per rulebook)
-            // For non-processed loans, use disbursed_at
+            // For processed loans, use processed_at_date (from SQL DATE()) to avoid timezone issues
+            // For non-processed loans, use disbursed_at_date
             let baseDate;
-            if (loan.processed_at) {
-              // Extract date portion only to avoid timezone issues
-              // Handle both string and Date object formats
+            if (loan.processed_at_date) {
+              // Use processed_at_date from SQL DATE() function (already extracted, no timezone issues)
               let processedDateStr;
-              if (typeof loan.processed_at === 'string') {
-                // Handle MySQL datetime format: "2025-12-25 23:19:50" or ISO format: "2025-12-25T23:19:50.000Z"
-                if (loan.processed_at.includes('T')) {
-                  processedDateStr = loan.processed_at.split('T')[0];
-                } else if (loan.processed_at.includes(' ')) {
-                  processedDateStr = loan.processed_at.split(' ')[0];
-                } else {
-                  processedDateStr = loan.processed_at.substring(0, 10);
-                }
-              } else if (loan.processed_at instanceof Date) {
-                processedDateStr = loan.processed_at.toISOString().split('T')[0];
+              if (typeof loan.processed_at_date === 'string') {
+                processedDateStr = loan.processed_at_date;
+              } else if (loan.processed_at_date instanceof Date) {
+                // MySQL DATE() returns as Date object - extract UTC components to avoid timezone shift
+                const year = loan.processed_at_date.getUTCFullYear();
+                const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
+                processedDateStr = `${year}-${month}-${day}`;
               } else {
-                // Fallback: try to convert to Date first
-                const processedDate = new Date(loan.processed_at);
-                processedDateStr = processedDate.toISOString().split('T')[0];
+                // Fallback: parse from processed_at
+                processedDateStr = parseDateToString(loan.processed_at) || getTodayString();
               }
               // Parse date components directly to avoid timezone issues
-              // processedDateStr is in format "YYYY-MM-DD"
               const [year, month, day] = processedDateStr.split('-').map(Number);
               baseDate = new Date(year, month - 1, day); // month is 0-indexed
-              console.log(`📅 Using processed_at as base date for EMI calculation: ${processedDateStr} (parsed as ${formatDateLocal(baseDate)})`);
+              console.log(`📅 [User] Using processed_at_date as base date for EMI calculation: ${processedDateStr} (parsed as ${formatDateLocal(baseDate)})`);
+            } else if (loan.disbursed_at_date) {
+              // Use disbursed_at_date from SQL DATE() function
+              let disbursedDateStr;
+              if (typeof loan.disbursed_at_date === 'string') {
+                disbursedDateStr = loan.disbursed_at_date;
+              } else if (loan.disbursed_at_date instanceof Date) {
+                const year = loan.disbursed_at_date.getUTCFullYear();
+                const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
+                disbursedDateStr = `${year}-${month}-${day}`;
+              } else {
+                disbursedDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
+              }
+              const [year, month, day] = disbursedDateStr.split('-').map(Number);
+              baseDate = new Date(year, month - 1, day);
+              console.log(`📅 [User] Using disbursed_at_date as base date: ${disbursedDateStr} (parsed as ${formatDateLocal(baseDate)})`);
             } else {
-              baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
-              console.log(`📅 Using disbursed_at as base date: ${formatDateLocal(baseDate)}`);
+              // Fallback: use today
+              baseDate = new Date();
+              console.log(`📅 [User] Using today as base date: ${formatDateLocal(baseDate)}`);
             }
             baseDate.setHours(0, 0, 0, 0);
             let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
@@ -3296,36 +3319,48 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       if (allEmiDates.length === 0 && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
         const salaryDate = parseInt(userData.salary_date);
         if (salaryDate >= 1 && salaryDate <= 31) {
-              // For processed loans, use processed_at as base date (per rulebook)
-              // For non-processed loans, use disbursed_at
+              // For processed loans, use processed_at_date (from SQL DATE()) to avoid timezone issues
+              // For non-processed loans, use disbursed_at_date
               let baseDateForEmi;
-              if (loan.processed_at) {
-                // Extract date portion only to avoid timezone issues
-                // Handle both string and Date object formats
+              if (loan.processed_at_date) {
+                // Use processed_at_date from SQL DATE() function (already extracted, no timezone issues)
                 let processedDateStr;
-                if (typeof loan.processed_at === 'string') {
-                  // Handle MySQL datetime format: "2025-12-25 23:19:50" or ISO format: "2025-12-25T23:19:50.000Z"
-                  if (loan.processed_at.includes('T')) {
-                    processedDateStr = loan.processed_at.split('T')[0];
-                  } else if (loan.processed_at.includes(' ')) {
-                    processedDateStr = loan.processed_at.split(' ')[0];
-                  } else {
-                    processedDateStr = loan.processed_at.substring(0, 10);
-                  }
-                } else if (loan.processed_at instanceof Date) {
-                  processedDateStr = loan.processed_at.toISOString().split('T')[0];
+                if (typeof loan.processed_at_date === 'string') {
+                  processedDateStr = loan.processed_at_date;
+                } else if (loan.processed_at_date instanceof Date) {
+                  // MySQL DATE() returns as Date object - extract UTC components to avoid timezone shift
+                  const year = loan.processed_at_date.getUTCFullYear();
+                  const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
+                  const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
+                  processedDateStr = `${year}-${month}-${day}`;
                 } else {
-                  // Fallback: try to convert to Date first
-                  const processedDate = new Date(loan.processed_at);
-                  processedDateStr = processedDate.toISOString().split('T')[0];
+                  // Fallback: parse from processed_at
+                  processedDateStr = parseDateToString(loan.processed_at) || getTodayString();
                 }
                 // Parse date components directly to avoid timezone issues
-                // processedDateStr is in format "YYYY-MM-DD"
                 const [year, month, day] = processedDateStr.split('-').map(Number);
                 baseDateForEmi = new Date(year, month - 1, day); // month is 0-indexed
-                console.log(`📅 Using processed_at as base date for EMI calculation: ${processedDateStr}`);
-      } else {
-                baseDateForEmi = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+                console.log(`📅 [Admin] Using processed_at_date as base date for EMI calculation: ${processedDateStr}`);
+              } else if (loan.disbursed_at_date) {
+                // Use disbursed_at_date from SQL DATE() function
+                let disbursedDateStr;
+                if (typeof loan.disbursed_at_date === 'string') {
+                  disbursedDateStr = loan.disbursed_at_date;
+                } else if (loan.disbursed_at_date instanceof Date) {
+                  const year = loan.disbursed_at_date.getUTCFullYear();
+                  const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
+                  const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
+                  disbursedDateStr = `${year}-${month}-${day}`;
+                } else {
+                  disbursedDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
+                }
+                const [year, month, day] = disbursedDateStr.split('-').map(Number);
+                baseDateForEmi = new Date(year, month - 1, day);
+                console.log(`📅 [Admin] Using disbursed_at_date as base date: ${disbursedDateStr}`);
+              } else {
+                // Fallback: use today
+                baseDateForEmi = new Date();
+                console.log(`📅 [Admin] Using today as base date`);
               }
               baseDateForEmi.setHours(0, 0, 0, 0);
               let nextSalaryDate = getNextSalaryDate(baseDateForEmi, salaryDate);
