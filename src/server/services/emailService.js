@@ -201,37 +201,9 @@ class EmailService {
     
     <p>Thank you for choosing <strong>Pocket Credit</strong> for your financial needs. Please find attached the Key Facts Statement (KFS) for your loan application.</p>
     
-    <div class="info-box">
-      <h3 style="margin-top: 0; color: #667eea;">Loan Details</h3>
-      <div class="info-row">
-        <span class="label">Application Number:</span>
-        <span class="value">${loanData.application_number}</span>
-      </div>
-      <div class="info-row">
-        <span class="label">Loan Amount:</span>
-        <span class="value">₹${loanData.sanctioned_amount?.toLocaleString('en-IN')}</span>
-      </div>
-      <div class="info-row">
-        <span class="label">Loan Term:</span>
-        <span class="value">${loanData.loan_term_days} days</span>
-      </div>
-      <div class="info-row">
-        <span class="label">Status:</span>
-        <span class="value" style="color: #28a745; font-weight: bold;">${loanData.status}</span>
-      </div>
-    </div>
-    
     <div class="warning">
       <strong>⚠️ Important:</strong> Please review the attached KFS document carefully. It contains important information about your loan terms, interest rates, fees, and repayment schedule.
     </div>
-    
-    <p><strong>What's Next?</strong></p>
-    <ul>
-      <li>Review the Key Facts Statement attached to this email</li>
-      <li>Understand all terms and conditions</li>
-      <li>Contact us if you have any questions</li>
-      <li>Complete any pending documentation</li>
-    </ul>
     
     <p>If you have any questions or need clarification, please don't hesitate to reach out to our support team.</p>
     
@@ -597,30 +569,6 @@ class EmailService {
     </div>
     
     <p>Thank you for choosing <strong>Pocket Credit</strong>. Please find attached your signed loan agreement document for your records.</p>
-    
-    <div class="info-box">
-      <h3 style="margin-top: 0; color: #28a745;">Loan Details</h3>
-      <div class="info-row">
-        <span class="label">Application Number:</span>
-        <span class="value">${loanData.application_number}</span>
-      </div>
-      <div class="info-row">
-        <span class="label">Loan Amount:</span>
-        <span class="value">₹${loanData.loan_amount?.toLocaleString('en-IN')}</span>
-      </div>
-      <div class="info-row">
-        <span class="label">Status:</span>
-        <span class="value" style="color: #28a745; font-weight: bold;">${loanData.status}</span>
-      </div>
-    </div>
-    
-    <p><strong>What's Next?</strong></p>
-    <ul>
-      <li>Keep this signed agreement document safe for your records</li>
-      <li>Review the terms and conditions mentioned in the agreement</li>
-      <li>Your loan will be processed as per the agreement terms</li>
-      <li>You will receive further updates on your loan application</li>
-    </ul>
     
     <p>If you have any questions or need clarification, please don't hesitate to reach out to our support team.</p>
     

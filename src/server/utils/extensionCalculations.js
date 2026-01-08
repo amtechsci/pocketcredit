@@ -303,47 +303,15 @@ function calculateExtensionFees(loan, extensionDate = null) {
   let postServiceFee = 0;
   
   // Try to get from processed_post_service_fee first
+  // IMPORTANT: processed_post_service_fee is ALWAYS stored as TOTAL (already multiplied by EMI count)
+  // This is set during loan processing from calculatedValues.totals.repayableFee
   if (loan.processed_post_service_fee) {
     postServiceFee = parseFloat(loan.processed_post_service_fee) || 0;
-    
-    // For multi-EMI loans, processed_post_service_fee might be per EMI
-    // Check if we need to multiply by EMI count
-    const planSnapshot = typeof loan.plan_snapshot === 'string' 
-      ? JSON.parse(loan.plan_snapshot) 
-      : loan.plan_snapshot;
-    const emiCount = planSnapshot?.emi_count || 1;
-    
-    // If it's a multi-EMI loan and the fee seems like a base fee, multiply
-    // We'll check fees_breakdown to determine if it's total or per EMI
-    if (emiCount > 1) {
-      try {
-        const feesBreakdown = typeof loan.fees_breakdown === 'string' 
-          ? JSON.parse(loan.fees_breakdown) 
-          : loan.fees_breakdown;
-        
-        if (Array.isArray(feesBreakdown)) {
-          const postServiceFeeEntry = feesBreakdown.find(f => 
-            f.name?.toLowerCase().includes('post service') || 
-            f.fee_name?.toLowerCase().includes('post service')
-          );
-          
-          if (postServiceFeeEntry) {
-            // Check if it's add_to_total (total fee) or per EMI
-            // If application_method is add_to_total, it's already total
-            // Otherwise, it might be per EMI
-            const applicationMethod = postServiceFeeEntry.application_method;
-            if (applicationMethod !== 'add_to_total') {
-              // Likely per EMI, multiply
-              postServiceFee = postServiceFee * emiCount;
-            }
-          }
-        }
-      } catch (e) {
-        // If parsing fails, assume it's total fee
-      }
-    }
+    // No multiplication needed - it's already the total fee
+    console.log(`📊 Using processed_post_service_fee: ₹${postServiceFee} (already total for all EMIs)`);
   } else {
-    // Fallback: Get from fees_breakdown or plan_snapshot
+    // Fallback: Get from fees_breakdown
+    // Note: fees_breakdown stores the already-multiplied total for add_to_total fees
     try {
       const feesBreakdown = typeof loan.fees_breakdown === 'string' 
         ? JSON.parse(loan.fees_breakdown) 
@@ -351,23 +319,15 @@ function calculateExtensionFees(loan, extensionDate = null) {
       
       if (Array.isArray(feesBreakdown)) {
         const postServiceFeeEntry = feesBreakdown.find(f => 
-          f.name?.toLowerCase().includes('post service') || 
-          f.fee_name?.toLowerCase().includes('post service')
+          (f.name?.toLowerCase().includes('post service') || 
+           f.fee_name?.toLowerCase().includes('post service')) &&
+          f.application_method === 'add_to_total'
         );
         
         if (postServiceFeeEntry) {
+          // fees_breakdown stores the total fee (already multiplied by EMI count for multi-EMI)
           postServiceFee = parseFloat(postServiceFeeEntry.amount || postServiceFeeEntry.fee_amount || 0);
-          
-          // For multi-EMI, if it's add_to_total, it's already total
-          // Otherwise, multiply by EMI count
-          const planSnapshot = typeof loan.plan_snapshot === 'string' 
-            ? JSON.parse(loan.plan_snapshot) 
-            : loan.plan_snapshot;
-          const emiCount = planSnapshot?.emi_count || 1;
-          
-          if (emiCount > 1 && postServiceFeeEntry.application_method !== 'add_to_total') {
-            postServiceFee = postServiceFee * emiCount;
-          }
+          console.log(`📊 Using fees_breakdown post service fee: ₹${postServiceFee} (total for all EMIs)`);
         }
       }
     } catch (e) {

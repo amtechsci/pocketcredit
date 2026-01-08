@@ -175,7 +175,9 @@ async function calculateLoanInterestAndPenalty() {
         const newInterest = Math.round(((loan.processed_interest || 0) + interestForPeriod) * 100) / 100;
 
         // Calculate penalty if overdue
-        let newPenalty = loan.processed_penalty || 0;
+        // CRITICAL: Penalties should be calculated from SCRATCH each time based on total days overdue
+        // NOT added incrementally (which would cause double-counting)
+        let newPenalty = 0;
         const dueDates = parseDueDates(loan.processed_due_date);
         
         if (dueDates.length > 0) {
@@ -191,10 +193,10 @@ async function calculateLoanInterestAndPenalty() {
           }
 
           if (maxDaysOverdue > 0) {
-            // Check if late fee was already applied
-            const hasLateFee = (loan.processed_penalty || 0) > 0;
-            const penaltyForPeriod = calculatePenalty(principal, maxDaysOverdue, hasLateFee);
-            newPenalty = Math.round(((loan.processed_penalty || 0) + penaltyForPeriod) * 100) / 100;
+            // Calculate total penalty from scratch based on total days overdue
+            // Late fee is one-time (already included in calculatePenalty when daysOverdue >= 1)
+            newPenalty = calculatePenalty(principal, maxDaysOverdue, false);
+            newPenalty = Math.round(newPenalty * 100) / 100;
           }
         }
 
