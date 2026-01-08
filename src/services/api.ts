@@ -1436,6 +1436,13 @@ class ApiService {
   }
 
   /**
+   * Accept extension agreement (changes status from 'pending' to 'pending_payment')
+   */
+  async acceptExtensionAgreement(extensionId: number): Promise<ApiResponse<any>> {
+    return this.request('POST', `/loan-extensions/${extensionId}/accept-agreement`);
+  }
+
+  /**
    * Create payment order for extension fee
    */
   async createExtensionPayment(extensionId: number): Promise<ApiResponse<{

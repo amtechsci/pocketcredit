@@ -419,7 +419,8 @@ router.post('/request', requireAuth, async (req, res) => {
     const extensionResult = await executeQuery(extensionQuery, extensionValues);
     const extensionId = extensionResult.insertId;
 
-    // Note: Transaction will be created by admin when approving the extension
+    // Note: Extension is created with 'pending_payment' status
+    // User will accept agreement and then proceed to payment
     // No transaction created at request time
 
     // Update loan application - set extension_status to pending_payment and increment extension_count
@@ -454,6 +455,66 @@ router.post('/request', requireAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to request extension',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/loan-extensions/:extensionId/accept-agreement
+ * Accept extension agreement (no status change needed since extension is created with 'pending_payment')
+ * This endpoint is kept for compatibility but doesn't change status
+ */
+router.post('/:extensionId/accept-agreement', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { extensionId } = req.params;
+    const userId = req.user.id;
+
+    // Get extension details
+    const extensions = await executeQuery(`
+      SELECT 
+        le.*,
+        la.id as loan_id,
+        la.user_id
+      FROM loan_extensions le
+      INNER JOIN loan_applications la ON le.loan_application_id = la.id
+      WHERE le.id = ? AND la.user_id = ?
+    `, [extensionId, userId]);
+
+    if (!extensions || extensions.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Extension request not found'
+      });
+    }
+
+    const extension = extensions[0];
+
+    // Check if extension is in pending_payment status
+    if (extension.status !== 'pending_payment') {
+      return res.status(400).json({
+        success: false,
+        message: `Extension request is ${extension.status}. Agreement can only be accepted for pending_payment requests.`
+      });
+    }
+
+    // No status change needed - extension is already in 'pending_payment' status
+    // Just return success to proceed to payment
+
+    res.json({
+      success: true,
+      message: 'Extension agreement accepted successfully',
+      data: {
+        extension_id: extensionId,
+        status: 'pending_payment'
+      }
+    });
+  } catch (error) {
+    console.error('Error accepting extension agreement:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to accept extension agreement',
       error: error.message
     });
   }

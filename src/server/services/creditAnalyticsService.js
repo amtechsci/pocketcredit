@@ -29,11 +29,12 @@ class CreditAnalyticsService {
   }
 
   /**
-   * Request Credit Report from Experian
+   * Request Credit Report from Experian with retry logic for transient errors
    * @param {Object} data - User data for credit check
+   * @param {Object} options - Retry options
    * @returns {Promise<Object>} Credit report response
    */
-  async requestCreditReport(data) {
+  async requestCreditReport(data, options = {}) {
     const {
       client_ref_num,
       mobile_no,
@@ -44,6 +45,10 @@ class CreditAnalyticsService {
       pan,
       device_ip = '192.168.1.1'
     } = data;
+
+    const maxRetries = options.maxRetries || 3;
+    const retryDelay = options.retryDelay || 2000; // 2 seconds base delay
+    const retryableStatusCodes = options.retryableStatusCodes || [503, 502, 504, 429]; // Service unavailable, Bad gateway, Gateway timeout, Too many requests
 
     // Generate timestamp in required format: DDMMYYYY-HH:MM:SS
     const now = new Date();
@@ -116,32 +121,77 @@ class CreditAnalyticsService {
       report_type: "3" // Testing report_type 3
     };
 
-    try {
-      console.log('🔍 Requesting credit report for:', { pan, mobile_no, client_ref_num });
-      console.log('📋 Full request body:', JSON.stringify(requestBody, null, 2));
-      
-      const response = await axios.post(this.apiUrl, requestBody, {
-        headers: {
-          'Authorization': this.getAuthHeader(),
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000 // 30 second timeout
-      });
+    let lastError;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 1) {
+          const delay = retryDelay * Math.pow(2, attempt - 2); // Exponential backoff
+          console.log(`🔄 Retrying credit report request (attempt ${attempt}/${maxRetries}) after ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
 
-      console.log('✅ Credit report received:', {
-        result_code: response.data.result_code,
-        message: response.data.message,
-        request_id: response.data.request_id
-      });
+        console.log(`🔍 Requesting credit report for (attempt ${attempt}/${maxRetries}):`, { pan, mobile_no, client_ref_num });
+        if (attempt === 1) {
+          console.log('📋 Full request body:', JSON.stringify(requestBody, null, 2));
+        }
+        
+        const response = await axios.post(this.apiUrl, requestBody, {
+          headers: {
+            'Authorization': this.getAuthHeader(),
+            'Content-Type': 'application/json'
+          },
+          timeout: 30000 // 30 second timeout
+        });
 
-      return response.data;
-    } catch (error) {
-      console.error('❌ Credit Analytics API error:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status
-      });
-      throw error;
+        console.log('✅ Credit report received:', {
+          result_code: response.data.result_code,
+          message: response.data.message,
+          request_id: response.data.request_id
+        });
+
+        return response.data;
+      } catch (error) {
+        lastError = error;
+        const statusCode = error.response?.status;
+        const isRetryable = statusCode && retryableStatusCodes.includes(statusCode);
+        
+        console.error(`❌ Credit Analytics API error (attempt ${attempt}/${maxRetries}):`, {
+          message: error.message,
+          status: statusCode,
+          response: error.response?.data,
+          isRetryable: isRetryable && attempt < maxRetries
+        });
+
+        // If it's a retryable error and we have attempts left, continue to retry
+        if (isRetryable && attempt < maxRetries) {
+          continue;
+        }
+
+        // If it's not retryable or we've exhausted retries, throw the error
+        // Enhance error message for service unavailable
+        if (statusCode === 503) {
+          const enhancedError = new Error('Credit Analytics service is temporarily unavailable. Please try again later.');
+          enhancedError.status = 503;
+          enhancedError.isServiceUnavailable = true;
+          enhancedError.originalError = error;
+          enhancedError.response = error.response;
+          throw enhancedError;
+        }
+
+        // For other errors, throw as-is
+        throw error;
+      }
+    }
+
+    // If we've exhausted all retries, throw the last error
+    if (lastError) {
+      const enhancedError = new Error('Credit Analytics service is temporarily unavailable after multiple retry attempts. Please try again later.');
+      enhancedError.status = lastError.response?.status || 503;
+      enhancedError.isServiceUnavailable = true;
+      enhancedError.originalError = lastError;
+      enhancedError.response = lastError.response;
+      throw enhancedError;
     }
   }
 

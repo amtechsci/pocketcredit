@@ -19,6 +19,7 @@ export function ExtensionLetterModal({ loanId, isOpen, onClose, onAccept }: Exte
   const [loading, setLoading] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const [extensionId, setExtensionId] = useState<number | null>(null);
 
   useEffect(() => {
     if (isOpen && loanId) {
@@ -27,6 +28,7 @@ export function ExtensionLetterModal({ loanId, isOpen, onClose, onAccept }: Exte
       // Reset state when modal closes
       setExtensionData(null);
       setAccepted(false);
+      setExtensionId(null);
     }
   }, [isOpen, loanId]);
 
@@ -36,6 +38,11 @@ export function ExtensionLetterModal({ loanId, isOpen, onClose, onAccept }: Exte
       const response = await apiService.getExtensionLetter(loanId);
       if (response.success && response.data) {
         setExtensionData(response.data);
+        // Check if extension already exists (from extension button click)
+        // The extension letter data might contain extension_id if it was already created
+        if (response.data.extension_id) {
+          setExtensionId(response.data.extension_id);
+        }
       } else {
         toast.error(response.message || 'Failed to load extension letter');
         onClose();
@@ -54,26 +61,37 @@ export function ExtensionLetterModal({ loanId, isOpen, onClose, onAccept }: Exte
 
     try {
       setAccepting(true);
-      toast.loading('Submitting extension request...');
+      let currentExtensionId = extensionId;
 
-      // Step 1: Submit extension request (creates extension with pending_payment status)
-      const extensionRequestResponse = await apiService.requestLoanExtension(loanId, 'Requesting loan tenure extension');
-      
-      if (!extensionRequestResponse.success) {
-        throw new Error(extensionRequestResponse.message || 'Failed to submit extension request');
+      // Step 1: If extension doesn't exist yet, create it (with 'pending' status)
+      if (!currentExtensionId) {
+        toast.loading('Submitting extension request...');
+        const extensionRequestResponse = await apiService.requestLoanExtension(loanId, 'Requesting loan tenure extension');
+        
+        if (!extensionRequestResponse.success) {
+          throw new Error(extensionRequestResponse.message || 'Failed to submit extension request');
+        }
+
+        currentExtensionId = extensionRequestResponse.data?.extension_id;
+        
+        if (!currentExtensionId) {
+          throw new Error('Extension ID not found in response');
+        }
+        setExtensionId(currentExtensionId);
       }
 
-      // Step 2: Get the extension ID from the response
-      const extensionId = extensionRequestResponse.data?.extension_id;
+      // Step 2: Accept extension agreement (changes status from 'pending' to 'pending_payment')
+      toast.loading('Accepting extension agreement...');
+      const acceptResponse = await apiService.acceptExtensionAgreement(currentExtensionId);
       
-      if (!extensionId) {
-        throw new Error('Extension ID not found in response');
+      if (!acceptResponse.success) {
+        throw new Error(acceptResponse.message || 'Failed to accept extension agreement');
       }
 
       toast.loading('Creating payment order...');
 
       // Step 3: Create payment order for extension fee
-      const paymentResponse = await apiService.createExtensionPayment(extensionId);
+      const paymentResponse = await apiService.createExtensionPayment(currentExtensionId);
       
       if (!paymentResponse.success || !paymentResponse.data?.paymentSessionId) {
         throw new Error(paymentResponse.message || 'Failed to create payment order');

@@ -1691,6 +1691,22 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
     `, [loan.user_id]);
     const address = addresses[0] || {};
 
+    // Check if there's a pending extension for this loan
+    let pendingExtensionId = null;
+    try {
+      const pendingExtensions = await executeQuery(`
+        SELECT id FROM loan_extensions 
+        WHERE loan_application_id = ? AND status = 'pending_payment'
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [loanId]);
+      if (pendingExtensions && pendingExtensions.length > 0) {
+        pendingExtensionId = pendingExtensions[0].id;
+      }
+    } catch (err) {
+      console.log('Could not check for pending extension:', err.message);
+    }
+
     // Prepare extension letter data
     const extensionLetterData = {
       company: {
@@ -1735,6 +1751,7 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
           new_emi_dates: newDueDateResult.newEmiDates
         } : {})
       },
+      extension_id: pendingExtensionId, // Include extension_id if pending extension exists
       generated_at: new Date().toISOString()
     };
 

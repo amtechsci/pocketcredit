@@ -926,10 +926,24 @@ export const RepaymentSchedulePage = () => {
                       <Button
                         variant="outline"
                         className="w-full h-12 border-2 border-orange-500 text-orange-600 hover:bg-orange-50 font-semibold"
-                        onClick={() => {
+                        onClick={async () => {
                           const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
                           if (loanId) {
-                            setShowExtensionModal(true);
+                            try {
+                              toast.loading('Submitting extension request...');
+                              // Create extension request first (status: 'pending')
+                              const response = await apiService.requestLoanExtension(loanId, 'Requesting loan tenure extension');
+                              if (response.success) {
+                                toast.success('Extension request submitted successfully');
+                                // Show modal with agreement
+                                setShowExtensionModal(true);
+                              } else {
+                                toast.error(response.message || 'Failed to submit extension request');
+                              }
+                            } catch (error: any) {
+                              console.error('Error submitting extension request:', error);
+                              toast.error(error.message || 'Failed to submit extension request');
+                            }
                           }
                         }}
                       >
@@ -1383,6 +1397,8 @@ export const RepaymentSchedulePage = () => {
 
                           if (response.success) {
                             toast.success('Extension request submitted successfully!');
+                            // Show modal with agreement
+                            setShowExtensionModal(true);
                             // Refresh loan data and eligibility to show updated extension status
                             await fetchLoanData(loanId);
                             const eligibilityResponse = await apiService.checkExtensionEligibility(loanId);

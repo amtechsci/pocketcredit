@@ -591,6 +591,15 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
       });
     } catch (apiError) {
       console.error('❌ Credit report API error:', apiError.message);
+      
+      // Check if it's a service unavailable error
+      if (apiError.isServiceUnavailable || apiError.status === 503 || apiError.response?.status === 503) {
+        const serviceError = new Error('Credit Analytics service is temporarily unavailable. The external credit check service is down or overloaded. Please try again in a few minutes.');
+        serviceError.status = 503;
+        serviceError.isServiceUnavailable = true;
+        throw serviceError;
+      }
+      
       throw new Error(`Failed to request credit report: ${apiError.message}`);
     }
 
@@ -687,26 +696,30 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
     console.error('Error details:', {
       message: error.message,
       response: error.response?.data,
-      status: error.response?.status,
-      code: error.code
+      status: error.response?.status || error.status,
+      code: error.code,
+      isServiceUnavailable: error.isServiceUnavailable
     });
+    
+    // Determine HTTP status code
+    const httpStatus = error.isServiceUnavailable || error.status === 503 ? 503 : 500;
     
     // Provide more detailed error message
     let errorMessage = 'Failed to perform credit check';
     if (error.message) {
-      errorMessage += `: ${error.message}`;
-    }
-    if (error.response?.data?.message) {
-      errorMessage += ` (${error.response.data.message})`;
+      errorMessage = error.message; // Use the enhanced error message if available
+    } else if (error.response?.data?.message) {
+      errorMessage += `: ${error.response.data.message}`;
     }
     
-    res.status(500).json({
+    res.status(httpStatus).json({
       status: 'error',
       message: errorMessage,
       error: process.env.NODE_ENV === 'development' ? error.message : undefined,
       details: process.env.NODE_ENV === 'development' ? {
         stack: error.stack,
-        response: error.response?.data
+        response: error.response?.data || error.originalError?.response?.data,
+        isServiceUnavailable: error.isServiceUnavailable
       } : undefined
     });
   }
