@@ -1032,15 +1032,16 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         let allEmiDates = [];
         
         // PRIORITY 1: Check if loan is processed and has processed_due_date
-        if (loan.processed_at && loan.processed_due_date) {
+        // ALWAYS use processed_due_date if it exists (it's the source of truth)
+        if (loan.processed_due_date) {
           try {
-            console.log(`📅 Attempting to use processed_due_date: ${loan.processed_due_date}`);
+            console.log(`📅 [User] Attempting to use processed_due_date: ${loan.processed_due_date}`);
             // processed_due_date can be JSON array for multi-EMI or single date string
             const parsedDueDate = typeof loan.processed_due_date === 'string' 
               ? JSON.parse(loan.processed_due_date) 
               : loan.processed_due_date;
             
-            console.log(`📅 Parsed processed_due_date:`, parsedDueDate);
+            console.log(`📅 [User] Parsed processed_due_date:`, parsedDueDate);
             
             if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
               // Multi-EMI: Use dates from processed_due_date directly
@@ -1051,14 +1052,14 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
                 }
                 return date;
               });
-              console.log(`✅ Using processed_due_date for EMI dates: ${allEmiDates.join(', ')}`);
+              console.log(`✅ [User] Using processed_due_date for EMI dates: ${allEmiDates.join(', ')}`);
             } else if (typeof parsedDueDate === 'string') {
               // Single payment: Use single date
               allEmiDates = [parsedDueDate.split('T')[0].split(' ')[0]];
-              console.log(`✅ Using processed_due_date for single payment: ${allEmiDates[0]}`);
+              console.log(`✅ [User] Using processed_due_date for single payment: ${allEmiDates[0]}`);
             }
           } catch (e) {
-            console.error('❌ Error parsing processed_due_date:', e, loan.processed_due_date);
+            console.error('❌ [User] Error parsing processed_due_date:', e, loan.processed_due_date);
             // Fall through to emi_schedule or calculation below
           }
         }
@@ -3235,8 +3236,9 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       // PRIORITY: For processed loans, use processed_due_date if available (it's the source of truth)
       let allEmiDates = [];
       
-      // PRIORITY 1: Check if loan is processed and has processed_due_date
-      if (loan.processed_at && loan.processed_due_date) {
+      // PRIORITY 1: Check if loan has processed_due_date
+      // ALWAYS use processed_due_date if it exists (it's the source of truth)
+      if (loan.processed_due_date) {
         try {
           console.log(`📅 [Admin] Attempting to use processed_due_date: ${loan.processed_due_date}`);
           const parsedDueDate = typeof loan.processed_due_date === 'string' 
