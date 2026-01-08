@@ -243,9 +243,11 @@ export const PostDisbursalFlowPage = () => {
 
           console.log(`🔒 Status guard check for App ${appId}: status='${app.status}'`);
 
-          // Only 'disbursal' or 'repeat_disbursal' status is allowed
-          if (app.status !== 'disbursal' && app.status !== 'repeat_disbursal') {
-            console.warn(`⛔ Unauthorized access attempt: App ${appId} has status '${app.status}', not 'disbursal' or 'repeat_disbursal'`);
+          // Allowed statuses: 'disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal'
+          // ready_to_repeat_disbursal is allowed because user should see post-disbursal completion message
+          const allowedStatuses = ['disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal'];
+          if (!allowedStatuses.includes(app.status)) {
+            console.warn(`⛔ Unauthorized access attempt: App ${appId} has status '${app.status}', not one of: ${allowedStatuses.join(', ')}`);
             
             // Redirect based on actual status
             if (app.status === 'account_manager') {
@@ -253,6 +255,12 @@ export const PostDisbursalFlowPage = () => {
               toast.info('This loan is already active. Redirecting...');
               setRedirecting(true);
               navigate(`/repayment-schedule?applicationId=${appId}`);
+              return;
+            } else if (app.status === 'ready_for_disbursement') {
+              // Regular ready_for_disbursement should show waiting message
+              console.log('➡️ Redirecting to dashboard (loan is ready for disbursement, waiting for admin)');
+              toast.info('Your loan is ready for disbursement. Admin will process it shortly.');
+              navigate('/dashboard');
               return;
             } else {
               console.log('➡️ Redirecting to dashboard (invalid status for post-disbursal flow)');

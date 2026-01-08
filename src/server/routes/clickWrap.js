@@ -511,17 +511,25 @@ router.get('/callback', async (req, res) => {
       }
     }
 
+    // Determine new status based on current status
+    // Repeat loans: repeat_disbursal -> ready_to_repeat_disbursal
+    // Regular loans: disbursal -> ready_for_disbursement
+    const isRepeatLoan = application.status === 'repeat_disbursal';
+    const newStatus = isRepeatLoan ? 'ready_to_repeat_disbursal' : 'ready_for_disbursement';
+    
     // Update database: mark as signed and store S3 key if available
     await executeQuery(
       `UPDATE loan_applications 
        SET agreement_signed = 1,
-           status = 'ready_for_disbursement',
+           status = ?,
            clickwrap_signed_at = NOW(),
            clickwrap_signed_pdf_s3_key = ?,
            updated_at = NOW()
        WHERE id = ?`,
-      [s3Key, applicationId]
+      [newStatus, s3Key, applicationId]
     );
+    
+    console.log(`✅ Agreement marked as signed - status updated from ${application.status} to ${newStatus}`);
 
     console.log('✅ Agreement marked as signed in database for application:', applicationId);
 

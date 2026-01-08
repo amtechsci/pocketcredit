@@ -377,10 +377,14 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
       updates.push('agreement_signed = ?');
       params.push(agreement_signed ? 1 : 0);
       
-      // If agreement is being signed, also update status to ready_for_disbursement
+      // If agreement is being signed, update status based on loan type
+      // Repeat loans: repeat_disbursal -> ready_to_repeat_disbursal
+      // Regular loans: disbursal -> ready_for_disbursement
       if (agreement_signed) {
+        const newStatus = isRepeatLoan ? 'ready_to_repeat_disbursal' : 'ready_for_disbursement';
         updates.push('status = ?');
-        params.push('ready_for_disbursement');
+        params.push(newStatus);
+        console.log(`[Post-Disbursal] Agreement signed - updating status from ${application.status} to ${newStatus}`);
       }
     }
     if (bank_confirm_done !== undefined && existingColumns.includes('bank_confirm_done')) {
@@ -752,6 +756,9 @@ router.post('/complete/:applicationId', requireAuth, async (req, res) => {
       });
     }
 
+    // Check if this is a repeat loan (repeat_disbursal status)
+    const isRepeatLoan = application.status === 'repeat_disbursal';
+
     // Verify all steps are completed
     const [progress] = await executeQuery(
       `SELECT 
@@ -779,19 +786,24 @@ router.post('/complete/:applicationId', requireAuth, async (req, res) => {
       });
     }
 
-    // Update status to ready_for_disbursement
+    // Update status based on loan type
+    // Repeat loans: repeat_disbursal -> ready_to_repeat_disbursal
+    // Regular loans: disbursal -> ready_for_disbursement
+    const newStatus = isRepeatLoan ? 'ready_to_repeat_disbursal' : 'ready_for_disbursement';
     await executeQuery(
       `UPDATE loan_applications 
-       SET status = 'ready_for_disbursement', updated_at = NOW() 
+       SET status = ?, updated_at = NOW() 
        WHERE id = ?`,
-      [applicationId]
+      [newStatus, applicationId]
     );
+
+    console.log(`[Post-Disbursal] Flow completed - status updated from ${application.status} to ${newStatus}`);
 
     res.json({
       success: true,
       data: {
         message: 'Post-disbursal flow completed successfully',
-        status: 'ready_for_disbursement'
+        status: newStatus
       }
     });
   } catch (error) {

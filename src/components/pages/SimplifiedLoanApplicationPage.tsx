@@ -124,17 +124,18 @@ export function SimplifiedLoanApplicationPage() {
             }
 
             // PRIORITY 2: Check for pre-disbursal
+            // NOTE: ready_to_repeat_disbursal should NOT redirect here - it should go to post-disbursal
             const preDisbursalApp = applications.find(
-              (app: any) => ['follow_up', 'ready_for_disbursement'].includes(app.status)
+              (app: any) => app.status === 'follow_up' || (app.status === 'ready_for_disbursement' && app.status !== 'ready_to_repeat_disbursal')
             );
             if (preDisbursalApp) {
               navigate('/application-under-review');
               return;
             }
 
-            // PRIORITY 3: Check for post-disbursal
+            // PRIORITY 3: Check for post-disbursal (disbursal, repeat_disbursal, ready_to_repeat_disbursal)
             const disbursalApp = applications.find(
-              (app: any) => app.status === 'disbursal'
+              (app: any) => app.status === 'disbursal' || app.status === 'repeat_disbursal' || app.status === 'ready_to_repeat_disbursal'
             );
             if (disbursalApp) {
               navigate(`/post-disbursal?applicationId=${disbursalApp.id}`);

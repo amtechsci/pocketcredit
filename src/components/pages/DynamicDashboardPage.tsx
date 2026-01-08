@@ -228,8 +228,9 @@ export function DynamicDashboardPage() {
           }
 
           // PRIORITY 2: Check for pre-disbursal statuses (follow_up, ready_for_disbursement, etc.)
+          // NOTE: ready_to_repeat_disbursal should NOT redirect here - it should go to post-disbursal
           const preDisbursalApp = applications.find(
-            (app: any) => ['follow_up', 'ready_for_disbursement'].includes(app.status)
+            (app: any) => app.status === 'follow_up' || (app.status === 'ready_for_disbursement' && app.status !== 'ready_to_repeat_disbursal')
           );
           if (preDisbursalApp) {
             // Check if it has pending documents first
@@ -275,11 +276,13 @@ export function DynamicDashboardPage() {
             }
           }
 
-          // PRIORITY 3: Check for post-disbursal (disbursal status)
+          // PRIORITY 3: Check for post-disbursal (disbursal, repeat_disbursal, ready_to_repeat_disbursal statuses)
+          // ready_to_repeat_disbursal should redirect to post-disbursal (not application-under-review)
           const disbursalApp = applications.find(
-            (app: any) => app.status === 'disbursal'
+            (app: any) => app.status === 'disbursal' || app.status === 'repeat_disbursal' || app.status === 'ready_to_repeat_disbursal'
           );
           if (disbursalApp) {
+            console.log(`🔄 Found ${disbursalApp.status} loan, redirecting to post-disbursal flow`);
             navigate(`/post-disbursal?applicationId=${disbursalApp.id}`);
             return;
           }
@@ -296,8 +299,9 @@ export function DynamicDashboardPage() {
           }
 
           // PRIORITY 5: Check for under_review or submitted status
+          // NOTE: ready_to_repeat_disbursal should NOT redirect here - it's handled in PRIORITY 3
           const underReviewApp = applications.find(
-            (app: any) => app.status === 'under_review' || app.status === 'submitted'
+            (app: any) => (app.status === 'under_review' || app.status === 'submitted') && app.status !== 'ready_to_repeat_disbursal'
           );
           if (underReviewApp) {
             navigate('/application-under-review');
@@ -384,15 +388,15 @@ export function DynamicDashboardPage() {
         );
         // Cleared loans stay on dashboard - user can apply for new loan
 
-        // Check for ready_for_disbursement status - show waiting message (admin needs to add transaction)
+        // Check for ready_for_disbursement or ready_to_repeat_disbursal status - show waiting message (admin needs to add transaction)
         const readyForDisbursementApp = uniqueApplications.find((app: any) =>
-          app.status === 'ready_for_disbursement'
+          app.status === 'ready_for_disbursement' || app.status === 'ready_to_repeat_disbursal'
         );
 
         if (readyForDisbursementApp) {
           // Don't redirect - just show the dashboard with a message
-          // The loan will appear in "Running Loans" section
-          // Once admin adds transaction, status will change to account_manager and user will see repayment schedule
+          // The loan will appear in "Applied Loans" section
+          // Once admin adds transaction, status will change to repeat_disbursal/disbursal and user will see post-disbursal flow
         }
 
         // Check for disbursal status - redirect to post-disbursal flow
@@ -433,9 +437,9 @@ export function DynamicDashboardPage() {
         }
 
         // Split applications into applied loans and running loans
-        // Applied: Pre-disbursal statuses (submitted, under_review, follow_up, ready_for_disbursement)
+        // Applied: Pre-disbursal statuses (submitted, under_review, follow_up, ready_for_disbursement, ready_to_repeat_disbursal)
         const applied = uniqueApplications.filter((app: any) =>
-          ['submitted', 'under_review', 'follow_up', 'ready_for_disbursement'].includes(app.status)
+          ['submitted', 'under_review', 'follow_up', 'ready_for_disbursement', 'ready_to_repeat_disbursal'].includes(app.status)
         );
 
         // Running loans: Only active loans with account manager (NOT cleared, NOT ready_for_disbursement)
@@ -861,11 +865,16 @@ export function DynamicDashboardPage() {
                             loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
                             loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
                             loan.status === 'ready_for_disbursement' ? 'bg-green-100 text-green-800' :
+                            loan.status === 'ready_to_repeat_disbursal' ? 'bg-green-100 text-green-800' :
+                            loan.status === 'repeat_disbursal' ? 'bg-orange-100 text-orange-800' :
                             loan.status === 'account_manager' ? 'bg-emerald-100 text-emerald-800' :
                             'bg-gray-100 text-gray-800'
                           }`}
                         >
-                          {loan.status === 'account_manager' ? 'Active' : loan.status.replace('_', ' ')}
+                          {loan.status === 'account_manager' ? 'Active' : 
+                           loan.status === 'repeat_disbursal' ? 'Repeat Disbursal' :
+                           loan.status === 'ready_to_repeat_disbursal' ? 'Ready for Repeat Disbursal' :
+                           loan.status.replace('_', ' ')}
                         </Badge>
                       </div>
 
@@ -886,6 +895,8 @@ export function DynamicDashboardPage() {
                           {loan.status === 'under_review' && 'Under review'}
                           {loan.status === 'follow_up' && 'Info required'}
                           {loan.status === 'ready_for_disbursement' && 'Ready for disbursal'}
+                          {loan.status === 'ready_to_repeat_disbursal' && 'Ready for repeat disbursal'}
+                          {loan.status === 'repeat_disbursal' && 'Repeat disbursal in progress'}
                           {loan.status === 'account_manager' && 'Loan is active'}
                         </p>
                         <Button
@@ -893,6 +904,8 @@ export function DynamicDashboardPage() {
                             console.log('View Details clicked for:', loan.id);
                             if (loan.status === 'account_manager') {
                               navigate(`/repayment-schedule?applicationId=${loan.id}`);
+                            } else if (loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal') {
+                              navigate(`/post-disbursal?applicationId=${loan.id}`);
                             } else if (loan.status === 'follow_up') {
                               // Check if documents are uploaded
                               const docStatus = loanDocumentStatus[loan.id];
@@ -950,6 +963,8 @@ export function DynamicDashboardPage() {
                         >
                           {loan.status === 'account_manager' 
                             ? 'View Loan' 
+                            : loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal'
+                              ? 'Continue'
                             : loan.status === 'follow_up' 
                               ? (loanDocumentStatus[loan.id]?.allUploaded ? 'View' : 'Upload Documents')
                               : 'View'}
@@ -1072,11 +1087,16 @@ export function DynamicDashboardPage() {
                         loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
                         loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
                         loan.status === 'ready_for_disbursement' ? 'bg-green-100 text-green-800' :
+                        loan.status === 'ready_to_repeat_disbursal' ? 'bg-green-100 text-green-800' :
+                        loan.status === 'repeat_disbursal' ? 'bg-orange-100 text-orange-800' :
                         loan.status === 'account_manager' ? 'bg-emerald-100 text-emerald-800' :
                         'bg-gray-100 text-gray-800'
                       }`}
                     >
-                      {loan.status === 'account_manager' ? 'Active' : loan.status.replace('_', ' ')}
+                      {loan.status === 'account_manager' ? 'Active' : 
+                       loan.status === 'repeat_disbursal' ? 'Repeat Disbursal' :
+                       loan.status === 'ready_to_repeat_disbursal' ? 'Ready for Repeat Disbursal' :
+                       loan.status.replace('_', ' ')}
                     </Badge>
                   </div>
 
@@ -1097,6 +1117,8 @@ export function DynamicDashboardPage() {
                       {loan.status === 'under_review' && 'Under review'}
                       {loan.status === 'follow_up' && 'Info required'}
                       {loan.status === 'ready_for_disbursement' && 'Ready for disbursal'}
+                      {loan.status === 'ready_to_repeat_disbursal' && 'Ready for repeat disbursal'}
+                      {loan.status === 'repeat_disbursal' && 'Repeat disbursal in progress'}
                       {loan.status === 'account_manager' && 'Loan is active'}
                     </p>
                     <Button
@@ -1104,6 +1126,8 @@ export function DynamicDashboardPage() {
                         console.log('View Details clicked for:', loan.id);
                         if (loan.status === 'account_manager') {
                           navigate(`/repayment-schedule?applicationId=${loan.id}`);
+                        } else if (loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal') {
+                          navigate(`/post-disbursal?applicationId=${loan.id}`);
                         } else if (loan.status === 'follow_up') {
                           navigate('/loan-application/upload-documents', {
                             state: { applicationId: loan.id }
@@ -1118,7 +1142,9 @@ export function DynamicDashboardPage() {
                       size="sm"
                       className="text-xs whitespace-nowrap w-full"
                     >
-                      {loan.status === 'account_manager' ? 'View Loan' : loan.status === 'follow_up' ? 'Upload Documents' : 'View'}
+                      {loan.status === 'account_manager' ? 'View Loan' : 
+                       loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal' ? 'Continue' :
+                       loan.status === 'follow_up' ? 'Upload Documents' : 'View'}
                     </Button>
                   </div>
                 </Card>

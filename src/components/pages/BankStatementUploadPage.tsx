@@ -48,9 +48,9 @@ export const BankStatementUploadPage = () => {
               const isSuccess = applicationsResponse.success || applicationsResponse.status === 'success';
               if (isSuccess && applicationsResponse.data?.applications) {
                 const applications = applicationsResponse.data.applications;
-                // Include ready_for_disbursement status as well
+                // Include ready_for_disbursement and repeat loan statuses as well
                 const activeApplication = applications.find((app: any) => 
-                  ['submitted', 'under_review', 'follow_up', 'disbursal', 'pending', 'in_progress', 'ready_for_disbursement'].includes(app.status)
+                  ['submitted', 'under_review', 'follow_up', 'disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal', 'pending', 'in_progress', 'ready_for_disbursement'].includes(app.status)
                 );
                 
                 if (activeApplication) {

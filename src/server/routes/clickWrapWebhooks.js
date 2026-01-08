@@ -47,21 +47,27 @@ router.post('/webhook', async (req, res) => {
     const allSigned = signersInfo && signersInfo.every((signer) => signer.status === 'SIGNED');
 
     if (allSigned) {
-      // Update agreement as signed and set status to ready_for_disbursement
+      // Determine new status based on current status
+      // Repeat loans: repeat_disbursal -> ready_to_repeat_disbursal
+      // Regular loans: disbursal -> ready_for_disbursement
+      const isRepeatLoan = application.status === 'repeat_disbursal';
+      const newStatus = isRepeatLoan ? 'ready_to_repeat_disbursal' : 'ready_for_disbursement';
+      
+      // Update agreement as signed and set status based on loan type
       // This matches the behavior when frontend manually sets agreement_signed
       await executeQuery(
         `UPDATE loan_applications 
          SET agreement_signed = 1,
-             status = 'ready_for_disbursement',
+             status = ?,
              clickwrap_signed_at = NOW(),
              clickwrap_webhook_data = ?,
              updated_at = NOW()
          WHERE id = ?`,
-        [JSON.stringify(webhookData), application.id]
+        [newStatus, JSON.stringify(webhookData), application.id]
       );
 
-      console.log('✅ Loan agreement marked as signed for application:', application.id);
-      console.log('✅ Loan status updated to ready_for_disbursement');
+      console.log(`✅ Loan agreement marked as signed for application: ${application.id}`);
+      console.log(`✅ Loan status updated from ${application.status} to ${newStatus}`);
     } else {
       // Store webhook data but don't mark as signed yet
       await executeQuery(
