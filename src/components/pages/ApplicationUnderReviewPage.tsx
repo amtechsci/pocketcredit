@@ -27,25 +27,40 @@ export const ApplicationUnderReviewPage = () => {
       // Check if user has a loan application
       const response = await apiService.getLoanApplications();
       
-      if (response.success && response.data && response.data.applications && response.data.applications.length > 0) {
-        const latestApplication = response.data.applications[0];
-        setApplicationStatus(latestApplication.status);
+      console.log('📋 ApplicationUnderReview: API response:', response);
+      
+      // Check both 'success' and 'status === success' for compatibility
+      const isSuccess = response.success === true || response.status === 'success';
+      
+      if (isSuccess && response.data && response.data.applications && response.data.applications.length > 0) {
+        const applications = response.data.applications;
+        console.log('📋 ApplicationUnderReview: All applications:', applications);
         
-        // Redirect to post-disbursal if status is in disbursal, ready_for_disbursement, repeat_disbursal, or ready_to_repeat_disbursal
+        // Find the most recent application with a post-disbursal status
         const postDisbursalStatuses = ['disbursal', 'ready_for_disbursement', 'repeat_disbursal', 'ready_to_repeat_disbursal'];
-        if (postDisbursalStatuses.includes(latestApplication.status)) {
-          console.log(`🔄 Application status is ${latestApplication.status}, redirecting to post-disbursal`);
-          navigate(`/post-disbursal?applicationId=${latestApplication.id}`);
+        const postDisbursalApp = applications.find((app: any) => postDisbursalStatuses.includes(app.status));
+        
+        if (postDisbursalApp) {
+          console.log(`🔄 ApplicationUnderReview: Found post-disbursal application with status ${postDisbursalApp.status}, redirecting to post-disbursal`);
+          setApplicationStatus(postDisbursalApp.status);
+          navigate(`/post-disbursal?applicationId=${postDisbursalApp.id}`, { replace: true });
           return;
         }
         
+        // If no post-disbursal app, check the latest application for other statuses
+        const latestApplication = applications[0];
+        console.log('📋 ApplicationUnderReview: Latest application:', latestApplication);
+        setApplicationStatus(latestApplication.status);
+        
         // If application is approved, redirect to dashboard
         if (latestApplication.status === 'approved') {
-          navigate('/dashboard');
+          navigate('/dashboard', { replace: true });
         }
+      } else {
+        console.log('📋 ApplicationUnderReview: No applications found or invalid response structure');
       }
     } catch (error) {
-      console.error('Error checking application status:', error);
+      console.error('❌ ApplicationUnderReview: Error checking application status:', error);
     } finally {
       setLoading(false);
     }
