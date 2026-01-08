@@ -31,6 +31,14 @@ export const ApplicationUnderReviewPage = () => {
         const latestApplication = response.data.applications[0];
         setApplicationStatus(latestApplication.status);
         
+        // Redirect to post-disbursal if status is in disbursal, ready_for_disbursement, repeat_disbursal, or ready_to_repeat_disbursal
+        const postDisbursalStatuses = ['disbursal', 'ready_for_disbursement', 'repeat_disbursal', 'ready_to_repeat_disbursal'];
+        if (postDisbursalStatuses.includes(latestApplication.status)) {
+          console.log(`🔄 Application status is ${latestApplication.status}, redirecting to post-disbursal`);
+          navigate(`/post-disbursal?applicationId=${latestApplication.id}`);
+          return;
+        }
+        
         // If application is approved, redirect to dashboard
         if (latestApplication.status === 'approved') {
           navigate('/dashboard');
