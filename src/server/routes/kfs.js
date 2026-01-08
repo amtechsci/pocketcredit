@@ -794,10 +794,65 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         if (emiCount > 1) {
           const interestRatePerDay = loanValues.interest?.rate_per_day || planData.interest_percent_per_day || (interest / (principal * days));
           
-          // Generate all EMI dates - always recalculate from processed_at for processed loans
-          // (stored processed_due_date may have been calculated from disbursed_at, so we recalculate)
+          // Generate all EMI dates for APR calculation
+          // PRIORITY 1: Use processed_due_date if available (source of truth)
+          // PRIORITY 2: Use emi_schedule if available
+          // PRIORITY 3: Recalculate only if neither exists
           let allEmiDates = [];
-          if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
+          
+          // PRIORITY 1: Check processed_due_date first
+          if (loan.processed_due_date) {
+            try {
+              const parsedDueDate = typeof loan.processed_due_date === 'string' 
+                ? JSON.parse(loan.processed_due_date) 
+                : loan.processed_due_date;
+              
+              if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
+                allEmiDates = parsedDueDate.map(date => {
+                  if (typeof date === 'string') {
+                    return date.split('T')[0].split(' ')[0];
+                  }
+                  return date;
+                });
+                console.log(`📅 [User APR] Using processed_due_date for EMI dates: ${allEmiDates.join(', ')}`);
+              } else if (typeof parsedDueDate === 'string') {
+                allEmiDates = [parsedDueDate.split('T')[0].split(' ')[0]];
+                console.log(`📅 [User APR] Using processed_due_date for single payment: ${allEmiDates[0]}`);
+              }
+            } catch (e) {
+              console.error('❌ [User APR] Error parsing processed_due_date:', e);
+            }
+          }
+          
+          // PRIORITY 2: Check emi_schedule if processed_due_date not available
+          if (allEmiDates.length === 0 && loan.emi_schedule) {
+            try {
+              const parsedEmiSchedule = typeof loan.emi_schedule === 'string' 
+                ? JSON.parse(loan.emi_schedule) 
+                : loan.emi_schedule;
+              
+              if (Array.isArray(parsedEmiSchedule) && parsedEmiSchedule.length > 0) {
+                allEmiDates = parsedEmiSchedule
+                  .map(emi => emi.due_date)
+                  .filter(date => date)
+                  .map(date => {
+                    if (typeof date === 'string') {
+                      return date.split('T')[0].split(' ')[0];
+                    }
+                    return date;
+                  });
+                
+                if (allEmiDates.length > 0) {
+                  console.log(`📅 [User APR] Using emi_schedule for EMI dates: ${allEmiDates.join(', ')}`);
+                }
+              }
+            } catch (e) {
+              console.error('❌ [User APR] Error parsing emi_schedule:', e);
+            }
+          }
+          
+          // PRIORITY 3: Recalculate only if neither processed_due_date nor emi_schedule exists
+          if (allEmiDates.length === 0 && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
             const salaryDate = parseInt(userData.salary_date);
             if (salaryDate >= 1 && salaryDate <= 31) {
               // For processed loans, use processed_at_date (from SQL DATE()) to avoid timezone issues
@@ -906,12 +961,21 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             interestForAPR = 0;
             
             for (let i = 0; i < emiCount; i++) {
-              // allEmiDates contains Date objects, ensure we work with Date objects
-              const emiDate = allEmiDates[i] instanceof Date ? allEmiDates[i] : new Date(allEmiDates[i]);
-              emiDate.setHours(0, 0, 0, 0);
-              
+              // allEmiDates may contain Date objects or date strings (YYYY-MM-DD)
               // Convert to string for accurate day calculation (no timezone issues)
-              const emiDateStr = formatDateToString(emiDate) || parseDateToString(emiDate);
+              let emiDateStr;
+              if (typeof allEmiDates[i] === 'string') {
+                // Already a string, use directly
+                emiDateStr = allEmiDates[i].split('T')[0].split(' ')[0];
+              } else if (allEmiDates[i] instanceof Date) {
+                // Date object, convert to string
+                emiDateStr = formatDateToString(allEmiDates[i]) || parseDateToString(allEmiDates[i]);
+              } else {
+                // Try to parse as date
+                const emiDate = new Date(allEmiDates[i]);
+                emiDate.setHours(0, 0, 0, 0);
+                emiDateStr = formatDateToString(emiDate) || parseDateToString(emiDate);
+              }
               
           // Calculate days for this EMI period using string-based calculation
           // First period (disbursement to first EMI): inclusive
@@ -923,8 +987,19 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             previousDateStr = baseDateStr || getTodayString();
               } else {
                 // Start from day AFTER previous EMI date
-            const prevEmiDate = allEmiDates[i - 1] instanceof Date ? allEmiDates[i - 1] : new Date(allEmiDates[i - 1]);
-            const prevEmiDateStr = formatDateToString(prevEmiDate) || parseDateToString(prevEmiDate);
+                let prevEmiDateStr;
+                if (typeof allEmiDates[i - 1] === 'string') {
+                  // Already a string, use directly
+                  prevEmiDateStr = allEmiDates[i - 1].split('T')[0].split(' ')[0];
+                } else if (allEmiDates[i - 1] instanceof Date) {
+                  // Date object, convert to string
+                  prevEmiDateStr = formatDateToString(allEmiDates[i - 1]) || parseDateToString(allEmiDates[i - 1]);
+                } else {
+                  // Try to parse as date
+                  const prevEmiDate = new Date(allEmiDates[i - 1]);
+                  prevEmiDateStr = formatDateToString(prevEmiDate) || parseDateToString(prevEmiDate);
+                }
+                
                 if (prevEmiDateStr) {
                   // Parse date string and add 1 day
                   const [year, month, day] = prevEmiDateStr.split('-').map(Number);
