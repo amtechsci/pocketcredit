@@ -1118,12 +1118,11 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         // PRIORITY: For processed loans, use processed_due_date if available (it's the source of truth)
         let allEmiDates = [];
         
-        // PRIORITY 1: Check if loan is processed and has processed_due_date
+        // PRIORITY 1: Check if loan has processed_due_date
         // ALWAYS use processed_due_date if it exists (it's the source of truth)
         if (loan.processed_due_date) {
           try {
             console.log(`📅 [User] Attempting to use processed_due_date: ${loan.processed_due_date}`);
-            // processed_due_date can be JSON array for multi-EMI or single date string
             const parsedDueDate = typeof loan.processed_due_date === 'string' 
               ? JSON.parse(loan.processed_due_date) 
               : loan.processed_due_date;
@@ -1131,9 +1130,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             console.log(`📅 [User] Parsed processed_due_date:`, parsedDueDate);
             
             if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
-              // Multi-EMI: Use dates from processed_due_date directly
               allEmiDates = parsedDueDate.map(date => {
-                // Ensure date is in YYYY-MM-DD format
                 if (typeof date === 'string') {
                   return date.split('T')[0].split(' ')[0];
                 }
@@ -1141,94 +1138,76 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               });
               console.log(`✅ [User] Using processed_due_date for EMI dates: ${allEmiDates.join(', ')}`);
             } else if (typeof parsedDueDate === 'string') {
-              // Single payment: Use single date
               allEmiDates = [parsedDueDate.split('T')[0].split(' ')[0]];
               console.log(`✅ [User] Using processed_due_date for single payment: ${allEmiDates[0]}`);
             }
           } catch (e) {
             console.error('❌ [User] Error parsing processed_due_date:', e, loan.processed_due_date);
-            // Fall through to emi_schedule or calculation below
           }
         }
         
         // PRIORITY 2: If processed_due_date not available, try emi_schedule
         if (allEmiDates.length === 0 && loan.emi_schedule) {
           try {
-            console.log(`📅 Attempting to use emi_schedule: ${loan.emi_schedule}`);
+            console.log(`📅 [User] Attempting to use emi_schedule: ${loan.emi_schedule}`);
             const parsedEmiSchedule = typeof loan.emi_schedule === 'string' 
               ? JSON.parse(loan.emi_schedule) 
               : loan.emi_schedule;
             
             if (Array.isArray(parsedEmiSchedule) && parsedEmiSchedule.length > 0) {
-              // Extract due dates from emi_schedule
               allEmiDates = parsedEmiSchedule
                 .map(emi => emi.due_date)
-                .filter(date => date) // Remove null/undefined
+                .filter(date => date)
                 .map(date => {
-                  // Ensure date is in YYYY-MM-DD format
                   if (typeof date === 'string') {
                     return date.split('T')[0].split(' ')[0];
                   }
                   return date;
                 });
-              
+            
               if (allEmiDates.length > 0) {
-                console.log(`✅ Using emi_schedule for EMI dates: ${allEmiDates.join(', ')}`);
+                console.log(`✅ [User] Using emi_schedule for EMI dates: ${allEmiDates.join(', ')}`);
               }
             }
           } catch (e) {
-            console.error('❌ Error parsing emi_schedule:', e, loan.emi_schedule);
-            // Fall through to calculation below
+            console.error('❌ [User] Error parsing emi_schedule:', e, loan.emi_schedule);
           }
         }
         
-        // If allEmiDates is still empty, calculate from plan data
+        // PRIORITY 3: If allEmiDates is still empty, calculate from plan data
         if (allEmiDates.length === 0 && isMultiEmi && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
           const salaryDate = parseInt(userData.salary_date);
-          console.log(`📅 EMI Calculation Debug - salaryDate: ${salaryDate}, processed_at: ${loan.processed_at}, disbursed_at: ${loan.disbursed_at}`);
           if (salaryDate >= 1 && salaryDate <= 31) {
-            // For processed loans, use processed_at_date (from SQL DATE()) to avoid timezone issues
-            // For non-processed loans, use disbursed_at_date
+            // For processed loans, use processed_at as base date (per rulebook)
+            // For non-processed loans, use disbursed_at
             let baseDate;
-            if (loan.processed_at_date) {
-              // Use processed_at_date from SQL DATE() function (already extracted, no timezone issues)
+            if (loan.processed_at) {
+              // Extract date portion only to avoid timezone issues
+              // Handle both string and Date object formats
               let processedDateStr;
-              if (typeof loan.processed_at_date === 'string') {
-                processedDateStr = loan.processed_at_date;
-              } else if (loan.processed_at_date instanceof Date) {
-                // MySQL DATE() returns as Date object - extract UTC components to avoid timezone shift
-                const year = loan.processed_at_date.getUTCFullYear();
-                const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
-                const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
-                processedDateStr = `${year}-${month}-${day}`;
+              if (typeof loan.processed_at === 'string') {
+                // Handle MySQL datetime format: "2025-12-25 23:19:50" or ISO format: "2025-12-25T23:19:50.000Z"
+                if (loan.processed_at.includes('T')) {
+                  processedDateStr = loan.processed_at.split('T')[0];
+                } else if (loan.processed_at.includes(' ')) {
+                  processedDateStr = loan.processed_at.split(' ')[0];
+                } else {
+                  processedDateStr = loan.processed_at.substring(0, 10);
+                }
+              } else if (loan.processed_at instanceof Date) {
+                processedDateStr = loan.processed_at.toISOString().split('T')[0];
               } else {
-                // Fallback: parse from processed_at
-                processedDateStr = parseDateToString(loan.processed_at) || getTodayString();
+                // Fallback: try to convert to Date first
+                const processedDate = new Date(loan.processed_at);
+                processedDateStr = processedDate.toISOString().split('T')[0];
               }
               // Parse date components directly to avoid timezone issues
+              // processedDateStr is in format "YYYY-MM-DD"
               const [year, month, day] = processedDateStr.split('-').map(Number);
               baseDate = new Date(year, month - 1, day); // month is 0-indexed
-              console.log(`📅 [User] Using processed_at_date as base date for EMI calculation: ${processedDateStr} (parsed as ${formatDateLocal(baseDate)})`);
-            } else if (loan.disbursed_at_date) {
-              // Use disbursed_at_date from SQL DATE() function
-              let disbursedDateStr;
-              if (typeof loan.disbursed_at_date === 'string') {
-                disbursedDateStr = loan.disbursed_at_date;
-              } else if (loan.disbursed_at_date instanceof Date) {
-                const year = loan.disbursed_at_date.getUTCFullYear();
-                const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
-                const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
-                disbursedDateStr = `${year}-${month}-${day}`;
-              } else {
-                disbursedDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
-              }
-              const [year, month, day] = disbursedDateStr.split('-').map(Number);
-              baseDate = new Date(year, month - 1, day);
-              console.log(`📅 [User] Using disbursed_at_date as base date: ${disbursedDateStr} (parsed as ${formatDateLocal(baseDate)})`);
+              console.log(`📅 [User] Using processed_at as base date for EMI calculation: ${processedDateStr}`);
             } else {
-              // Fallback: use today
-              baseDate = new Date();
-              console.log(`📅 [User] Using today as base date: ${formatDateLocal(baseDate)}`);
+              baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
             }
             baseDate.setHours(0, 0, 0, 0);
             let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
@@ -1247,9 +1226,9 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
               allEmiDates.push(formatDateLocal(emiDate));
             }
-            console.log(`📅 Generated ${allEmiDates.length} EMI dates: ${allEmiDates.join(', ')}`);
-          } else {
-            console.log(`⚠️ Invalid salary date: ${salaryDate}`);
+            
+            // Debug: Log all generated EMI dates for repayment schedule
+            console.log('📅 [User] Repayment Schedule - All EMI Dates:', allEmiDates);
           }
         } else if (allEmiDates.length === 0 && isMultiEmi) {
           // For non-salary date Multi-EMI, calculate based on frequency
