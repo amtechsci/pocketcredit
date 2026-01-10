@@ -121,8 +121,10 @@ function checkExtensionEligibility(loan, currentDate = null, emiIndex = null) {
   const daysUntilDue = Math.ceil((dueDate.getTime() - currentDateObj.getTime()) / (1000 * 60 * 60 * 24));
 
   // Extension window: D-5 to D+15
-  const windowStart = -EXTENSION_WINDOW_BEFORE; // 5 days before
-  const windowEnd = EXTENSION_WINDOW_AFTER; // 15 days after
+  // D-5 = 5 days BEFORE due date = +5 days until due (positive = future)
+  // D+15 = 15 days AFTER due date = -15 days until due (negative = overdue)
+  const windowStart = -EXTENSION_WINDOW_AFTER; // -15 (15 days after due = overdue)
+  const windowEnd = EXTENSION_WINDOW_BEFORE; // +5 (5 days before due = future)
 
   const isWithinWindow = daysUntilDue >= windowStart && daysUntilDue <= windowEnd;
 

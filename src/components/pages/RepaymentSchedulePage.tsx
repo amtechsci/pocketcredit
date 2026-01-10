@@ -796,11 +796,26 @@ export const RepaymentSchedulePage = () => {
               dpd,
               isWithinDpdWindow,
               isBackendEligible,
+              hasPendingPayment,
               canShowExtension,
               extensionEligibility,
+              extensionStatus: loanData?.extension_status,
+              extensionCount: loanData?.extension_count,
               today: today.toISOString().split('T')[0],
               dueDateStr: dueDateObj.toISOString().split('T')[0]
             });
+            
+            // If button is not showing, log the reason
+            if (!canShowExtension) {
+              console.warn('⚠️ Extension button NOT showing because:');
+              if (!isWithinDpdWindow) {
+                console.warn('  - Outside DPD window (current DPD:', dpd, ', need -5 to +15)');
+              }
+              if (!isBackendEligible && !hasPendingPayment) {
+                console.warn('  - Backend eligibility check failed');
+                console.warn('  - extensionEligibility:', extensionEligibility);
+              }
+            }
           }
           
           return (
@@ -1378,11 +1393,26 @@ export const RepaymentSchedulePage = () => {
               dpd,
               isWithinDpdWindow,
               isBackendEligible,
+              hasPendingPayment,
               canShowExtension,
               extensionEligibility,
+              extensionStatus: loanData?.extension_status,
+              extensionCount: loanData?.extension_count,
               today: today.toISOString().split('T')[0],
               dueDate: firstEmiDate.toISOString().split('T')[0]
             });
+            
+            // If button is not showing, log the reason
+            if (!canShowExtension) {
+              console.warn('⚠️ Extension button NOT showing because:');
+              if (!isWithinDpdWindow) {
+                console.warn('  - Outside DPD window (current DPD:', dpd, ', need -5 to +15)');
+              }
+              if (!isBackendEligible && !hasPendingPayment) {
+                console.warn('  - Backend eligibility check failed');
+                console.warn('  - extensionEligibility:', extensionEligibility);
+              }
+            }
           }
           
           return (
