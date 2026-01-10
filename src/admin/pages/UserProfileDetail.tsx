@@ -809,6 +809,57 @@ export function UserProfileDetail() {
     }
   }, [userData, showContactModal]);
 
+  // Auto-update disbursal amount when loan calculation is fetched for loan disbursement transactions
+  useEffect(() => {
+    if (transactionForm.transactionType === 'loan_disbursement' && transactionForm.loanApplicationId) {
+      const loanId = parseInt(transactionForm.loanApplicationId);
+      if (loanId && !isNaN(loanId)) {
+        // Check if loan has already been disbursed (to avoid overwriting stored values)
+        // For repeat_disbursal loans, ALWAYS recalculate (don't use stored disbursal_amount from previous disbursal)
+        const loan = getArray('loans')?.find((l: any) => {
+          const lId = l.id || l.loanId;
+          return lId && (lId.toString() === loanId.toString() || parseInt(lId.toString()) === loanId);
+        });
+        const isRepeatDisbursal = loan?.status === 'repeat_disbursal' || loan?.status === 'repeat_ready_for_disbursement';
+        const isFinalStatus = (loan?.status === 'account_manager' || loan?.status === 'cleared') && !isRepeatDisbursal;
+        const isAlreadyDisbursed = (loan?.disbursed_at && isFinalStatus) || isFinalStatus;
+        const loanAmount = loan?.loan_amount || loan?.amount || loan?.principalAmount || 0;
+        const storedDisbursalAmount = loan?.disbursal_amount || loan?.disbursalAmount;
+        
+        // If calculation is available, use it to update the amount
+        if (loanCalculations[loanId]?.disbursal?.amount !== undefined) {
+          const disbursalAmount = loanCalculations[loanId].disbursal.amount;
+          const currentAmount = parseFloat(transactionForm.amount || '0');
+          
+          console.log(`🔍 [Auto-update Amount] Loan #${loanId}: currentAmount=₹${currentAmount}, disbursalAmount=₹${disbursalAmount}, loanAmount=₹${loanAmount}, storedDisbursalAmount=₹${storedDisbursalAmount}, isAlreadyDisbursed=${isAlreadyDisbursed}`);
+          
+          // For loans not yet disbursed OR repeat_disbursal loans, always update if:
+          // 1. Amount doesn't match calculated disbursal amount, OR
+          // 2. Current amount matches stored disbursal amount (which might be wrong for repeat_disbursal), OR
+          // 3. Current amount matches loan_amount (temporary placeholder), OR
+          // 4. It's a repeat_disbursal loan (always update these)
+          if (!isAlreadyDisbursed || isRepeatDisbursal) {
+            const shouldUpdate = 
+              isRepeatDisbursal || // Always update repeat_disbursal loans
+              Math.abs(currentAmount - disbursalAmount) > 0.01 || // Amount doesn't match
+              (storedDisbursalAmount && Math.abs(currentAmount - storedDisbursalAmount) < 0.01) || // Using stored (wrong) value
+              (loanAmount > 0 && Math.abs(currentAmount - loanAmount) < 0.01); // Using loan_amount placeholder
+            
+            if (shouldUpdate) {
+              setTransactionForm(prev => ({ ...prev, amount: disbursalAmount.toString() }));
+              console.log(`✅ Auto-updated disbursal amount for loan #${loanId} (status: ${loan?.status}, isRepeatDisbursal: ${isRepeatDisbursal}): ₹${currentAmount} → ₹${disbursalAmount}`);
+            }
+          }
+        } else if ((!isAlreadyDisbursed || isRepeatDisbursal) && !calculationsLoading[loanId]) {
+          // Calculation not available yet and not loading, fetch it
+          // Always fetch for repeat_disbursal loans (even if already disbursed)
+          console.log(`📊 [Auto-update Amount] Fetching loan calculation for loan #${loanId} (status: ${loan?.status}, isRepeatDisbursal: ${isRepeatDisbursal}) to get correct disbursal amount`);
+          fetchLoanCalculation(loanId).catch(err => console.error('Error fetching loan calculation:', err));
+        }
+      }
+    }
+  }, [transactionForm.transactionType, transactionForm.loanApplicationId, loanCalculations, calculationsLoading]);
+
   // Fetch bank statement when tab becomes active
   useEffect(() => {
     if (activeTab === 'statement-verification' && params.userId && !bankStatement) {
@@ -4500,11 +4551,15 @@ export function UserProfileDetail() {
 
     try {
       const response = await adminApiService.getLoanCalculation(loanId);
-      if (response.success && response.data) {
+      console.log(`📊 [Fetch Loan Calculation] Response for loan #${loanId}:`, response);
+      if ((response.success || response.status === 'success') && response.data) {
         setLoanCalculations(prev => ({ ...prev, [loanId]: response.data }));
+        console.log(`✅ [Fetch Loan Calculation] Stored calculation for loan #${loanId}, disbursal amount: ₹${response.data?.disbursal?.amount || 'N/A'}`);
+      } else {
+        console.warn(`⚠️ [Fetch Loan Calculation] Invalid response for loan #${loanId}:`, response);
       }
     } catch (error) {
-      console.error(`Error fetching calculation for loan ${loanId}:`, error);
+      console.error(`❌ Error fetching calculation for loan ${loanId}:`, error);
     } finally {
       setCalculationsLoading(prev => ({ ...prev, [loanId]: false }));
     }
@@ -8718,8 +8773,40 @@ export function UserProfileDetail() {
                       if (transactionForm.transactionType === 'loan_disbursement' && appId) {
                         const loan = getArray('loans')?.find((l: any) => l.id.toString() === appId || l.loanId?.toString() === appId);
                         if (loan) {
-                          // Use disbursal_amount if available, otherwise fall back to full amount
-                          amount = loan.disbursal_amount || loan.disbursalAmount || loan.amount || loan.loan_amount || loan.principalAmount;
+                          // Check if loan is in a status that requires recalculation
+                          // For repeat_disbursal loans, ALWAYS recalculate (don't use stored disbursal_amount from previous disbursal)
+                          const isRepeatDisbursal = loan.status === 'repeat_disbursal' || loan.status === 'repeat_ready_for_disbursement';
+                          // Check if loan is already in final status (account_manager/cleared) and not a repeat disbursal
+                          const isFinalStatus = (loan.status === 'account_manager' || loan.status === 'cleared') && !isRepeatDisbursal;
+                          const isAlreadyDisbursed = (loan.disbursed_at && isFinalStatus) || isFinalStatus;
+                          
+                          if (isAlreadyDisbursed && !isRepeatDisbursal) {
+                            // For already disbursed loans in final status (and not repeat disbursal), use the stored disbursal_amount
+                            amount = loan.disbursal_amount || loan.disbursalAmount;
+                            console.log(`📋 [onChange] Using stored disbursal_amount for final status loan #${loan.id || loan.loanId}: ₹${amount}`);
+                          } else {
+                            // For loans not yet disbursed OR repeat_disbursal loans, NEVER use stored disbursal_amount (might be from old loan)
+                            // Always fetch calculation to get correct disbursal amount based on current loan_amount
+                            const loanId = parseInt(appId);
+                            if (loanId) {
+                              // Check if calculation is already cached
+                              if (loanCalculations[loanId]?.disbursal?.amount !== undefined) {
+                                // Use cached calculation immediately
+                                amount = loanCalculations[loanId].disbursal.amount;
+                                console.log(`✅ [onChange] Using cached calculation for loan #${loanId} (status: ${loan.status}): ₹${amount}`);
+                              } else {
+                                // Don't use stored disbursal_amount - it might be wrong for repeat_disbursal loans!
+                                // Use loan_amount as temporary placeholder (will be updated by useEffect when calculation arrives)
+                                amount = loan.loan_amount || loan.amount || loan.principalAmount || '';
+                                console.log(`📊 [onChange] Loan #${loanId} (status: ${loan.status}) - using loan_amount (₹${amount}) as placeholder, fetching calculation...`);
+                                // Trigger calculation fetch immediately to get correct disbursal amount
+                                fetchLoanCalculation(loanId).catch(err => console.error('Error fetching loan calculation:', err));
+                              }
+                            } else {
+                              // Fallback: use loan_amount (never use stored disbursal_amount for non-final loans)
+                              amount = loan.loan_amount || loan.amount || loan.principalAmount || '';
+                            }
+                          }
                         }
                       }
                       setTransactionForm({ ...transactionForm, loanApplicationId: appId, amount: amount ? amount.toString() : '' });

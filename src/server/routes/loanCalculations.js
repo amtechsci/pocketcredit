@@ -801,8 +801,20 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
         
         // Update interest and total repayable (always recalculate for accuracy)
         calculation.interest.amount = totalInterest;
+        
+        // Ensure calculation.total exists before setting properties
+        if (!calculation.total) {
+          calculation.total = {};
+        }
+        
         calculation.total.repayable = principal + totalInterest + calculation.totals.repayableFee + calculation.totals.repayableFeeGST;
         calculation.total.breakdown = `Principal (₹${principal.toFixed(2)}) + Interest (₹${totalInterest.toFixed(2)}) + Repayable Fees (₹${(calculation.totals.repayableFee + calculation.totals.repayableFeeGST).toFixed(2)}) = ₹${calculation.total.repayable.toFixed(2)}`;
+        
+        // Also set total_amount and total_repayable for compatibility
+        calculation.total_amount = calculation.total.repayable;
+        calculation.total_repayable = calculation.total.repayable;
+        
+        console.log(`✅ [Loan Calculations] Set total.repayable: ₹${calculation.total.repayable} (Principal: ₹${principal}, Interest: ₹${totalInterest}, Fees: ₹${calculation.totals.repayableFee}, GST: ₹${calculation.totals.repayableFeeGST})`);
         
         console.log(`✅ [Loan Calculations] Recalculated EMI amounts with correct post service fee + GST for all ${schedule.length} EMIs`);
         
@@ -863,34 +875,111 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
         
         calculation.repayment.schedule = schedule;
         
-        // Update stored emi_schedule in database for account_manager loans to fix incorrect stored values
+        // Update stored values in database for account_manager AND repeat_disbursal loans to fix incorrect stored values
         // This ensures existing loans with wrong stored values get corrected automatically
-        if (isAccountManager && schedule.length > 0 && emiCount > 1) {
+        // CRITICAL: Update ALL stored calculation values (emi_schedule, fees_breakdown, disbursal_amount) based on current loan_amount
+        const isRepeatDisbursal = loan.status === 'repeat_disbursal' || loan.status === 'repeat_ready_for_disbursement';
+        if (isAccountManager || isRepeatDisbursal) {
           try {
-            // Convert recalculated schedule to stored format (preserving status from database if available)
-            const updatedEmiSchedule = schedule.map((instalment) => ({
-              emi_number: instalment.emi_number,
-              instalment_no: instalment.instalment_no,
-              due_date: instalment.due_date,
-              emi_amount: instalment.instalment_amount,
-              status: instalment.status || 'pending'
+            // Recalculate fees_breakdown with correct values based on current loan_amount
+            // Combine deduct_from_disbursal and add_to_total fees
+            const allFees = [
+              ...(calculation.fees?.deductFromDisbursal || []),
+              ...(calculation.fees?.addToTotal || [])
+            ];
+            const updatedFeesBreakdown = allFees.map(fee => ({
+              fee_name: fee.fee_name,
+              fee_amount: fee.fee_amount,
+              gst_amount: fee.gst_amount,
+              fee_percent: fee.fee_percent,
+              total_with_gst: fee.total_with_gst
             }));
             
-            // Update emi_schedule in database
+            // Prepare update values
+            const updateFields = [];
+            const updateValues = [];
+            
+            // For multi-EMI loans, update emi_schedule
+            if (schedule && schedule.length > 0) {
+              const updatedEmiSchedule = schedule.map((instalment) => ({
+                emi_number: instalment.emi_number,
+                instalment_no: instalment.instalment_no,
+                due_date: instalment.due_date,
+                emi_amount: instalment.instalment_amount,
+                status: instalment.status || 'pending'
+              }));
+              updateFields.push('emi_schedule = ?');
+              updateValues.push(JSON.stringify(updatedEmiSchedule));
+            }
+            
+            // Always update fees_breakdown, disbursal_amount, and total_repayable
+            updateFields.push('fees_breakdown = ?');
+            updateFields.push('disbursal_amount = ?');
+            updateFields.push('total_repayable = ?');
+            updateValues.push(JSON.stringify(updatedFeesBreakdown));
+            updateValues.push(calculation.disbursal.amount);
+            updateValues.push(calculation.total.repayable);
+            updateValues.push(loanId); // For WHERE clause
+            
+            // Update stored calculation values in database
             const { executeQuery: execQuery } = require('../config/database');
             await execQuery(
-              `UPDATE loan_applications SET emi_schedule = ?, updated_at = NOW() WHERE id = ?`,
-              [JSON.stringify(updatedEmiSchedule), loanId]
+              `UPDATE loan_applications 
+               SET ${updateFields.join(', ')}, updated_at = NOW() 
+               WHERE id = ?`,
+              updateValues
             );
             
-            console.log(`✅ [Loan Calculations] Updated stored emi_schedule in database for loan #${loanId} with correct amounts (preserved payment status)`);
+            console.log(`✅ [Loan Calculations] Updated stored values in database for loan #${loanId} (status: ${loan.status}):`);
+            if (schedule && schedule.length > 0) {
+              console.log(`   - emi_schedule: ${schedule.length} EMIs with correct amounts`);
+            }
+            console.log(`   - fees_breakdown: ${updatedFeesBreakdown.length} fees recalculated`);
+            console.log(`   - disbursal_amount: ₹${calculation.disbursal.amount} (was: ₹${loan.disbursal_amount || 'N/A'})`);
+            console.log(`   - total_repayable: ₹${calculation.total.repayable} (was: ₹${loan.total_repayable || 'N/A'})`);
+            if (isRepeatDisbursal) {
+              console.log(`   - ⚠️ NOTE: This is a repeat_disbursal loan - stored values updated for next disbursal`);
+            }
           } catch (updateError) {
             // Don't fail the request if update fails, just log the error
-            console.error(`⚠️ [Loan Calculations] Failed to update stored emi_schedule for loan #${loanId}:`, updateError);
+            console.error(`⚠️ [Loan Calculations] Failed to update stored values for loan #${loanId}:`, updateError);
           }
         }
       }
     }
+    
+    // Ensure calculation.total exists and is set correctly (fallback for single payment loans or edge cases)
+    if (!calculation.total) {
+      calculation.total = {};
+    }
+    
+    // Ensure total.repayable is always set (fallback for single payment loans or edge cases)
+    if (!calculation.total || !calculation.total.repayable || calculation.total.repayable === 0) {
+      if (!calculation.total) {
+        calculation.total = {};
+      }
+      
+      const principal = calculation.principal || parseFloat(loan.loan_amount || 0);
+      const interest = calculation.interest?.amount || 0;
+      const repayableFee = calculation.totals?.repayableFee || 0;
+      const repayableFeeGST = calculation.totals?.repayableFeeGST || 0;
+      
+      calculation.total.repayable = principal + interest + repayableFee + repayableFeeGST;
+      calculation.total.breakdown = `Principal (₹${principal.toFixed(2)}) + Interest (₹${interest.toFixed(2)}) + Repayable Fees (₹${(repayableFee + repayableFeeGST).toFixed(2)}) = ₹${calculation.total.repayable.toFixed(2)}`;
+      
+      console.log(`✅ [Loan Calculations] Set calculation.total.repayable fallback: ₹${calculation.total.repayable} (Principal: ₹${principal}, Interest: ₹${interest}, Fees: ₹${repayableFee}, GST: ₹${repayableFeeGST})`);
+    }
+    
+    // Ensure compatibility fields are always set
+    if (!calculation.total_amount || calculation.total_amount === 0) {
+      calculation.total_amount = calculation.total.repayable;
+    }
+    if (!calculation.total_repayable || calculation.total_repayable === 0) {
+      calculation.total_repayable = calculation.total.repayable;
+    }
+    
+    // Debug: Log final total values
+    console.log(`📊 [Loan Calculations] Final total values for loan #${loanId}: total.repayable=₹${calculation.total?.repayable}, total_amount=₹${calculation.total_amount}, total_repayable=₹${calculation.total_repayable}`);
     
     // Calculate exhausted days and interest till today for preclose calculation
     // PRIORITY: last_extension_date + next day (if extension exists)
