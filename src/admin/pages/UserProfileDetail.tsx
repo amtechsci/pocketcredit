@@ -6207,7 +6207,48 @@ export function UserProfileDetail() {
       );
     }
 
-    const { credit_score, is_eligible, rejection_reasons, full_report, pdf_url, checked_at, request_id, client_ref_num } = creditAnalyticsData;
+    const { credit_score, is_eligible, rejection_reasons, full_report, pdf_url, checked_at, request_id, client_ref_num, result_code, api_message } = creditAnalyticsData;
+
+    // Check if result_code is 102 (mobile number mismatch)
+    // Check both from database field and from full_report
+    const actualResultCode = result_code || full_report?.result_code;
+    const actualMessage = api_message || full_report?.message;
+
+    // If result_code is 102, show mobile number mismatch error
+    if (actualResultCode === 102 && actualMessage) {
+      // Extract masked mobile number from message (e.g., [83XXXXX247])
+      const maskedMobileMatch = actualMessage.match(/\[([^\]]+)\]/);
+      const maskedMobile = maskedMobileMatch ? maskedMobileMatch[1] : null;
+      
+      // Get user's actual mobile number
+      const userMobile = userData?.mobile || userData?.phone || 'N/A';
+
+      return (
+        <div className="bg-white rounded-lg border border-red-200 p-8">
+          <div className="flex items-center gap-3 mb-6">
+            <AlertCircle className="w-8 h-8 text-red-600" />
+            <h3 className="text-xl font-semibold text-red-900">Mobile Number Mismatch</h3>
+          </div>
+          
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6 mb-4">
+            <p className="text-base font-semibold text-red-900 mb-3">
+              mobile number did not match
+            </p>
+            <p className="text-sm text-gray-800">
+              mobile number {maskedMobile ? `[${maskedMobile}]` : '[N/A]'}, received number ({userMobile})
+            </p>
+          </div>
+
+          {request_id && (
+            <div className="mt-6 pt-4 border-t border-gray-200 text-xs text-gray-500">
+              <p><strong>Request ID:</strong> {request_id}</p>
+              {client_ref_num && <p><strong>Client Ref:</strong> {client_ref_num}</p>}
+              {checked_at && <p><strong>Report Date:</strong> {new Date(checked_at).toLocaleDateString('en-GB')}</p>}
+            </div>
+          )}
+        </div>
+      );
+    }
 
     // Parse the full report to extract detailed information
     const reportData = full_report?.result?.result_json?.INProfileResponse || {};

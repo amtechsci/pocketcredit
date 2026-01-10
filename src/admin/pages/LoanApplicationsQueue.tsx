@@ -124,9 +124,9 @@ export function LoanApplicationsQueue() {
   }, []);
 
   const handleSelectApplication = useCallback((applicationId: string, status: string) => {
-    // Only allow selection of ready_for_disbursement loans
-    if (status !== 'ready_for_disbursement') {
-      toast.warning('Only loans with "Ready for Disbursement" status can be selected for payout');
+    // Allow selection of ready_for_disbursement and ready_to_repeat_disbursal loans
+    if (status !== 'ready_for_disbursement' && status !== 'ready_to_repeat_disbursal') {
+      toast.warning('Only loans with "Ready for Disbursement" or "Repeat Ready for Disbursal" status can be selected for payout');
       return;
     }
     setSelectedApplications(prev => 
@@ -138,8 +138,8 @@ export function LoanApplicationsQueue() {
 
   const handleSelectAll = useCallback(() => {
     const apps = applications.length > 0 ? applications : mockApplications;
-    // Only select ready_for_disbursement loans
-    const readyLoans = apps.filter(app => app.status === 'ready_for_disbursement');
+    // Select ready_for_disbursement and ready_to_repeat_disbursal loans
+    const readyLoans = apps.filter(app => app.status === 'ready_for_disbursement' || app.status === 'ready_to_repeat_disbursal');
     const readyLoanIds = readyLoans.map(app => app.id);
     
     // Check if all ready loans are selected
@@ -482,11 +482,11 @@ export function LoanApplicationsQueue() {
   const handleBulkPayout = async () => {
     const readyLoans = selectedApplications.filter(id => {
       const app = applications.find(a => a.id === id);
-      return app && app.status === 'ready_for_disbursement';
+      return app && (app.status === 'ready_for_disbursement' || app.status === 'ready_to_repeat_disbursal');
     });
 
     if (readyLoans.length === 0) {
-      toast.error('Please select loans with "Ready for Disbursement" status');
+      toast.error('Please select loans with "Ready for Disbursement" or "Repeat Ready for Disbursal" status');
       return;
     }
 
@@ -964,7 +964,7 @@ export function LoanApplicationsQueue() {
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
                   {(() => {
-                    const readyLoans = currentApplications.filter(app => app.status === 'ready_for_disbursement');
+                    const readyLoans = currentApplications.filter(app => app.status === 'ready_for_disbursement' || app.status === 'ready_to_repeat_disbursal');
                     const readyLoanIds = readyLoans.map(app => app.id);
                     const allReadySelected = readyLoanIds.length > 0 && readyLoanIds.every(id => selectedApplications.includes(id));
                     
@@ -1038,7 +1038,7 @@ export function LoanApplicationsQueue() {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredApplications.map((application) => {
-                const isReadyForDisbursement = application.status === 'ready_for_disbursement';
+                const isReadyForDisbursement = application.status === 'ready_for_disbursement' || application.status === 'ready_to_repeat_disbursal';
                 const isSelected = selectedApplications.includes(application.id);
                 const isProcessing = processingPayouts.includes(application.id);
                 
@@ -1050,7 +1050,7 @@ export function LoanApplicationsQueue() {
                       checked={isSelected}
                       onChange={() => handleSelectApplication(application.id, application.status)}
                       disabled={!isReadyForDisbursement || isProcessing}
-                      title={!isReadyForDisbursement ? 'Only loans with "Ready for Disbursement" status can be selected' : 'Select for payout'}
+                      title={!isReadyForDisbursement ? 'Only loans with "Ready for Disbursement" or "Repeat Ready for Disbursal" status can be selected' : 'Select for payout'}
                       className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                   </td>

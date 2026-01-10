@@ -1624,6 +1624,8 @@ const AgreementSignStep = ({ applicationId, onComplete, saving, progress }: Step
 
 // Step 6: Confirmation
 const ConfirmationStep = () => {
+  const navigate = useNavigate();
+  
   return (
     <div className="space-y-6 text-center">
       <CheckCircle className="w-20 h-20 text-green-500 mx-auto" />
@@ -1631,7 +1633,15 @@ const ConfirmationStep = () => {
       <p className="text-gray-600 mb-6">
         Your loan application has been processed successfully. Funds will be disbursed to your registered bank account shortly.
       </p>
-      {/* No Continue button - user just sees the confirmation message and stays on this page */}
+      <div className="flex justify-center">
+        <Button
+          onClick={() => navigate('/dashboard')}
+          className="min-w-[200px]"
+          size="lg"
+        >
+          Go to Dashboard
+        </Button>
+      </div>
     </div>
   );
 };

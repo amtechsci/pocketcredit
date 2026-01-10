@@ -389,6 +389,8 @@ router.get('/:id/credit-analytics', authenticateAdmin, async (req, res) => {
         request_id,
         client_ref_num,
         credit_score,
+        result_code,
+        api_message,
         is_eligible,
         rejection_reasons,
         has_settlements,

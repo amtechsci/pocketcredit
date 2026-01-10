@@ -66,11 +66,11 @@ router.post('/disburse-loan', authenticateAdmin, async (req, res) => {
 
         const loan = loans[0];
 
-        // Validate loan status
-        if (loan.status !== 'ready_for_disbursement') {
+        // Validate loan status - allow both ready_for_disbursement and ready_to_repeat_disbursal
+        if (loan.status !== 'ready_for_disbursement' && loan.status !== 'ready_to_repeat_disbursal') {
             return res.status(400).json({
                 success: false,
-                message: `Loan must be in 'ready_for_disbursement' status. Current status: ${loan.status}`
+                message: `Loan must be in 'ready_for_disbursement' or 'ready_to_repeat_disbursal' status. Current status: ${loan.status}`
             });
         }
 
@@ -418,7 +418,7 @@ router.get('/ready-for-disbursement', authenticateAdmin, async (req, res) => {
             FROM loan_applications la
             JOIN users u ON la.user_id = u.id
             LEFT JOIN bank_details bd ON u.id = bd.user_id AND bd.is_primary = 1
-            WHERE la.status = 'ready_for_disbursement'
+            WHERE la.status = 'ready_for_disbursement' OR la.status = 'ready_to_repeat_disbursal'
             ORDER BY la.created_at DESC
         `;
 
