@@ -46,8 +46,8 @@ export function SharedExtensionLetterDocument({ extensionData }: SharedExtension
     };
 
     const formatCurrencySimple = (amount: number) => {
-        // Format as "Rs.xxx" without currency symbol
-        return `Rs.${Math.round(amount).toLocaleString('en-IN')}`;
+        // Format as "Rs.xxx.xx" with 2 decimal places
+        return `Rs.${amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
     };
 
     const formatDate = (dateString: string) => {
@@ -102,7 +102,13 @@ export function SharedExtensionLetterDocument({ extensionData }: SharedExtension
     
     // Calculate values
     const extensionFee = extensionData.extension.extension_fee || 0;
+    const gstAmount = extensionData.extension.gst_amount || 0;
     const interestTillDate = extensionData.extension.interest_till_date || 0;
+    // Penalty: use penalty_base if available, otherwise use penalty (backward compatibility)
+    const penaltyBase = extensionData.extension.penalty_base || extensionData.extension.penalty || 0;
+    const penaltyGST = extensionData.extension.penalty_gst || 0;
+    const penaltyTotal = extensionData.extension.penalty_total || extensionData.extension.penalty || 0;
+    const totalExtensionAmount = extensionData.extension.total_extension_amount || (extensionFee + gstAmount + interestTillDate + penaltyTotal);
     const outstandingBalance = extensionData.extension.outstanding_loan_balance || loanAmount;
     // Outstanding balance after extension remains UNCHANGED (extension is date shift, not balance mutation)
     // Extension payment is a separate transactional charge, not added to outstanding balance
@@ -198,8 +204,26 @@ export function SharedExtensionLetterDocument({ extensionData }: SharedExtension
                     <p className="mb-2 text-justify">
                         <strong>A)</strong> A fixed extension fee of <strong>{formatCurrencySimple(extensionFee)}</strong> shall be applicable. This fee is administrative in nature and does not constitute interest or principal repayment.
                     </p>
+                    {gstAmount > 0 && (
+                        <p className="mb-2 text-justify">
+                            <strong>B)</strong> GST on Extension Fee (18%): <strong>{formatCurrencySimple(gstAmount)}</strong>
+                        </p>
+                    )}
+                    <p className="mb-2 text-justify">
+                        <strong>{gstAmount > 0 ? 'C' : 'B'})</strong> Total Interest till <strong>{todayDate}</strong> ( Today's date ) : <strong>{formatCurrencySimple(interestTillDate)}</strong>
+                    </p>
+                    {penaltyBase > 0 && (
+                        <p className="mb-2 text-justify">
+                            <strong>{gstAmount > 0 ? 'D' : 'C'})</strong> Penalty for overdue payment (if applicable): <strong>{formatCurrencySimple(penaltyBase)}</strong>
+                        </p>
+                    )}
+                    {penaltyBase > 0 && penaltyGST > 0 && (
+                        <p className="mb-2 text-justify">
+                            <strong>{gstAmount > 0 ? 'E' : 'D'})</strong> GST on Penalty (18%): <strong>{formatCurrencySimple(penaltyGST)}</strong>
+                        </p>
+                    )}
                     <p className="text-justify">
-                        <strong>B)</strong> Total Interest till <strong>{todayDate}</strong> ( Today's date ) : <strong>{formatCurrencySimple(interestTillDate)}</strong>
+                        <strong>{gstAmount > 0 && penaltyBase > 0 ? (penaltyGST > 0 ? 'F' : 'E') : (gstAmount > 0 || penaltyBase > 0 ? 'D' : 'C')})</strong> Total Extension Payment (including all charges): <strong>{formatCurrencySimple(totalExtensionAmount)}</strong>
                     </p>
                 </div>
 
@@ -210,6 +234,17 @@ export function SharedExtensionLetterDocument({ extensionData }: SharedExtension
                         <p>Loan Amount: <strong>{formatCurrencySimple(loanAmount)}</strong></p>
                         <p>Outstanding Loan Balance: <strong>{formatCurrencySimple(outstandingBalance)}</strong></p>
                         <p>Extension Fee: <strong>{formatCurrencySimple(extensionFee)}</strong></p>
+                        {gstAmount > 0 && (
+                            <p>GST on Extension Fee: <strong>{formatCurrencySimple(gstAmount)}</strong></p>
+                        )}
+                        <p>Interest till Date: <strong>{formatCurrencySimple(interestTillDate)}</strong></p>
+                        {penaltyBase > 0 && (
+                            <p>Penalty (if applicable): <strong>{formatCurrencySimple(penaltyBase)}</strong></p>
+                        )}
+                        {penaltyBase > 0 && penaltyGST > 0 && (
+                            <p>GST on Penalty (18%): <strong>{formatCurrencySimple(penaltyGST)}</strong></p>
+                        )}
+                        <p>Total Extension Payment (including all charges): <strong>{formatCurrencySimple(totalExtensionAmount)}</strong></p>
                         <p>Outstanding Loan Balance after extension: <strong>{formatCurrencySimple(outstandingBalanceAfterExtension)}</strong></p>
                         <p>Extension Start Date: <strong>{formatDate(extensionData.extension.original_due_date)}</strong></p>
                         <p>Revised Repayment Due Date: <strong>{formatDate(extensionData.extension.new_due_date || extensionData.extension.extension_period_till)}</strong></p>

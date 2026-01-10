@@ -81,11 +81,18 @@ export function ExtensionLetterModal({ loanId, isOpen, onClose, onAccept }: Exte
       }
 
       // Step 2: Accept extension agreement (changes status from 'pending' to 'pending_payment')
-      toast.loading('Accepting extension agreement...');
-      const acceptResponse = await apiService.acceptExtensionAgreement(currentExtensionId);
+      // Skip if extension_id exists (means extension is already in pending_payment status)
+      const alreadyAccepted = !!extensionData.extension_id;
       
-      if (!acceptResponse.success) {
-        throw new Error(acceptResponse.message || 'Failed to accept extension agreement');
+      if (!alreadyAccepted) {
+        toast.loading('Accepting extension agreement...');
+        const acceptResponse = await apiService.acceptExtensionAgreement(currentExtensionId);
+        
+        if (!acceptResponse.success) {
+          throw new Error(acceptResponse.message || 'Failed to accept extension agreement');
+        }
+      } else {
+        toast.loading('Retrying payment creation...');
       }
 
       toast.loading('Creating payment order...');

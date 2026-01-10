@@ -5541,8 +5541,22 @@ export function UserProfileDetail() {
                       }
 
                       // Helper function to open EMI details modal
-                      const handleViewEmiDetails = () => {
-                        setSelectedLoanEmiSchedule(emiSchedule);
+                      const handleViewEmiDetails = async () => {
+                        try {
+                          // Fetch calculated schedule from loan calculations API (includes penalty)
+                          const calcResponse = await adminApiService.getLoanCalculation(loan.id);
+                          if (calcResponse.success && calcResponse.data?.repayment?.schedule) {
+                            // Use calculated schedule with penalty
+                            setSelectedLoanEmiSchedule(calcResponse.data.repayment.schedule);
+                          } else {
+                            // Fallback to stored emi_schedule if calculation fails
+                            setSelectedLoanEmiSchedule(emiSchedule);
+                          }
+                        } catch (error) {
+                          console.error('Error fetching calculated EMI schedule:', error);
+                          // Fallback to stored emi_schedule
+                          setSelectedLoanEmiSchedule(emiSchedule);
+                        }
                         setSelectedLoanIdForEmi(shortLoanId);
                         setShowEmiDetailsModal(true);
                       };
@@ -9849,36 +9863,53 @@ export function UserProfileDetail() {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {selectedLoanEmiSchedule.map((emi: any, index: number) => {
-                      // Get data directly from emi_schedule
+                      // Get data from calculated schedule (includes penalty) or stored emi_schedule
                       const emiNumber = emi.emi_number || emi.instalment_no || (index + 1);
                       const emiDate = emi.due_date || 'N/A';
-                      const emiAmount = parseFloat(emi.emi_amount || 0);
+                      // Use instalment_amount if available (includes penalty), otherwise use emi_amount
+                      const emiAmount = parseFloat(emi.instalment_amount || emi.emi_amount || 0);
                       const emiStatus = emi.status || 'pending';
+                      
+                      // Check if EMI is overdue and has penalty
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const dueDate = emiDate !== 'N/A' ? new Date(emiDate) : null;
+                      const isOverdue = dueDate && dueDate < today;
+                      const hasPenalty = emi.penalty_total > 0 || emi.penalty_base > 0;
 
                       return (
-                        <tr key={index} className="hover:bg-gray-50">
+                        <tr key={index} className={`hover:bg-gray-50 ${isOverdue ? 'bg-red-50' : ''}`}>
                           <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
                             {emiNumber}
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                             {emiDate !== 'N/A' ? formatDate(emiDate) : 'N/A'}
                           </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
-                            {formatCurrencyWithDecimals(emiAmount)}
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="text-sm font-semibold text-gray-900">
+                              {formatCurrencyWithDecimals(emiAmount)}
+                            </div>
+                            {hasPenalty && (
+                              <div className="text-xs text-red-600 mt-1">
+                                <div>Penalty: ₹{(emi.penalty_base || 0).toFixed(2)}</div>
+                                <div>GST: ₹{(emi.penalty_gst || 0).toFixed(2)}</div>
+                                <div className="font-semibold">Total Penalty: ₹{(emi.penalty_total || 0).toFixed(2)}</div>
+                              </div>
+                            )}
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap text-sm">
                             <span
                               className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
                                 emiStatus === 'paid' || emiStatus === 'completed'
                                   ? 'bg-green-100 text-green-800'
-                                  : emiStatus === 'overdue' || emiStatus === 'defaulted'
+                                  : emiStatus === 'overdue' || emiStatus === 'defaulted' || isOverdue
                                   ? 'bg-red-100 text-red-800'
                                   : emiStatus === 'pending' || emiStatus === 'due'
                                   ? 'bg-yellow-100 text-yellow-800'
                                   : 'bg-gray-100 text-gray-800'
                               }`}
                             >
-                              {emiStatus.charAt(0).toUpperCase() + emiStatus.slice(1)}
+                              {isOverdue ? 'Overdue' : (emiStatus.charAt(0).toUpperCase() + emiStatus.slice(1))}
                             </span>
                           </td>
                         </tr>
@@ -9894,7 +9925,8 @@ export function UserProfileDetail() {
                         <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-900">
                           {formatCurrencyWithDecimals(
                             selectedLoanEmiSchedule.reduce((sum: number, emi: any) => {
-                              return sum + parseFloat(emi.emi_amount || 0);
+                              // Use instalment_amount (includes penalty) if available, otherwise emi_amount
+                              return sum + parseFloat(emi.instalment_amount || emi.emi_amount || 0);
                             }, 0)
                           )}
                         </td>

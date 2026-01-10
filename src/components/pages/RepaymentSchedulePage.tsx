@@ -1499,6 +1499,16 @@ export const RepaymentSchedulePage = () => {
                                   </p>
                                 </div>
                               </div>
+                              {isOverdue && emi.penalty_total > 0 && (
+                                <div className="mt-2 pt-2 border-t border-red-200">
+                                  <p className="text-xs text-red-600 font-semibold mb-1">Penalty for Overdue Payment:</p>
+                                  <div className="text-xs text-red-700 space-y-0.5">
+                                    <p>Penalty Base: ₹{(emi.penalty_base || 0).toFixed(2)}</p>
+                                    <p>GST (18%): ₹{(emi.penalty_gst || 0).toFixed(2)}</p>
+                                    <p className="font-semibold">Total Penalty: ₹{(emi.penalty_total || 0).toFixed(2)}</p>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                             <div className="flex items-center gap-2">
                               <p className="text-lg sm:text-xl font-bold text-gray-900 mr-2">
@@ -1631,11 +1641,29 @@ export const RepaymentSchedulePage = () => {
                                     toast.info(response.data.message || 'Payment status checked.');
                                   }
                                 } else {
-                                  toast.error(response.message || 'Failed to check payment status');
+                                  // If payment order not found, show extension letter again
+                                  if (response.message?.includes('Payment order not found')) {
+                                    toast.info('No payment found. Opening extension letter to retry payment...');
+                                    const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
+                                    if (loanId) {
+                                      setShowExtensionModal(true);
+                                    }
+                                  } else {
+                                    toast.error(response.message || 'Failed to check payment status');
+                                  }
                                 }
                               } catch (error: any) {
                                 console.error('Error checking extension payment:', error);
-                                toast.error(error.message || 'Failed to check payment status');
+                                // If payment order not found, show extension letter again
+                                if (error.message?.includes('Payment order not found')) {
+                                  toast.info('No payment found. Opening extension letter to retry payment...');
+                                  const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
+                                  if (loanId) {
+                                    setShowExtensionModal(true);
+                                  }
+                                } else {
+                                  toast.error(error.message || 'Failed to check payment status');
+                                }
                               }
                             }
                           }}

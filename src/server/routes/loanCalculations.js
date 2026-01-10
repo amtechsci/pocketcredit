@@ -148,7 +148,8 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
         DATE(last_extension_date) as last_extension_date_date, last_extension_date,
         extension_count,
         processed_due_date, plan_snapshot, emi_schedule,
-        interest_percent_per_day, fees_breakdown, user_id, loan_plan_id
+        interest_percent_per_day, fees_breakdown, user_id, loan_plan_id,
+        late_fee_structure
       FROM loan_applications 
       WHERE id = ?`,
       [loanId]
@@ -739,6 +740,125 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           }
         }
         
+        // Parse late_fee_structure for penalty calculation
+        let lateFeeStructure = null;
+        try {
+          if (loan.late_fee_structure) {
+            lateFeeStructure = typeof loan.late_fee_structure === 'string' 
+              ? JSON.parse(loan.late_fee_structure) 
+              : loan.late_fee_structure;
+          } else if (planSnapshot && planSnapshot.late_fee_structure) {
+            lateFeeStructure = typeof planSnapshot.late_fee_structure === 'string'
+              ? JSON.parse(planSnapshot.late_fee_structure)
+              : planSnapshot.late_fee_structure;
+          } else if (loan.loan_plan_id) {
+            // Fallback: Fetch from late_penalty_tiers table if not in loan_applications
+            try {
+              const penaltyTiers = await executeQuery(
+                `SELECT days_overdue_start, days_overdue_end, penalty_percent, tier_order 
+                 FROM late_penalty_tiers 
+                 WHERE loan_plan_id = ? 
+                 ORDER BY tier_order ASC, days_overdue_start ASC`,
+                [loan.loan_plan_id]
+              );
+              
+              if (penaltyTiers && penaltyTiers.length > 0) {
+                lateFeeStructure = penaltyTiers.map((tier) => {
+                  const penaltyPercent = parseFloat(tier.penalty_percent);
+                  const gstPercent = 18;
+                  const totalPercent = penaltyPercent + (penaltyPercent * gstPercent / 100);
+                  
+                  return {
+                    tier_name: `Day ${tier.days_overdue_start}${tier.days_overdue_end ? `-${tier.days_overdue_end}` : '+'}`,
+                    days_overdue_start: tier.days_overdue_start,
+                    days_overdue_end: tier.days_overdue_end,
+                    fee_type: 'percentage',
+                    fee_value: tier.penalty_percent.toString(),
+                    gst_percent: gstPercent,
+                    total_percent_with_gst: totalPercent,
+                    tier_order: tier.tier_order
+                  };
+                });
+                console.log(`✅ [Loan Calculations] Fetched late_fee_structure from late_penalty_tiers for loan plan #${loan.loan_plan_id}: ${lateFeeStructure.length} tiers`);
+              }
+            } catch (fetchError) {
+              console.error('⚠️ [Loan Calculations] Error fetching late_fee_structure from late_penalty_tiers:', fetchError);
+            }
+          }
+          
+          if (!lateFeeStructure || !Array.isArray(lateFeeStructure) || lateFeeStructure.length === 0) {
+            console.warn(`⚠️ [Loan Calculations] No late_fee_structure found for loan #${loanId} (loan_plan_id: ${loan.loan_plan_id})`);
+          } else {
+            console.log(`✅ [Loan Calculations] Found late_fee_structure with ${lateFeeStructure.length} tiers for loan #${loanId}`);
+          }
+        } catch (e) {
+          console.error('⚠️ [Loan Calculations] Error parsing late_fee_structure:', e);
+        }
+        
+        // Function to calculate penalty for an EMI based on days overdue
+        const calculateEmiPenalty = (emiPrincipal, daysOverdue, lateFeeStructure) => {
+          if (daysOverdue <= 0 || !lateFeeStructure || !Array.isArray(lateFeeStructure) || lateFeeStructure.length === 0) {
+            return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+          }
+          
+          let penaltyBase = 0;
+          
+          // Sort tiers by tier_order or days_overdue_start
+          const sortedTiers = [...lateFeeStructure].sort((a, b) => {
+            const orderA = a.tier_order !== undefined ? a.tier_order : (a.days_overdue_start || 0);
+            const orderB = b.tier_order !== undefined ? b.tier_order : (b.days_overdue_start || 0);
+            return orderA - orderB;
+          });
+          
+          // Calculate penalty based on tiers
+          for (const tier of sortedTiers) {
+            const startDay = tier.days_overdue_start || 0;
+            const endDay = tier.days_overdue_end !== null && tier.days_overdue_end !== undefined 
+              ? tier.days_overdue_end 
+              : null;
+            
+            if (daysOverdue < startDay) continue;
+            
+            const feeValue = parseFloat(tier.fee_value || tier.penalty_percent || 0);
+            if (feeValue <= 0) continue;
+            
+            let tierPenalty = 0;
+            
+            if (startDay === endDay || (startDay === 1 && endDay === 1)) {
+              // Single day tier (e.g., "Day 1-1"): apply as one-time percentage
+              if (daysOverdue >= startDay) {
+                tierPenalty = emiPrincipal * (feeValue / 100);
+              }
+            } else if (endDay === null || endDay === undefined) {
+              // Unlimited tier (e.g., "Day 121+"): apply for all days from startDay onwards
+              if (daysOverdue >= startDay) {
+                const daysInTier = daysOverdue - startDay + 1;
+                tierPenalty = emiPrincipal * (feeValue / 100) * daysInTier;
+              }
+            } else {
+              // Multi-day tier (e.g., "Day 2-10", "Day 11-120"): calculate for applicable days
+              if (daysOverdue >= startDay) {
+                const tierStartDay = startDay;
+                const tierEndDay = Math.min(endDay, daysOverdue);
+                const daysInTier = Math.max(0, tierEndDay - tierStartDay + 1);
+                
+                if (daysInTier > 0) {
+                  tierPenalty = emiPrincipal * (feeValue / 100) * daysInTier;
+                }
+              }
+            }
+            
+            penaltyBase += tierPenalty;
+          }
+          
+          const penaltyBaseRounded = Math.round(penaltyBase * 100) / 100;
+          const gstPercent = lateFeeStructure[0]?.gst_percent || 18;
+          const penaltyGST = Math.round(penaltyBaseRounded * (gstPercent / 100) * 100) / 100;
+          const penaltyTotal = Math.round((penaltyBaseRounded + penaltyGST) * 100) / 100;
+          
+          return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
+        };
+        
         let outstandingPrincipal = principal;
         let totalInterest = 0;
         
@@ -768,9 +888,42 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
           totalInterest += interestForPeriod;
           
-          // Calculate installment amount (principal + interest + post service fee + GST)
+          // Calculate penalty if EMI is overdue
+          // Use string-based date comparison to avoid timezone issues
+          const todayStr = getTodayString();
+          let penaltyAmount = 0;
+          let penaltyBase = 0;
+          let penaltyGST = 0;
+          
+          // Check if EMI is overdue by comparing date strings (YYYY-MM-DD format)
+          if (emiDateStr < todayStr) {
+            // EMI is overdue - calculate days overdue (exclusive, not including today)
+            const daysOverdueInclusive = calculateDaysBetween(emiDateStr, todayStr);
+            const daysOverdue = Math.max(1, daysOverdueInclusive - 1); // Exclude today for penalty calculation
+            
+            // Calculate penalty based on LOAN PRINCIPAL (not EMI principal)
+            // Penalty is calculated on the full loan amount, not per-EMI principal
+            if (lateFeeStructure && Array.isArray(lateFeeStructure) && lateFeeStructure.length > 0) {
+              const penaltyCalc = calculateEmiPenalty(principal, daysOverdue, lateFeeStructure);
+              penaltyAmount = penaltyCalc.penaltyTotal;
+              penaltyBase = penaltyCalc.penaltyBase;
+              penaltyGST = penaltyCalc.penaltyGST;
+              
+              console.log(`💰 [EMI Penalty] EMI #${i + 1} (due: ${emiDateStr}, today: ${todayStr}): ${daysOverdue} days overdue, Principal: ₹${principal}, Penalty Base: ₹${penaltyBase}, GST: ₹${penaltyGST}, Total: ₹${penaltyAmount}`);
+            } else {
+              console.warn(`⚠️ [EMI Penalty] EMI #${i + 1} is overdue but no late_fee_structure found`);
+            }
+          }
+          
+          // Calculate installment amount (principal + interest + post service fee + GST + penalty)
           // CRITICAL: Include post service fee + GST in each EMI
-          const instalmentAmount = Math.round((principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi) * 100) / 100;
+          // Penalty is added to overdue EMIs
+          const baseAmount = principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi;
+          const instalmentAmount = Math.round((baseAmount + penaltyAmount) * 100) / 100;
+          
+          if (penaltyAmount > 0) {
+            console.log(`💰 [EMI #${i + 1}] Base: ₹${baseAmount.toFixed(2)}, Penalty: ₹${penaltyAmount.toFixed(2)}, Total: ₹${instalmentAmount.toFixed(2)}`);
+          }
           
           // Preserve stored status if available (for account_manager loans with payment tracking)
           let emiStatus = 'pending';
@@ -791,6 +944,9 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
             interest: interestForPeriod,
             post_service_fee: postServiceFeePerEmi,
             gst_on_post_service_fee: postServiceFeeGSTPerEmi,
+            penalty_base: penaltyBase,
+            penalty_gst: penaltyGST,
+            penalty_total: penaltyAmount,
             instalment_amount: instalmentAmount,
             days: daysForPeriod,
             status: emiStatus
@@ -900,12 +1056,14 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
             const updateValues = [];
             
             // For multi-EMI loans, update emi_schedule
+            // Note: Penalty is calculated dynamically based on how overdue the EMI is, so it's not stored
+            // The schedule returned to frontend will include penalty, but stored format keeps it minimal
             if (schedule && schedule.length > 0) {
               const updatedEmiSchedule = schedule.map((instalment) => ({
                 emi_number: instalment.emi_number,
                 instalment_no: instalment.instalment_no,
                 due_date: instalment.due_date,
-                emi_amount: instalment.instalment_amount,
+                emi_amount: instalment.instalment_amount, // EMI amount includes penalty if overdue
                 status: instalment.status || 'pending'
               }));
               updateFields.push('emi_schedule = ?');

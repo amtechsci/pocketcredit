@@ -50,6 +50,22 @@ router.get('/eligibility/:loanId', requireAuth, async (req, res) => {
 
     const loan = loans[0];
 
+    // Count only APPROVED/COMPLETED extensions (not pending, failed, rejected, etc.)
+    const approvedExtensions = await executeQuery(`
+      SELECT COUNT(*) as count
+      FROM loan_extensions
+      WHERE loan_application_id = ? AND status IN ('approved', 'completed')
+    `, [loanId]);
+    
+    const actualExtensionCount = approvedExtensions && approvedExtensions.length > 0 
+      ? parseInt(approvedExtensions[0].count) || 0 
+      : 0;
+    
+    // Override extension_count in loan object with actual approved count
+    loan.extension_count = actualExtensionCount;
+    
+    console.log(`📊 Extension Count for loan #${loanId}: Database extension_count=${loan.extension_count || 0}, Actual approved extensions=${actualExtensionCount}`);
+
     // Check for pending extension request (both 'pending' and 'pending_payment')
     const pendingExtension = await executeQuery(`
       SELECT id, extension_number, created_at, status
@@ -59,7 +75,7 @@ router.get('/eligibility/:loanId', requireAuth, async (req, res) => {
       LIMIT 1
     `, [loanId]);
 
-    // Check eligibility
+    // Check eligibility (now using actual approved extension count)
     const eligibility = checkExtensionEligibility(loan, null, 0);
 
     // If there's a pending extension, override eligibility
@@ -143,7 +159,7 @@ router.get('/eligibility/:loanId', requireAuth, async (req, res) => {
       data: {
         is_eligible: eligibility.eligible,
         can_extend: eligibility.eligible,
-        extension_count: loan.extension_count || 0,
+        extension_count: actualExtensionCount, // Use actual approved extension count
         max_extensions: MAX_EXTENSIONS,
         extension_window: eligibility.extensionWindow || {},
         due_date: dueDate,

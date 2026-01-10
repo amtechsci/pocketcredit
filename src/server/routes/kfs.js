@@ -1483,6 +1483,7 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
         la.*,
         DATE(la.disbursed_at) as disbursed_at_date,
         la.processed_due_date,
+        la.late_fee_structure,
         u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
         u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number,
         u.salary_date
@@ -1504,13 +1505,27 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
     // We'll call a helper function to avoid code duplication
     // For now, let's inline it but we can refactor later
     
-    // Get principal amount and plan snapshot for calculations
-    const principal = parseFloat(loan.processed_amount || loan.sanctioned_amount || loan.loan_amount || 0);
+    // Get principal amount - prioritize sanctioned_amount/principal_amount (more reliable)
+    // processed_amount might be wrong from old calculations
+    const principal = parseFloat(
+      loan.sanctioned_amount || 
+      loan.principal_amount || 
+      loan.loan_amount || 
+      loan.processed_amount || 
+      0
+    );
     
-    if (principal <= 0) {
+    console.log(`💰 Principal for extension letter (loan #${loanId}):
+      sanctioned_amount: ${loan.sanctioned_amount}
+      principal_amount: ${loan.principal_amount}
+      loan_amount: ${loan.loan_amount}
+      processed_amount: ${loan.processed_amount}
+      Final Principal: ₹${principal}`);
+    
+    if (principal <= 0 || principal > 1000000) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid loan principal amount'
+        message: `Invalid loan principal amount: ₹${principal}`
       });
     }
 
@@ -1673,7 +1688,241 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
     }
 
     // Calculate extension fees and new due date using utility functions
-    const fees = calculateExtensionFees(loan);
+    let fees = calculateExtensionFees(loan);
+    
+    // CRITICAL: Recalculate interest using the EXACT principal from this scope (line 1508)
+    // This ensures we use the correct principal value, not a potentially wrong value from loan object
+    // Interest = Principal × Rate Per Day × Days
+    const todayStr = getTodayString();
+    const processedDateStr = parseDateToString(loan.processed_at);
+    
+    // Validate principal is reasonable (should be between 1 and 1,000,000 for sanity check)
+    if (principal <= 0 || principal > 1000000) {
+      console.error(`⚠️ ERROR: Invalid principal value (₹${principal}) for loan #${loanId}. Using default calculation.`);
+    }
+    
+    if (processedDateStr && principal > 0 && principal <= 1000000) {
+      const interestDays = calculateDaysBetween(processedDateStr, todayStr);
+      const interestRatePerDay = parseFloat(planSnapshot.interest_percent_per_day || loan.processed_interest_percent_per_day || 0.001);
+      const recalculatedInterest = Math.round(principal * interestRatePerDay * interestDays * 100) / 100;
+      
+      // Override with recalculated interest using correct principal
+      fees.interestTillDate = recalculatedInterest;
+      fees.interestDays = interestDays; // Store days for logging
+      
+      console.log(`💰 Interest Recalculation for Extension Letter (loan #${loanId}):
+        Principal: ₹${principal} (from: processed_amount=${loan.processed_amount}, sanctioned_amount=${loan.sanctioned_amount})
+        Processed Date: ${processedDateStr}
+        Today: ${todayStr}
+        Interest Days: ${interestDays}
+        Interest Rate Per Day: ${interestRatePerDay} (${(interestRatePerDay * 100).toFixed(4)}%)
+        Interest Calculation: ₹${principal} × ${interestRatePerDay} × ${interestDays} = ₹${recalculatedInterest}`);
+    } else {
+      console.error(`⚠️ ERROR: Cannot recalculate interest - processedDateStr=${processedDateStr}, principal=${principal}`);
+    }
+    
+    // Calculate penalty if overdue (not included in calculateExtensionFees utility)
+    let penaltyAmount = 0;
+    let penaltyBase = 0;
+    let penaltyGST = 0;
+    if (loan.processed_penalty !== null && loan.processed_penalty !== undefined && parseFloat(loan.processed_penalty) > 0) {
+      // Use penalty already calculated by cron job
+      // Note: processed_penalty from cron job includes GST, so calculate base and GST
+      penaltyAmount = Math.round(parseFloat(loan.processed_penalty) * 100) / 100;
+      // Extract base and GST (assuming penaltyAmount includes GST: penaltyBase = penaltyAmount / 1.18)
+      penaltyBase = Math.round((penaltyAmount / 1.18) * 100) / 100;
+      penaltyGST = Math.round((penaltyAmount - penaltyBase) * 100) / 100;
+      console.log(`💰 Using processed_penalty from database: ₹${penaltyAmount} (Base: ₹${penaltyBase}, GST: ₹${penaltyGST})`);
+    } else {
+      // Recalculate if not available - check if any EMI is overdue
+      const parseDueDates = (dueDateStr) => {
+        if (!dueDateStr) return [];
+        try {
+          const parsed = typeof dueDateStr === 'string' ? JSON.parse(dueDateStr) : dueDateStr;
+          return Array.isArray(parsed) ? parsed : [parsed];
+        } catch (e) {
+          return typeof dueDateStr === 'string' ? [dueDateStr] : [];
+        }
+      };
+      
+      const isOverdue = (dueDateStr, currentDate) => {
+        if (!dueDateStr) return false;
+        const dueDate = new Date(dueDateStr);
+        dueDate.setHours(0, 0, 0, 0);
+        currentDate.setHours(0, 0, 0, 0);
+        return dueDate < currentDate;
+      };
+      
+      const calculateDaysInclusive = (startDate, endDate) => {
+        const msPerDay = 1000 * 60 * 60 * 24;
+        return Math.ceil((endDate - startDate) / msPerDay) + 1;
+      };
+      
+      // Parse late_fee_structure from loan
+      let lateFeeStructure = null;
+      try {
+        if (loan.late_fee_structure) {
+          lateFeeStructure = typeof loan.late_fee_structure === 'string' 
+            ? JSON.parse(loan.late_fee_structure) 
+            : loan.late_fee_structure;
+        } else if (planSnapshot && planSnapshot.late_fee_structure) {
+          lateFeeStructure = typeof planSnapshot.late_fee_structure === 'string'
+            ? JSON.parse(planSnapshot.late_fee_structure)
+            : planSnapshot.late_fee_structure;
+        }
+      } catch (e) {
+        console.error('Error parsing late_fee_structure:', e);
+      }
+      
+      // Calculate penalty using late_fee_structure from database
+      const calculatePenalty = (principal, daysOverdue, lateFeeStructure) => {
+        if (daysOverdue <= 0) return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+        
+        // If no late_fee_structure, return 0 (no penalty)
+        if (!lateFeeStructure || !Array.isArray(lateFeeStructure) || lateFeeStructure.length === 0) {
+          console.warn('⚠️ No late_fee_structure found, skipping penalty calculation');
+          return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+        }
+        
+        let penaltyBase = 0;
+        
+        // Sort tiers by tier_order or days_overdue_start
+        const sortedTiers = [...lateFeeStructure].sort((a, b) => {
+          const orderA = a.tier_order !== undefined ? a.tier_order : (a.days_overdue_start || 0);
+          const orderB = b.tier_order !== undefined ? b.tier_order : (b.days_overdue_start || 0);
+          return orderA - orderB;
+        });
+        
+        // Calculate penalty based on tiers
+        // Example: For 32 days overdue with structure [Day 1: 5%, Day 2-10: 1%, Day 11-120: 0.6%, Day 121+: 0%]
+        // - Day 1: 5% one-time
+        // - Days 2-10: 1% × 9 days = 9%
+        // - Days 11-32: 0.6% × 22 days = 13.2%
+        // Total: 5% + 9% + 13.2% = 27.2%
+        for (const tier of sortedTiers) {
+          const startDay = tier.days_overdue_start || 0;
+          const endDay = tier.days_overdue_end !== null && tier.days_overdue_end !== undefined 
+            ? tier.days_overdue_end 
+            : null; // null means unlimited (e.g., Day 121+)
+          
+          // Skip tiers that haven't started yet
+          if (daysOverdue < startDay) continue;
+          
+          const feeValue = parseFloat(tier.fee_value || tier.penalty_percent || 0);
+          if (feeValue <= 0) continue;
+          
+          if (startDay === endDay || (startDay === 1 && endDay === 1)) {
+            // Single day tier (e.g., "Day 1-1"): apply as one-time percentage
+            // Only applies if the loan is at least this many days overdue
+            if (daysOverdue >= startDay) {
+              penaltyBase += principal * (feeValue / 100);
+            }
+          } else if (endDay === null || endDay === undefined) {
+            // Unlimited tier (e.g., "Day 121+"): apply for all days from startDay onwards
+            if (daysOverdue >= startDay) {
+              const daysInTier = daysOverdue - startDay + 1;
+              penaltyBase += principal * (feeValue / 100) * daysInTier;
+            }
+          } else {
+            // Multi-day tier (e.g., "Day 2-10", "Day 11-120"): calculate for applicable days
+            if (daysOverdue >= startDay) {
+              // Calculate how many days in this tier apply
+              // Example: If tier is Day 2-10 and loan is 10 days overdue:
+              //   - Days 2, 3, 4, 5, 6, 7, 8, 9, 10 = 9 days (not 10!)
+              //   - Formula: daysInTier = min(endDay, daysOverdue) - startDay + 1
+              const tierStartDay = startDay;
+              const tierEndDay = Math.min(endDay, daysOverdue); // Cap at days overdue
+              // Calculate days: if tier is 2-10 and daysOverdue is 10, then days 2-10 = 9 days
+              // Formula: (tierEndDay - tierStartDay + 1)
+              // For Day 2-10 with 10 days overdue: (10 - 2 + 1) = 9 days ✓
+              const daysInTier = Math.max(0, tierEndDay - tierStartDay + 1);
+              
+              if (daysInTier > 0) {
+                // Apply percentage per day for days in this tier
+                const tierPenalty = principal * (feeValue / 100) * daysInTier;
+                penaltyBase += tierPenalty;
+                console.log(`    Tier ${tier.tier_name || `Day ${startDay}-${endDay}`}: ${daysInTier} day(s) × ${feeValue}% × ₹${principal} = ₹${tierPenalty.toFixed(2)}`);
+              }
+            }
+          }
+        }
+        
+        const penaltyBaseRounded = Math.round(penaltyBase * 100) / 100;
+        const gstPercent = lateFeeStructure[0]?.gst_percent || 18; // Use GST from structure or default 18%
+        const penaltyGST = Math.round(penaltyBaseRounded * (gstPercent / 100) * 100) / 100;
+        const penaltyTotal = Math.round((penaltyBaseRounded + penaltyGST) * 100) / 100;
+        
+        // Debug logging for penalty calculation
+        if (daysOverdue > 0) {
+          console.log(`📊 Penalty Calculation Details:
+            Principal: ₹${principal}
+            Days Overdue: ${daysOverdue}
+            Penalty Base: ₹${penaltyBaseRounded} (${((penaltyBaseRounded / principal) * 100).toFixed(2)}%)
+            GST (${gstPercent}%): ₹${penaltyGST}
+            Penalty Total: ₹${penaltyTotal}`);
+        }
+        
+        return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
+      };
+      
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const dueDates = parseDueDates(loan.processed_due_date);
+      if (dueDates.length > 0) {
+        let maxDaysOverdue = 0;
+        for (const dueDateStr of dueDates) {
+          if (isOverdue(dueDateStr, today)) {
+            const dueDate = new Date(dueDateStr);
+            dueDate.setHours(0, 0, 0, 0);
+            // Calculate days overdue: if due date is 1st and today is 11th, that's 10 days past due
+            // calculateDaysInclusive gives 11 days (1st to 11th inclusive), but for penalty we need exclusive
+            // So subtract 1 to get actual days past due (excluding today)
+            const daysOverdueInclusive = calculateDaysInclusive(dueDate, today);
+            const daysOverdue = Math.max(1, daysOverdueInclusive - 1); // Exclude today for penalty calculation
+            maxDaysOverdue = Math.max(maxDaysOverdue, daysOverdue);
+          }
+        }
+        
+        if (maxDaysOverdue > 0) {
+          const penaltyCalc = calculatePenalty(principal, maxDaysOverdue, lateFeeStructure);
+          // Update local variables for use in extension letter data
+          penaltyAmount = penaltyCalc.penaltyTotal;
+          penaltyBase = penaltyCalc.penaltyBase;
+          penaltyGST = penaltyCalc.penaltyGST;
+          // Also store in fees object
+          fees.penaltyBase = penaltyCalc.penaltyBase;
+          fees.penaltyGST = penaltyCalc.penaltyGST;
+          console.log(`💰 Penalty calculation using late_fee_structure (loan #${loanId}):
+            Principal: ₹${principal}
+            Days Overdue: ${maxDaysOverdue}
+            Late Fee Structure: ${JSON.stringify(lateFeeStructure)}
+            Penalty Base: ₹${penaltyCalc.penaltyBase}
+            Penalty GST (${lateFeeStructure?.[0]?.gst_percent || 18}%): ₹${penaltyCalc.penaltyGST}
+            Penalty Total: ₹${penaltyCalc.penaltyTotal}`);
+        }
+      }
+    }
+    
+    // Add penalty to fees object (base, GST, and total)
+    fees.penalty = penaltyBase; // Base penalty for backward compatibility
+    fees.penaltyBase = penaltyBase;
+    fees.penaltyGST = penaltyGST;
+    fees.penaltyTotal = penaltyAmount;
+    
+    // Recalculate total: Extension Fee + GST on Extension Fee + Interest + Penalty Base + GST on Penalty
+    fees.totalExtensionAmount = Math.round((fees.extensionFee + fees.gstAmount + fees.interestTillDate + penaltyAmount) * 100) / 100;
+    
+    // Add debug logging to verify calculations
+    console.log(`💰 Final Extension Calculation for loan #${loanId}:
+      Principal: ₹${principal}
+      Interest (${fees.interestDays || 'N/A'} days @ 0.1%): ₹${fees.interestTillDate}
+      Extension Fee (21%): ₹${fees.extensionFee}
+      GST on Extension Fee (18%): ₹${fees.gstAmount}
+      Penalty Base: ₹${penaltyBase}
+      GST on Penalty (18%): ₹${penaltyGST}
+      Penalty Total: ₹${penaltyAmount}
+      Total Extension Amount: ₹${fees.totalExtensionAmount}`);
+    
     const newDueDateResult = calculateNewDueDate(loan, originalDueDate, planSnapshot, loan.salary_date, allOriginalEmiDates);
     const outstandingBalance = calculateOutstandingBalance(loan);
 
@@ -1740,7 +1989,10 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
         extension_fee: fees.extensionFee,
         gst_amount: fees.gstAmount,
         interest_till_date: fees.interestTillDate,
-        penalty: 0,
+        penalty: fees.penaltyBase || 0, // Penalty base (without GST) for display
+        penalty_base: fees.penaltyBase || 0,
+        penalty_gst: fees.penaltyGST || 0,
+        penalty_total: fees.penaltyTotal || 0,
         total_extension_amount: fees.totalExtensionAmount,
         original_due_date: originalDueDate,
         new_due_date: newDueDateResult.newDueDate,
@@ -1882,6 +2134,7 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         la.*,
         DATE(la.disbursed_at) as disbursed_at_date,
         la.processed_due_date,
+        la.late_fee_structure,
         u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
         u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number,
         u.salary_date
@@ -2229,53 +2482,248 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
     const gstAmount = Math.round(extensionFee * GST_RATE * 100) / 100;
 
     // Calculate interest till date
-    // Interest should be calculated from processed_at date to today
-    // processed_at date is day 1, so days = (today - processed_at) + 1
+    // IMPORTANT: Use processed_interest from database if available (calculated by cron job)
+    // Only recalculate if processed_interest is not available
     let interestTillDate = 0;
     
-    // Get interest rate from plan snapshot (already parsed above)
-    const interestRatePerDay = parseFloat(planSnapshot.interest_percent_per_day || 0.001); // Default 0.1% per day
-    
-    // Use processed_at as the start date (processed_at is day 1)
-    // If processed_at is not available, use disbursed_at or created_at
-    let processedDate;
-    if (loan.processed_at) {
-      processedDate = new Date(loan.processed_at);
-    } else if (loan.disbursed_at) {
-      processedDate = new Date(loan.disbursed_at);
+    if (loan.processed_interest !== null && loan.processed_interest !== undefined && parseFloat(loan.processed_interest) > 0) {
+      // Use interest already calculated by cron job (most accurate)
+      interestTillDate = Math.round(parseFloat(loan.processed_interest) * 100) / 100;
+      console.log(`💰 Using processed_interest from database: ₹${interestTillDate}`);
     } else {
-      processedDate = new Date(loan.created_at);
+      // Recalculate if not available (fallback)
+      // Interest should be calculated on PRINCIPAL only, NOT outstanding balance
+      // Outstanding balance includes fees which are not interest-bearing
+      
+      // Use processed_at as the start date (processed_at is day 1)
+      // If processed_at is not available, use disbursed_at or created_at
+      let processedDate;
+      if (loan.processed_at) {
+        processedDate = new Date(loan.processed_at);
+      } else if (loan.disbursed_at) {
+        processedDate = new Date(loan.disbursed_at);
+      } else {
+        processedDate = new Date(loan.created_at);
+      }
+      
+      // Normalize dates to start of day (ignore time)
+      processedDate.setHours(0, 0, 0, 0);
+      today.setHours(0, 0, 0, 0);
+      
+      // Calculate days from processed_at to today (inclusive counting)
+      // processed_at date is day 1, so: days = (today - processed_at) + 1
+      // Use the same calculation as cron job: Math.ceil((end - start) / msPerDay) + 1
+      const msPerDay = 1000 * 60 * 60 * 24;
+      const days = Math.ceil((today - processedDate) / msPerDay) + 1;
+      
+      // Ensure days is at least 1 (if processed_at is today, days = 1)
+      const finalDays = Math.max(1, days);
+      
+      // Get interest rate from plan snapshot (already parsed above)
+      const interestRatePerDay = parseFloat(planSnapshot.interest_percent_per_day || 0.001); // Default 0.1% per day
+      
+      // Calculate total interest from processed_at to today: Principal × Interest Rate Per Day × Days
+      // IMPORTANT: Use PRINCIPAL only, NOT outstanding balance (fees are not interest-bearing)
+      interestTillDate = Math.round(principal * interestRatePerDay * finalDays * 100) / 100;
+      
+      console.log(`💰 Interest calculation (recalculated):
+        Principal: ₹${principal}
+        Interest Rate Per Day: ${interestRatePerDay} (${(interestRatePerDay * 100).toFixed(4)}%)
+        Processed Date: ${formatDateLocal(processedDate)} (Day 1)
+        Today: ${formatDateLocal(today)}
+        Raw Days Calculation: ${(today - processedDate) / msPerDay}
+        Days: ${finalDays} (inclusive, processed_at is day 1)
+        Interest Calculation: ₹${principal} × ${interestRatePerDay} × ${finalDays} = ₹${principal * interestRatePerDay * finalDays}
+        Interest Till Date (rounded): ₹${interestTillDate}`);
+    }
+
+    // Calculate penalty if overdue
+    // IMPORTANT: Use processed_penalty from database if available (calculated by cron job)
+    // Only recalculate if processed_penalty is not available or if EMIs are overdue
+    let penaltyAmount = 0;
+    let penaltyBase = 0;
+    let penaltyGST = 0;
+    
+    if (loan.processed_penalty !== null && loan.processed_penalty !== undefined && parseFloat(loan.processed_penalty) > 0) {
+      // Use penalty already calculated by cron job
+      // Note: processed_penalty from cron job includes GST, so calculate base and GST
+      penaltyAmount = Math.round(parseFloat(loan.processed_penalty) * 100) / 100;
+      // Extract base and GST (assuming penaltyAmount includes GST: penaltyBase = penaltyAmount / 1.18)
+      penaltyBase = Math.round((penaltyAmount / 1.18) * 100) / 100;
+      penaltyGST = Math.round((penaltyAmount - penaltyBase) * 100) / 100;
+      console.log(`💰 Using processed_penalty from database: ₹${penaltyAmount} (Base: ₹${penaltyBase}, GST: ₹${penaltyGST})`);
+    } else {
+      // Recalculate if not available - check if any EMI is overdue
+      const parseDueDates = (dueDateStr) => {
+        if (!dueDateStr) return [];
+        try {
+          const parsed = typeof dueDateStr === 'string' ? JSON.parse(dueDateStr) : dueDateStr;
+          return Array.isArray(parsed) ? parsed : [parsed];
+        } catch (e) {
+          return typeof dueDateStr === 'string' ? [dueDateStr] : [];
+        }
+      };
+      
+      const isOverdue = (dueDateStr, currentDate) => {
+        if (!dueDateStr) return false;
+        const dueDate = new Date(dueDateStr);
+        dueDate.setHours(0, 0, 0, 0);
+        currentDate.setHours(0, 0, 0, 0);
+        return dueDate < currentDate;
+      };
+      
+      const calculateDaysInclusive = (startDate, endDate) => {
+        const msPerDay = 1000 * 60 * 60 * 24;
+        return Math.ceil((endDate - startDate) / msPerDay) + 1;
+      };
+      
+      // Parse late_fee_structure from loan
+      let lateFeeStructure = null;
+      try {
+        if (loan.late_fee_structure) {
+          lateFeeStructure = typeof loan.late_fee_structure === 'string' 
+            ? JSON.parse(loan.late_fee_structure) 
+            : loan.late_fee_structure;
+        } else if (planSnapshot && planSnapshot.late_fee_structure) {
+          lateFeeStructure = typeof planSnapshot.late_fee_structure === 'string'
+            ? JSON.parse(planSnapshot.late_fee_structure)
+            : planSnapshot.late_fee_structure;
+        }
+      } catch (e) {
+        console.error('Error parsing late_fee_structure:', e);
+      }
+      
+      // Calculate penalty using late_fee_structure from database
+      const calculatePenalty = (principal, daysOverdue, lateFeeStructure) => {
+        if (daysOverdue <= 0) return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+        
+        // If no late_fee_structure, return 0 (no penalty)
+        if (!lateFeeStructure || !Array.isArray(lateFeeStructure) || lateFeeStructure.length === 0) {
+          console.warn('⚠️ No late_fee_structure found, skipping penalty calculation');
+          return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+        }
+        
+        let penaltyBase = 0;
+        
+        // Sort tiers by tier_order or days_overdue_start
+        const sortedTiers = [...lateFeeStructure].sort((a, b) => {
+          const orderA = a.tier_order !== undefined ? a.tier_order : (a.days_overdue_start || 0);
+          const orderB = b.tier_order !== undefined ? b.tier_order : (b.days_overdue_start || 0);
+          return orderA - orderB;
+        });
+        
+        // Calculate penalty based on tiers
+        // Example: For 32 days overdue with structure [Day 1: 5%, Day 2-10: 1%, Day 11-120: 0.6%, Day 121+: 0%]
+        // - Day 1: 5% one-time
+        // - Days 2-10: 1% × 9 days = 9%
+        // - Days 11-32: 0.6% × 22 days = 13.2%
+        // Total: 5% + 9% + 13.2% = 27.2%
+        for (const tier of sortedTiers) {
+          const startDay = tier.days_overdue_start || 0;
+          const endDay = tier.days_overdue_end !== null && tier.days_overdue_end !== undefined 
+            ? tier.days_overdue_end 
+            : null; // null means unlimited (e.g., Day 121+)
+          
+          // Skip tiers that haven't started yet
+          if (daysOverdue < startDay) continue;
+          
+          const feeValue = parseFloat(tier.fee_value || tier.penalty_percent || 0);
+          if (feeValue <= 0) continue;
+          
+          if (startDay === endDay || (startDay === 1 && endDay === 1)) {
+            // Single day tier (e.g., "Day 1-1"): apply as one-time percentage
+            // Only applies if the loan is at least this many days overdue
+            if (daysOverdue >= startDay) {
+              penaltyBase += principal * (feeValue / 100);
+            }
+          } else if (endDay === null || endDay === undefined) {
+            // Unlimited tier (e.g., "Day 121+"): apply for all days from startDay onwards
+            if (daysOverdue >= startDay) {
+              const daysInTier = daysOverdue - startDay + 1;
+              penaltyBase += principal * (feeValue / 100) * daysInTier;
+            }
+          } else {
+            // Multi-day tier (e.g., "Day 2-10", "Day 11-120"): calculate for applicable days
+            if (daysOverdue >= startDay) {
+              // Calculate how many days in this tier apply
+              // Example: If tier is Day 2-10 and loan is 10 days overdue:
+              //   - Days 2, 3, 4, 5, 6, 7, 8, 9, 10 = 9 days (not 10!)
+              //   - Formula: daysInTier = min(endDay, daysOverdue) - startDay + 1
+              const tierStartDay = startDay;
+              const tierEndDay = Math.min(endDay, daysOverdue); // Cap at days overdue
+              // Calculate days: if tier is 2-10 and daysOverdue is 10, then days 2-10 = 9 days
+              // Formula: (tierEndDay - tierStartDay + 1)
+              // For Day 2-10 with 10 days overdue: (10 - 2 + 1) = 9 days ✓
+              const daysInTier = Math.max(0, tierEndDay - tierStartDay + 1);
+              
+              if (daysInTier > 0) {
+                // Apply percentage per day for days in this tier
+                const tierPenalty = principal * (feeValue / 100) * daysInTier;
+                penaltyBase += tierPenalty;
+                console.log(`    Tier ${tier.tier_name || `Day ${startDay}-${endDay}`}: ${daysInTier} day(s) × ${feeValue}% × ₹${principal} = ₹${tierPenalty.toFixed(2)}`);
+              }
+            }
+          }
+        }
+        
+        const penaltyBaseRounded = Math.round(penaltyBase * 100) / 100;
+        const gstPercent = lateFeeStructure[0]?.gst_percent || 18; // Use GST from structure or default 18%
+        const penaltyGST = Math.round(penaltyBaseRounded * (gstPercent / 100) * 100) / 100;
+        const penaltyTotal = Math.round((penaltyBaseRounded + penaltyGST) * 100) / 100;
+        
+        // Debug logging for penalty calculation
+        if (daysOverdue > 0) {
+          console.log(`📊 Penalty Calculation Details:
+            Principal: ₹${principal}
+            Days Overdue: ${daysOverdue}
+            Penalty Base: ₹${penaltyBaseRounded} (${((penaltyBaseRounded / principal) * 100).toFixed(2)}%)
+            GST (${gstPercent}%): ₹${penaltyGST}
+            Penalty Total: ₹${penaltyTotal}`);
+        }
+        
+        return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
+      };
+      
+      const dueDates = parseDueDates(loan.processed_due_date);
+      if (dueDates.length > 0) {
+        let maxDaysOverdue = 0;
+        for (const dueDateStr of dueDates) {
+          if (isOverdue(dueDateStr, today)) {
+            const dueDate = new Date(dueDateStr);
+            dueDate.setHours(0, 0, 0, 0);
+            // Calculate days overdue: if due date is 1st and today is 11th, that's 10 days past due
+            // calculateDaysInclusive gives 11 days (1st to 11th inclusive), but for penalty we need exclusive
+            // So subtract 1 to get actual days past due (excluding today)
+            const daysOverdueInclusive = calculateDaysInclusive(dueDate, today);
+            const daysOverdue = Math.max(1, daysOverdueInclusive - 1); // Exclude today for penalty calculation
+            maxDaysOverdue = Math.max(maxDaysOverdue, daysOverdue);
+          }
+        }
+        
+        if (maxDaysOverdue > 0) {
+          const penaltyCalc = calculatePenalty(principal, maxDaysOverdue, lateFeeStructure);
+          penaltyAmount = penaltyCalc.penaltyTotal;
+          // Store penalty base and GST separately for extension letter display
+          penaltyBase = penaltyCalc.penaltyBase;
+          penaltyGST = penaltyCalc.penaltyGST;
+          console.log(`💰 Penalty calculation using late_fee_structure (admin endpoint):
+            Principal: ₹${principal}
+            Days Overdue: ${maxDaysOverdue}
+            Late Fee Structure: ${JSON.stringify(lateFeeStructure)}
+            Penalty Base: ₹${penaltyCalc.penaltyBase}
+            Penalty GST (${lateFeeStructure?.[0]?.gst_percent || 18}%): ₹${penaltyCalc.penaltyGST}
+            Penalty Total: ₹${penaltyCalc.penaltyTotal}`);
+        }
+      }
     }
     
-    // Normalize dates to start of day (ignore time)
-    processedDate.setHours(0, 0, 0, 0);
-    today.setHours(0, 0, 0, 0);
+    // Initialize penalty base and GST if not set
+    if (!penaltyBase) penaltyBase = 0;
+    if (!penaltyGST) penaltyGST = 0;
     
-    // Calculate days from processed_at to today (inclusive counting)
-    // processed_at date is day 1, so: days = (today - processed_at) + 1
-    // Use the same calculation as cron job: Math.ceil((end - start) / msPerDay) + 1
-    const msPerDay = 1000 * 60 * 60 * 24;
-    const days = Math.ceil((today - processedDate) / msPerDay) + 1;
-    
-    // Ensure days is at least 1 (if processed_at is today, days = 1)
-    const finalDays = Math.max(1, days);
-    
-    // Calculate total interest from processed_at to today: Principal × Interest Rate Per Day × Days
-    interestTillDate = Math.round(principal * interestRatePerDay * finalDays * 100) / 100;
-    
-    console.log(`💰 Interest calculation:
-      Principal: ₹${principal}
-      Interest Rate Per Day: ${interestRatePerDay} (${(interestRatePerDay * 100).toFixed(4)}%)
-      Processed Date: ${formatDateLocal(processedDate)} (Day 1)
-      Today: ${formatDateLocal(today)}
-      Raw Days Calculation: ${(today - processedDate) / msPerDay}
-      Days: ${finalDays} (inclusive, processed_at is day 1)
-      Interest Calculation: ₹${principal} × ${interestRatePerDay} × ${finalDays} = ₹${principal * interestRatePerDay * finalDays}
-      Interest Till Date (rounded): ₹${interestTillDate}`);
-
-    // Calculate total extension amount: Extension Fee + GST + Interest Till Date
-    // This is what user pays NOW for the extension (transactional charge)
-    const totalExtensionAmount = Math.round((extensionFee + gstAmount + interestTillDate) * 100) / 100;
+    // Calculate total extension amount: Extension Fee + GST on Extension Fee + Interest + Penalty Base + GST on Penalty
+    // Note: Penalty amount already includes GST
+    const totalExtensionAmount = Math.round((extensionFee + gstAmount + interestTillDate + penaltyAmount) * 100) / 100;
 
     // Calculate outstanding loan balance CORRECTLY
     // Outstanding Balance = Principal + Post Service Fee + GST on Post Service Fee
@@ -2510,7 +2958,10 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         extension_fee: extensionFee,
         gst_amount: gstAmount,
         interest_till_date: interestTillDate,
-        penalty: 0, // No penalty for extension
+        penalty: penaltyBase, // Penalty base (without GST) for display
+        penalty_base: penaltyBase,
+        penalty_gst: penaltyGST,
+        penalty_total: penaltyAmount,
         total_extension_amount: totalExtensionAmount,
         original_due_date: parseDateToString(originalDueDate) || originalDueDate,
         new_due_date: extensionPeriodTill,
