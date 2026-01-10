@@ -2018,13 +2018,22 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             }
 
             // 3. Calculate values to save
-            const processedAmount = calculatedValues?.disbursal?.amount || loan.disbursal_amount || null;
+            const processedAmount = calculatedValues?.disbursal?.amount || loan.disbursal_amount || loan.loan_amount || 0;
             const exhaustedPeriodDays = 1; // At processing time, it's day 1 (inclusive counting)
-            const pFee = calculatedValues?.totals?.disbursalFee || loan.processing_fee || null;
-            const postServiceFee = calculatedValues?.totals?.repayableFee || null;
+            const pFee = calculatedValues?.totals?.disbursalFee || loan.processing_fee || 0;
+            const postServiceFee = calculatedValues?.totals?.repayableFee || 0;
             const gst = (calculatedValues?.totals?.disbursalFeeGST || 0) + (calculatedValues?.totals?.repayableFeeGST || 0);
-            const interest = calculatedValues?.interest?.amount || loan.total_interest || null;
+            const interest = calculatedValues?.interest?.amount || loan.total_interest || 0;
             const penalty = 0; // No penalty at processing time
+            
+            // Validate processedAmount - it should never be null or 0 for account_manager loans
+            if (!processedAmount || processedAmount <= 0) {
+              console.error(`❌ ERROR: processedAmount is invalid (${processedAmount}) for loan #${loanIdInt}. Cannot create EMI schedule.`);
+              return res.status(400).json({
+                success: false,
+                message: 'Cannot move loan to account_manager status: Invalid loan amount. Please ensure the loan has a valid disbursal amount or loan amount.'
+              });
+            }
             
             // Calculate processed_due_date - single date for single payment, JSON array for multi-EMI
             let processedDueDate = null;
@@ -2089,9 +2098,14 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                       const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
                       allEmiDates.push(formatDateLocal(emiDate)); // Store as YYYY-MM-DD without timezone conversion
                     }
+                  } else {
+                    console.warn(`⚠️ Invalid salary date (${userSalaryDate}) for loan #${loanIdInt}, will fall back to non-salary calculation`);
                   }
-                } else {
-                  // Non-salary-based EMIs
+                }
+                
+                // If salary-based calculation didn't generate dates, use non-salary method
+                if (allEmiDates.length === 0 && emiCount > 1) {
+                  console.log(`📅 Salary-based EMI calculation didn't generate dates, using non-salary method for loan #${loanIdInt}`);
                   const firstDueDate = calculatedValues?.interest?.repayment_date 
                     ? new Date(calculatedValues.interest.repayment_date)
                     : (() => {
@@ -2112,8 +2126,17 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                       emiDate.setDate(emiDate.getDate() + (i * daysBetween));
                     }
                     emiDate.setHours(0, 0, 0, 0);
-                    allEmiDates.push(formatDateLocal(emiDate)); // Store as YYYY-MM-DD without timezone conversion
+                    allEmiDates.push(formatDateLocal(emiDate));
                   }
+                }
+                
+                // Validate EMI dates were generated
+                if (!allEmiDates || allEmiDates.length !== emiCount) {
+                  console.error(`❌ ERROR: Failed to generate EMI dates for loan #${loanIdInt}. Expected ${emiCount} dates but got ${allEmiDates?.length || 0}`);
+                  return res.status(400).json({
+                    success: false,
+                    message: `Cannot create EMI schedule: Failed to generate ${emiCount} EMI dates. Please check loan plan configuration.`
+                  });
                 }
                 
                 // Store as JSON array for multi-EMI
@@ -2122,6 +2145,16 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 // Create emi_schedule with dates, amounts, and status using REDUCING BALANCE method
                 const { formatDateToString, calculateDaysBetween, getTodayString } = require('../utils/loanCalculations');
                 const emiSchedule = [];
+                
+                // Validate processedAmount is valid before calculation
+                if (!processedAmount || processedAmount <= 0 || isNaN(processedAmount)) {
+                  console.error(`❌ ERROR: Invalid processedAmount (${processedAmount}) for loan #${loanIdInt} EMI calculation`);
+                  return res.status(400).json({
+                    success: false,
+                    message: 'Cannot create EMI schedule: Invalid processed amount. Please ensure the loan has a valid disbursal amount.'
+                  });
+                }
+                
                 const principalPerEmi = Math.floor(processedAmount / emiCount * 100) / 100;
                 const remainder = Math.round((processedAmount - (principalPerEmi * emiCount)) * 100) / 100;
                 
@@ -2132,6 +2165,9 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 
                 // Get interest rate per day from loan or plan snapshot
                 const interestRatePerDay = parseFloat(loan.interest_percent_per_day || planSnapshot.interest_percent_per_day || 0.001);
+                
+                // Log EMI calculation inputs for debugging
+                console.log(`📊 [EMI Calculation] Loan #${loanIdInt}: processedAmount=₹${processedAmount}, emiCount=${emiCount}, principalPerEmi=₹${principalPerEmi}, postServiceFee=₹${postServiceFee}, postServiceFeePerEmi=₹${postServiceFeePerEmi}, gst=₹${gst}, postServiceFeeGSTPerEmi=₹${postServiceFeeGSTPerEmi}, interestRatePerDay=${interestRatePerDay}`);
                 
                 // Calculate base date for interest calculation (processed_at takes priority over disbursed_at)
                 // Reuse existing baseDate variable but update it if processed_at exists

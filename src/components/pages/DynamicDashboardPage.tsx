@@ -850,17 +850,17 @@ export function DynamicDashboardPage() {
               </div>
 
               {activeLoansForDisplay.length > 0 ? (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {activeLoansForDisplay.map((loan) => (
-                    <Card key={loan.id} className="p-3 lg:p-6 hover:shadow-md transition-shadow">
-                      <div className="flex justify-between items-start mb-3 lg:mb-4">
+                    <Card key={loan.id} className="p-4 hover:shadow-md transition-shadow">
+                      <div className="flex justify-between items-start mb-3">
                         <div className="flex-1 min-w-0">
-                          <h4 className="text-sm lg:text-lg font-semibold truncate">{loan.loan_purpose || 'Personal Loan'}</h4>
-                          <p className="text-gray-600 text-xs lg:text-sm truncate">App: {formatAppNumber(loan.application_number)}</p>
+                          <h4 className="text-sm font-semibold truncate">{loan.loan_purpose || 'Personal Loan'}</h4>
+                          <p className="text-gray-600 text-xs truncate">App: {formatAppNumber(loan.application_number)}</p>
                         </div>
                         <Badge
                           variant="secondary"
-                          className={`text-[10px] lg:text-xs px-1.5 lg:px-2.5 py-0.5 ${
+                          className={`text-[10px] px-1.5 py-0.5 ${
                             loan.status === 'submitted' ? 'bg-blue-100 text-blue-800' :
                             loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
                             loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
@@ -878,19 +878,19 @@ export function DynamicDashboardPage() {
                         </Badge>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 lg:gap-4 mb-3 lg:mb-4">
+                      <div className="grid grid-cols-2 gap-2 mb-3">
                         <div>
-                          <p className="text-xs lg:text-sm text-gray-500">Loan Amount</p>
-                          <p className="text-sm lg:text-lg font-semibold">₹{Number(loan.loan_amount).toLocaleString()}</p>
+                          <p className="text-xs text-gray-500">Loan Amount</p>
+                          <p className="text-sm font-semibold">₹{Number(loan.loan_amount).toLocaleString()}</p>
                         </div>
                         <div>
-                          <p className="text-xs lg:text-sm text-gray-500">Applied On</p>
-                          <p className="text-xs lg:text-sm font-medium">{formatDate(loan.created_at)}</p>
+                          <p className="text-xs text-gray-500">Applied On</p>
+                          <p className="text-xs font-medium">{formatDate(loan.created_at)}</p>
                         </div>
                       </div>
 
-                      <div className="flex flex-col lg:flex-row justify-between lg:items-center pt-3 lg:pt-4 border-t gap-2">
-                        <p className="text-[10px] lg:text-xs text-gray-500">
+                      <div className="flex flex-col justify-between pt-3 border-t gap-2">
+                        <p className="text-[10px] text-gray-500">
                           {loan.status === 'submitted' && 'Application submitted'}
                           {loan.status === 'under_review' && 'Under review'}
                           {loan.status === 'follow_up' && 'Info required'}
@@ -959,7 +959,7 @@ export function DynamicDashboardPage() {
                           }}
                           variant="outline"
                           size="sm"
-                          className="text-xs lg:text-sm whitespace-nowrap"
+                          className="text-xs whitespace-nowrap w-full"
                         >
                           {loan.status === 'account_manager' 
                             ? 'View Loan' 
@@ -996,7 +996,7 @@ export function DynamicDashboardPage() {
 
           {/* Right Sidebar */}
           <div className="col-span-4 space-y-6">
-            {/* Graduation Upsell Card for Students OR Credit Score Widget for Others */}
+            {/* Graduation Upsell Card for Students */}
             {userData.employment_type === 'student' &&
               userData.graduation_status === 'not_graduated' &&
               userData.loan_limit ? (
@@ -1006,57 +1006,6 @@ export function DynamicDashboardPage() {
                   fetchDashboard();
                 }}
               />
-            ) : userData.employment_type !== 'student' ? (
-              <Card className="p-6 text-center">
-                <div className="w-20 h-20 bg-blue-100 rounded-full mx-auto mb-4 flex items-center justify-center">
-                  <TrendingUp className="w-10 h-10 text-blue-600" />
-                </div>
-                <p className={`text-4xl font-bold mb-2 ${getCreditScoreColor(summary.credit_score)}`}>
-                  {summary.credit_score}
-                </p>
-                <p className="text-sm text-gray-600 mb-2">Pocket Credit Score</p>
-                {summary.experian_score !== null && summary.experian_score !== undefined ? (
-                  <div className="mb-2">
-                    <p className="text-xs text-gray-500 mb-1">Experian Score</p>
-                    <p className="text-2xl font-semibold text-gray-700">{summary.experian_score}</p>
-                  </div>
-                ) : (
-                  <div className="mb-2">
-                    <p className="text-xs text-gray-500 mb-1">Experian Score</p>
-                    <p className="text-2xl font-semibold text-gray-400">N/A</p>
-                  </div>
-                )}
-                <div className="flex justify-center mb-4">
-                  <Badge className="bg-blue-100 text-blue-800">
-                    {getCreditScoreCategory(summary.credit_score)}
-                  </Badge>
-                </div>
-                <div className="text-xs text-gray-500 space-y-1 mb-4">
-                  <div className="flex justify-between">
-                    <span>Last updated:</span>
-                    <span>{formatDate(new Date().toISOString())}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Status:</span>
-                    <span className="text-blue-600">Good</span>
-                  </div>
-                </div>
-                <div className="mt-4 pt-4 border-t border-gray-200">
-                  <div className="bg-blue-50 rounded-lg p-3">
-                    <p className="text-xs text-gray-700 leading-relaxed text-center">
-                      For any dispute related concerns please reach out to{' '}
-                      <a
-                        href="https://consumer.experian.in/ECSINDIA-DCE/"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
-                      >
-                        Experian Customer Dispute Portal
-                      </a>
-                    </p>
-                  </div>
-                </div>
-              </Card>
             ) : null}
           </div>
         </div>

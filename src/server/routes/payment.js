@@ -54,7 +54,7 @@ router.post('/create-order', authenticateToken, async (req, res) => {
             });
         }
 
-        // Fetch loan details with all email fields and plan snapshot
+        // Fetch loan details with all email fields and plan snapshot, including status
         const [loan] = await executeQuery(
             `SELECT la.*, 
                     CONCAT(u.first_name, ' ', u.last_name) as name,
@@ -72,6 +72,14 @@ router.post('/create-order', authenticateToken, async (req, res) => {
             return res.status(404).json({
                 success: false,
                 message: 'Loan not found'
+            });
+        }
+
+        // Check if loan is cleared - if cleared, don't allow more payments
+        if (loan.status === 'cleared') {
+            return res.status(400).json({
+                success: false,
+                message: 'This loan has already been cleared. No further payments are required.'
             });
         }
 
@@ -171,7 +179,8 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         console.log(`[Payment] Final payment type determined: ${finalPaymentType} (original from request: ${paymentType})`);
 
         // Validate sequential EMI payments (only for EMI types, skip for pre-close/full_payment)
-        if (finalPaymentType && finalPaymentType.startsWith('emi_')) {
+        // IMPORTANT: Only check if loan is NOT cleared
+        if (finalPaymentType && finalPaymentType.startsWith('emi_') && loan.status !== 'cleared') {
             // Get which EMIs have been paid using payment_orders table
             const paidEmis = await executeQuery(
                 `SELECT payment_type 
@@ -198,7 +207,7 @@ router.post('/create-order', authenticateToken, async (req, res) => {
             else if (finalPaymentType === 'emi_3rd') requestedEmiNumber = 3;
             else if (finalPaymentType === 'emi_4th') requestedEmiNumber = 4;
             
-            // Check if this EMI was already paid
+            // Check if this EMI was already paid (only if loan is not cleared)
             if (paidEmiNumbers.includes(requestedEmiNumber)) {
                 return res.status(400).json({
                     success: false,
@@ -236,25 +245,28 @@ router.post('/create-order', authenticateToken, async (req, res) => {
             });
         }
 
-        // Check if there's an existing pending or paid order for this loan
+        // Check if there's an existing pending or paid order for this loan WITH THE SAME PAYMENT TYPE
+        // This prevents reusing order IDs for different payment types (e.g., emi_1st vs emi_2nd)
+        const orderPaymentType = finalPaymentType || 'loan_repayment';
         const existingOrders = await executeQuery(
-            `SELECT order_id, status, amount, payment_session_id, created_at 
+            `SELECT order_id, status, amount, payment_session_id, payment_type, created_at 
              FROM payment_orders 
-             WHERE loan_id = ? AND user_id = ? AND status IN ('PENDING', 'PAID')
+             WHERE loan_id = ? AND user_id = ? AND payment_type = ? AND status IN ('PENDING', 'PAID')
              ORDER BY created_at DESC 
              LIMIT 1`,
-            [loanId, userId]
+            [loanId, userId, orderPaymentType]
         );
 
         if (existingOrders.length > 0) {
             const existingOrder = existingOrders[0];
-            console.log(`[Payment] Found existing order for loan ${loanId}:`, {
+            console.log(`[Payment] Found existing order for loan ${loanId} with payment_type ${orderPaymentType}:`, {
                 orderId: existingOrder.order_id,
                 status: existingOrder.status,
-                amount: existingOrder.amount
+                amount: existingOrder.amount,
+                payment_type: existingOrder.payment_type
             });
 
-            // If there's a PAID order, check if payment was actually processed
+            // If there's a PAID order with the same payment type, check if payment was actually processed
             if (existingOrder.status === 'PAID') {
                 // Check if loan payment record exists
                 const paymentRecord = await executeQuery(
@@ -264,6 +276,19 @@ router.post('/create-order', authenticateToken, async (req, res) => {
 
                 if (paymentRecord.length > 0) {
                     console.log(`[Payment] Payment already processed for order ${existingOrder.order_id}`);
+                    
+                    // Check current loan status first - if cleared, don't allow more payments
+                    const currentLoanStatus = await executeQuery(
+                        `SELECT status FROM loan_applications WHERE id = ?`,
+                        [loanId]
+                    );
+                    
+                    if (currentLoanStatus.length > 0 && currentLoanStatus[0].status === 'cleared') {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'This loan has already been cleared. No further payments are required.'
+                        });
+                    }
                     
                     // Even if payment is processed, check if loan should be cleared
                     try {
@@ -349,26 +374,48 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                     });
                 }
             } else if (existingOrder.status === 'PENDING') {
-                // Return existing pending order
-                console.log(`[Payment] Returning existing pending order ${existingOrder.order_id}`);
-                return res.json({
-                    success: true,
-                    message: 'Existing payment order found',
-                    data: {
-                        orderId: existingOrder.order_id,
-                        status: 'PENDING',
-                        paymentSessionId: existingOrder.payment_session_id,
-                        checkoutUrl: existingOrder.payment_session_id 
-                            ? `https://payments.cashfree.com/checkout/${existingOrder.payment_session_id}`
-                            : null
+                // Check if pending order is too old (more than 30 minutes) - create new order
+                const orderAge = Date.now() - new Date(existingOrder.created_at).getTime();
+                const thirtyMinutes = 30 * 60 * 1000;
+                
+                if (orderAge > thirtyMinutes) {
+                    console.log(`[Payment] Existing pending order ${existingOrder.order_id} is too old (${Math.round(orderAge / 60000)} minutes), creating new order`);
+                    // Mark old order as expired and continue to create new order
+                    try {
+                        await executeQuery(
+                            `UPDATE payment_orders SET status = 'EXPIRED' WHERE order_id = ?`,
+                            [existingOrder.order_id]
+                        );
+                    } catch (updateError) {
+                        console.warn('[Payment] Could not mark old order as expired:', updateError);
                     }
-                });
+                    // Continue to create new order below
+                } else {
+                    // Return existing pending order if it's recent
+                    console.log(`[Payment] Returning existing pending order ${existingOrder.order_id} (age: ${Math.round(orderAge / 60000)} minutes)`);
+                    return res.json({
+                        success: true,
+                        message: 'Existing payment order found',
+                        data: {
+                            orderId: existingOrder.order_id,
+                            status: 'PENDING',
+                            paymentSessionId: existingOrder.payment_session_id,
+                            checkoutUrl: existingOrder.payment_session_id 
+                                ? `https://payments.cashfree.com/checkout/${existingOrder.payment_session_id}`
+                                : null
+                        }
+                    });
+                }
             }
         }
 
-        // Generate unique order ID
-        orderId = `LOAN_${loan.application_number}_${Date.now()}`;
-        console.log(`[Payment] Generated order ID: ${orderId} for loan ${loanId}`);
+        // Generate unique order ID with payment type to ensure uniqueness per payment type
+        // Format: LOAN_{app_number}_{payment_type}_{timestamp}
+        // This ensures each payment type (emi_1st, emi_2nd, etc.) gets a unique order ID
+        // Replace '-' with '_' and keep underscores for payment types like 'emi_1st'
+        const paymentTypeSuffix = finalPaymentType ? `_${finalPaymentType.replace(/-/g, '_')}` : '';
+        orderId = `LOAN_${loan.application_number}${paymentTypeSuffix}_${Date.now()}`;
+        console.log(`[Payment] Generated unique order ID: ${orderId} for loan ${loanId} with payment_type: ${finalPaymentType}`);
 
         // Create payment order in database
         // First, ensure the table exists (create if it doesn't)

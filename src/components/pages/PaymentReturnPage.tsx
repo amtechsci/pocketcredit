@@ -148,12 +148,13 @@ export const PaymentReturnPage = () => {
                 )}
 
                 <div className="space-y-3">
-                  {/* Only show "View Repayment Schedule" if loan status is 'account_manager' and not 'cleared' */}
-                  {orderDetails?.loan_status === 'account_manager' && orderDetails?.loan_status !== 'cleared' && (
+                  {/* Only show "View Repayment Schedule" if loan status is 'account_manager' (includes cleared check) */}
+                  {orderDetails?.loan_status === 'account_manager' && (
                     <Button
                       onClick={() => {
                         if (orderDetails?.loan_id) {
-                          navigate(`/repayment-schedule?applicationId=${orderDetails.loan_id}`);
+                          // Add refresh flag to force reload data after payment
+                          navigate(`/repayment-schedule?applicationId=${orderDetails.loan_id}&refresh=${Date.now()}`);
                         } else {
                           navigate('/repayment-schedule');
                         }

@@ -37,8 +37,30 @@ export const RepaymentSchedulePage = () => {
     }
 
     const appId = searchParams.get('applicationId');
+    
+    // Check if we're returning from payment gateway (has orderId, payment_status, or refresh param)
+    const orderId = searchParams.get('orderId');
+    const paymentStatus = searchParams.get('payment_status');
+    const refreshParam = searchParams.get('refresh');
+    const isPaymentReturn = orderId || paymentStatus || refreshParam;
+    
     if (appId) {
-      fetchLoanData(parseInt(appId));
+      // If returning from payment, force refresh
+      if (isPaymentReturn) {
+        console.log('🔄 Returning from payment gateway, forcing refresh of loan data...');
+        // Remove payment-related params from URL to prevent re-triggering on subsequent renders
+        const newSearchParams = new URLSearchParams(searchParams);
+        newSearchParams.delete('orderId');
+        newSearchParams.delete('payment_status');
+        newSearchParams.delete('refresh');
+        window.history.replaceState({}, '', `${window.location.pathname}?${newSearchParams.toString()}`);
+        // Force refresh - add small delay to ensure backend has processed payment
+        setTimeout(() => {
+          fetchLoanData(parseInt(appId), true);
+        }, 1000);
+      } else {
+        fetchLoanData(parseInt(appId), false);
+      }
     } else {
       // Try to find loan with account_manager status
       fetchUserLoan();
@@ -79,13 +101,21 @@ export const RepaymentSchedulePage = () => {
 
   const [completedLoansCount, setCompletedLoansCount] = useState(0);
 
-  const fetchLoanData = async (loanId: number) => {
+  const fetchLoanData = async (loanId: number, forceRefresh = false) => {
     try {
       setLoading(true);
       setError(null);
 
       // Fetch KFS data which contains all loan calculation details
       // Use useActualDays=true for repayment schedule to calculate interest based on actual exhausted days
+      // When forceRefresh is true, fetch fresh data (API should handle this, but we'll ensure state is cleared)
+      if (forceRefresh) {
+        // Clear existing state to force re-render with fresh data
+        setKfsData(null);
+        setLoanData(null);
+        console.log('🔄 Force refreshing loan data after payment return...');
+      }
+      
       const kfsResponse = await apiService.getKFS(loanId, true);
       console.log('📊 KFS Response:', kfsResponse);
       console.log('📊 Loan Data:', kfsResponse?.data?.loan);
@@ -1448,9 +1478,9 @@ export const RepaymentSchedulePage = () => {
                               <Button
                                 className="bg-blue-600 hover:bg-blue-700 text-white"
                                 onClick={async () => {
+                                  const loadingToastId = toast.loading('Creating payment order...');
+                                  
                                   try {
-                                    toast.loading('Creating payment order...');
-
                                     const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
                                     const amount = emi.instalment_amount || 0;
                                     
@@ -1463,11 +1493,14 @@ export const RepaymentSchedulePage = () => {
                                     else if (emiNumber === 4) paymentType = 'emi_4th';
 
                                     if (!loanId || !amount) {
+                                      toast.dismiss(loadingToastId);
                                       toast.error('Unable to process payment');
                                       return;
                                     }
 
                                     const response = await apiService.createPaymentOrder(loanId, amount, paymentType);
+                                    
+                                    toast.dismiss(loadingToastId);
 
                                     if (response.success && response.data?.paymentSessionId) {
                                       toast.success('Opening payment gateway...');
