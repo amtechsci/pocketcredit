@@ -40,6 +40,13 @@ import { adminApiService } from '../../services/adminApi';
 import { toast } from 'sonner';
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '../../components/ui/tooltip';
 import { Button } from '../../components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '../../components/ui/dialog';
 
 
 
@@ -241,6 +248,11 @@ export function UserProfileDetail() {
   const [creditAnalyticsData, setCreditAnalyticsData] = useState<any>(null);
   const [creditAnalyticsLoading, setCreditAnalyticsLoading] = useState(false);
   const [performingCreditCheck, setPerformingCreditCheck] = useState(false);
+
+  // EMI Details modal state
+  const [showEmiDetailsModal, setShowEmiDetailsModal] = useState(false);
+  const [selectedLoanEmiSchedule, setSelectedLoanEmiSchedule] = useState<any[]>([]);
+  const [selectedLoanIdForEmi, setSelectedLoanIdForEmi] = useState<string>('');
 
   // Validation options from API
   const [documentOptions, setDocumentOptions] = useState([]);
@@ -1864,6 +1876,26 @@ export function UserProfileDetail() {
       style: 'currency',
       currency: 'INR',
       maximumFractionDigits: 0
+    }).format(numAmount);
+  };
+
+  // Format currency with decimal places (for EMI amounts - preserve exact decimals, don't round)
+  const formatCurrencyWithDecimals = (amount: number | string | null | undefined) => {
+    if (amount === null || amount === undefined || amount === '' || isNaN(Number(amount))) {
+      return '₹0';
+    }
+    const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+    if (isNaN(numAmount) || numAmount < 0) {
+      return '₹0';
+    }
+    // Preserve exact decimal places as stored (up to 2 decimal places)
+    // minimumFractionDigits: 0 means don't force trailing zeros
+    // maximumFractionDigits: 2 means show up to 2 decimal places
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
     }).format(numAmount);
   };
 
@@ -5220,7 +5252,7 @@ export function UserProfileDetail() {
                             </Tooltip>
                           </div>
                         </th>
-                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">EMI Dates</th>
+                        <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">EMI Details</th>
                         <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           <div className="flex items-center gap-1">
                             Pre close
@@ -5430,17 +5462,35 @@ export function UserProfileDetail() {
                       const loanClosedAmount = loan.status === 'cleared' ? (loan.closed_amount || totalAmount) : 'N/A';
                       const loanClosedDate = loan.status === 'cleared' ? (loan.closed_date || loan.updatedAt) : 'N/A';
 
-                      // EMI Dates
-                      let emiDates = 'N/A';
-                      if (calculation?.repayment?.schedule) {
-                        emiDates = calculation.repayment.schedule.map((emi: any) => formatDate(emi.due_date)).join(', ');
-                      } else if (calculation?.emi_schedule) {
-                        emiDates = calculation.emi_schedule.map((emi: any) => formatDate(emi.due_date || emi.date)).join(', ');
-                      } else if (calculation?.repayment?.all_emi_dates) {
-                        emiDates = calculation.repayment.all_emi_dates.map((date: string) => formatDate(date)).join(', ');
-                      } else if (dueDate) {
-                        emiDates = formatDate(dueDate);
+                      // EMI Schedule - get ONLY from loan.emi_schedule (raw data, no calculations)
+                      let emiSchedule: any[] = [];
+                      
+                      if (loan.emi_schedule) {
+                        // Parse emi_schedule from loan data (stored as JSON string in database)
+                        try {
+                          const parsedSchedule = typeof loan.emi_schedule === 'string' 
+                            ? JSON.parse(loan.emi_schedule) 
+                            : loan.emi_schedule;
+                          
+                          // Use raw emi_schedule data exactly as stored
+                          // Structure: emi_number, due_date, emi_amount, status
+                          emiSchedule = Array.isArray(parsedSchedule) ? parsedSchedule.map((emi: any) => ({
+                            emi_number: emi.emi_number || emi.instalment_no,
+                            due_date: emi.due_date || emi.date,
+                            emi_amount: emi.emi_amount || 0,
+                            status: emi.status || 'pending'
+                          })) : [];
+                        } catch (e) {
+                          console.error('Error parsing loan.emi_schedule:', e);
+                        }
                       }
+
+                      // Helper function to open EMI details modal
+                      const handleViewEmiDetails = () => {
+                        setSelectedLoanEmiSchedule(emiSchedule);
+                        setSelectedLoanIdForEmi(shortLoanId);
+                        setShowEmiDetailsModal(true);
+                      };
 
                       // Pre-close amount: principal + 10% pre-close fee + GST + interest till TODAY
                       // Use same calculation as RepaymentSchedulePage for consistency
@@ -5504,7 +5554,16 @@ export function UserProfileDetail() {
                             {formatCurrency(totalAmount)}
                           </td>
                           <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {emiDates}
+                            <Button
+                              onClick={handleViewEmiDetails}
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-3 text-xs"
+                              disabled={emiSchedule.length === 0}
+                            >
+                              <Eye className="w-3 h-3 mr-1" />
+                              View
+                            </Button>
                           </td>
                           <td className="px-2 py-4 whitespace-nowrap text-sm text-gray-900">
                             {formatCurrency(preCloseAmount)}
@@ -9671,6 +9730,102 @@ export function UserProfileDetail() {
           </div>
         </div>
       )}
+
+      {/* EMI Details Modal */}
+      <Dialog open={showEmiDetailsModal} onOpenChange={setShowEmiDetailsModal}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>EMI Details - {selectedLoanIdForEmi}</DialogTitle>
+            <DialogDescription>
+              View all EMI schedule details with dates and amounts
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4">
+            {selectedLoanEmiSchedule.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        EMI #
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Date
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Amount (₹)
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {selectedLoanEmiSchedule.map((emi: any, index: number) => {
+                      // Get data directly from emi_schedule
+                      const emiNumber = emi.emi_number || emi.instalment_no || (index + 1);
+                      const emiDate = emi.due_date || 'N/A';
+                      const emiAmount = parseFloat(emi.emi_amount || 0);
+                      const emiStatus = emi.status || 'pending';
+
+                      return (
+                        <tr key={index} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {emiNumber}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                            {emiDate !== 'N/A' ? formatDate(emiDate) : 'N/A'}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
+                            {formatCurrencyWithDecimals(emiAmount)}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm">
+                            <span
+                              className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                emiStatus === 'paid' || emiStatus === 'completed'
+                                  ? 'bg-green-100 text-green-800'
+                                  : emiStatus === 'overdue' || emiStatus === 'defaulted'
+                                  ? 'bg-red-100 text-red-800'
+                                  : emiStatus === 'pending' || emiStatus === 'due'
+                                  ? 'bg-yellow-100 text-yellow-800'
+                                  : 'bg-gray-100 text-gray-800'
+                              }`}
+                            >
+                              {emiStatus.charAt(0).toUpperCase() + emiStatus.slice(1)}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  {selectedLoanEmiSchedule.length > 0 && (
+                    <tfoot className="bg-gray-50">
+                      <tr>
+                        <td colSpan={2} className="px-4 py-3 text-right text-sm font-semibold text-gray-900">
+                          Total:
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-900">
+                          {formatCurrencyWithDecimals(
+                            selectedLoanEmiSchedule.reduce((sum: number, emi: any) => {
+                              return sum + parseFloat(emi.emi_amount || 0);
+                            }, 0)
+                          )}
+                        </td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-500">
+                <FileText className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                <p>No EMI schedule data available</p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 

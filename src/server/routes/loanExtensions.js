@@ -64,18 +64,39 @@ router.get('/eligibility/:loanId', requireAuth, async (req, res) => {
 
     // If there's a pending extension, override eligibility
     if (pendingExtension && pendingExtension.length > 0) {
+      const extension = pendingExtension[0];
+      
+      // If status is pending_payment, check for payment order
+      let paymentOrder = null;
+      if (extension.status === 'pending_payment') {
+        const paymentOrders = await executeQuery(`
+          SELECT id, order_id, status, amount, created_at, updated_at
+          FROM payment_orders
+          WHERE loan_id = ? AND payment_type = 'extension_fee' AND extension_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1
+        `, [loanId, extension.id]);
+        
+        if (paymentOrders && paymentOrders.length > 0) {
+          paymentOrder = paymentOrders[0];
+        }
+      }
+      
       return res.json({
         success: true,
         data: {
           eligible: false,
           has_pending_request: true,
           pending_extension: {
-            id: pendingExtension[0].id,
-            extension_number: pendingExtension[0].extension_number,
-            requested_at: pendingExtension[0].created_at,
-            status: pendingExtension[0].status
+            id: extension.id,
+            extension_number: extension.extension_number,
+            requested_at: extension.created_at,
+            status: extension.status,
+            payment_order: paymentOrder
           },
-          reason: 'A loan extension request is already pending approval',
+          reason: extension.status === 'pending_payment' 
+            ? 'Extension payment is pending. Please check payment status.'
+            : 'A loan extension request is already pending approval',
           extensionWindow: eligibility.extensionWindow
         }
       });
@@ -698,6 +719,204 @@ router.post('/:extensionId/payment', requireAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to create payment order',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/loan-extensions/:extensionId/check-payment
+ * Check payment status for pending_payment extension and complete if paid
+ */
+router.post('/:extensionId/check-payment', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { extensionId } = req.params;
+    const userId = req.user.id;
+
+    // Get extension details
+    const extensions = await executeQuery(`
+      SELECT 
+        le.*,
+        la.id as loan_id,
+        la.user_id,
+        la.application_number
+      FROM loan_extensions le
+      INNER JOIN loan_applications la ON le.loan_application_id = la.id
+      WHERE le.id = ? AND la.user_id = ?
+    `, [extensionId, userId]);
+
+    if (!extensions || extensions.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Extension request not found'
+      });
+    }
+
+    const extension = extensions[0];
+
+    // Only allow checking for pending_payment extensions
+    if (extension.status !== 'pending_payment') {
+      return res.status(400).json({
+        success: false,
+        message: `Extension status is ${extension.status}. Payment check is only available for pending_payment extensions.`
+      });
+    }
+
+    // Find payment order for this extension
+    const paymentOrders = await executeQuery(`
+      SELECT id, order_id, status, amount, created_at, updated_at
+      FROM payment_orders
+      WHERE loan_id = ? AND payment_type = 'extension_fee' AND extension_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [extension.loan_id, extensionId]);
+
+    if (!paymentOrders || paymentOrders.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment order not found for this extension'
+      });
+    }
+
+    const paymentOrder = paymentOrders[0];
+    const orderId = paymentOrder.order_id;
+
+    // Check Cashfree API for current payment status
+    const cashfreePayment = require('../services/cashfreePayment');
+    const cashfreeStatus = await cashfreePayment.getOrderStatus(orderId);
+
+    let currentStatus = paymentOrder.status;
+    let paymentReceived = false;
+    let cashfreeOrderStatus = null;
+
+    if (cashfreeStatus.success && cashfreeStatus.data) {
+      cashfreeOrderStatus = cashfreeStatus.data.order_status || 
+                           cashfreeStatus.data.order?.order_status;
+      paymentReceived = cashfreeStatus.paymentReceived || (cashfreeOrderStatus === 'PAID');
+      
+      // Update database status if Cashfree shows PAID
+      if (paymentReceived && paymentOrder.status === 'PENDING') {
+        console.log(`🔄 Updating payment order ${orderId} status from PENDING to PAID`);
+        await executeQuery(
+          `UPDATE payment_orders SET status = 'PAID', updated_at = NOW() WHERE order_id = ?`,
+          [orderId]
+        );
+        currentStatus = 'PAID';
+      }
+    }
+
+    // If payment is PAID, complete the extension
+    if (currentStatus === 'PAID' || paymentReceived) {
+      // Check if extension is already approved (to avoid duplicate processing)
+      const currentExtension = await executeQuery(
+        'SELECT status FROM loan_extensions WHERE id = ?',
+        [extensionId]
+      );
+
+      if (currentExtension && currentExtension.length > 0 && 
+          currentExtension[0].status === 'pending_payment') {
+        // Check if transaction already exists to avoid duplicates
+        const existingTransaction = await executeQuery(
+          `SELECT id FROM transactions WHERE reference_number = ? AND loan_application_id = ? AND transaction_type LIKE 'loan_extension_%'`,
+          [orderId, extension.loan_id]
+        );
+
+        if (existingTransaction.length === 0) {
+          // Complete the extension by approving it
+          try {
+            const { approveExtension } = require('../utils/extensionApproval');
+            const approvalResult = await approveExtension(
+              extensionId,
+              orderId, // Use orderId as reference number
+              null // No admin ID for auto-approval from payment check
+            );
+
+            console.log('✅ Extension auto-approved via payment check:', approvalResult);
+
+            return res.json({
+              success: true,
+              data: {
+                status: 'completed',
+                message: 'Extension payment verified and extension approved successfully',
+                payment_status: 'PAID',
+                extension_approved: true,
+                approval_result: approvalResult
+              }
+            });
+          } catch (approvalError) {
+            console.error('❌ Error auto-approving extension:', approvalError);
+            return res.status(500).json({
+              success: false,
+              message: 'Payment is PAID but failed to approve extension. Please contact support.',
+              error: approvalError.message,
+              payment_status: 'PAID'
+            });
+          }
+        } else {
+          // Transaction already exists, extension might be in process
+          return res.json({
+            success: true,
+            data: {
+              status: 'processing',
+              message: 'Extension is being processed. Please wait.',
+              payment_status: 'PAID'
+            }
+          });
+        }
+      } else {
+        // Extension already processed
+        return res.json({
+          success: true,
+          data: {
+            status: 'already_processed',
+            message: 'Extension has already been processed',
+            payment_status: 'PAID',
+            extension_status: currentExtension[0].status
+          }
+        });
+      }
+    } else if (currentStatus === 'PENDING' || cashfreeOrderStatus === 'ACTIVE') {
+      // Payment is still pending
+      return res.json({
+        success: true,
+        data: {
+          status: 'pending',
+          message: 'Your payment transaction is still pending. Please wait for payment confirmation.',
+          payment_status: 'PENDING',
+          order_id: orderId
+        }
+      });
+    } else if (currentStatus === 'FAILED' || cashfreeOrderStatus === 'EXPIRED') {
+      // Payment failed or expired
+      return res.json({
+        success: true,
+        data: {
+          status: 'failed',
+          message: 'Payment transaction has failed or expired. Please create a new payment order.',
+          payment_status: 'FAILED',
+          order_id: orderId
+        }
+      });
+    } else {
+      // Unknown status
+      return res.json({
+        success: true,
+        data: {
+          status: 'unknown',
+          message: `Payment status is ${currentStatus}. Please try again later or contact support.`,
+          payment_status: currentStatus,
+          cashfree_status: cashfreeOrderStatus,
+          order_id: orderId
+        }
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Error checking extension payment:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check payment status',
       error: error.message
     });
   }

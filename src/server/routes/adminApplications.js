@@ -691,6 +691,80 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
             
             // Store as JSON array for multi-EMI
             processedDueDate = JSON.stringify(allEmiDates);
+            
+            // Create emi_schedule with dates, amounts, and status using REDUCING BALANCE method
+            const { formatDateToString, calculateDaysBetween, getTodayString } = require('../utils/loanCalculations');
+            const emiSchedule = [];
+            const principalPerEmi = Math.floor(processedAmount / emiCount * 100) / 100;
+            const remainder = Math.round((processedAmount - (principalPerEmi * emiCount)) * 100) / 100;
+            
+            // Calculate per-EMI fees (post service fee and GST are already total amounts)
+            // IMPORTANT: postServiceFee and gst are TOTAL amounts, need to divide by emiCount for per-EMI
+            const postServiceFeePerEmi = Math.round((postServiceFee || 0) / emiCount * 100) / 100;
+            const postServiceFeeGSTPerEmi = Math.round((gst || 0) / emiCount * 100) / 100;
+            
+            // Get interest rate per day
+            const interestRatePerDay = parseFloat(loan.interest_percent_per_day || 0.001);
+            
+            // Calculate base date for interest calculation (processed_at takes priority over disbursed_at)
+            // Reuse existing baseDate variable but update it if processed_at exists
+            const interestBaseDate = loan.processed_at ? new Date(loan.processed_at) : baseDate;
+            interestBaseDate.setHours(0, 0, 0, 0);
+            const baseDateStr = formatDateToString(interestBaseDate) || getTodayString();
+            
+            // Track outstanding principal for reducing balance calculation
+            let outstandingPrincipal = processedAmount;
+            
+            // Calculate EMI amounts using reducing balance method
+            for (let i = 0; i < emiCount; i++) {
+              const emiDateStr = allEmiDates[i];
+              
+              // Calculate days for this period
+              let previousDateStr;
+              if (i === 0) {
+                // First EMI: from base date (processed_at/disbursed_at) to first EMI date
+                previousDateStr = baseDateStr;
+              } else {
+                // Subsequent EMIs: from day AFTER previous EMI date to current EMI date
+                const prevEmiDateStr = allEmiDates[i - 1];
+                const [prevYear, prevMonth, prevDay] = prevEmiDateStr.split('-').map(Number);
+                const prevDueDate = new Date(prevYear, prevMonth - 1, prevDay);
+                prevDueDate.setDate(prevDueDate.getDate() + 1); // Add 1 day (inclusive counting)
+                previousDateStr = formatDateToString(prevDueDate);
+              }
+              
+              // Calculate days between dates (inclusive)
+              const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStr);
+              
+              // Calculate principal for this EMI (last EMI gets remainder)
+              const principalForThisEmi = i === emiCount - 1
+                ? Math.round((principalPerEmi + remainder) * 100) / 100
+                : principalPerEmi;
+              
+              // Calculate interest for this period on reducing balance
+              const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
+              
+              // Calculate EMI amount: principal + interest + post service fee + GST
+              const emiAmount = Math.round((principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi) * 100) / 100;
+              
+              // Reduce outstanding principal for next EMI
+              outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
+              
+              emiSchedule.push({
+                emi_number: i + 1,
+                instalment_no: i + 1,
+                due_date: emiDateStr,
+                emi_amount: emiAmount,
+                status: 'pending'
+              });
+              
+              console.log(`📊 EMI ${i + 1}: ${previousDateStr} to ${emiDateStr} (${daysForPeriod} days), Principal: ₹${principalForThisEmi}, Interest: ₹${interestForPeriod}, Total: ₹${emiAmount}`);
+            }
+            
+            // Update emi_schedule in the update query
+            updateQuery += `, emi_schedule = ?`;
+            updateParams.push(JSON.stringify(emiSchedule));
+            console.log(`📅 Created emi_schedule for multi-EMI loan with ${emiCount} EMIs`);
           } else {
             // Single payment: Calculate from plan snapshot and processed_at
             const { getNextSalaryDate, getSalaryDateForMonth, formatDateToString, calculateDaysBetween, parseDateToString } = require('../utils/loanCalculations');
@@ -739,6 +813,20 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
                 console.log(`📅 Single payment loan ${loan.id}: Due date = ${processedDueDate} (fixed days: ${repaymentDays}, base: ${baseDateStr})`);
               }
             }
+            
+            // Create emi_schedule for single payment loan
+            const totalAmount = (processedAmount || 0) + (interest || 0) + (postServiceFee || 0) + (gst || 0);
+            const emiScheduleForSingle = [{
+              emi_number: 1,
+              instalment_no: 1,
+              due_date: processedDueDate,
+              emi_amount: totalAmount,
+              status: 'pending'
+            }];
+            
+            updateQuery += `, emi_schedule = ?`;
+            updateParams.push(JSON.stringify(emiScheduleForSingle));
+            console.log(`📅 Created emi_schedule for single payment loan`);
           }
         } catch (dueDateError) {
           console.error('Error calculating processed_due_date:', dueDateError);
@@ -749,7 +837,7 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
         }
         
         const dueDate = processedDueDate; // Use the calculated processedDueDate
-
+        
         updateQuery += `, processed_at = NOW(), 
           processed_amount = ?,
           exhausted_period_days = ?,

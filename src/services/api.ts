@@ -1456,6 +1456,21 @@ class ApiService {
   }
 
   /**
+   * Check payment status for pending_payment extension and complete if paid
+   */
+  async checkExtensionPayment(extensionId: number): Promise<ApiResponse<{
+    status: 'completed' | 'pending' | 'failed' | 'processing' | 'already_processed' | 'unknown';
+    message: string;
+    payment_status: string;
+    extension_approved?: boolean;
+    extension_status?: string;
+    order_id?: string;
+    cashfree_status?: string;
+  }>> {
+    return this.request('POST', `/loan-extensions/${extensionId}/check-payment`);
+  }
+
+  /**
    * Get extension history for a loan
    */
   async getExtensionHistory(loanId: number): Promise<ApiResponse<any>> {

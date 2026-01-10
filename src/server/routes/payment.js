@@ -1042,15 +1042,15 @@ router.post('/webhook', async (req, res) => {
                         // ALWAYS check if loan should be cleared (runs for all successful payments)
                     try {
                         // Get loan details to calculate outstanding balance
-                        const loanDetails = await executeQuery(
-                            `SELECT 
-                                id, processed_amount, loan_amount,
-                                processed_post_service_fee, fees_breakdown, plan_snapshot,
-                                status
-                            FROM loan_applications 
-                            WHERE id = ?`,
-                            [paymentOrder.loan_id]
-                        );
+                            const loanDetails = await executeQuery(
+                                `SELECT 
+                                    id, processed_amount, loan_amount,
+                                    processed_post_service_fee, fees_breakdown, plan_snapshot,
+                                    emi_schedule, status
+                                FROM loan_applications 
+                                WHERE id = ?`,
+                                [paymentOrder.loan_id]
+                            );
 
                         if (loanDetails.length > 0) {
                             const loan = loanDetails[0];
@@ -1084,6 +1084,47 @@ router.post('/webhook', async (req, res) => {
                                     else if (paymentType === 'emi_2nd') currentEmiNumber = 2;
                                     else if (paymentType === 'emi_3rd') currentEmiNumber = 3;
                                     else if (paymentType === 'emi_4th') currentEmiNumber = 4;
+                                    
+                                    // Update emi_schedule to mark this EMI as paid
+                                    try {
+                                        let emiSchedule = loan.emi_schedule;
+                                        if (emiSchedule) {
+                                            let emiScheduleArray = null;
+                                            try {
+                                                emiScheduleArray = typeof emiSchedule === 'string' 
+                                                    ? JSON.parse(emiSchedule) 
+                                                    : emiSchedule;
+                                            } catch (parseError) {
+                                                console.error('Error parsing emi_schedule:', parseError);
+                                            }
+                                            
+                                            if (Array.isArray(emiScheduleArray) && emiScheduleArray.length >= currentEmiNumber) {
+                                                // Update the status of the corresponding EMI (0-indexed array)
+                                                const emiIndex = currentEmiNumber - 1;
+                                                emiScheduleArray[emiIndex] = {
+                                                    ...emiScheduleArray[emiIndex],
+                                                    status: 'paid'
+                                                };
+                                                
+                                                // Update emi_schedule in database
+                                                await executeQuery(
+                                                    `UPDATE loan_applications 
+                                                     SET emi_schedule = ? 
+                                                     WHERE id = ?`,
+                                                    [JSON.stringify(emiScheduleArray), paymentOrder.loan_id]
+                                                );
+                                                
+                                                console.log(`✅ Updated emi_schedule: EMI #${currentEmiNumber} marked as paid`);
+                                            } else {
+                                                console.warn(`⚠️ emi_schedule array not found or invalid for EMI #${currentEmiNumber}`);
+                                            }
+                                        } else {
+                                            console.warn(`⚠️ emi_schedule not found in loan record`);
+                                        }
+                                    } catch (emiScheduleError) {
+                                        console.error('❌ Error updating emi_schedule:', emiScheduleError);
+                                        // Don't fail the webhook - payment was successful, just log the error
+                                    }
                                     
                                     // Check if this is the last EMI
                                     if (currentEmiNumber === emiCount) {
@@ -1264,7 +1305,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
 
         // Fetch from database first
         const [order] = await executeQuery(
-            `SELECT po.*, la.application_number 
+            `SELECT po.*, la.application_number, la.status as loan_status
        FROM payment_orders po
        JOIN loan_applications la ON po.loan_id = la.id
        WHERE po.order_id = ? AND po.user_id = ?`,
@@ -1422,7 +1463,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                         `SELECT 
                                             id, processed_amount, loan_amount,
                                             processed_post_service_fee, fees_breakdown, plan_snapshot,
-                                            status
+                                            emi_schedule, status
                                         FROM loan_applications 
                                         WHERE id = ?`,
                                         [paymentOrder.loan_id]
@@ -1458,6 +1499,47 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                                 else if (paymentType === 'emi_2nd') currentEmiNumber = 2;
                                                 else if (paymentType === 'emi_3rd') currentEmiNumber = 3;
                                                 else if (paymentType === 'emi_4th') currentEmiNumber = 4;
+                                                
+                                                // Update emi_schedule to mark this EMI as paid
+                                                try {
+                                                    let emiSchedule = loan.emi_schedule;
+                                                    if (emiSchedule) {
+                                                        let emiScheduleArray = null;
+                                                        try {
+                                                            emiScheduleArray = typeof emiSchedule === 'string' 
+                                                                ? JSON.parse(emiSchedule) 
+                                                                : emiSchedule;
+                                                        } catch (parseError) {
+                                                            console.error('Error parsing emi_schedule:', parseError);
+                                                        }
+                                                        
+                                                        if (Array.isArray(emiScheduleArray) && emiScheduleArray.length >= currentEmiNumber) {
+                                                            // Update the status of the corresponding EMI (0-indexed array)
+                                                            const emiIndex = currentEmiNumber - 1;
+                                                            emiScheduleArray[emiIndex] = {
+                                                                ...emiScheduleArray[emiIndex],
+                                                                status: 'paid'
+                                                            };
+                                                            
+                                                            // Update emi_schedule in database
+                                                            await executeQuery(
+                                                                `UPDATE loan_applications 
+                                                                 SET emi_schedule = ? 
+                                                                 WHERE id = ?`,
+                                                                [JSON.stringify(emiScheduleArray), paymentOrder.loan_id]
+                                                            );
+                                                            
+                                                            console.log(`✅ Updated emi_schedule: EMI #${currentEmiNumber} marked as paid`);
+                                                        } else {
+                                                            console.warn(`⚠️ emi_schedule array not found or invalid for EMI #${currentEmiNumber}`);
+                                                        }
+                                                    } else {
+                                                        console.warn(`⚠️ emi_schedule not found in loan record`);
+                                                    }
+                                                } catch (emiScheduleError) {
+                                                    console.error('❌ Error updating emi_schedule:', emiScheduleError);
+                                                    // Don't fail the webhook - payment was successful, just log the error
+                                                }
                                                 
                                                 // Check if this is the last EMI
                                                 if (currentEmiNumber === emiCount) {
@@ -1579,6 +1661,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
             data: {
                 ...order,
                 status: order.status, // Updated status if changed
+                loan_status: order.loan_status, // Include loan status
                 cashfreeStatus: cashfreeStatus.data,
                 paymentReceived: paymentReceived,
                 paymentStatus: cashfreeOrderStatus || order.status,

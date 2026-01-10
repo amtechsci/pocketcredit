@@ -580,6 +580,8 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         processed_gst: loan.processed_gst || null,
         processed_due_date: loan.processed_due_date || null,
         last_calculated_at: loan.last_calculated_at || null,
+        last_extension_date: loan.last_extension_date || null, // For preclose calculation priority
+        extension_count: loan.extension_count || 0, // For preclose calculation priority
         loan_term_days: (() => {
           // Calculate loan term days based on EMI count for EMI loans
           const emiCount = planData.emi_count || null;
@@ -3555,7 +3557,15 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         approved_date: loan.approved_at,
         disbursed_date: loan.disbursed_at,
         due_date: formatDateLocal(dueDate),
-        emi_count: planData.emi_count || null
+        emi_count: planData.emi_count || null,
+        processed_at: loan.processed_at || null,
+        processed_amount: loan.processed_amount || null,
+        processed_interest: loan.processed_interest || null,
+        processed_penalty: loan.processed_penalty || null,
+        processed_due_date: loan.processed_due_date || null,
+        last_extension_date: loan.last_extension_date || null, // For preclose calculation priority
+        extension_count: loan.extension_count || 0, // For preclose calculation priority
+        emi_schedule: loan.emi_schedule || null
       },
 
       // Borrower Details

@@ -81,7 +81,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         la.disbursal_amount, la.processed_at,
         la.processed_amount, la.exhausted_period_days, la.processed_p_fee,
         la.processed_post_service_fee, la.processed_gst, la.processed_interest,
-        la.processed_penalty, la.processed_due_date,
+        la.processed_penalty, la.processed_due_date, la.emi_schedule,
         es.status as enach_status
       FROM loan_applications la
       LEFT JOIN (
@@ -784,6 +784,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           processed_interest: app.processed_interest,
           processed_penalty: app.processed_penalty,
           processed_due_date: app.processed_due_date,
+          emi_schedule: app.emi_schedule || null,
           enach_status: app.enach_status || null
         };
       })
@@ -2027,6 +2028,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             
             // Calculate processed_due_date - single date for single payment, JSON array for multi-EMI
             let processedDueDate = null;
+            let emiScheduleForUpdate = null; // Initialize emi_schedule for update
             try {
               // Parse plan snapshot to check if it's multi-EMI
               let planSnapshot = {};
@@ -2116,6 +2118,79 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 
                 // Store as JSON array for multi-EMI
                 processedDueDate = JSON.stringify(allEmiDates);
+                
+                // Create emi_schedule with dates, amounts, and status using REDUCING BALANCE method
+                const { formatDateToString, calculateDaysBetween, getTodayString } = require('../utils/loanCalculations');
+                const emiSchedule = [];
+                const principalPerEmi = Math.floor(processedAmount / emiCount * 100) / 100;
+                const remainder = Math.round((processedAmount - (principalPerEmi * emiCount)) * 100) / 100;
+                
+                // Calculate per-EMI fees (post service fee and GST are already total amounts)
+                // IMPORTANT: postServiceFee and gst are TOTAL amounts, need to divide by emiCount for per-EMI
+                const postServiceFeePerEmi = Math.round((postServiceFee || 0) / emiCount * 100) / 100;
+                const postServiceFeeGSTPerEmi = Math.round((gst || 0) / emiCount * 100) / 100;
+                
+                // Get interest rate per day from loan or plan snapshot
+                const interestRatePerDay = parseFloat(loan.interest_percent_per_day || planSnapshot.interest_percent_per_day || 0.001);
+                
+                // Calculate base date for interest calculation (processed_at takes priority over disbursed_at)
+                // Reuse existing baseDate variable but update it if processed_at exists
+                const interestBaseDate = loan.processed_at ? new Date(loan.processed_at) : baseDate;
+                interestBaseDate.setHours(0, 0, 0, 0);
+                const baseDateStr = formatDateToString(interestBaseDate) || getTodayString();
+                
+                // Track outstanding principal for reducing balance calculation
+                let outstandingPrincipal = processedAmount;
+                
+                // Calculate EMI amounts using reducing balance method
+                for (let i = 0; i < emiCount; i++) {
+                  const emiDateStr = allEmiDates[i];
+                  
+                  // Calculate days for this period
+                  let previousDateStr;
+                  if (i === 0) {
+                    // First EMI: from base date (processed_at/disbursed_at) to first EMI date
+                    previousDateStr = baseDateStr;
+                  } else {
+                    // Subsequent EMIs: from day AFTER previous EMI date to current EMI date
+                    const prevEmiDateStr = allEmiDates[i - 1];
+                    const [prevYear, prevMonth, prevDay] = prevEmiDateStr.split('-').map(Number);
+                    const prevDueDate = new Date(prevYear, prevMonth - 1, prevDay);
+                    prevDueDate.setDate(prevDueDate.getDate() + 1); // Add 1 day (inclusive counting)
+                    previousDateStr = formatDateToString(prevDueDate);
+                  }
+                  
+                  // Calculate days between dates (inclusive)
+                  const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStr);
+                  
+                  // Calculate principal for this EMI (last EMI gets remainder)
+                  const principalForThisEmi = i === emiCount - 1
+                    ? Math.round((principalPerEmi + remainder) * 100) / 100
+                    : principalPerEmi;
+                  
+                  // Calculate interest for this period on reducing balance
+                  const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
+                  
+                  // Calculate EMI amount: principal + interest + post service fee + GST
+                  const emiAmount = Math.round((principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi) * 100) / 100;
+                  
+                  // Reduce outstanding principal for next EMI
+                  outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
+                  
+                  emiSchedule.push({
+                    emi_number: i + 1,
+                    instalment_no: i + 1,
+                    due_date: emiDateStr,
+                    emi_amount: emiAmount,
+                    status: 'pending'
+                  });
+                  
+                  console.log(`📊 EMI ${i + 1}: ${previousDateStr} to ${emiDateStr} (${daysForPeriod} days), Principal: ₹${principalForThisEmi}, Interest: ₹${interestForPeriod}, Total: ₹${emiAmount}`);
+                }
+                
+                // Store emi_schedule to be updated
+                emiScheduleForUpdate = JSON.stringify(emiSchedule);
+                console.log(`📅 Created emi_schedule for multi-EMI loan with ${emiCount} EMIs`);
               } else {
                 // Single payment: Calculate from plan snapshot and processed_at
                 const { getNextSalaryDate, getSalaryDateForMonth, formatDateToString, calculateDaysBetween, parseDateToString } = require('../utils/loanCalculations');
@@ -2164,6 +2239,19 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     console.log(`📅 Single payment loan ${loanId}: Due date = ${processedDueDate} (fixed days: ${repaymentDays}, base: ${baseDateStr})`);
                   }
                 }
+                
+                // Create emi_schedule for single payment loan
+                const totalAmount = (processedAmount || 0) + (interest || 0) + (postServiceFee || 0) + (gst || 0);
+                const emiScheduleForSingle = [{
+                  emi_number: 1,
+                  instalment_no: 1,
+                  due_date: processedDueDate,
+                  emi_amount: totalAmount,
+                  status: 'pending'
+                }];
+                
+                emiScheduleForUpdate = JSON.stringify(emiScheduleForSingle);
+                console.log(`📅 Created emi_schedule for single payment loan`);
               }
             } catch (dueDateError) {
               console.error('Error calculating processed_due_date:', dueDateError);
@@ -2194,37 +2282,45 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
             // 5. Update loan status and save calculated values
             console.log(`Attempting to update loan status to account_manager with calculated values...`);
-            const updateResult = await executeQuery(`
-                 UPDATE loan_applications 
-                 SET 
-                   status = 'account_manager',
-                   disbursed_at = NOW(),
-                   processed_at = NOW(),
-                   processed_amount = ?,
-                   exhausted_period_days = ?,
-                   processed_p_fee = ?,
-                   processed_post_service_fee = ?,
-                   processed_gst = ?,
-                   processed_interest = ?,
-                   processed_penalty = ?,
-                   processed_due_date = ?,
-                   kfs_pdf_url = ?,
-                   loan_agreement_pdf_url = ?,
-                   updated_at = NOW()
-                 WHERE id = ?
-               `, [
-                 processedAmount,
-                 exhaustedPeriodDays,
-                 pFee,
-                 postServiceFee,
-                 gst || null,
-                 interest,
-                 penalty,
-                 processedDueDate,
-                 kfsPdfUrl,
-                 loanAgreementPdfUrl,
-                 loanIdInt
-               ]);
+            
+            // Build UPDATE query with emi_schedule if available
+            let updateQueryParts = [
+              `status = 'account_manager'`,
+              `disbursed_at = NOW()`,
+              `processed_at = NOW()`,
+              `processed_amount = ?`,
+              `exhausted_period_days = ?`,
+              `processed_p_fee = ?`,
+              `processed_post_service_fee = ?`,
+              `processed_gst = ?`,
+              `processed_interest = ?`,
+              `processed_penalty = ?`,
+              `processed_due_date = ?`
+            ];
+            
+            let updateParams = [
+              processedAmount,
+              exhaustedPeriodDays,
+              pFee,
+              postServiceFee,
+              gst || null,
+              interest,
+              penalty,
+              processedDueDate
+            ];
+            
+            // Add emi_schedule if it was created
+            if (emiScheduleForUpdate) {
+              updateQueryParts.push(`emi_schedule = ?`);
+              updateParams.push(emiScheduleForUpdate);
+              console.log(`📅 Will update emi_schedule in database`);
+            }
+            
+            updateQueryParts.push(`kfs_pdf_url = ?`, `loan_agreement_pdf_url = ?`, `updated_at = NOW()`);
+            updateParams.push(kfsPdfUrl, loanAgreementPdfUrl, loanIdInt);
+            
+            const updateQuery = `UPDATE loan_applications SET ${updateQueryParts.join(', ')} WHERE id = ?`;
+            const updateResult = await executeQuery(updateQuery, updateParams);
 
             console.log('Update result:', updateResult);
             console.log(`✅ Updated loan #${loanIdInt} status to account_manager and saved calculated values`);

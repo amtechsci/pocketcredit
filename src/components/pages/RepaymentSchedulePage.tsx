@@ -318,32 +318,56 @@ export const RepaymentSchedulePage = () => {
     console.warn('⚠️ processed_at is not available for loan, cannot calculate exhausted days accurately');
   }
 
-  // Exhausted Days Calculation - based on processed_at only
+  // Exhausted Days Calculation - Priority: last_extension_date + 1 day, Fallback: processed_at
   // Per rulebook: Use inclusive counting - Math.ceil((end - start) / msPerDay) + 1
-  let exhaustedDays = 1; // Default to 1 if processed_at is not available
+  // First, try to use exhaustedDays from API response (calculated with last_extension_date priority)
+  let exhaustedDays = calculations?.interest?.exhaustedDays || 1;
   
-  if (processedDateMidnight) {
-    // Calculate difference in days using inclusive counting
-    // Formula: Math.ceil((end - start) / msPerDay) + 1
-    const diffTime = currentDateMidnight.getTime() - processedDateMidnight.getTime();
-    const daysDiff = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-    
-    // Exhausted days should be at least 1 if loan was processed today or in the past
-    exhaustedDays = Math.max(1, daysDiff);
+  // If API didn't provide exhaustedDays, calculate locally with priority logic
+  if (!calculations?.interest?.exhaustedDays || exhaustedDays === 1) {
+    // PRIORITY 1: Use last_extension_date + 1 day (next day after extension) if extension exists
+    if (loanData.last_extension_date && loanData.extension_count > 0) {
+      const lastExtensionDateStr = loanData.last_extension_date.split('T')[0]; // Get YYYY-MM-DD part
+      const lastExtensionDate = new Date(lastExtensionDateStr + 'T00:00:00');
+      lastExtensionDate.setHours(0, 0, 0, 0);
+      
+      // Add 1 day to get "next day" after extension
+      const nextDayAfterExtension = new Date(lastExtensionDate);
+      nextDayAfterExtension.setDate(nextDayAfterExtension.getDate() + 1);
+      nextDayAfterExtension.setHours(0, 0, 0, 0);
+      
+      // Calculate days from next day after extension to today
+      const diffTime = currentDateMidnight.getTime() - nextDayAfterExtension.getTime();
+      const daysDiff = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+      exhaustedDays = Math.max(1, daysDiff);
+      
+      console.log('Exhausted Days Calculation (using last_extension_date + 1 day):', {
+        last_extension_date: loanData.last_extension_date,
+        lastExtensionDateStr,
+        nextDayAfterExtension: nextDayAfterExtension.toISOString().split('T')[0],
+        currentDate: currentDate.toISOString().split('T')[0],
+        calculatedDays: exhaustedDays
+      });
+    } 
+    // FALLBACK: Use processed_at if no extension or last_extension_date not available
+    else if (processedDateMidnight) {
+      // Calculate difference in days using inclusive counting
+      // Formula: Math.ceil((end - start) / msPerDay) + 1
+      const diffTime = currentDateMidnight.getTime() - processedDateMidnight.getTime();
+      const daysDiff = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+      
+      // Exhausted days should be at least 1 if loan was processed today or in the past
+      exhaustedDays = Math.max(1, daysDiff);
+      
+      console.log('Exhausted Days Calculation (using processed_at as fallback):', {
+        processed_at: loanData.processed_at,
+        processedDateStr: processedDateMidnight ? loanData.processed_at.split('T')[0] : 'N/A',
+        calculatedDays: exhaustedDays
+      });
+    }
+  } else {
+    console.log('Using exhaustedDays from API response (with last_extension_date priority):', exhaustedDays);
   }
-  
-  // Debug logging
-  console.log('Exhausted Days Calculation (using processed_at only):', {
-    processed_at: loanData.processed_at,
-    processedDateStr: processedDateMidnight ? loanData.processed_at.split('T')[0] : 'N/A',
-    processedDateMidnight: processedDateMidnight ? processedDateMidnight.toISOString().split('T')[0] : 'N/A',
-    currentDate: currentDate.toISOString().split('T')[0],
-    currentDateMidnight: currentDateMidnight.toISOString().split('T')[0],
-    diffTime: processedDateMidnight ? (currentDateMidnight.getTime() - processedDateMidnight.getTime()) : 'N/A',
-    diffDays: processedDateMidnight ? ((currentDateMidnight.getTime() - processedDateMidnight.getTime()) / (1000 * 60 * 60 * 24)) : 'N/A',
-    calculatedDays: exhaustedDays,
-    note: processedDateMidnight ? 'Calculated from processed_at (date only, ignoring time/timezone)' : 'Using default (1 day) - processed_at not available'
-  });
   
   // For due date calculation, still use disbursed_at or processed_at
   const disbursedDate = processedDateMidnight || (loanData.disbursed_at ? new Date(loanData.disbursed_at.split('T')[0] + 'T00:00:00') : new Date());
@@ -487,9 +511,9 @@ export const RepaymentSchedulePage = () => {
           
           return (
             <>
-              <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
-                <CardContent className="p-4 sm:p-6">
-                  {/* Preclose Section - Single Row Layout */}
+            <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
+              <CardContent className="p-4 sm:p-6">
+                {/* Preclose Section - Single Row Layout */}
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
                     <h3 className="text-lg sm:text-xl font-bold text-gray-900">Preclose it today</h3>
                     {shortLoanId !== 'N/A' && (
@@ -498,202 +522,217 @@ export const RepaymentSchedulePage = () => {
                       </span>
                     )}
                   </div>
+                
+                {/* Calculate preclose amount */}
+                {(() => {
+                  const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
                   
-                  {/* Calculate preclose amount */}
-                  {(() => {
-                    const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
-                    
-                    // Calculate interest till today
-                    let interestTillToday = 0;
-                    let interestRatePerDay = planData.interest_percent_per_day || 
-                                        calculations.interest?.rate_per_day ||
-                                        (calculations.interest?.amount && calculations.interest?.days && principal > 0
-                                          ? calculations.interest.amount / (calculations.interest.days * principal)
-                                          : 0.001); // Default 0.1% per day
-                    
-                    if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
-                      // Use processed_interest from database
-                      interestTillToday = parseFloat(loanData.processed_interest || 0);
-                    } else {
-                      interestTillToday = principal * interestRatePerDay * exhaustedDays;
-                    }
-                    
-                    // Pre-close fee: 10% of principal + 18% GST (NO post service fee for pre-close)
-                    const preCloseFeePercent = 10;
-                    const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
-                    const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
-                    
-                    const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
-                    
-                    // Get due date for display
-                    let dueDateObj = null;
-                    let daysRemaining = 0;
-                    let isOverdue = false;
-                    let isDueToday = false;
-                    
-                    if (dueDate) {
-                      dueDateObj = new Date(dueDate);
-                      const today = new Date();
-                      today.setHours(0, 0, 0, 0);
-                      dueDateObj.setHours(0, 0, 0, 0);
-                      daysRemaining = Math.ceil((dueDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                      isOverdue = daysRemaining < 0;
-                      isDueToday = daysRemaining === 0;
-                    }
+                  // Calculate interest till today for preclose
+                  // Priority: Use interestTillToday from API (calculated with last_extension_date priority)
+                  let interestTillToday = calculations?.interest?.interestTillToday || 0;
+                  let interestRatePerDay = planData.interest_percent_per_day || 
+                                      calculations.interest?.rate_per_day ||
+                                      (calculations.interest?.amount && calculations.interest?.days && principal > 0
+                                        ? calculations.interest.amount / (calculations.interest.days * principal)
+                                        : 0.001); // Default 0.1% per day
                   
-                  // Calculate last available date (DPD = -6 means 6 days before due date)
-                  // So last available date = due_date - 6 days
-                  let lastAvailableDate = null;
-                  let lastAvailableDateFormatted = '';
-                  if (dueDateObj) {
-                    lastAvailableDate = new Date(dueDateObj);
-                    lastAvailableDate.setDate(lastAvailableDate.getDate() - 6);
-                    lastAvailableDateFormatted = lastAvailableDate.toLocaleDateString('en-GB', { 
-                      day: '2-digit', 
-                      month: '2-digit', 
-                      year: 'numeric' 
+                  // If API didn't provide interestTillToday, calculate locally using exhaustedDays
+                  // exhaustedDays is already calculated with last_extension_date priority above
+                  if (!interestTillToday || interestTillToday === 0) {
+                    // Calculate interest based on exhaustedDays (which uses last_extension_date + 1 day as priority)
+                    interestTillToday = principal * interestRatePerDay * exhaustedDays;
+                    
+                    console.log('Calculating interestTillToday locally for single payment preclose:', {
+                      principal,
+                      interestRatePerDay,
+                      exhaustedDays,
+                      interestTillToday,
+                      baseDate: loanData.last_extension_date && loanData.extension_count > 0
+                        ? `last_extension_date (${loanData.last_extension_date.split('T')[0]}) + 1 day`
+                        : loanData.processed_at 
+                          ? `processed_at (${loanData.processed_at.split('T')[0]})`
+                          : 'disbursed_at'
                     });
+                  } else {
+                    console.log('Using interestTillToday from API (with last_extension_date priority) for single payment preclose:', interestTillToday);
                   }
+                  
+                  // Pre-close fee: 10% of principal + 18% GST (NO post service fee for pre-close)
+                  const preCloseFeePercent = 10;
+                  const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
+                  const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
+                  
+                  const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
+                  
+                  // Get due date for display
+                  let dueDateObj = null;
+                  let daysRemaining = 0;
+                  let isOverdue = false;
+                  let isDueToday = false;
+                  
+                  if (dueDate) {
+                    dueDateObj = new Date(dueDate);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    dueDateObj.setHours(0, 0, 0, 0);
+                    daysRemaining = Math.ceil((dueDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                    isOverdue = daysRemaining < 0;
+                    isDueToday = daysRemaining === 0;
+                  }
+                
+                // Calculate last available date (DPD = -6 means 6 days before due date)
+                // So last available date = due_date - 6 days
+                let lastAvailableDate = null;
+                let lastAvailableDateFormatted = '';
+                if (dueDateObj) {
+                  lastAvailableDate = new Date(dueDateObj);
+                  lastAvailableDate.setDate(lastAvailableDate.getDate() - 6);
+                  lastAvailableDateFormatted = lastAvailableDate.toLocaleDateString('en-GB', { 
+                    day: '2-digit', 
+                    month: '2-digit', 
+                    year: 'numeric' 
+                  });
+                }
 
-                  return (
-                    <>
-                      {/* Single Row Layout: Amount | Due Date | Button */}
-                      <div className="flex flex-col md:flex-row md:items-center gap-4 p-4 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
-                        {/* Column 1: Preclose Amount with message */}
-                        <div className="flex-1">
-                          <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">
-                            Now & save interest: {formatCurrency(precloseAmount)}
-                          </p>
-                          <p className="text-xs sm:text-sm text-gray-500 italic">
-                            (Available till {lastAvailableDateFormatted || 'N/A'} only)
-                          </p>
-                          <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 mt-2">
-                            {formatCurrency(precloseAmount)}
-                          </h2>
-                        </div>
-                        
-                        {/* Column 2: Due Date */}
-                        {dueDateObj && (
-                          <div className="flex-1">
-                            <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">Due Date</p>
-                            <p className="text-lg sm:text-xl font-semibold text-gray-900 mb-0.5">
-                              {dueDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
-                            </p>
-                            <p className={`text-xs text-gray-600 ${isOverdue ? 'text-red-600' : isDueToday ? 'text-yellow-600' : ''}`}>
-                              {isOverdue ? `Overdue by ${Math.abs(daysRemaining)} days` : isDueToday ? 'Due Today!' : `Due in ${daysRemaining} days`}
-                            </p>
-                          </div>
-                        )}
-                        
-                        {/* Column 3: Repay Now Button */}
-                        <div className="flex-shrink-0 w-full md:w-auto">
-                          <Button
-                            className="w-full md:w-auto h-12 text-base font-semibold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all"
-                            onClick={async () => {
-                              try {
-                                toast.loading('Creating payment order...');
-
-                                const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
-                                const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
-                                
-                                // Calculate interest till today
-                                let interestTillToday = 0;
-                                let interestRatePerDay = planData.interest_percent_per_day || 
-                                                    calculations.interest?.rate_per_day ||
-                                                    (calculations.interest?.amount && calculations.interest?.days && principal > 0
-                                                      ? calculations.interest.amount / (calculations.interest.days * principal)
-                                                      : 0.001);
-                                
-                                if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
-                                  interestTillToday = parseFloat(loanData.processed_interest || 0);
-                                } else {
-                                  interestTillToday = principal * interestRatePerDay * exhaustedDays;
-                                }
-                                
-                                const preCloseFeePercent = 10;
-                                const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
-                                const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
-                                const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
-
-                                if (!loanId || !precloseAmount) {
-                                  toast.error('Unable to process payment');
-                                  return;
-                                }
-
-                                const response = await apiService.createPaymentOrder(loanId, precloseAmount, 'pre-close');
-
-                                if (response.success && response.data?.paymentSessionId) {
-                                  toast.success('Opening payment gateway...');
-
-                                  try {
-                                    const isProduction = response.data.checkoutUrl?.includes('payments.cashfree.com') && 
-                                                       !response.data.checkoutUrl?.includes('payments-test');
-                                    
-                                    const cashfree = await load({ 
-                                      mode: isProduction ? "production" : "sandbox"
-                                    });
-
-                                    if (cashfree) {
-                                      cashfree.checkout({
-                                        paymentSessionId: response.data.paymentSessionId
-                                      });
-                                    } else {
-                                      throw new Error('Failed to load Cashfree SDK');
-                                    }
-                                  } catch (sdkError: any) {
-                                    console.error('Cashfree SDK error:', sdkError);
-                                    toast.error('Failed to open payment gateway. Please try again.');
-                                    
-                                    if (response.data.checkoutUrl) {
-                                      window.location.href = response.data.checkoutUrl;
-                                    } else {
-                                      throw new Error('No payment session available');
-                                    }
-                                  }
-                                } else {
-                                  toast.error(response.message || 'Failed to create payment order');
-                                }
-                              } catch (error: any) {
-                                console.error('Payment error:', error);
-                                toast.error(error.message || 'Failed to initiate payment');
-                              }
-                            }}
-                          >
-                            Repay Now
-                          </Button>
-                        </div>
+                return (
+                  <>
+                    {/* Single Row Layout: Amount | Due Date | Button */}
+                    <div className="flex flex-col md:flex-row md:items-center gap-4 p-4 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
+                      {/* Column 1: Preclose Amount with message */}
+                      <div className="flex-1">
+                        <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">
+                          Now & save interest: {formatCurrency(precloseAmount)}
+                        </p>
+                        <p className="text-xs sm:text-sm text-gray-500 italic">
+                          (Available till {lastAvailableDateFormatted || 'N/A'} only)
+                        </p>
+                        <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 mt-2">
+                          {formatCurrency(precloseAmount)}
+                        </h2>
                       </div>
-
-                      {/* Default Status */}
-                      {isDefaulted && (
-                        <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg animate-pulse mt-4">
-                          <p className="text-red-600 font-bold text-base sm:text-lg uppercase tracking-wide">
-                            ⚠ DEFAULTED ({daysDelayed} days delayed)
+                      
+                      {/* Column 2: Due Date */}
+                      {dueDateObj && (
+                        <div className="flex-1">
+                          <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">Due Date</p>
+                          <p className="text-lg sm:text-xl font-semibold text-gray-900 mb-0.5">
+                            {dueDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                           </p>
-                          <p className="text-xs sm:text-sm text-red-500 mt-1">Immediate action required</p>
+                          <p className={`text-xs text-gray-600 ${isOverdue ? 'text-red-600' : isDueToday ? 'text-yellow-600' : ''}`}>
+                            {isOverdue ? `Overdue by ${Math.abs(daysRemaining)} days` : isDueToday ? 'Due Today!' : `Due in ${daysRemaining} days`}
+                          </p>
                         </div>
                       )}
+                      
+                      {/* Column 3: Repay Now Button */}
+                      <div className="flex-shrink-0 w-full md:w-auto">
+                        <Button
+                          className="w-full md:w-auto h-12 text-base font-semibold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all"
+                          onClick={async () => {
+                            try {
+                              toast.loading('Creating payment order...');
 
-                      {/* Extend Loan Tenure Button */}
-                      {canExtend && (
-                        <div className="mt-4">
-                          <Button
-                            variant="outline"
-                            className="w-full h-12 border-2 border-blue-600 text-blue-600 hover:bg-blue-50 font-semibold"
-                            onClick={() => {
-                              toast.info('Tenure extension feature coming soon');
-                            }}
-                          >
-                            <TrendingUp className="w-4 h-4 mr-2" />
-                            Extend your loan tenure
-                          </Button>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-                </CardContent>
-              </Card>
+                              const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
+                              const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
+                              
+                              // Calculate interest till today
+                              let interestTillToday = 0;
+                              let interestRatePerDay = planData.interest_percent_per_day || 
+                                                  calculations.interest?.rate_per_day ||
+                                                  (calculations.interest?.amount && calculations.interest?.days && principal > 0
+                                                    ? calculations.interest.amount / (calculations.interest.days * principal)
+                                                    : 0.001);
+                              
+                              if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
+                                interestTillToday = parseFloat(loanData.processed_interest || 0);
+                              } else {
+                                interestTillToday = principal * interestRatePerDay * exhaustedDays;
+                              }
+                              
+                              const preCloseFeePercent = 10;
+                              const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
+                              const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
+                              const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
+
+                              if (!loanId || !precloseAmount) {
+                                toast.error('Unable to process payment');
+                                return;
+                              }
+
+                              const response = await apiService.createPaymentOrder(loanId, precloseAmount, 'pre-close');
+
+                              if (response.success && response.data?.paymentSessionId) {
+                                toast.success('Opening payment gateway...');
+
+                                try {
+                                  const isProduction = response.data.checkoutUrl?.includes('payments.cashfree.com') && 
+                                                     !response.data.checkoutUrl?.includes('payments-test');
+                                  
+                                  const cashfree = await load({ 
+                                    mode: isProduction ? "production" : "sandbox"
+                                  });
+
+                                  if (cashfree) {
+                                    cashfree.checkout({
+                                      paymentSessionId: response.data.paymentSessionId
+                                    });
+                                  } else {
+                                    throw new Error('Failed to load Cashfree SDK');
+                                  }
+                                } catch (sdkError: any) {
+                                  console.error('Cashfree SDK error:', sdkError);
+                                  toast.error('Failed to open payment gateway. Please try again.');
+                                  
+                                  if (response.data.checkoutUrl) {
+                                    window.location.href = response.data.checkoutUrl;
+                                  } else {
+                                    throw new Error('No payment session available');
+                                  }
+                                }
+                              } else {
+                                toast.error(response.message || 'Failed to create payment order');
+                              }
+                            } catch (error: any) {
+                              console.error('Payment error:', error);
+                              toast.error(error.message || 'Failed to initiate payment');
+                            }
+                          }}
+                        >
+                          Repay Now
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Default Status */}
+                    {isDefaulted && (
+                      <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg animate-pulse mt-4">
+                        <p className="text-red-600 font-bold text-base sm:text-lg uppercase tracking-wide">
+                          ⚠ DEFAULTED ({daysDelayed} days delayed)
+                        </p>
+                        <p className="text-xs sm:text-sm text-red-500 mt-1">Immediate action required</p>
+                      </div>
+                    )}
+
+                    {/* Extend Loan Tenure Button */}
+                    {canExtend && (
+                      <div className="mt-4">
+                        <Button
+                          variant="outline"
+                          className="w-full h-12 border-2 border-blue-600 text-blue-600 hover:bg-blue-50 font-semibold"
+                          onClick={() => {
+                            toast.info('Tenure extension feature coming soon');
+                          }}
+                        >
+                          <TrendingUp className="w-4 h-4 mr-2" />
+                          Extend your loan tenure
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+              </CardContent>
+            </Card>
             </>
           );
         })()}
@@ -714,11 +753,14 @@ export const RepaymentSchedulePage = () => {
             // Show extension button if DPD is between -5 and +15 (5 days before to 15 days after)
             const isWithinDpdWindow = dpd >= -5 && dpd <= 15;
             // Also check backend eligibility - only show if backend says it's eligible
+            // OR if there's a pending_payment extension (user needs to check payment status)
             // If eligibility data is not loaded yet, don't show the button
             const isBackendEligible = extensionEligibility 
               ? (extensionEligibility.can_extend === true || extensionEligibility.is_eligible === true)
               : false;
-            canShowExtension = isWithinDpdWindow && isBackendEligible;
+            const hasPendingPayment = extensionEligibility?.has_pending_request && 
+                                     extensionEligibility?.pending_extension?.status === 'pending_payment';
+            canShowExtension = isWithinDpdWindow && (isBackendEligible || hasPendingPayment);
             console.log('🔍 Extension Button Check (Single Payment):', {
               dueDate,
               dpd,
@@ -937,12 +979,69 @@ export const RepaymentSchedulePage = () => {
                 <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-orange-100">
                   <CardContent className="p-4 sm:p-6">
                     {extensionEligibility?.has_pending_request ? (
-                      <div className="flex items-center justify-center p-4 bg-orange-50 rounded-lg border-2 border-orange-200">
-                        <AlertCircle className="w-5 h-5 mr-2 text-orange-600" />
-                        <span className="text-orange-700 font-semibold">
-                          Extension Request Pending Approval
-                        </span>
-                      </div>
+                      extensionEligibility?.pending_extension?.status === 'pending_payment' ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-center p-4 bg-orange-50 rounded-lg border-2 border-orange-200">
+                            <AlertCircle className="w-5 h-5 mr-2 text-orange-600" />
+                            <span className="text-orange-700 font-semibold">
+                              Extension Payment Pending
+                            </span>
+                          </div>
+                          <Button
+                            variant="outline"
+                            className="w-full h-12 border-2 border-blue-500 text-blue-600 hover:bg-blue-50 font-semibold"
+                            onClick={async () => {
+                              const extensionId = extensionEligibility?.pending_extension?.id;
+                              if (extensionId) {
+                                try {
+                                  toast.loading('Checking payment status...');
+                                  const response = await apiService.checkExtensionPayment(extensionId);
+                                  toast.dismiss();
+                                  
+                                  if (response.success) {
+                                    if (response.data.status === 'completed') {
+                                      toast.success(response.data.message || 'Extension payment verified and extension approved successfully!');
+                                      // Refresh loan data and eligibility
+                                      const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
+                                      if (loanId) {
+                                        await fetchLoanData(loanId);
+                                        const eligibilityResponse = await apiService.checkExtensionEligibility(loanId);
+                                        if (eligibilityResponse.success) {
+                                          setExtensionEligibility(eligibilityResponse.data);
+                                        }
+                                      }
+                                    } else if (response.data.status === 'pending') {
+                                      toast.info(response.data.message || 'Your payment transaction is still pending. Please wait for payment confirmation.');
+                                    } else if (response.data.status === 'failed') {
+                                      toast.error(response.data.message || 'Payment transaction has failed. Please create a new payment order.');
+                                    } else {
+                                      toast.info(response.data.message || 'Payment status checked.');
+                                    }
+                                  } else {
+                                    toast.error(response.message || 'Failed to check payment status');
+                                  }
+                                } catch (error: any) {
+                                  console.error('Error checking extension payment:', error);
+                                  toast.error(error.message || 'Failed to check payment status');
+                                }
+                              }
+                            }}
+                          >
+                            <Loader2 className="w-4 h-4 mr-2" />
+                            Check Payment Status
+                          </Button>
+                          <p className="text-xs text-gray-500 text-center">
+                            Your payment transaction is being processed. Click to check the latest status.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center p-4 bg-orange-50 rounded-lg border-2 border-orange-200">
+                          <AlertCircle className="w-5 h-5 mr-2 text-orange-600" />
+                          <span className="text-orange-700 font-semibold">
+                            Extension Request Pending Approval
+                          </span>
+                        </div>
+                      )
                     ) : (
                       <Button
                         variant="outline"
@@ -1024,52 +1123,35 @@ export const RepaymentSchedulePage = () => {
                   {(() => {
                     const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
                     
-                    // For processed loans, use processed_interest from database (updated by cron)
-                    // Per rulebook: Use processed_* values for processed loans, not recalculated values
-                    let interestTillToday = 0;
-                    let interestDays = exhaustedDays;
+                    // Calculate interest till today for preclose
+                    // Priority: Use interestTillToday from API (calculated with last_extension_date priority)
+                    let interestTillToday = calculations?.interest?.interestTillToday || 0;
+                    let interestDays = exhaustedDays; // Use exhaustedDays (already calculated with last_extension_date priority)
                     let interestRatePerDay = planData.interest_percent_per_day || 
                                         calculations.interest?.rate_per_day ||
                                         (calculations.interest?.amount && calculations.interest?.days && principal > 0
                                           ? calculations.interest.amount / (calculations.interest.days * principal)
                                           : 0.001); // Default 0.1% per day
                     
-                    if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
-                      // Use processed_interest from database (already calculated by cron)
-                      interestTillToday = parseFloat(loanData.processed_interest || 0);
-                      // Calculate days from processed_at to today for display
-                      // Extract date portion only to avoid timezone issues
-                      const processedDateStr = loanData.processed_at.split('T')[0]; // Get YYYY-MM-DD part
-                      const processedDate = new Date(processedDateStr + 'T00:00:00');
-                      processedDate.setHours(0, 0, 0, 0);
-                      const today = new Date();
-                      today.setHours(0, 0, 0, 0);
-                      interestDays = Math.ceil((today.getTime() - processedDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                      console.log('Using processed_interest from database:', {
-                        processed_interest: interestTillToday,
-                        processed_at: loanData.processed_at,
-                        processedDate: processedDate.toISOString().split('T')[0],
-                        today: today.toISOString().split('T')[0],
-                        interestDays: interestDays,
-                        diffMs: today.getTime() - processedDate.getTime(),
-                        diffDays: (today.getTime() - processedDate.getTime()) / (1000 * 60 * 60 * 24)
+                    // If API didn't provide interestTillToday, calculate locally using exhaustedDays
+                    // exhaustedDays is already calculated with last_extension_date priority above
+                    if (!interestTillToday) {
+                      // Calculate interest based on exhaustedDays (which uses last_extension_date + 1 day as priority)
+                      interestTillToday = principal * interestRatePerDay * exhaustedDays;
+                      
+                      console.log('Calculating interestTillToday locally for multi-EMI:', {
+                        principal,
+                        interestRatePerDay,
+                        exhaustedDays,
+                        interestTillToday,
+                        baseDate: loanData.last_extension_date 
+                          ? `last_extension_date (${loanData.last_extension_date.split('T')[0]}) + 1 day`
+                          : loanData.processed_at 
+                            ? `processed_at (${loanData.processed_at.split('T')[0]})`
+                            : 'disbursed_at'
                       });
                     } else {
-                      // Calculate interest till today based on exhausted days (for non-processed loans)
-                      // But if loan is processed, use the same days calculation as above
-                      if (loanData.processed_at) {
-                        // For processed loans, recalculate days even if processed_interest is 0/null
-                        // Extract date portion only to avoid timezone issues
-                        const processedDateStr = loanData.processed_at.split('T')[0]; // Get YYYY-MM-DD part
-                        const processedDate = new Date(processedDateStr + 'T00:00:00');
-                        processedDate.setHours(0, 0, 0, 0);
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        interestDays = Math.ceil((today.getTime() - processedDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                        console.log('Recalculating days for processed loan (processed_interest is 0/null):', interestDays);
-                      }
-                      // Interest = Principal * Rate * Days
-                      interestTillToday = principal * interestRatePerDay * interestDays;
+                      console.log('Using interestTillToday from API (with last_extension_date priority) for multi-EMI:', interestTillToday);
                     }
                     
                     // Pre-close fee: 10% of principal + 18% GST (NO post service fee for pre-close)
@@ -1253,11 +1335,14 @@ export const RepaymentSchedulePage = () => {
             // Show extension button if DPD is between -5 and +15 (5 days before to 15 days after)
             const isWithinDpdWindow = dpd >= -5 && dpd <= 15;
             // Also check backend eligibility - only show if backend says it's eligible
+            // OR if there's a pending_payment extension (user needs to check payment status)
             // If eligibility data is not loaded yet, don't show the button
             const isBackendEligible = extensionEligibility 
               ? (extensionEligibility.can_extend === true || extensionEligibility.is_eligible === true)
               : false;
-            canShowExtension = isWithinDpdWindow && isBackendEligible;
+            const hasPendingPayment = extensionEligibility?.has_pending_request && 
+                                     extensionEligibility?.pending_extension?.status === 'pending_payment';
+            canShowExtension = isWithinDpdWindow && (isBackendEligible || hasPendingPayment);
             console.log('🔍 Extension Button Check (Multi-EMI):', {
               firstEmiDueDate: firstEmi.due_date,
               dpd,
@@ -1309,19 +1394,33 @@ export const RepaymentSchedulePage = () => {
                         >
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                             <div className="flex-1">
-                              <div className="flex items-center gap-3 mb-2">
+                              <div className="flex items-center gap-3 mb-2 flex-wrap">
                                 <span className="text-base sm:text-lg font-bold text-gray-900">
                                   {getOrdinal(emi.instalment_no || index + 1)} EMI
                                 </span>
-                                {isOverdue && (
-                                  <span className="text-xs font-semibold text-red-600 bg-red-100 px-2 py-1 rounded">
-                                    Overdue
+                                {emi.status === 'paid' ? (
+                                  <span className="text-xs font-semibold text-green-600 bg-green-100 px-2 py-1 rounded flex items-center gap-1">
+                                    <CheckCircle className="w-3 h-3" />
+                                    Paid
                                   </span>
-                                )}
-                                {isDueToday && (
-                                  <span className="text-xs font-semibold text-yellow-600 bg-yellow-100 px-2 py-1 rounded">
-                                    Due Today
-                                  </span>
+                                ) : (
+                                  <>
+                                    {isOverdue && (
+                                      <span className="text-xs font-semibold text-red-600 bg-red-100 px-2 py-1 rounded">
+                                        Overdue
+                                      </span>
+                                    )}
+                                    {isDueToday && (
+                                      <span className="text-xs font-semibold text-yellow-600 bg-yellow-100 px-2 py-1 rounded">
+                                        Due Today
+                                      </span>
+                                    )}
+                                    {!isOverdue && !isDueToday && (
+                                      <span className="text-xs font-semibold text-gray-600 bg-gray-100 px-2 py-1 rounded">
+                                        Pending
+                                      </span>
+                                    )}
+                                  </>
                                 )}
                               </div>
                               <div className="grid grid-cols-2 gap-2 text-sm">
@@ -1345,6 +1444,7 @@ export const RepaymentSchedulePage = () => {
                               <p className="text-lg sm:text-xl font-bold text-gray-900 mr-2">
                                 {formatCurrency(emi.instalment_amount || 0)}
                               </p>
+                              {emi.status !== 'paid' ? (
                               <Button
                                 className="bg-blue-600 hover:bg-blue-700 text-white"
                                 onClick={async () => {
@@ -1403,11 +1503,18 @@ export const RepaymentSchedulePage = () => {
                                   } catch (error: any) {
                                     console.error('Payment error:', error);
                                     toast.error(error.message || 'Failed to initiate payment');
+                                  } finally {
+                                    toast.dismiss();
                                   }
                                 }}
                               >
                                 Pay Now
                               </Button>
+                              ) : (
+                                <span className="text-sm font-semibold text-green-600 bg-green-100 px-3 py-2 rounded">
+                                  Paid
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -1422,12 +1529,69 @@ export const RepaymentSchedulePage = () => {
               <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-orange-100">
                 <CardContent className="p-4 sm:p-6">
                   {extensionEligibility?.has_pending_request ? (
-                    <div className="flex items-center justify-center p-4 bg-orange-50 rounded-lg border-2 border-orange-200">
-                      <AlertCircle className="w-5 h-5 mr-2 text-orange-600" />
-                      <span className="text-orange-700 font-semibold">
-                        Extension Request Pending Approval
-                      </span>
-                    </div>
+                    extensionEligibility?.pending_extension?.status === 'pending_payment' ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-center p-4 bg-orange-50 rounded-lg border-2 border-orange-200">
+                          <AlertCircle className="w-5 h-5 mr-2 text-orange-600" />
+                          <span className="text-orange-700 font-semibold">
+                            Extension Payment Pending
+                          </span>
+                        </div>
+                        <Button
+                          variant="outline"
+                          className="w-full h-12 border-2 border-blue-500 text-blue-600 hover:bg-blue-50 font-semibold"
+                          onClick={async () => {
+                            const extensionId = extensionEligibility?.pending_extension?.id;
+                            if (extensionId) {
+                              try {
+                                toast.loading('Checking payment status...');
+                                const response = await apiService.checkExtensionPayment(extensionId);
+                                toast.dismiss();
+                                
+                                if (response.success) {
+                                  if (response.data.status === 'completed') {
+                                    toast.success(response.data.message || 'Extension payment verified and extension approved successfully!');
+                                    // Refresh loan data and eligibility
+                                    const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
+                                    if (loanId) {
+                                      await fetchLoanData(loanId);
+                                      const eligibilityResponse = await apiService.checkExtensionEligibility(loanId);
+                                      if (eligibilityResponse.success) {
+                                        setExtensionEligibility(eligibilityResponse.data);
+                                      }
+                                    }
+                                  } else if (response.data.status === 'pending') {
+                                    toast.info(response.data.message || 'Your payment transaction is still pending. Please wait for payment confirmation.');
+                                  } else if (response.data.status === 'failed') {
+                                    toast.error(response.data.message || 'Payment transaction has failed. Please create a new payment order.');
+                                  } else {
+                                    toast.info(response.data.message || 'Payment status checked.');
+                                  }
+                                } else {
+                                  toast.error(response.message || 'Failed to check payment status');
+                                }
+                              } catch (error: any) {
+                                console.error('Error checking extension payment:', error);
+                                toast.error(error.message || 'Failed to check payment status');
+                              }
+                            }
+                          }}
+                        >
+                          <Loader2 className="w-4 h-4 mr-2" />
+                          Check Payment Status
+                        </Button>
+                        <p className="text-xs text-gray-500 text-center">
+                          Your payment transaction is being processed. Click to check the latest status.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center p-4 bg-orange-50 rounded-lg border-2 border-orange-200">
+                        <AlertCircle className="w-5 h-5 mr-2 text-orange-600" />
+                        <span className="text-orange-700 font-semibold">
+                          Extension Request Pending Approval
+                        </span>
+                      </div>
+                    )
                   ) : (
                     <Button
                       variant="outline"

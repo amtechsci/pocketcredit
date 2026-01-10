@@ -148,12 +148,21 @@ export const PaymentReturnPage = () => {
                 )}
 
                 <div className="space-y-3">
-                  <Button
-                    onClick={() => navigate('/repayment-schedule')}
-                    className="w-full bg-green-600 hover:bg-green-700"
-                  >
-                    View Repayment Schedule
-                  </Button>
+                  {/* Only show "View Repayment Schedule" if loan status is 'account_manager' and not 'cleared' */}
+                  {orderDetails?.loan_status === 'account_manager' && orderDetails?.loan_status !== 'cleared' && (
+                    <Button
+                      onClick={() => {
+                        if (orderDetails?.loan_id) {
+                          navigate(`/repayment-schedule?applicationId=${orderDetails.loan_id}`);
+                        } else {
+                          navigate('/repayment-schedule');
+                        }
+                      }}
+                      className="w-full bg-green-600 hover:bg-green-700"
+                    >
+                      View Repayment Schedule
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     onClick={() => navigate('/dashboard')}
