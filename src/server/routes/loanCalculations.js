@@ -712,128 +712,107 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
       if (allEmiDates.length === emiCount) {
         let schedule = [];
         
-        if (isAccountManager && loan.emi_schedule) {
-          // CRITICAL: For account_manager loans, use emi_amount from emi_schedule - DO NOT RECALCULATE
-          console.log(`🔒 [Loan Calculations] Account_manager loan - using emi_amount from emi_schedule (source of truth)`);
-          
+        // Always recalculate EMI amounts to ensure correct post service fee + GST inclusion
+        // For account_manager loans, we'll preserve stored status and dates but recalculate amounts
+        console.log(`📊 [Loan Calculations] Recalculating EMI amounts (ensuring correct post service fee + GST calculation)`);
+        
+        const principalPerEmi = Math.floor(principal / emiCount * 100) / 100;
+        const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
+        
+        // IMPORTANT: totals.repayableFee is ALREADY multiplied by emiCount in calculateCompleteLoanValues
+        // So we need to divide by emiCount to get the per-EMI fee
+        // CRITICAL: Only use repayableFeeGST for EMI calculations, NOT disbursalFeeGST (which is deducted upfront)
+        const totalRepayableFee = calculation.totals.repayableFee || 0;
+        const totalRepayableFeeGST = calculation.totals.repayableFeeGST || 0;
+        const postServiceFeePerEmi = Math.round((totalRepayableFee / emiCount) * 100) / 100;
+        const postServiceFeeGSTPerEmi = Math.round((totalRepayableFeeGST / emiCount) * 100) / 100;
+        
+        // Get stored EMI schedule to preserve status and dates if available
+        let storedEmiSchedule = null;
+        if (loan.emi_schedule) {
           try {
-            let emiScheduleArray = typeof loan.emi_schedule === 'string' 
+            storedEmiSchedule = typeof loan.emi_schedule === 'string' 
               ? JSON.parse(loan.emi_schedule) 
               : loan.emi_schedule;
-            
-            if (Array.isArray(emiScheduleArray) && emiScheduleArray.length > 0) {
-              // Map stored EMI schedule to repayment schedule format
-              for (let i = 0; i < emiCount; i++) {
-                const emiDate = allEmiDates[i];
-                const emiDateStr = formatDateToString(emiDate);
-                const storedEmi = emiScheduleArray.find(e => 
-                  (e.emi_number === i + 1 || e.instalment_no === i + 1)
-                ) || emiScheduleArray[i];
-                
-                // Use stored emi_amount as instalment_amount
-                const instalmentAmount = parseFloat(storedEmi?.emi_amount || storedEmi?.emiAmount || 0);
-                
-                schedule.push({
-                  emi_number: i + 1,
-                  instalment_no: i + 1,
-                  due_date: emiDateStr,
-                  principal: 0, // Not recalculated for account_manager loans
-                  interest: 0, // Not recalculated for account_manager loans
-                  post_service_fee: 0, // Not recalculated for account_manager loans
-                  gst_on_post_service_fee: 0, // Not recalculated for account_manager loans
-                  instalment_amount: instalmentAmount, // Use stored amount (source of truth)
-                  days: 0, // Not needed for account_manager loans
-                  status: storedEmi?.status || 'pending'
-                });
-              }
-              
-              console.log(`✅ [Loan Calculations] Used emi_amount from emi_schedule for all ${schedule.length} EMIs`);
-            } else {
-              throw new Error('emi_schedule array is empty');
-            }
           } catch (e) {
-            console.error('❌ [Loan Calculations] Error using emi_schedule for account_manager loan, falling back to recalculation:', e);
-            // Fall through to recalculation below
-            schedule = [];
+            console.warn('⚠️ [Loan Calculations] Could not parse stored emi_schedule, will recalculate:', e);
           }
         }
         
-        // Recalculate for non-account_manager loans or if emi_schedule failed
-        if (schedule.length !== emiCount) {
-          console.log(`📊 [Loan Calculations] Recalculating EMI amounts (non-account_manager or emi_schedule unavailable)`);
+        let outstandingPrincipal = principal;
+        let totalInterest = 0;
+        
+        for (let i = 0; i < emiCount; i++) {
+          const emiDate = allEmiDates[i];
+          const emiDateStr = formatDateToString(emiDate);
           
-          const principalPerEmi = Math.floor(principal / emiCount * 100) / 100;
-          const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
+          let previousDateStr;
+          if (i === 0) {
+            previousDateStr = baseDateStr;
+          } else {
+            const prevEmiDate = allEmiDates[i - 1];
+            const prevEmiDateStr = formatDateToString(prevEmiDate);
+            // Add 1 day to previous date for inclusive counting
+            const prevDate = new Date(prevEmiDate);
+            prevDate.setDate(prevDate.getDate() + 1);
+            previousDateStr = formatDateToString(prevDate);
+          }
           
-          // IMPORTANT: totals.repayableFee is ALREADY multiplied by emiCount in calculateCompleteLoanValues
-          // So we need to divide by emiCount to get the per-EMI fee
-          const totalRepayableFee = calculation.totals.repayableFee || 0;
-          const totalRepayableFeeGST = calculation.totals.repayableFeeGST || 0;
-          const postServiceFeePerEmi = Math.round((totalRepayableFee / emiCount) * 100) / 100;
-          const postServiceFeeGSTPerEmi = Math.round((totalRepayableFeeGST / emiCount) * 100) / 100;
+          // Calculate days difference (inclusive counting: both start and end dates count)
+          const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStr);
           
-          let outstandingPrincipal = principal;
-          let totalInterest = 0;
+          const principalForThisEmi = i === emiCount - 1 
+            ? Math.round((principalPerEmi + remainder) * 100) / 100
+            : principalPerEmi;
           
-          for (let i = 0; i < emiCount; i++) {
-            const emiDate = allEmiDates[i];
-            const emiDateStr = formatDateToString(emiDate);
-            
-            let previousDateStr;
-            if (i === 0) {
-              previousDateStr = baseDateStr;
-            } else {
-              const prevEmiDate = allEmiDates[i - 1];
-              const prevEmiDateStr = formatDateToString(prevEmiDate);
-              // Add 1 day to previous date for inclusive counting
-              const prevDate = new Date(prevEmiDate);
-              prevDate.setDate(prevDate.getDate() + 1);
-              previousDateStr = formatDateToString(prevDate);
+          const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
+          totalInterest += interestForPeriod;
+          
+          // Calculate installment amount (principal + interest + post service fee + GST)
+          // CRITICAL: Include post service fee + GST in each EMI
+          const instalmentAmount = Math.round((principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi) * 100) / 100;
+          
+          // Preserve stored status if available (for account_manager loans with payment tracking)
+          let emiStatus = 'pending';
+          if (storedEmiSchedule && Array.isArray(storedEmiSchedule)) {
+            const storedEmi = storedEmiSchedule.find(e => 
+              (e.emi_number === i + 1 || e.instalment_no === i + 1)
+            ) || storedEmiSchedule[i];
+            if (storedEmi && storedEmi.status) {
+              emiStatus = storedEmi.status;
             }
-            
-            // Calculate days difference (inclusive counting: both start and end dates count)
-            const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStr);
-            
-            const principalForThisEmi = i === emiCount - 1 
-              ? Math.round((principalPerEmi + remainder) * 100) / 100
-              : principalPerEmi;
-            
-            const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
-            totalInterest += interestForPeriod;
-            
-            // Calculate installment amount (principal + interest + post service fee + GST)
-            const instalmentAmount = Math.round((principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi) * 100) / 100;
-            
-            schedule.push({
-              emi_number: i + 1,
-              instalment_no: i + 1, // Add instalment_no for consistency with kfs.js
-              due_date: emiDateStr,
-              principal: principalForThisEmi,
-              interest: interestForPeriod,
-              post_service_fee: postServiceFeePerEmi,
-              gst_on_post_service_fee: postServiceFeeGSTPerEmi,
-              instalment_amount: instalmentAmount,
-              days: daysForPeriod
-            });
-            
-            outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
           }
           
-          // Update interest and total repayable only if we recalculated
-          if (!isAccountManager) {
-            calculation.interest.amount = totalInterest;
-            calculation.total.repayable = principal + totalInterest + calculation.totals.repayableFee + calculation.totals.repayableFeeGST;
-            calculation.total.breakdown = `Principal (₹${principal.toFixed(2)}) + Interest (₹${totalInterest.toFixed(2)}) + Repayable Fees (₹${(calculation.totals.repayableFee + calculation.totals.repayableFeeGST).toFixed(2)}) = ₹${calculation.total.repayable.toFixed(2)}`;
-          }
+          schedule.push({
+            emi_number: i + 1,
+            instalment_no: i + 1, // Add instalment_no for consistency with kfs.js
+            due_date: emiDateStr,
+            principal: principalForThisEmi,
+            interest: interestForPeriod,
+            post_service_fee: postServiceFeePerEmi,
+            gst_on_post_service_fee: postServiceFeeGSTPerEmi,
+            instalment_amount: instalmentAmount,
+            days: daysForPeriod,
+            status: emiStatus
+          });
+          
+          outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
         }
+        
+        // Update interest and total repayable (always recalculate for accuracy)
+        calculation.interest.amount = totalInterest;
+        calculation.total.repayable = principal + totalInterest + calculation.totals.repayableFee + calculation.totals.repayableFeeGST;
+        calculation.total.breakdown = `Principal (₹${principal.toFixed(2)}) + Interest (₹${totalInterest.toFixed(2)}) + Repayable Fees (₹${(calculation.totals.repayableFee + calculation.totals.repayableFeeGST).toFixed(2)}) = ₹${calculation.total.repayable.toFixed(2)}`;
+        
+        console.log(`✅ [Loan Calculations] Recalculated EMI amounts with correct post service fee + GST for all ${schedule.length} EMIs`);
         
         // Add repayment schedule to calculation
         if (!calculation.repayment) {
           calculation.repayment = {};
         }
         
-        // For account_manager loans, status is already set when using stored emi_amount - no merge needed
-        // For non-account_manager loans, merge status from emi_schedule
+        // For account_manager loans, status is already preserved in the recalculated schedule above
+        // For non-account_manager loans, merge status from emi_schedule to preserve payment tracking
         if (!isAccountManager) {
           try {
             let emiScheduleArray = null;
@@ -880,9 +859,36 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
             }));
           }
         }
-        // For account_manager loans, status is already set correctly from emi_schedule when using stored amounts
+        // Note: For account_manager loans, status was already preserved during recalculation above
         
         calculation.repayment.schedule = schedule;
+        
+        // Update stored emi_schedule in database for account_manager loans to fix incorrect stored values
+        // This ensures existing loans with wrong stored values get corrected automatically
+        if (isAccountManager && schedule.length > 0 && emiCount > 1) {
+          try {
+            // Convert recalculated schedule to stored format (preserving status from database if available)
+            const updatedEmiSchedule = schedule.map((instalment) => ({
+              emi_number: instalment.emi_number,
+              instalment_no: instalment.instalment_no,
+              due_date: instalment.due_date,
+              emi_amount: instalment.instalment_amount,
+              status: instalment.status || 'pending'
+            }));
+            
+            // Update emi_schedule in database
+            const { executeQuery: execQuery } = require('../config/database');
+            await execQuery(
+              `UPDATE loan_applications SET emi_schedule = ?, updated_at = NOW() WHERE id = ?`,
+              [JSON.stringify(updatedEmiSchedule), loanId]
+            );
+            
+            console.log(`✅ [Loan Calculations] Updated stored emi_schedule in database for loan #${loanId} with correct amounts (preserved payment status)`);
+          } catch (updateError) {
+            // Don't fail the request if update fails, just log the error
+            console.error(`⚠️ [Loan Calculations] Failed to update stored emi_schedule for loan #${loanId}:`, updateError);
+          }
+        }
       }
     }
     
