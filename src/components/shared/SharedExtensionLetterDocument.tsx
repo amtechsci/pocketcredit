@@ -246,7 +246,7 @@ export function SharedExtensionLetterDocument({ extensionData }: SharedExtension
                         )}
                         <p>Total Extension Payment (including all charges): <strong>{formatCurrencySimple(totalExtensionAmount)}</strong></p>
                         <p>Outstanding Loan Balance after extension: <strong>{formatCurrencySimple(outstandingBalanceAfterExtension)}</strong></p>
-                        <p>Extension Start Date: <strong>{formatDate(extensionData.extension.original_due_date)}</strong></p>
+                        <p>Extension Start Date: <strong>{todayDate}</strong></p>
                         <p>Revised Repayment Due Date: <strong>{formatDate(extensionData.extension.new_due_date || extensionData.extension.extension_period_till)}</strong></p>
                     </div>
                 </div>
