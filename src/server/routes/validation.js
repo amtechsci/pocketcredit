@@ -188,6 +188,93 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       }
     }
 
+    // For cancel action, validate loan before saving history
+    let loanToUpdate = null;
+    let actualLoanId = loanApplicationId;
+    
+    if (actionType === 'cancel') {
+      // Try to find the loan to cancel
+      if (loanApplicationId) {
+        // Verify loan exists and get current status
+        const loanCheck = await executeQuery(
+          'SELECT id, status, user_id FROM loan_applications WHERE id = ?',
+          [loanApplicationId]
+        );
+
+        if (loanCheck.length === 0) {
+          console.error(`❌ Loan application ${loanApplicationId} not found for cancel action`);
+          return res.status(404).json({
+            status: 'error',
+            message: `Loan application with ID ${loanApplicationId} not found`
+          });
+        }
+
+        const currentLoan = loanCheck[0];
+        
+        // Verify loan belongs to the user
+        if (currentLoan.user_id !== userId) {
+          console.error(`❌ Loan ${loanApplicationId} does not belong to user ${userId}`);
+          return res.status(403).json({
+            status: 'error',
+            message: 'Loan application does not belong to this user'
+          });
+        }
+        
+        // Block cancellation if loan is in account_manager status
+        if (currentLoan.status === 'account_manager') {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Cannot cancel loan. Loan is in account_manager status and cannot be modified.'
+          });
+        }
+
+        // Block cancellation if loan is already cancelled
+        if (currentLoan.status === 'cancelled') {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Loan is already cancelled'
+          });
+        }
+
+        loanToUpdate = currentLoan;
+      } else {
+        // If no loanApplicationId provided, try to find active loan for user
+        const activeLoans = await executeQuery(
+          `SELECT id, status FROM loan_applications 
+           WHERE user_id = ? 
+           AND status IN ('submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'repeat_ready_for_disbursement', 'repeat_disbursal')
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [userId]
+        );
+
+        if (activeLoans.length > 0) {
+          const foundLoan = activeLoans[0];
+          
+          // Block cancellation if loan is in account_manager status (though shouldn't be in the query)
+          if (foundLoan.status === 'account_manager') {
+            return res.status(400).json({
+              status: 'error',
+              message: 'Cannot cancel loan. Loan is in account_manager status and cannot be modified.'
+            });
+          }
+
+          if (foundLoan.status === 'cancelled') {
+            return res.status(400).json({
+              status: 'error',
+              message: 'Loan is already cancelled'
+            });
+          }
+
+          loanToUpdate = foundLoan;
+          actualLoanId = foundLoan.id;
+        } else {
+          console.warn(`⚠️ Cancel action requested but no active loan found for user ${userId}`);
+          // Continue - might just be updating user status
+        }
+      }
+    }
+
     // Insert validation history record
     const historyResult = await executeQuery(
       `INSERT INTO user_validation_history 
@@ -195,7 +282,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
        VALUES (?, ?, ?, ?, ?)`,
       [
         userId, 
-        loanApplicationId || null, 
+        actualLoanId || null, 
         finalAdminId, 
         actionType, 
         JSON.stringify(actionDetails)
@@ -203,7 +290,10 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
     );
 
     // Update loan application status if needed
-    if (loanApplicationId) {
+    let loanUpdateSuccess = false;
+    let loanUpdateMessage = '';
+
+    if (loanApplicationId || loanToUpdate) {
       let newStatus = null;
       
       switch (actionType) {
@@ -222,10 +312,28 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       }
 
       if (newStatus) {
-        await executeQuery(
-          'UPDATE loan_applications SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          [newStatus, loanApplicationId]
-        );
+        const targetLoanId = actualLoanId || loanApplicationId;
+        
+        if (targetLoanId) {
+          // Update loan status
+          const updateResult = await executeQuery(
+            'UPDATE loan_applications SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [newStatus, targetLoanId]
+          );
+
+          const affectedRows = updateResult?.affectedRows || (typeof updateResult === 'number' ? updateResult : 0);
+          
+          if (affectedRows > 0) {
+            loanUpdateSuccess = true;
+            const oldStatus = loanToUpdate?.status || 'unknown';
+            loanUpdateMessage = `Loan ${targetLoanId} status updated from ${oldStatus} to ${newStatus}`;
+            console.log(`✅ Successfully updated loan ${targetLoanId} status from ${oldStatus} to ${newStatus} (${affectedRows} row(s) affected)`);
+          } else {
+            loanUpdateMessage = `Failed to update loan ${targetLoanId} status. No rows were affected.`;
+            console.error(`❌ ${loanUpdateMessage}`);
+            console.error(`   Target loan ID: ${targetLoanId}, New status: ${newStatus}`);
+          }
+        }
       }
     }
 
@@ -367,13 +475,27 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       }
     }
 
+    // Build response message
+    let responseMessage = 'Validation action submitted successfully';
+    if (actionType === 'cancel') {
+      if (loanUpdateSuccess) {
+        responseMessage = 'Loan cancelled successfully';
+      } else if (loanUpdateMessage) {
+        responseMessage = `Validation action submitted, but ${loanUpdateMessage.toLowerCase()}`;
+      } else {
+        responseMessage = 'Validation action submitted. No active loan found to cancel.';
+      }
+    }
+
     res.json({
       status: 'success',
-      message: 'Validation action submitted successfully',
+      message: responseMessage,
       data: {
         historyId: historyResult.insertId,
         actionType,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        loanUpdateSuccess,
+        loanUpdateMessage: loanUpdateMessage || null
       }
     });
 

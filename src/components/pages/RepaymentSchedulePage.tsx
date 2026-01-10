@@ -391,7 +391,19 @@ export const RepaymentSchedulePage = () => {
 
   // Generate short loan ID format: PLL + last 4 digits
   const getShortLoanId = () => {
-    const appNumber = loanData.loan_id || loanData.application_number || loanData.id || '';
+    // Try multiple sources: loanData, kfsData.loan, or URL parameter
+    const sourceLoan = loanData || kfsData?.loan;
+    const appId = searchParams.get('applicationId');
+    
+    const appNumber = sourceLoan?.application_number 
+      || sourceLoan?.loan_id 
+      || sourceLoan?.id 
+      || kfsData?.loan?.application_number
+      || kfsData?.loan?.loan_id
+      || kfsData?.loan?.id
+      || appId
+      || '';
+      
     if (appNumber) {
       const last4 = String(appNumber).slice(-4);
       return `PLL${last4}`;
@@ -474,206 +486,215 @@ export const RepaymentSchedulePage = () => {
           }
           
           return (
-            <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
-              <CardContent className="p-4 sm:p-6">
-                {/* Preclose Section - Single Row Layout */}
-                <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Preclose it today</h3>
-                
-                {/* Calculate preclose amount */}
-                {(() => {
-                  const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
+            <>
+              <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
+                <CardContent className="p-4 sm:p-6">
+                  {/* Preclose Section - Single Row Layout */}
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+                    <h3 className="text-lg sm:text-xl font-bold text-gray-900">Preclose it today</h3>
+                    {shortLoanId !== 'N/A' && (
+                      <span className="text-xs sm:text-sm font-semibold text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
+                        Loan ID: {shortLoanId}
+                      </span>
+                    )}
+                  </div>
                   
-                  // Calculate interest till today
-                  let interestTillToday = 0;
-                  let interestRatePerDay = planData.interest_percent_per_day || 
-                                      calculations.interest?.rate_per_day ||
-                                      (calculations.interest?.amount && calculations.interest?.days && principal > 0
-                                        ? calculations.interest.amount / (calculations.interest.days * principal)
-                                        : 0.001); // Default 0.1% per day
+                  {/* Calculate preclose amount */}
+                  {(() => {
+                    const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
+                    
+                    // Calculate interest till today
+                    let interestTillToday = 0;
+                    let interestRatePerDay = planData.interest_percent_per_day || 
+                                        calculations.interest?.rate_per_day ||
+                                        (calculations.interest?.amount && calculations.interest?.days && principal > 0
+                                          ? calculations.interest.amount / (calculations.interest.days * principal)
+                                          : 0.001); // Default 0.1% per day
+                    
+                    if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
+                      // Use processed_interest from database
+                      interestTillToday = parseFloat(loanData.processed_interest || 0);
+                    } else {
+                      interestTillToday = principal * interestRatePerDay * exhaustedDays;
+                    }
+                    
+                    // Pre-close fee: 10% of principal + 18% GST (NO post service fee for pre-close)
+                    const preCloseFeePercent = 10;
+                    const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
+                    const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
+                    
+                    const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
+                    
+                    // Get due date for display
+                    let dueDateObj = null;
+                    let daysRemaining = 0;
+                    let isOverdue = false;
+                    let isDueToday = false;
+                    
+                    if (dueDate) {
+                      dueDateObj = new Date(dueDate);
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      dueDateObj.setHours(0, 0, 0, 0);
+                      daysRemaining = Math.ceil((dueDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                      isOverdue = daysRemaining < 0;
+                      isDueToday = daysRemaining === 0;
+                    }
                   
-                  if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
-                    // Use processed_interest from database
-                    interestTillToday = parseFloat(loanData.processed_interest || 0);
-                  } else {
-                    interestTillToday = principal * interestRatePerDay * exhaustedDays;
+                  // Calculate last available date (DPD = -6 means 6 days before due date)
+                  // So last available date = due_date - 6 days
+                  let lastAvailableDate = null;
+                  let lastAvailableDateFormatted = '';
+                  if (dueDateObj) {
+                    lastAvailableDate = new Date(dueDateObj);
+                    lastAvailableDate.setDate(lastAvailableDate.getDate() - 6);
+                    lastAvailableDateFormatted = lastAvailableDate.toLocaleDateString('en-GB', { 
+                      day: '2-digit', 
+                      month: '2-digit', 
+                      year: 'numeric' 
+                    });
                   }
-                  
-                  // Pre-close fee: 10% of principal + 18% GST (NO post service fee for pre-close)
-                  const preCloseFeePercent = 10;
-                  const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
-                  const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
-                  
-                  const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
-                  
-                  // Get due date for display
-                  let dueDateObj = null;
-                  let daysRemaining = 0;
-                  let isOverdue = false;
-                  let isDueToday = false;
-                  
-                  if (dueDate) {
-                    dueDateObj = new Date(dueDate);
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0);
-                    dueDateObj.setHours(0, 0, 0, 0);
-                    daysRemaining = Math.ceil((dueDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                    isOverdue = daysRemaining < 0;
-                    isDueToday = daysRemaining === 0;
-                  }
-                
-                // Calculate last available date (DPD = -6 means 6 days before due date)
-                // So last available date = due_date - 6 days
-                let lastAvailableDate = null;
-                let lastAvailableDateFormatted = '';
-                if (dueDateObj) {
-                  lastAvailableDate = new Date(dueDateObj);
-                  lastAvailableDate.setDate(lastAvailableDate.getDate() - 6);
-                  lastAvailableDateFormatted = lastAvailableDate.toLocaleDateString('en-GB', { 
-                    day: '2-digit', 
-                    month: '2-digit', 
-                    year: 'numeric' 
-                  });
-                }
 
-                return (
-                  <>
-                    {/* Single Row Layout: Amount | Due Date | Button */}
-                    <div className="flex flex-col md:flex-row md:items-center gap-4 p-4 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
-                      {/* Column 1: Preclose Amount with message */}
-                      <div className="flex-1">
-                        <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">
-                          Now & save interest: {formatCurrency(precloseAmount)}
-                        </p>
-                        <p className="text-xs sm:text-sm text-gray-500 italic">
-                          (Available till {lastAvailableDateFormatted || 'N/A'} only)
-                        </p>
-                        <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 mt-2">
-                          {formatCurrency(precloseAmount)}
-                        </h2>
-                      </div>
-                      
-                      {/* Column 2: Due Date */}
-                      {dueDateObj && (
+                  return (
+                    <>
+                      {/* Single Row Layout: Amount | Due Date | Button */}
+                      <div className="flex flex-col md:flex-row md:items-center gap-4 p-4 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
+                        {/* Column 1: Preclose Amount with message */}
                         <div className="flex-1">
-                          <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">Due Date</p>
-                          <p className="text-lg sm:text-xl font-semibold text-gray-900 mb-0.5">
-                            {dueDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                          <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">
+                            Now & save interest: {formatCurrency(precloseAmount)}
                           </p>
-                          <p className={`text-xs text-gray-600 ${isOverdue ? 'text-red-600' : isDueToday ? 'text-yellow-600' : ''}`}>
-                            {isOverdue ? `Overdue by ${Math.abs(daysRemaining)} days` : isDueToday ? 'Due Today!' : `Due in ${daysRemaining} days`}
+                          <p className="text-xs sm:text-sm text-gray-500 italic">
+                            (Available till {lastAvailableDateFormatted || 'N/A'} only)
                           </p>
+                          <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 mt-2">
+                            {formatCurrency(precloseAmount)}
+                          </h2>
+                        </div>
+                        
+                        {/* Column 2: Due Date */}
+                        {dueDateObj && (
+                          <div className="flex-1">
+                            <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">Due Date</p>
+                            <p className="text-lg sm:text-xl font-semibold text-gray-900 mb-0.5">
+                              {dueDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </p>
+                            <p className={`text-xs text-gray-600 ${isOverdue ? 'text-red-600' : isDueToday ? 'text-yellow-600' : ''}`}>
+                              {isOverdue ? `Overdue by ${Math.abs(daysRemaining)} days` : isDueToday ? 'Due Today!' : `Due in ${daysRemaining} days`}
+                            </p>
+                          </div>
+                        )}
+                        
+                        {/* Column 3: Repay Now Button */}
+                        <div className="flex-shrink-0 w-full md:w-auto">
+                          <Button
+                            className="w-full md:w-auto h-12 text-base font-semibold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all"
+                            onClick={async () => {
+                              try {
+                                toast.loading('Creating payment order...');
+
+                                const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
+                                const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
+                                
+                                // Calculate interest till today
+                                let interestTillToday = 0;
+                                let interestRatePerDay = planData.interest_percent_per_day || 
+                                                    calculations.interest?.rate_per_day ||
+                                                    (calculations.interest?.amount && calculations.interest?.days && principal > 0
+                                                      ? calculations.interest.amount / (calculations.interest.days * principal)
+                                                      : 0.001);
+                                
+                                if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
+                                  interestTillToday = parseFloat(loanData.processed_interest || 0);
+                                } else {
+                                  interestTillToday = principal * interestRatePerDay * exhaustedDays;
+                                }
+                                
+                                const preCloseFeePercent = 10;
+                                const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
+                                const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
+                                const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
+
+                                if (!loanId || !precloseAmount) {
+                                  toast.error('Unable to process payment');
+                                  return;
+                                }
+
+                                const response = await apiService.createPaymentOrder(loanId, precloseAmount, 'pre-close');
+
+                                if (response.success && response.data?.paymentSessionId) {
+                                  toast.success('Opening payment gateway...');
+
+                                  try {
+                                    const isProduction = response.data.checkoutUrl?.includes('payments.cashfree.com') && 
+                                                       !response.data.checkoutUrl?.includes('payments-test');
+                                    
+                                    const cashfree = await load({ 
+                                      mode: isProduction ? "production" : "sandbox"
+                                    });
+
+                                    if (cashfree) {
+                                      cashfree.checkout({
+                                        paymentSessionId: response.data.paymentSessionId
+                                      });
+                                    } else {
+                                      throw new Error('Failed to load Cashfree SDK');
+                                    }
+                                  } catch (sdkError: any) {
+                                    console.error('Cashfree SDK error:', sdkError);
+                                    toast.error('Failed to open payment gateway. Please try again.');
+                                    
+                                    if (response.data.checkoutUrl) {
+                                      window.location.href = response.data.checkoutUrl;
+                                    } else {
+                                      throw new Error('No payment session available');
+                                    }
+                                  }
+                                } else {
+                                  toast.error(response.message || 'Failed to create payment order');
+                                }
+                              } catch (error: any) {
+                                console.error('Payment error:', error);
+                                toast.error(error.message || 'Failed to initiate payment');
+                              }
+                            }}
+                          >
+                            Repay Now
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Default Status */}
+                      {isDefaulted && (
+                        <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg animate-pulse mt-4">
+                          <p className="text-red-600 font-bold text-base sm:text-lg uppercase tracking-wide">
+                            ⚠ DEFAULTED ({daysDelayed} days delayed)
+                          </p>
+                          <p className="text-xs sm:text-sm text-red-500 mt-1">Immediate action required</p>
                         </div>
                       )}
-                      
-                      {/* Column 3: Repay Now Button */}
-                      <div className="flex-shrink-0 w-full md:w-auto">
-                        <Button
-                          className="w-full md:w-auto h-12 text-base font-semibold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all"
-                          onClick={async () => {
-                            try {
-                              toast.loading('Creating payment order...');
 
-                              const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
-                              const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
-                              
-                              // Calculate interest till today
-                              let interestTillToday = 0;
-                              let interestRatePerDay = planData.interest_percent_per_day || 
-                                                  calculations.interest?.rate_per_day ||
-                                                  (calculations.interest?.amount && calculations.interest?.days && principal > 0
-                                                    ? calculations.interest.amount / (calculations.interest.days * principal)
-                                                    : 0.001);
-                              
-                              if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
-                                interestTillToday = parseFloat(loanData.processed_interest || 0);
-                              } else {
-                                interestTillToday = principal * interestRatePerDay * exhaustedDays;
-                              }
-                              
-                              const preCloseFeePercent = 10;
-                              const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
-                              const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
-                              const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
-
-                              if (!loanId || !precloseAmount) {
-                                toast.error('Unable to process payment');
-                                return;
-                              }
-
-                              const response = await apiService.createPaymentOrder(loanId, precloseAmount, 'pre-close');
-
-                              if (response.success && response.data?.paymentSessionId) {
-                                toast.success('Opening payment gateway...');
-
-                                try {
-                                  const isProduction = response.data.checkoutUrl?.includes('payments.cashfree.com') && 
-                                                     !response.data.checkoutUrl?.includes('payments-test');
-                                  
-                                  const cashfree = await load({ 
-                                    mode: isProduction ? "production" : "sandbox"
-                                  });
-
-                                  if (cashfree) {
-                                    cashfree.checkout({
-                                      paymentSessionId: response.data.paymentSessionId
-                                    });
-                                  } else {
-                                    throw new Error('Failed to load Cashfree SDK');
-                                  }
-                                } catch (sdkError: any) {
-                                  console.error('Cashfree SDK error:', sdkError);
-                                  toast.error('Failed to open payment gateway. Please try again.');
-                                  
-                                  if (response.data.checkoutUrl) {
-                                    window.location.href = response.data.checkoutUrl;
-                                  } else {
-                                    throw new Error('No payment session available');
-                                  }
-                                }
-                              } else {
-                                toast.error(response.message || 'Failed to create payment order');
-                              }
-                            } catch (error: any) {
-                              console.error('Payment error:', error);
-                              toast.error(error.message || 'Failed to initiate payment');
-                            }
-                          }}
-                        >
-                          Repay Now
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Default Status */}
-                    {isDefaulted && (
-                      <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg animate-pulse mt-4">
-                        <p className="text-red-600 font-bold text-base sm:text-lg uppercase tracking-wide">
-                          ⚠ DEFAULTED ({daysDelayed} days delayed)
-                        </p>
-                        <p className="text-xs sm:text-sm text-red-500 mt-1">Immediate action required</p>
-                      </div>
-                    )}
-
-                    {/* Extend Loan Tenure Button */}
-                    {canExtend && (
-                      <div className="mt-4">
-                        <Button
-                          variant="outline"
-                          className="w-full h-12 border-2 border-blue-600 text-blue-600 hover:bg-blue-50 font-semibold"
-                          onClick={() => {
-                            toast.info('Tenure extension feature coming soon');
-                          }}
-                        >
-                          <TrendingUp className="w-4 h-4 mr-2" />
-                          Extend your loan tenure
-                        </Button>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
-              </CardContent>
-            </Card>
+                      {/* Extend Loan Tenure Button */}
+                      {canExtend && (
+                        <div className="mt-4">
+                          <Button
+                            variant="outline"
+                            className="w-full h-12 border-2 border-blue-600 text-blue-600 hover:bg-blue-50 font-semibold"
+                            onClick={() => {
+                              toast.info('Tenure extension feature coming soon');
+                            }}
+                          >
+                            <TrendingUp className="w-4 h-4 mr-2" />
+                            Extend your loan tenure
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+                </CardContent>
+              </Card>
+            </>
           );
         })()}
 
@@ -990,7 +1011,14 @@ export const RepaymentSchedulePage = () => {
             <>
               <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
                 <CardContent className="p-4 sm:p-6">
-                  <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Preclose it today</h3>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+                    <h3 className="text-lg sm:text-xl font-bold text-gray-900">Preclose it today</h3>
+                    {shortLoanId !== 'N/A' && (
+                      <span className="text-xs sm:text-sm font-semibold text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
+                        Loan ID: {shortLoanId}
+                      </span>
+                    )}
+                  </div>
                   
                   {/* Calculate preclose amount: principal + interest till today + post service fee (1 time) + gst */}
                   {(() => {
@@ -1051,6 +1079,14 @@ export const RepaymentSchedulePage = () => {
                     
                     const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
                     
+                    // Calculate total of all remaining EMIs to show interest saved
+                    let totalEmiAmount = 0;
+                    let interestSaved = 0;
+                    if (repaymentSchedule && repaymentSchedule.length > 0) {
+                      totalEmiAmount = repaymentSchedule.reduce((sum: number, emi: any) => sum + (emi.instalment_amount || 0), 0);
+                      interestSaved = Math.round((totalEmiAmount - precloseAmount) * 100) / 100;
+                    }
+                    
                     // Debug logging
                     console.log('Preclose Calculation:', {
                       principal,
@@ -1059,7 +1095,9 @@ export const RepaymentSchedulePage = () => {
                       interestTillToday,
                       preCloseFee,
                       preCloseFeeGST,
-                      precloseAmount
+                      precloseAmount,
+                      totalEmiAmount,
+                      interestSaved
                     });
                     
                     // Get due date for display (first EMI due date)
@@ -1100,7 +1138,11 @@ export const RepaymentSchedulePage = () => {
                         {/* Column 1: Preclose Amount with message */}
                         <div className="flex-1">
                           <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">
-                            Now & save interest: {formatCurrency(precloseAmount)}
+                            {interestSaved > 0 ? (
+                              <>Now & save interest: {formatCurrency(interestSaved)}</>
+                            ) : (
+                              <>Now & save interest: {formatCurrency(precloseAmount)}</>
+                            )}
                           </p>
                           <p className="text-xs sm:text-sm text-gray-500 italic">
                             (Available till {lastAvailableDateFormatted || 'N/A'} only)
@@ -1232,7 +1274,14 @@ export const RepaymentSchedulePage = () => {
             <>
             <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
                 <CardContent className="p-4 sm:p-6">
-                  <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">EMI Schedule</h3>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+                    <h3 className="text-lg sm:text-xl font-bold text-gray-900">EMI Schedule</h3>
+                    {shortLoanId !== 'N/A' && (
+                      <span className="text-xs sm:text-sm font-semibold text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
+                        Loan ID: {shortLoanId}
+                      </span>
+                    )}
+                  </div>
                   <div className="space-y-3">
                     {repaymentSchedule.map((emi: any, index: number) => {
                       const emiDate = new Date(emi.due_date);

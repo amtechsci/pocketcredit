@@ -430,9 +430,14 @@ export function UserProfileDetail() {
       }
 
       // Get the latest loan application ID from applied loans
+      // For cancel action, include all cancellable statuses
       const loans = getArray('loans');
+      const cancellableStatuses = selectedAction === 'cancel' 
+        ? ['submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'repeat_ready_for_disbursement', 'repeat_disbursal']
+        : ['submitted', 'under_review', 'follow_up', 'disbursal'];
+      
       const appliedLoans = loans ? loans.filter((loan: any) =>
-        ['submitted', 'under_review', 'follow_up', 'disbursal'].includes(loan.status)
+        cancellableStatuses.includes(loan.status)
       ) : [];
       const latestLoan = appliedLoans && appliedLoans.length > 0 ? appliedLoans[0] : null;
       const loanApplicationId = latestLoan?.id || userData.current_loan_id || null;

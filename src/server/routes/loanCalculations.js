@@ -512,6 +512,13 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
         const principalPerEmi = Math.floor(principal / emiCount * 100) / 100;
         const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
         
+        // IMPORTANT: totals.repayableFee is ALREADY multiplied by emiCount in calculateCompleteLoanValues
+        // So we need to divide by emiCount to get the per-EMI fee
+        const totalRepayableFee = calculation.totals.repayableFee || 0;
+        const totalRepayableFeeGST = calculation.totals.repayableFeeGST || 0;
+        const postServiceFeePerEmi = Math.round((totalRepayableFee / emiCount) * 100) / 100;
+        const postServiceFeeGSTPerEmi = Math.round((totalRepayableFeeGST / emiCount) * 100) / 100;
+        
         let outstandingPrincipal = principal;
         let totalInterest = 0;
         const schedule = [];
@@ -542,13 +549,17 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
           totalInterest += interestForPeriod;
           
-          // Add to schedule
-          const instalmentAmount = Math.round((principalForThisEmi + interestForPeriod) * 100) / 100;
+          // Calculate installment amount (principal + interest + post service fee + GST)
+          const instalmentAmount = Math.round((principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi) * 100) / 100;
+          
           schedule.push({
             emi_number: i + 1,
+            instalment_no: i + 1, // Add instalment_no for consistency with kfs.js
             due_date: emiDateStr,
             principal: principalForThisEmi,
             interest: interestForPeriod,
+            post_service_fee: postServiceFeePerEmi,
+            gst_on_post_service_fee: postServiceFeeGSTPerEmi,
             instalment_amount: instalmentAmount,
             days: daysForPeriod
           });

@@ -568,6 +568,11 @@ router.post('/:extensionId/payment', requireAuth, async (req, res) => {
 
     // Get email - use personal_email, official_email, or email (in that priority order)
     const customerEmail = extension.personal_email || extension.official_email || extension.email || 'user@example.com';
+    
+    // Get customer name
+    const customerName = extension.first_name && extension.last_name 
+      ? `${extension.first_name} ${extension.last_name}`.trim()
+      : (extension.first_name || extension.last_name || 'Customer');
 
     // Generate unique order ID
     const orderId = `EXT_${extension.application_number}_${extension.extension_number}_${Date.now()}`;
@@ -585,6 +590,7 @@ router.post('/:extensionId/payment', requireAuth, async (req, res) => {
     console.log(`[Extension Payment] Creating Cashfree order:`, {
       orderId,
       amount: extension.total_extension_amount,
+      customerName,
       customerEmail,
       customerPhone: extension.phone || '9999999999',
       returnUrl,
@@ -593,13 +599,10 @@ router.post('/:extensionId/payment', requireAuth, async (req, res) => {
 
     const orderResult = await cashfreePayment.createOrder({
       orderId,
-      orderAmount: extension.total_extension_amount,
-      orderCurrency: 'INR',
-      customerDetails: {
-        customerId: userId.toString(),
-        customerEmail,
-        customerPhone: extension.phone || '9999999999'
-      },
+      amount: extension.total_extension_amount,
+      customerName: customerName,
+      customerEmail: customerEmail,
+      customerPhone: extension.phone || '9999999999',
       returnUrl,
       notifyUrl
     });
