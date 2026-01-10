@@ -139,22 +139,22 @@ export function ExtensionLetterModal({ loanId, isOpen, onClose, onAccept }: Exte
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-2 sm:p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[95vh] sm:max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b">
-          <h2 className="text-xl font-bold text-gray-900">Loan Extension Letter</h2>
+        <div className="flex items-center justify-between p-3 sm:p-4 border-b">
+          <h2 className="text-lg sm:text-xl font-bold text-gray-900">Loan Extension Letter</h2>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 transition-colors"
+            className="text-gray-500 hover:text-gray-700 transition-colors p-1"
             disabled={accepting}
           >
-            <X className="w-6 h-6" />
+            <X className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
@@ -173,22 +173,23 @@ export function ExtensionLetterModal({ loanId, isOpen, onClose, onAccept }: Exte
 
         {/* Footer */}
         {!loading && !accepted && extensionData && (
-          <div className="p-4 border-t bg-gray-50 flex items-center justify-between">
-            <p className="text-sm text-gray-600">
+          <div className="p-4 border-t bg-gray-50 space-y-4">
+            <p className="text-sm text-gray-600 text-center md:text-left">
               Please read the extension letter carefully. After accepting, you will be redirected to payment gateway to pay the extension fee.
             </p>
-            <div className="flex gap-3">
+            <div className="flex flex-col sm:flex-row gap-3">
               <Button
                 variant="outline"
                 onClick={onClose}
                 disabled={accepting}
+                className="w-full sm:w-auto order-2 sm:order-1"
               >
                 Cancel
               </Button>
               <Button
                 onClick={handleAccept}
                 disabled={accepting}
-                className="bg-orange-600 hover:bg-orange-700 text-white"
+                className="bg-orange-600 hover:bg-orange-700 text-white w-full sm:w-auto sm:flex-1 order-1 sm:order-2"
               >
                 {accepting ? (
                   <>
