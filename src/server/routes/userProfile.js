@@ -1983,7 +1983,8 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
       console.log(`🔍 Verifying loan #${loanIdInt}`);
       const loans = await executeQuery(
         `SELECT id, user_id, status, loan_amount, plan_snapshot, interest_percent_per_day, 
-         fees_breakdown, processed_at FROM loan_applications WHERE id = ?`,
+         fees_breakdown, processed_at, disbursal_amount, disbursed_at, 
+         processed_post_service_fee, processing_fee, total_interest FROM loan_applications WHERE id = ?`,
         [loanIdInt]
       );
 
@@ -2021,10 +2022,58 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             const processedAmount = calculatedValues?.disbursal?.amount || loan.disbursal_amount || loan.loan_amount || 0;
             const exhaustedPeriodDays = 1; // At processing time, it's day 1 (inclusive counting)
             const pFee = calculatedValues?.totals?.disbursalFee || loan.processing_fee || 0;
-            const postServiceFee = calculatedValues?.totals?.repayableFee || 0;
-            const gst = (calculatedValues?.totals?.disbursalFeeGST || 0) + (calculatedValues?.totals?.repayableFeeGST || 0);
+            
+            // Get post service fee from multiple sources (fallback chain)
+            // IMPORTANT: For multi-EMI loans, repayableFee is ALREADY multiplied by emiCount in calculatedValues
+            let postServiceFee = calculatedValues?.totals?.repayableFee || 0;
+            
+            // Fallback 1: Check if already stored in loan record
+            if (!postServiceFee && loan.processed_post_service_fee) {
+              postServiceFee = parseFloat(loan.processed_post_service_fee) || 0;
+              console.log(`📊 Using processed_post_service_fee from loan record: ₹${postServiceFee}`);
+            }
+            
+            // Fallback 2: Extract from fees_breakdown if still missing
+            if (!postServiceFee && loan.fees_breakdown) {
+              try {
+                const feesBreakdown = typeof loan.fees_breakdown === 'string' 
+                  ? JSON.parse(loan.fees_breakdown) 
+                  : loan.fees_breakdown;
+                
+                if (Array.isArray(feesBreakdown)) {
+                  const postServiceFeeEntry = feesBreakdown.find(f => 
+                    (f.name?.toLowerCase().includes('post service') || 
+                     f.fee_name?.toLowerCase().includes('post service')) &&
+                    f.application_method === 'add_to_total'
+                  );
+                  
+                  if (postServiceFeeEntry) {
+                    // fees_breakdown stores the total fee (already multiplied by EMI count for multi-EMI)
+                    postServiceFee = parseFloat(postServiceFeeEntry.amount || postServiceFeeEntry.fee_amount || 0);
+                    console.log(`📊 Using post service fee from fees_breakdown: ₹${postServiceFee}`);
+                  }
+                }
+              } catch (e) {
+                console.error('Error parsing fees_breakdown for post service fee:', e);
+              }
+            }
+            
+            // Get GST (disbursal GST + repayable GST)
+            // For repayable GST, try to get from calculatedValues, then calculate from postServiceFee if needed
+            let repayableFeeGST = calculatedValues?.totals?.repayableFeeGST || 0;
+            if (!repayableFeeGST && postServiceFee > 0) {
+              // Calculate GST as 18% of post service fee (total for all EMIs)
+              repayableFeeGST = Math.round(postServiceFee * 0.18 * 100) / 100;
+              console.log(`📊 Calculated repayableFeeGST from postServiceFee: ₹${repayableFeeGST}`);
+            }
+            
+            // Store disbursal GST separately (one-time fee, not included in EMIs)
+            const disbursalFeeGST = calculatedValues?.totals?.disbursalFeeGST || 0;
+            const gst = disbursalFeeGST + repayableFeeGST;
             const interest = calculatedValues?.interest?.amount || loan.total_interest || 0;
             const penalty = 0; // No penalty at processing time
+            
+            console.log(`📊 [Post Service Fee] Final values - postServiceFee: ₹${postServiceFee}, repayableFeeGST: ₹${repayableFeeGST}, disbursalFeeGST: ₹${disbursalFeeGST}, totalGST: ₹${gst}`);
             
             // Validate processedAmount - it should never be null or 0 for account_manager loans
             if (!processedAmount || processedAmount <= 0) {
@@ -2158,16 +2207,17 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 const principalPerEmi = Math.floor(processedAmount / emiCount * 100) / 100;
                 const remainder = Math.round((processedAmount - (principalPerEmi * emiCount)) * 100) / 100;
                 
-                // Calculate per-EMI fees (post service fee and GST are already total amounts)
-                // IMPORTANT: postServiceFee and gst are TOTAL amounts, need to divide by emiCount for per-EMI
+                // Calculate per-EMI fees (post service fee and repayable GST are already total amounts)
+                // IMPORTANT: postServiceFee and repayableFeeGST are TOTAL amounts for all EMIs, need to divide by emiCount for per-EMI
+                // disbursalFeeGST is NOT included in EMIs (it's a one-time fee deducted from disbursal)
                 const postServiceFeePerEmi = Math.round((postServiceFee || 0) / emiCount * 100) / 100;
-                const postServiceFeeGSTPerEmi = Math.round((gst || 0) / emiCount * 100) / 100;
+                const postServiceFeeGSTPerEmi = Math.round((repayableFeeGST || 0) / emiCount * 100) / 100;
                 
                 // Get interest rate per day from loan or plan snapshot
                 const interestRatePerDay = parseFloat(loan.interest_percent_per_day || planSnapshot.interest_percent_per_day || 0.001);
                 
                 // Log EMI calculation inputs for debugging
-                console.log(`📊 [EMI Calculation] Loan #${loanIdInt}: processedAmount=₹${processedAmount}, emiCount=${emiCount}, principalPerEmi=₹${principalPerEmi}, postServiceFee=₹${postServiceFee}, postServiceFeePerEmi=₹${postServiceFeePerEmi}, gst=₹${gst}, postServiceFeeGSTPerEmi=₹${postServiceFeeGSTPerEmi}, interestRatePerDay=${interestRatePerDay}`);
+                console.log(`📊 [EMI Calculation] Loan #${loanIdInt}: processedAmount=₹${processedAmount}, emiCount=${emiCount}, principalPerEmi=₹${principalPerEmi}, postServiceFee (total)=₹${postServiceFee}, postServiceFeePerEmi=₹${postServiceFeePerEmi}, repayableFeeGST (total)=₹${repayableFeeGST}, postServiceFeeGSTPerEmi=₹${postServiceFeeGSTPerEmi}, interestRatePerDay=${interestRatePerDay}`);
                 
                 // Calculate base date for interest calculation (processed_at takes priority over disbursed_at)
                 // Reuse existing baseDate variable but update it if processed_at exists
