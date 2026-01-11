@@ -1722,19 +1722,13 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
     }
     
     // Calculate penalty if overdue (not included in calculateExtensionFees utility)
+    // IMPORTANT: Always recalculate penalty using late_fee_structure (don't use processed_penalty from database)
+    // This ensures penalty matches EMI calculation and uses current late_fee_structure
     let penaltyAmount = 0;
     let penaltyBase = 0;
     let penaltyGST = 0;
-    if (loan.processed_penalty !== null && loan.processed_penalty !== undefined && parseFloat(loan.processed_penalty) > 0) {
-      // Use penalty already calculated by cron job
-      // Note: processed_penalty from cron job includes GST, so calculate base and GST
-      penaltyAmount = Math.round(parseFloat(loan.processed_penalty) * 100) / 100;
-      // Extract base and GST (assuming penaltyAmount includes GST: penaltyBase = penaltyAmount / 1.18)
-      penaltyBase = Math.round((penaltyAmount / 1.18) * 100) / 100;
-      penaltyGST = Math.round((penaltyAmount - penaltyBase) * 100) / 100;
-      console.log(`💰 Using processed_penalty from database: ₹${penaltyAmount} (Base: ₹${penaltyBase}, GST: ₹${penaltyGST})`);
-    } else {
-      // Recalculate if not available - check if any EMI is overdue
+    
+    // Always recalculate penalty - check if any EMI is overdue
       const parseDueDates = (dueDateStr) => {
         if (!dueDateStr) return [];
         try {
@@ -1901,7 +1895,6 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
             Penalty Total: ₹${penaltyCalc.penaltyTotal}`);
         }
       }
-    }
     
     // Add penalty to fees object (base, GST, and total)
     fees.penalty = penaltyBase; // Base penalty for backward compatibility
@@ -2538,22 +2531,13 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
     }
 
     // Calculate penalty if overdue
-    // IMPORTANT: Use processed_penalty from database if available (calculated by cron job)
-    // Only recalculate if processed_penalty is not available or if EMIs are overdue
+    // IMPORTANT: Always recalculate penalty using late_fee_structure (don't use processed_penalty from database)
+    // This ensures penalty matches EMI calculation and uses current late_fee_structure
     let penaltyAmount = 0;
     let penaltyBase = 0;
     let penaltyGST = 0;
     
-    if (loan.processed_penalty !== null && loan.processed_penalty !== undefined && parseFloat(loan.processed_penalty) > 0) {
-      // Use penalty already calculated by cron job
-      // Note: processed_penalty from cron job includes GST, so calculate base and GST
-      penaltyAmount = Math.round(parseFloat(loan.processed_penalty) * 100) / 100;
-      // Extract base and GST (assuming penaltyAmount includes GST: penaltyBase = penaltyAmount / 1.18)
-      penaltyBase = Math.round((penaltyAmount / 1.18) * 100) / 100;
-      penaltyGST = Math.round((penaltyAmount - penaltyBase) * 100) / 100;
-      console.log(`💰 Using processed_penalty from database: ₹${penaltyAmount} (Base: ₹${penaltyBase}, GST: ₹${penaltyGST})`);
-    } else {
-      // Recalculate if not available - check if any EMI is overdue
+    // Always recalculate penalty - check if any EMI is overdue
       const parseDueDates = (dueDateStr) => {
         if (!dueDateStr) return [];
         try {
@@ -2715,7 +2699,6 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
             Penalty Total: ₹${penaltyCalc.penaltyTotal}`);
         }
       }
-    }
     
     // Initialize penalty base and GST if not set
     if (!penaltyBase) penaltyBase = 0;
