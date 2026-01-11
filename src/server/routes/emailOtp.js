@@ -21,8 +21,8 @@ const transporter = nodemailer.createTransport({
   tls: {
     rejectUnauthorized: false
   },
-  debug: process.env.NODE_ENV === 'development', // Enable debug logs
-  logger: process.env.NODE_ENV === 'development' // Enable logger
+  debug: false,
+  logger: false
 });
 
 // Generate 6-digit OTP

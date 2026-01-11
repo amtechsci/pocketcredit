@@ -3,7 +3,6 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 async function createUserLoginHistoryTable() {
   try {
     await initializeDatabase();
-    console.log('Creating user_login_history table...');
 
     await executeQuery(`
       CREATE TABLE IF NOT EXISTS user_login_history (
@@ -31,8 +30,6 @@ async function createUserLoginHistoryTable() {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-
-    console.log('✅ user_login_history table created successfully');
   } catch (error) {
     console.error('❌ Error creating user_login_history table:', error);
     throw error;

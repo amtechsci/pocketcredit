@@ -9,6 +9,264 @@ const { executeQuery } = require('../config/database');
 const cashfreePayment = require('../services/cashfreePayment');
 const { authenticateToken } = require('../middleware/auth');
 
+/**
+ * Helper function to generate NOC HTML content
+ * @param {object} nocData - NOC data object
+ * @returns {string} HTML content for NOC document
+ */
+function generateNOCHTML(nocData) {
+  const formatDate = (dateString) => {
+    if (!dateString || dateString === 'N/A') return 'N/A';
+    try {
+      // Handle YYYY-MM-DD format
+      if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        const [year, month, day] = dateString.split('-');
+        return `${day}-${month}-${year}`;
+      }
+      // Handle ISO datetime strings
+      if (typeof dateString === 'string' && dateString.includes('T')) {
+        const datePart = dateString.split('T')[0];
+        if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+          const [year, month, day] = datePart.split('-');
+          return `${day}-${month}-${year}`;
+        }
+      }
+      // Handle MySQL datetime format
+      if (typeof dateString === 'string' && dateString.includes(' ')) {
+        const datePart = dateString.split(' ')[0];
+        if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+          const [year, month, day] = datePart.split('-');
+          return `${day}-${month}-${year}`;
+        }
+      }
+      // Fallback
+      const date = new Date(dateString);
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}-${month}-${year}`;
+    } catch {
+      return dateString;
+    }
+  };
+
+  const borrowerName = nocData.borrower?.name || 
+    `${nocData.borrower?.first_name || ''} ${nocData.borrower?.last_name || ''}`.trim() || 
+    'N/A';
+  
+  const applicationNumber = nocData.loan?.application_number || nocData.loan?.loan_id || 'N/A';
+  const shortLoanId = applicationNumber && applicationNumber !== 'N/A' 
+    ? `PLL${String(applicationNumber).slice(-4)}`
+    : (nocData.loan?.id ? `PLL${String(nocData.loan.id).padStart(4, '0').slice(-4)}` : 'PLLXXX');
+  
+  const todayDate = formatDate(nocData.generated_at || new Date().toISOString());
+
+  return `
+    <div style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; line-height: 1.6; background-color: white;">
+      <div style="padding: 32px;">
+        <div style="text-align: center; margin-bottom: 16px; border-bottom: 1px solid #000; padding-bottom: 8px;">
+          <h2 style="font-weight: bold; margin-bottom: 4px; font-size: 14pt;">
+            SPHEETI FINTECH PRIVATE LIMITED
+          </h2>
+          <p style="font-size: 12px; margin-bottom: 4px;">
+            CIN: U65929MH2018PTC306088 | RBI Registration no: N-13.02361
+          </p>
+          <p style="font-size: 12px; margin-bottom: 8px;">
+            Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI, MAHARASHTRA, 421001
+          </p>
+        </div>
+
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h1 style="font-weight: bold; font-size: 13pt; text-transform: uppercase;">
+            NO DUES CERTIFICATE
+          </h1>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <p style="font-size: 12px;">
+            <strong>Date :</strong> ${todayDate}
+          </p>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <p style="font-size: 12px;">
+            <strong>Name of the Customer:</strong> ${borrowerName}
+          </p>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <p style="font-size: 12px;">
+            <strong>Sub: No Dues Certificate for Loan ID - ${shortLoanId}</strong>
+          </p>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <p style="font-weight: bold;">Dear Sir/Madam,</p>
+        </div>
+
+        <div style="margin-bottom: 24px; text-align: justify;">
+          <p>
+            This letter is to confirm that Spheeti Fintech Private Limited has received payment for the aforesaid loan ID and no amount is outstanding and payable by you to the Company under the aforesaid loan ID.
+          </p>
+        </div>
+
+        <div style="margin-top: 32px;">
+          <p style="margin-bottom: 4px; font-weight: bold;">Thanking you,</p>
+          <p style="font-weight: bold;">On behalf of Spheeti Fintech Private Limited</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Helper function to generate and send NOC email when loan is cleared
+ * @param {number} loanId - Loan ID
+ * @returns {Promise<void>}
+ */
+async function generateAndSendNOCEmail(loanId) {
+  try {
+    console.log(`📧 Generating and sending NOC email for loan ID: ${loanId}`);
+
+    const emailService = require('../services/emailService');
+    const pdfService = require('../services/pdfService');
+
+    // Get loan details
+    const loans = await executeQuery(`
+      SELECT 
+        la.*,
+        DATE(la.disbursed_at) as disbursed_at_date,
+        u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
+        u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
+      FROM loan_applications la
+      INNER JOIN users u ON la.user_id = u.id
+      WHERE la.id = ?
+    `, [loanId]);
+
+    if (!loans || loans.length === 0) {
+      console.error(`❌ Loan #${loanId} not found for NOC email`);
+      return;
+    }
+
+    const loan = loans[0];
+
+    // Verify loan is cleared
+    if (loan.status !== 'cleared') {
+      console.log(`ℹ️ Loan #${loanId} is not cleared (status: ${loan.status}), skipping NOC email`);
+      return;
+    }
+
+    // Get recipient email
+    const recipientEmail = loan.personal_email || loan.official_email || loan.email;
+    const recipientName = `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'User';
+
+    if (!recipientEmail) {
+      console.error(`❌ No email found for loan #${loanId}, cannot send NOC email`);
+      return;
+    }
+
+    // Prepare NOC data
+    const borrower = {
+      name: recipientName,
+      first_name: loan.first_name || '',
+      last_name: loan.last_name || '',
+      email: recipientEmail,
+      phone: loan.phone || '',
+      date_of_birth: loan.date_of_birth || '',
+      gender: loan.gender || '',
+      marital_status: loan.marital_status || '',
+      pan_number: loan.pan_number || ''
+    };
+
+    const company = {
+      name: 'SPHEETI FINTECH PRIVATE LIMITED',
+      cin: 'U65929MH2018PTC306088',
+      rbi_registration: 'N-13.02361',
+      address: 'Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI, MAHARASHTRA, 421001'
+    };
+
+    const loanData = {
+      id: loan.id,
+      application_number: loan.application_number || loan.id,
+      loan_id: loan.application_number || loan.id,
+      sanctioned_amount: loan.sanctioned_amount || loan.loan_amount || 0,
+      loan_amount: loan.loan_amount || loan.sanctioned_amount || 0,
+      disbursed_at: loan.disbursed_at || loan.disbursed_at_date,
+      status: loan.status
+    };
+
+    const nocData = {
+      company,
+      loan: loanData,
+      borrower,
+      generated_at: new Date().toISOString()
+    };
+
+    // Generate HTML content
+    const htmlContent = generateNOCHTML(nocData);
+
+    // Generate PDF
+    const filename = `No_Dues_Certificate_${loan.application_number || loanId}.pdf`;
+    if (!pdfService) {
+      console.error('❌ PDF service not available for NOC email');
+      return;
+    }
+
+    let pdfResult;
+    try {
+      pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
+      
+      let pdfBuffer;
+      if (Buffer.isBuffer(pdfResult)) {
+        pdfBuffer = pdfResult;
+      } else if (pdfResult.buffer) {
+        pdfBuffer = pdfResult.buffer;
+      } else {
+        throw new Error('PDF generation returned invalid result structure');
+      }
+      
+      if (!Buffer.isBuffer(pdfBuffer)) {
+        if (pdfBuffer instanceof Uint8Array || pdfBuffer.constructor?.name === 'Uint8Array') {
+          pdfBuffer = Buffer.from(pdfBuffer);
+        } else {
+          throw new Error('PDF generation returned invalid buffer type');
+        }
+      }
+      
+      pdfResult.buffer = pdfBuffer;
+      console.log('✅ NOC PDF generated for email, size:', pdfBuffer.length, 'bytes');
+    } catch (pdfError) {
+      console.error('❌ Error generating NOC PDF for email:', pdfError);
+      return;
+    }
+
+    // Send email
+    try {
+      await emailService.sendNOCEmail({
+        loanId: loan.id,
+        recipientEmail: recipientEmail,
+        recipientName: recipientName,
+        loanData: {
+          application_number: loan.application_number || loan.id,
+          loan_amount: loan.loan_amount || loan.sanctioned_amount || 0
+        },
+        pdfBuffer: pdfResult.buffer,
+        pdfFilename: filename,
+        sentBy: null // System-generated
+      });
+
+      console.log(`✅ NOC email sent successfully to ${recipientEmail} for loan #${loanId}`);
+    } catch (emailError) {
+      console.error('❌ Error sending NOC email:', emailError);
+      // Don't throw - email failure shouldn't block loan clearance
+    }
+
+  } catch (error) {
+    console.error(`❌ Error generating and sending NOC email for loan #${loanId}:`, error);
+    // Don't throw - email failure shouldn't block loan clearance
+  }
+}
+
 
 /**
  * POST /api/payment/create-order
@@ -20,23 +278,7 @@ router.post('/create-order', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
         
-        // Log the RAW request body BEFORE destructuring to see everything
-        console.log(`[Payment] 🔍 RAW request body:`, JSON.stringify(req.body, null, 2));
-        console.log(`[Payment] 🔍 Request body type:`, typeof req.body);
-        console.log(`[Payment] 🔍 Request body keys:`, Object.keys(req.body || {}));
-        
         const { loanId, amount, paymentType } = req.body; // paymentType: 'pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', etc.
-
-        // Log the received request body for debugging
-        console.log(`[Payment] Create order request received:`, {
-            userId,
-            loanId,
-            amount,
-            paymentType: paymentType !== undefined ? paymentType : '(undefined - not provided)',
-            paymentTypeType: typeof paymentType,
-            bodyKeys: Object.keys(req.body || {}),
-            bodyValues: req.body
-        });
 
         // Validate input
         if (!loanId || !amount) {
@@ -107,12 +349,9 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         // Determine payment type if not provided
         let finalPaymentType = paymentType;
         
-        console.log(`[Payment] Received paymentType from request: ${paymentType}, loanId: ${loanId}, amount: ${amount}`);
-        
         // CRITICAL: If paymentType is explicitly provided (especially 'pre-close' or 'full_payment'), ALWAYS use it and skip ALL auto-detection
         if (finalPaymentType === 'pre-close' || finalPaymentType === 'full_payment') {
             // Explicitly provided pre-close or full_payment - use it as-is, skip ALL auto-detection
-            console.log(`[Payment] ✅ Using explicitly provided payment type: ${finalPaymentType} - skipping ALL auto-detection logic`);
             // DO NOT fall through to auto-detection - finalPaymentType is already set correctly
         } else if (!finalPaymentType) {
             // Auto-detect payment type only if not provided
@@ -173,10 +412,7 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                 console.warn(`[Payment] ⚠️ WARNING: paymentType was "${paymentType}" but finalPaymentType became "${finalPaymentType}". Correcting to preserve original type.`);
                 finalPaymentType = paymentType;
             }
-            console.log(`[Payment] ✅ Preserved explicit payment type: ${finalPaymentType}`);
         }
-        
-        console.log(`[Payment] Final payment type determined: ${finalPaymentType} (original from request: ${paymentType})`);
 
         // Validate sequential EMI payments (only for EMI types, skip for pre-close/full_payment)
         // IMPORTANT: Only check if loan is NOT cleared
@@ -259,12 +495,6 @@ router.post('/create-order', authenticateToken, async (req, res) => {
 
         if (existingOrders.length > 0) {
             const existingOrder = existingOrders[0];
-            console.log(`[Payment] Found existing order for loan ${loanId} with payment_type ${orderPaymentType}:`, {
-                orderId: existingOrder.order_id,
-                status: existingOrder.status,
-                amount: existingOrder.amount,
-                payment_type: existingOrder.payment_type
-            });
 
             // If there's a PAID order with the same payment type, check if payment was actually processed
             if (existingOrder.status === 'PAID') {
@@ -275,8 +505,6 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                 );
 
                 if (paymentRecord.length > 0) {
-                    console.log(`[Payment] Payment already processed for order ${existingOrder.order_id}`);
-                    
                     // Check current loan status first - if cleared, don't allow more payments
                     const currentLoanStatus = await executeQuery(
                         `SELECT status FROM loan_applications WHERE id = ?`,
@@ -338,6 +566,14 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                                     );
                                     
                                     console.log(`✅ Loan #${loanId} fully paid and marked as CLEARED`);
+                                    
+                                    // Send NOC email to user
+                                    try {
+                                        await generateAndSendNOCEmail(loanId);
+                                    } catch (nocEmailError) {
+                                        console.error('❌ Error sending NOC email (non-fatal):', nocEmailError);
+                                        // Don't fail - email failure shouldn't block loan clearance
+                                    }
                                 }
                             }
                         }
@@ -357,7 +593,6 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                     });
                 } else {
                     // Payment marked as PAID but not processed - trigger processing
-                    console.log(`[Payment] Order ${existingOrder.order_id} is PAID but not processed, will trigger processing`);
                     // Continue to create new order or return existing one with note to check status
                     return res.json({
                         success: true,
@@ -379,7 +614,6 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                 const thirtyMinutes = 30 * 60 * 1000;
                 
                 if (orderAge > thirtyMinutes) {
-                    console.log(`[Payment] Existing pending order ${existingOrder.order_id} is too old (${Math.round(orderAge / 60000)} minutes), creating new order`);
                     // Mark old order as expired and continue to create new order
                     try {
                         await executeQuery(
@@ -392,7 +626,6 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                     // Continue to create new order below
                 } else {
                     // Return existing pending order if it's recent
-                    console.log(`[Payment] Returning existing pending order ${existingOrder.order_id} (age: ${Math.round(orderAge / 60000)} minutes)`);
                     return res.json({
                         success: true,
                         message: 'Existing payment order found',
@@ -415,7 +648,6 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         // Replace '-' with '_' and keep underscores for payment types like 'emi_1st'
         const paymentTypeSuffix = finalPaymentType ? `_${finalPaymentType.replace(/-/g, '_')}` : '';
         orderId = `LOAN_${loan.application_number}${paymentTypeSuffix}_${Date.now()}`;
-        console.log(`[Payment] Generated unique order ID: ${orderId} for loan ${loanId} with payment_type: ${finalPaymentType}`);
 
         // Create payment order in database
         // First, ensure the table exists (create if it doesn't)
@@ -500,19 +732,17 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         try {
             // Use finalPaymentType or default to 'loan_repayment'
             const orderPaymentType = finalPaymentType || 'loan_repayment';
-            console.log(`[Payment] Saving payment order - Original paymentType: ${paymentType}, finalPaymentType: ${finalPaymentType}, orderPaymentType: ${orderPaymentType}`);
             await executeQuery(
                 `INSERT INTO payment_orders (
             order_id, loan_id, user_id, amount, payment_type, status, created_at
           ) VALUES (?, ?, ?, ?, ?, 'PENDING', NOW())`,
                 [orderId, loanId, userId, amount, orderPaymentType]
             );
-            console.log(`[Payment] Payment order created in DB: ${orderId} with payment_type: ${orderPaymentType}`);
         } catch (insertError) {
             console.error('[Payment] Failed to insert payment order:', insertError);
             // If it's a duplicate key error, that's okay - order already exists
             if (insertError.message && insertError.message.includes('Duplicate entry')) {
-                console.log(`[Payment] Order ${orderId} already exists, continuing...`);
+                // Order already exists, continue
             } else {
                 throw insertError; // Re-throw if it's a different error
             }
@@ -534,16 +764,6 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         const backendUrl = process.env.BACKEND_URL || process.env.APP_URL || 'http://localhost:3001';
         const returnUrl = `${frontendUrl}/payment/return?orderId=${orderId}`;
         const notifyUrl = `${backendUrl}/api/payment/webhook`;
-
-        console.log(`[Payment] Creating Cashfree order:`, {
-            orderId,
-            amount,
-            customerEmail: customerEmail,
-            customerPhone: loan.phone || 'N/A',
-            returnUrl,
-            notifyUrl,
-            cashfreeBaseURL: cashfreePayment.baseURL
-        });
 
         const orderResult = await cashfreePayment.createOrder({
             orderId,
@@ -622,14 +842,6 @@ router.post('/create-order', authenticateToken, async (req, res) => {
             ]
         );
 
-        console.log('🔍 Debug - Full Cashfree response:', JSON.stringify(orderResult.data, null, 2));
-        console.log('🔍 Debug - Response keys:', Object.keys(orderResult.data || {}));
-        console.log('🔍 Debug - Session ID from response (original):', paymentSessionId);
-        console.log('🔍 Debug - Session ID (cleaned):', cleanSessionId);
-        console.log('🔍 Debug - Payment link from response:', orderResult.data.payment_link);
-        console.log('🔍 Debug - Payment URL from response:', orderResult.data.payment_url);
-        console.log('🔍 Debug - Order status:', orderResult.data.order_status);
-
         // Create a clean response object with cleaned session ID
         const cleanOrderResponse = {
             ...orderResult.data,
@@ -640,7 +852,6 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         let checkoutUrl;
         try {
             checkoutUrl = cashfreePayment.getCheckoutUrl(cleanOrderResponse);
-            console.log('🔍 Debug - Generated checkout URL:', checkoutUrl);
             
             // Verify URL format
             if (!checkoutUrl || !checkoutUrl.startsWith('http')) {
@@ -1228,6 +1439,14 @@ router.post('/webhook', async (req, res) => {
                                     }
                                     
                                     console.log(`✅ Loan #${paymentOrder.loan_id} marked as CLEARED (${paymentType})`);
+                                    
+                                    // Send NOC email to user
+                                    try {
+                                        await generateAndSendNOCEmail(paymentOrder.loan_id);
+                                    } catch (nocEmailError) {
+                                        console.error('❌ Error sending NOC email (non-fatal):', nocEmailError);
+                                        // Don't fail - email failure shouldn't block loan clearance
+                                    }
                                 } else {
                                     console.log(`ℹ️ Loan #${paymentOrder.loan_id} payment received but not cleared yet (${paymentType})`);
                                 }
@@ -1264,7 +1483,6 @@ router.post('/webhook', async (req, res) => {
 router.get('/pending', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
-        console.log(`🔍 Fetching pending payments for user: ${userId}`);
 
         // Fetch all pending payment orders for the user
         const orders = await executeQuery(
@@ -1348,7 +1566,6 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
         const { orderId } = req.params;
         const userId = req.user.id;
 
-        console.log(`🔍 Checking payment status for order: ${orderId}, user: ${userId}`);
 
         // Fetch from database first
         const [order] = await executeQuery(
@@ -1643,6 +1860,14 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                                 }
                                                 
                                                 console.log(`✅ Loan #${paymentOrder.loan_id} marked as CLEARED (${paymentType})`);
+                                                
+                                                // Send NOC email to user
+                                                try {
+                                                    await generateAndSendNOCEmail(paymentOrder.loan_id);
+                                                } catch (nocEmailError) {
+                                                    console.error('❌ Error sending NOC email (non-fatal):', nocEmailError);
+                                                    // Don't fail - email failure shouldn't block loan clearance
+                                                }
                                             } else {
                                                 console.log(`ℹ️ Loan #${paymentOrder.loan_id} payment received but not cleared yet (${paymentType})`);
                                             }

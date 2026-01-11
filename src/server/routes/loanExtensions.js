@@ -15,7 +15,8 @@ const {
   formatDateToString,
   calculateDaysBetween,
   getNextSalaryDate,
-  getSalaryDateForMonth
+  getSalaryDateForMonth,
+  toDecimal2
 } = require('../utils/loanCalculations');
 
 const router = express.Router();
@@ -63,8 +64,6 @@ router.get('/eligibility/:loanId', requireAuth, async (req, res) => {
     
     // Override extension_count in loan object with actual approved count
     loan.extension_count = actualExtensionCount;
-    
-    console.log(`📊 Extension Count for loan #${loanId}: Database extension_count=${loan.extension_count || 0}, Actual approved extensions=${actualExtensionCount}`);
 
     // Check for pending extension request (both 'pending' and 'pending_payment')
     const pendingExtension = await executeQuery(`
@@ -276,7 +275,6 @@ router.post('/request', requireAuth, async (req, res) => {
 
     // If processed_due_date is null, calculate it from plan snapshot and processed_at
     if (!originalDueDate && loan.processed_at) {
-      console.log(`📅 processed_due_date is null, calculating from plan snapshot and processed_at`);
       
       const usesSalaryDate = planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true;
       const salaryDate = loan.salary_date ? parseInt(loan.salary_date) : null;
@@ -307,7 +305,6 @@ router.post('/request', requireAuth, async (req, res) => {
           }
           
           originalDueDate = originalEmiDates[0]; // First EMI for extension
-          console.log(`📅 Calculated ${originalEmiDates.length} EMI dates from plan snapshot: ${originalEmiDates.join(', ')}, original due date (first EMI) = ${originalDueDate}`);
         } else if (!isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
           // Single payment with salary date
           const nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
@@ -348,7 +345,6 @@ router.post('/request', requireAuth, async (req, res) => {
               originalEmiDates.push(formatDateToString(emiDate));
             }
             originalDueDate = originalEmiDates[0]; // First EMI for extension
-            console.log(`📅 Calculated ${originalEmiDates.length} EMI dates (fixed days): ${originalEmiDates.join(', ')}, original due date (first EMI) = ${originalDueDate}`);
           } else {
             originalDueDate = formatDateToString(dueDate);
             originalEmiDates = [originalDueDate];
@@ -396,6 +392,178 @@ router.post('/request', requireAuth, async (req, res) => {
     // Calculate extension fees
     const fees = calculateExtensionFees(loan, extensionDate);
 
+    // CRITICAL: Recalculate interest using the correct principal priority order
+    // This ensures we use the correct principal value, not a potentially wrong processed_amount
+    // Priority: sanctioned_amount > principal_amount > loan_amount > processed_amount
+    const principal = parseFloat(
+      loan.sanctioned_amount || 
+      loan.principal_amount || 
+      loan.loan_amount || 
+      loan.processed_amount || 
+      0
+    );
+    
+    const processedDateStr = parseDateToString(loan.processed_at);
+    
+    // Validate principal is reasonable
+    if (principal > 0 && principal <= 1000000 && processedDateStr) {
+      const interestDays = calculateDaysBetween(processedDateStr, extensionDate);
+      const interestRatePerDay = parseFloat(planSnapshot.interest_percent_per_day || loan.processed_interest_percent_per_day || 0.001);
+      const recalculatedInterest = toDecimal2(principal * interestRatePerDay * interestDays);
+      
+      // Override with recalculated interest using correct principal
+      fees.interestTillDate = recalculatedInterest;
+      fees.interestDays = interestDays; // Store days for logging
+      
+      // Recalculate total extension amount with correct interest (penalty will be added later)
+      fees.totalExtensionAmount = toDecimal2(fees.extensionFee + fees.gstAmount + recalculatedInterest);
+      
+    } else {
+      console.error(`⚠️ ERROR: Cannot recalculate interest - processedDateStr=${processedDateStr}, principal=${principal}`);
+    }
+
+    // Calculate penalty if overdue (similar to kfs.js extension letter calculation)
+    // IMPORTANT: Always recalculate penalty using late_fee_structure (don't use processed_penalty from database)
+    let penaltyAmount = 0;
+    let penaltyBase = 0;
+    let penaltyGST = 0;
+    
+    // Helper functions for penalty calculation
+    const parseDueDates = (dueDateStr) => {
+      if (!dueDateStr) return [];
+      try {
+        const parsed = typeof dueDateStr === 'string' ? JSON.parse(dueDateStr) : dueDateStr;
+        return Array.isArray(parsed) ? parsed : [parsed];
+      } catch (e) {
+        return typeof dueDateStr === 'string' ? [dueDateStr] : [];
+      }
+    };
+    
+    const isOverdue = (dueDateStr, currentDate) => {
+      if (!dueDateStr) return false;
+      const dueDate = new Date(dueDateStr);
+      dueDate.setHours(0, 0, 0, 0);
+      currentDate.setHours(0, 0, 0, 0);
+      return dueDate < currentDate;
+    };
+    
+    const calculateDaysInclusive = (startDate, endDate) => {
+      const msPerDay = 1000 * 60 * 60 * 24;
+      return Math.ceil((endDate - startDate) / msPerDay) + 1;
+    };
+    
+    // Parse late_fee_structure from loan
+    let lateFeeStructure = null;
+    try {
+      if (loan.late_fee_structure) {
+        lateFeeStructure = typeof loan.late_fee_structure === 'string' 
+          ? JSON.parse(loan.late_fee_structure) 
+          : loan.late_fee_structure;
+      } else if (planSnapshot && planSnapshot.late_fee_structure) {
+        lateFeeStructure = typeof planSnapshot.late_fee_structure === 'string'
+          ? JSON.parse(planSnapshot.late_fee_structure)
+          : planSnapshot.late_fee_structure;
+      }
+    } catch (e) {
+      console.error('Error parsing late_fee_structure:', e);
+    }
+    
+    // Calculate penalty using late_fee_structure
+    const calculatePenalty = (principal, daysOverdue, lateFeeStructure) => {
+      if (daysOverdue <= 0) return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+      
+      if (!lateFeeStructure || !Array.isArray(lateFeeStructure) || lateFeeStructure.length === 0) {
+        return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+      }
+      
+      let penaltyBase = 0;
+      
+      const sortedTiers = [...lateFeeStructure].sort((a, b) => {
+        const orderA = a.tier_order !== undefined ? a.tier_order : (a.days_overdue_start || 0);
+        const orderB = b.tier_order !== undefined ? b.tier_order : (b.days_overdue_start || 0);
+        return orderA - orderB;
+      });
+      
+      for (const tier of sortedTiers) {
+        const startDay = tier.days_overdue_start || 0;
+        const endDay = tier.days_overdue_end !== null && tier.days_overdue_end !== undefined 
+          ? tier.days_overdue_end 
+          : null;
+        
+        if (daysOverdue < startDay) continue;
+        
+        const feeValue = parseFloat(tier.fee_value || tier.penalty_percent || 0);
+        if (feeValue <= 0) continue;
+        
+        if (startDay === endDay || (startDay === 1 && endDay === 1)) {
+          if (daysOverdue >= startDay) {
+            penaltyBase += principal * (feeValue / 100);
+          }
+        } else if (endDay === null || endDay === undefined) {
+          if (daysOverdue >= startDay) {
+            const daysInTier = daysOverdue - startDay + 1;
+            penaltyBase += principal * (feeValue / 100) * daysInTier;
+          }
+        } else {
+          if (daysOverdue >= startDay) {
+            const tierStartDay = startDay;
+            const tierEndDay = Math.min(endDay, daysOverdue);
+            const daysInTier = Math.max(0, tierEndDay - tierStartDay + 1);
+            
+            if (daysInTier > 0) {
+              penaltyBase += principal * (feeValue / 100) * daysInTier;
+            }
+          }
+        }
+      }
+      
+      const penaltyBaseRounded = toDecimal2(penaltyBase);
+      const gstPercent = lateFeeStructure[0]?.gst_percent || 18;
+      const penaltyGST = toDecimal2(penaltyBaseRounded * (gstPercent / 100));
+      const penaltyTotal = toDecimal2(penaltyBaseRounded + penaltyGST);
+      
+      return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
+    };
+    
+    // Check if any EMI is overdue
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dueDates = parseDueDates(loan.processed_due_date);
+    if (dueDates.length > 0) {
+      let maxDaysOverdue = 0;
+      for (const dueDateStr of dueDates) {
+        if (isOverdue(dueDateStr, today)) {
+          const dueDate = new Date(dueDateStr);
+          dueDate.setHours(0, 0, 0, 0);
+          const daysOverdueInclusive = calculateDaysInclusive(dueDate, today);
+          const daysOverdue = Math.max(1, daysOverdueInclusive - 1); // Exclude today for penalty calculation
+          maxDaysOverdue = Math.max(maxDaysOverdue, daysOverdue);
+        }
+      }
+      
+      if (maxDaysOverdue > 0) {
+        const penaltyCalc = calculatePenalty(principal, maxDaysOverdue, lateFeeStructure);
+        penaltyAmount = penaltyCalc.penaltyTotal;
+        penaltyBase = penaltyCalc.penaltyBase;
+        penaltyGST = penaltyCalc.penaltyGST;
+        
+        fees.penaltyBase = penaltyBase;
+        fees.penaltyGST = penaltyGST;
+        fees.penaltyTotal = penaltyAmount;
+        
+        console.log(`💰 Penalty calculation for Extension (loan #${loan_application_id}):
+          Principal: ₹${principal}
+          Days Overdue: ${maxDaysOverdue}
+          Penalty Base: ₹${penaltyBase}
+          Penalty GST (${lateFeeStructure?.[0]?.gst_percent || 18}%): ₹${penaltyGST}
+          Penalty Total: ₹${penaltyAmount}`);
+      }
+    }
+    
+    // Recalculate total extension amount to include penalty
+    fees.totalExtensionAmount = toDecimal2(fees.extensionFee + fees.gstAmount + fees.interestTillDate + penaltyAmount);
+    
+
     // Calculate outstanding balance
     const outstandingBalance = calculateOutstandingBalance(loan);
 
@@ -406,8 +574,7 @@ router.post('/request', requireAuth, async (req, res) => {
       : 0;
 
     // Insert extension record
-    // Note: Using only essential columns that are most likely to exist
-    // If table structure is different, we'll need to run the migration
+    // Note: penalty_base, penalty_gst, and penalty_total columns should be added to the table
     const extensionQuery = `
       INSERT INTO loan_extensions (
         loan_application_id,
@@ -417,6 +584,9 @@ router.post('/request', requireAuth, async (req, res) => {
         extension_fee,
         gst_amount,
         interest_till_date,
+        penalty_base,
+        penalty_gst,
+        penalty_total,
         total_extension_amount,
         extension_period_days,
         total_tenure_days,
@@ -426,7 +596,7 @@ router.post('/request', requireAuth, async (req, res) => {
         payment_status,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_payment', 'pending', NOW(), NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_payment', 'pending', NOW(), NOW())
     `;
 
     // For multi-EMI loans, store all EMI dates as JSON string
@@ -446,6 +616,9 @@ router.post('/request', requireAuth, async (req, res) => {
       fees.extensionFee,
       fees.gstAmount,
       fees.interestTillDate,
+      penaltyBase,
+      penaltyGST,
+      penaltyAmount,
       fees.totalExtensionAmount,
       newDueDateResult.extensionPeriodDays,
       totalTenureDays,
@@ -477,6 +650,9 @@ router.post('/request', requireAuth, async (req, res) => {
         extension_fee: fees.extensionFee,
         gst_amount: fees.gstAmount,
         interest_till_date: fees.interestTillDate,
+        penalty_base: penaltyBase,
+        penalty_gst: penaltyGST,
+        penalty_total: penaltyAmount,
         total_amount: fees.totalExtensionAmount,
         original_due_date: originalDueDate,
         new_due_date: newDueDateResult.newDueDate,
@@ -741,6 +917,130 @@ router.post('/:extensionId/payment', requireAuth, async (req, res) => {
 });
 
 /**
+ * Helper function to create extension payment order
+ * @param {number} extensionId - Extension ID
+ * @param {Object} extension - Extension object with all details
+ * @param {number} userId - User ID
+ * @returns {Promise<Object>} Payment order creation result
+ */
+async function createExtensionPaymentOrder(extensionId, extension, userId) {
+  try {
+    // Get email - use personal_email, official_email, or email (in that priority order)
+    const customerEmail = extension.personal_email || extension.official_email || extension.email || 'user@example.com';
+    
+    // Get customer name
+    const customerName = extension.first_name && extension.last_name 
+      ? `${extension.first_name} ${extension.last_name}`.trim()
+      : (extension.first_name || extension.last_name || 'Customer');
+
+    // Generate unique order ID
+    const orderId = `EXT_${extension.application_number}_${extension.extension_number}_${Date.now()}`;
+    console.log(`[Extension Payment] Generated order ID: ${orderId} for extension ${extensionId}`);
+
+    // Import cashfree payment service
+    const cashfreePayment = require('../services/cashfreePayment');
+
+    // Create Cashfree order
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const backendUrl = process.env.BACKEND_URL || process.env.APP_URL || 'http://localhost:3001';
+    const returnUrl = `${frontendUrl}/payment/return?orderId=${orderId}`;
+    const notifyUrl = `${backendUrl}/api/payment/webhook`;
+
+    const orderResult = await cashfreePayment.createOrder({
+      orderId,
+      amount: extension.total_extension_amount,
+      customerName: customerName,
+      customerEmail: customerEmail,
+      customerPhone: extension.phone || '9999999999',
+      returnUrl,
+      notifyUrl
+    });
+
+    if (!orderResult.success) {
+      return {
+        success: false,
+        error: orderResult.error || 'Failed to create payment order'
+      };
+    }
+
+    const paymentSessionId = orderResult.data?.payment_session_id;
+    if (!paymentSessionId) {
+      return {
+        success: false,
+        error: 'Failed to get payment session from gateway'
+      };
+    }
+
+    // Clean the session ID
+    const cleanSessionId = paymentSessionId
+      .trim()
+      .split(/\s+/)[0]
+      .replace(/[^a-zA-Z0-9_\-]/g, '')
+      .replace(/paymentpayment$/i, '');
+
+    if (!cleanSessionId.startsWith('session_')) {
+      return {
+        success: false,
+        error: 'Invalid payment session received'
+      };
+    }
+
+    // Create payment order in database
+    try {
+      await executeQuery(`
+        INSERT INTO payment_orders (
+          order_id, 
+          loan_id, 
+          extension_id,
+          user_id, 
+          amount, 
+          payment_type,
+          status, 
+          payment_session_id, 
+          cashfree_response,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, 'extension_fee', 'PENDING', ?, ?, NOW())
+      `, [
+        orderId,
+        extension.loan_id,
+        extensionId,
+        userId,
+        extension.total_extension_amount,
+        cleanSessionId,
+        JSON.stringify(orderResult.data)
+      ]);
+      console.log(`[Extension Payment] Payment order created in DB: ${orderId}`);
+    } catch (insertError) {
+      console.error('[Extension Payment] Failed to insert payment order:', insertError);
+      if (!insertError.message || !insertError.message.includes('Duplicate entry')) {
+        throw insertError;
+      }
+      console.log(`[Extension Payment] Order ${orderId} already exists, continuing...`);
+    }
+
+    // Get checkout URL
+    const checkoutUrl = cashfreePayment.getCheckoutUrl(orderResult.data);
+
+    return {
+      success: true,
+      data: {
+        orderId,
+        paymentSessionId: cleanSessionId,
+        checkoutUrl,
+        extension_id: extensionId,
+        amount: extension.total_extension_amount
+      }
+    };
+  } catch (error) {
+    console.error('❌ Error creating extension payment order:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to create payment order'
+    };
+  }
+}
+
+/**
  * POST /api/loan-extensions/:extensionId/check-payment
  * Check payment status for pending_payment extension and complete if paid
  */
@@ -750,15 +1050,22 @@ router.post('/:extensionId/check-payment', requireAuth, async (req, res) => {
     const { extensionId } = req.params;
     const userId = req.user.id;
 
-    // Get extension details
+    // Get extension details with user info for payment order creation
     const extensions = await executeQuery(`
       SELECT 
         le.*,
         la.id as loan_id,
         la.user_id,
-        la.application_number
+        la.application_number,
+        u.phone,
+        u.email,
+        u.personal_email,
+        u.official_email,
+        u.first_name,
+        u.last_name
       FROM loan_extensions le
       INNER JOIN loan_applications la ON le.loan_application_id = la.id
+      INNER JOIN users u ON la.user_id = u.id
       WHERE le.id = ? AND la.user_id = ?
     `, [extensionId, userId]);
 
@@ -781,7 +1088,7 @@ router.post('/:extensionId/check-payment', requireAuth, async (req, res) => {
 
     // Find payment order for this extension
     const paymentOrders = await executeQuery(`
-      SELECT id, order_id, status, amount, created_at, updated_at
+      SELECT id, order_id, status, amount, payment_session_id, cashfree_response, created_at, updated_at
       FROM payment_orders
       WHERE loan_id = ? AND payment_type = 'extension_fee' AND extension_id = ?
       ORDER BY created_at DESC
@@ -797,6 +1104,13 @@ router.post('/:extensionId/check-payment', requireAuth, async (req, res) => {
 
     const paymentOrder = paymentOrders[0];
     const orderId = paymentOrder.order_id;
+    
+    // Check if order is expired (Cashfree orders expire after 30 minutes)
+    // Use 25 minutes as threshold to be safe (create new order before expiry)
+    const orderCreatedAt = new Date(paymentOrder.created_at);
+    const now = new Date();
+    const minutesSinceCreation = (now - orderCreatedAt) / (1000 * 60);
+    const isExpired = minutesSinceCreation > 25; // Create new order if older than 25 minutes (before 30 min expiry)
 
     // Check Cashfree API for current payment status
     const cashfreePayment = require('../services/cashfreePayment');
@@ -894,15 +1208,147 @@ router.post('/:extensionId/check-payment', requireAuth, async (req, res) => {
       }
     } else if (currentStatus === 'PENDING' || cashfreeOrderStatus === 'ACTIVE') {
       // Payment is still pending
-      return res.json({
-        success: true,
-        data: {
-          status: 'pending',
-          message: 'Your payment transaction is still pending. Please wait for payment confirmation.',
-          payment_status: 'PENDING',
-          order_id: orderId
+      // If expired or can't get valid session, delete old order and create new one
+      if (isExpired || cashfreeOrderStatus === 'EXPIRED') {
+        // Delete expired payment order
+        try {
+          await executeQuery(
+            `UPDATE payment_orders SET status = 'EXPIRED', updated_at = NOW() WHERE order_id = ?`,
+            [orderId]
+          );
+          console.log(`🗑️ Marked expired payment order ${orderId} as EXPIRED`);
+        } catch (e) {
+          console.error('Error updating expired payment order:', e);
         }
-      });
+        
+        // Create new payment order directly
+        try {
+          const userId = req.user.id;
+          const newOrderResponse = await createExtensionPaymentOrder(extensionId, extension, userId);
+          
+          if (newOrderResponse.success && newOrderResponse.data.paymentSessionId) {
+            return res.json({
+              success: true,
+              data: {
+                status: 'pending',
+                message: 'New payment order created. Opening payment gateway...',
+                payment_status: 'PENDING',
+                order_id: newOrderResponse.data.orderId,
+                paymentSessionId: newOrderResponse.data.paymentSessionId,
+                checkoutUrl: newOrderResponse.data.checkoutUrl, // Keep for fallback
+                useSdk: true // Flag to use SDK instead of redirect
+              }
+            });
+          }
+        } catch (e) {
+          console.error('Error creating new payment order:', e);
+        }
+        
+        // If creation failed, return flag to create new order
+        return res.json({
+          success: true,
+          data: {
+            status: 'expired',
+            message: 'Payment order has expired. Please create a new payment order.',
+            payment_status: 'EXPIRED',
+            order_id: orderId,
+                createNewOrder: true
+          }
+        });
+      } else {
+        // Order is still valid (not expired), try to get checkout URL from stored response
+        let checkoutUrl = null;
+        let paymentSessionId = paymentOrder.payment_session_id;
+        
+        try {
+          const cashfreeResponse = paymentOrder.cashfree_response 
+            ? JSON.parse(paymentOrder.cashfree_response) 
+            : null;
+          
+          if (cashfreeResponse && (cashfreeResponse.payment_link || cashfreeResponse.payment_session_id)) {
+            checkoutUrl = cashfreePayment.getCheckoutUrl(cashfreeResponse);
+          }
+        } catch (e) {
+          console.error('Error getting checkout URL from stored response:', e);
+        }
+        
+        // If we can't get checkout URL, delete old order and create new one
+        if (!checkoutUrl) {
+          // Delete invalid payment order
+          try {
+            await executeQuery(
+              `UPDATE payment_orders SET status = 'FAILED', updated_at = NOW() WHERE order_id = ?`,
+              [orderId]
+            );
+            console.log(`🗑️ Marked invalid payment order ${orderId} as FAILED`);
+          } catch (e) {
+            console.error('Error updating invalid payment order:', e);
+          }
+          
+          // Create new payment order directly
+          try {
+            const userId = req.user.id;
+            const newOrderResponse = await createExtensionPaymentOrder(extensionId, extension, userId);
+            
+            if (newOrderResponse.success && newOrderResponse.data.paymentSessionId) {
+              return res.json({
+                success: true,
+                data: {
+                  status: 'pending',
+                  message: 'New payment order created. Opening payment gateway...',
+                  payment_status: 'PENDING',
+                  order_id: newOrderResponse.data.orderId,
+                  paymentSessionId: newOrderResponse.data.paymentSessionId,
+                  checkoutUrl: newOrderResponse.data.checkoutUrl, // Keep for fallback
+                  use_sdk: true // Flag to use SDK instead of redirect
+                }
+              });
+            }
+          } catch (e) {
+            console.error('Error creating new payment order:', e);
+          }
+          
+          return res.json({
+            success: true,
+            data: {
+              status: 'pending',
+              message: 'Unable to retrieve payment session. Creating a new payment order...',
+              payment_status: 'PENDING',
+              order_id: orderId,
+                createNewOrder: true
+            }
+          });
+        }
+        
+        // If we have a valid payment session ID, return it for SDK use
+        if (paymentSessionId && paymentSessionId.startsWith('session_')) {
+          return res.json({
+            success: true,
+            data: {
+              status: 'pending',
+              message: 'Your payment transaction is still pending. Opening payment gateway...',
+              payment_status: 'PENDING',
+              order_id: orderId,
+              paymentSessionId: paymentSessionId,
+              checkoutUrl: checkoutUrl, // Keep for fallback
+              use_sdk: true // Flag to use SDK instead of redirect
+            }
+          });
+        }
+        
+        // Fallback: if we have checkout URL but no valid session ID, try redirect
+        return res.json({
+          success: true,
+          data: {
+            status: 'pending',
+            message: 'Your payment transaction is still pending. Redirecting to payment gateway...',
+            payment_status: 'PENDING',
+            order_id: orderId,
+            checkoutUrl: checkoutUrl,
+            redirectToPayment: true
+          }
+        });
+      }
     } else if (currentStatus === 'FAILED' || cashfreeOrderStatus === 'EXPIRED') {
       // Payment failed or expired
       return res.json({
@@ -911,7 +1357,8 @@ router.post('/:extensionId/check-payment', requireAuth, async (req, res) => {
           status: 'failed',
           message: 'Payment transaction has failed or expired. Please create a new payment order.',
           payment_status: 'FAILED',
-          order_id: orderId
+          order_id: orderId,
+                createNewOrder: true
         }
       });
     } else {
@@ -1053,17 +1500,12 @@ router.get('/pending', authenticateAdmin, async (req, res) => {
       LIMIT ${limitNum} OFFSET ${offset}
     `, [status]);
 
-    console.log('📊 Found extensions:', extensions.length);
-    console.log('📊 Extensions data:', JSON.stringify(extensions, null, 2));
-
     // Get total count
     const countResult = await executeQuery(
       'SELECT COUNT(*) as total FROM loan_extensions WHERE status = ?',
       [status]
     );
     const total = countResult[0]?.total || 0;
-
-    console.log('📊 Total pending extensions:', total);
 
     const responseData = {
       success: true,

@@ -70,7 +70,6 @@ const initializeRedis = async () => {
     });
 
     redisClient.on('connect', () => {
-      console.log('✅ Redis connected for activity logging');
     });
 
     await redisClient.connect();
@@ -144,7 +143,6 @@ const logActivity = async (activityData) => {
     // Set expiration for the queue (24 hours)
     await client.expire('activity_queue', 86400);
     
-    console.log(`📝 Activity logged: ${activity.type} - ${activity.action}`);
     
   } catch (error) {
     console.error('❌ Failed to log activity:', error);
@@ -157,7 +155,6 @@ const logActivity = async (activityData) => {
  */
 const activityLoggerMiddleware = (options = {}) => {
   return async (req, res, next) => {
-    console.log('🎯 Middleware triggered for:', req.method, req.path);
     
     // Skip logging for certain paths
     const skipPaths = [
@@ -168,7 +165,6 @@ const activityLoggerMiddleware = (options = {}) => {
     ];
     
     if (skipPaths.some(path => req.path.startsWith(path))) {
-      console.log('⏭️ Skipping middleware for:', req.path);
       return next();
     }
 
@@ -178,13 +174,11 @@ const activityLoggerMiddleware = (options = {}) => {
     
     // Track response
     res.send = function(data) {
-      console.log('📤 res.send intercepted for:', req.method, req.path, 'Status:', res.statusCode);
       logRequestActivity(req, res, data);
       return originalSend.call(this, data);
     };
     
     res.json = function(data) {
-      console.log('📤 res.json intercepted for:', req.method, req.path, 'Status:', res.statusCode);
       logRequestActivity(req, res, data);
       return originalJson.call(this, data);
     };
@@ -198,7 +192,6 @@ const activityLoggerMiddleware = (options = {}) => {
  */
 const logRequestActivity = async (req, res, data) => {
   try {
-    console.log('🔄 Activity Middleware Called:', { method: req.method, path: req.path, statusCode: res.statusCode });
     
     const { method, path, user, admin } = req;
     
@@ -211,17 +204,6 @@ const logRequestActivity = async (req, res, data) => {
       console.warn('⚠️ Failed to parse response data as JSON:', parseError.message);
       responseData = { raw: data };
     }
-    
-    // Debug response data parsing
-    console.log('📊 Response data debug:', {
-      dataType: typeof data,
-      isString: typeof data === 'string',
-      responseDataKeys: responseData ? Object.keys(responseData) : 'null',
-      responseDataStatus: responseData?.status,
-      responseDataSuccess: responseData?.success,
-      responseDataData: responseData?.data,
-      responseDataMessage: responseData?.message
-    });
     
     let activityType = ACTIVITY_TYPES.SYSTEM_EVENT;
     let action = `${method} ${path}`;
@@ -238,21 +220,11 @@ const logRequestActivity = async (req, res, data) => {
       userId = responseData?.data?.user?.id || responseData?.user?.id;
       metadata.phone = req.body?.mobile || req.body?.phone;
     } else if (path.includes('/verify-otp') && method === 'POST' && res.statusCode < 400) {
-      console.log('🎯 MATCHED /verify-otp condition!');
       activityType = ACTIVITY_TYPES.USER_LOGIN;
       action = 'User Verified OTP & Logged In';
       userId = responseData?.data?.user?.id || responseData?.user?.id;
       metadata.phone = req.body?.mobile;
       
-      // Debug logging
-      console.log('🔄 Activity Logger - OTP Verification:', {
-        path,
-        method,
-        statusCode: res.statusCode,
-        userId,
-        userFromResponse: responseData?.data?.user,
-        bodyMobile: req.body?.mobile
-      });
     } else if (path.includes('/register') && method === 'POST' && res.statusCode < 400) {
       activityType = ACTIVITY_TYPES.USER_REGISTRATION;
       action = 'New User Registered';
@@ -330,26 +302,8 @@ const logRequestActivity = async (req, res, data) => {
       metadata.documentType = req.body?.documentType;
     } else {
       // Skip logging for GET requests, health checks, and other non-important actions
-      console.log('🚫 Activity Logger - Skipping:', { 
-        method, 
-        path, 
-        statusCode: res.statusCode,
-        pathIncludesVerifyOtp: path.includes('/verify-otp'),
-        isPost: method === 'POST',
-        isSuccess: res.statusCode < 400
-      });
       return;
     }
-
-    // Debug the activity being logged
-    console.log('✅ Activity Logger - Logging activity:', {
-      action,
-      userId,
-      adminId,
-      type: activityType,
-      path,
-      method
-    });
 
     // Log the activity
     await logActivity({

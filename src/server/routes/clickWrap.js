@@ -15,7 +15,6 @@ const { uploadGeneratedPDF } = require('../services/s3Service');
 
 // Debug route to check if route is reachable
 router.post('/initiate/debug', (req, res) => {
-  console.log('🔍 Debug route hit');
   console.log('   Headers:', Object.keys(req.headers));
   console.log('   Authorization header:', req.headers['authorization'] || req.headers['Authorization']);
   console.log('   Body:', req.body);

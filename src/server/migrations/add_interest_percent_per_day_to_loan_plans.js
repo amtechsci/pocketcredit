@@ -10,7 +10,6 @@ async function addInterestPercentPerDayColumn() {
   });
 
   try {
-    console.log('🚀 Adding interest_percent_per_day column to loan_plans table...\n');
 
     // Check if column already exists
     const [columns] = await pool.query(`
@@ -22,7 +21,6 @@ async function addInterestPercentPerDayColumn() {
     `);
 
     if (columns.length > 0) {
-      console.log('✅ interest_percent_per_day column already exists\n');
       await pool.end();
       return;
     }
@@ -36,7 +34,6 @@ async function addInterestPercentPerDayColumn() {
       AFTER calculate_by_salary_date
     `);
 
-    console.log('✅ Added interest_percent_per_day column to loan_plans table\n');
     
     await pool.end();
   } catch (error) {
@@ -50,7 +47,6 @@ async function addInterestPercentPerDayColumn() {
 if (require.main === module) {
   addInterestPercentPerDayColumn()
     .then(() => {
-      console.log('Migration completed successfully');
       process.exit(0);
     })
     .catch((error) => {

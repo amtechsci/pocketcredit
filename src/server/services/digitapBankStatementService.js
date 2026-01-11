@@ -415,7 +415,6 @@ async function checkBankStatementStatus(request_id) {
       };
     }
 
-    console.log(`🔍 Checking status for request_id: ${request_id}`);
 
     const response = await axios.post(
       ENDPOINTS.STATUS_CHECK,

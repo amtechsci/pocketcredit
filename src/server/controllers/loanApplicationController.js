@@ -91,13 +91,6 @@ const applyForLoan = async (req, res) => {
     // Prepare application data from request body (no transformation needed)
     const applicationData = req.body;
     
-    // Log plan_id for debugging
-    console.log('📥 Received loan application request:');
-    console.log('   - User ID:', userId);
-    console.log('   - Loan amount:', applicationData.loan_amount);
-    console.log('   - plan_id:', applicationData.plan_id);
-    console.log('   - loan_plan_id:', applicationData.loan_plan_id);
-    console.log('   - Full body:', JSON.stringify(applicationData, null, 2));
 
     // Create loan application
     const newApplication = await createApplication(userId, applicationData);

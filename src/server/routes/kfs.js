@@ -3,7 +3,7 @@ const router = express.Router();
 const { authenticateAdmin } = require('../middleware/auth');
 const { requireAuth } = require('../middleware/jwtAuth');
 const { initializeDatabase, executeQuery } = require('../config/database');
-const { calculateLoanValues, calculateTotalDays, calculateCompleteLoanValues, calculateInterestDays, getNextSalaryDate, getSalaryDateForMonth, parseDateToString, getTodayString, calculateDaysBetween, formatDateToString } = require('../utils/loanCalculations');
+const { calculateLoanValues, calculateTotalDays, calculateCompleteLoanValues, calculateInterestDays, getNextSalaryDate, getSalaryDateForMonth, parseDateToString, getTodayString, calculateDaysBetween, formatDateToString, toDecimal2 } = require('../utils/loanCalculations');
 const pdfService = require('../services/pdfService');
 const emailService = require('../services/emailService');
 const { uploadGeneratedPDF } = require('../services/s3Service');
@@ -28,7 +28,6 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     const { loanId } = req.params;
     const userId = req.userId;
 
-    console.log('📄 User fetching KFS for loan ID:', loanId);
 
     // Verify loan belongs to user
     const loans = await executeQuery(`
@@ -370,7 +369,6 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         if (actualExhaustedDays < 1) {
         actualExhaustedDays = 1;
       }
-        console.log(`📅 Using actual exhausted days: ${actualExhaustedDays} (from processed_at ${processedDateStr} to ${currentDateStr})`);
       }
     } else if (useActualDays && loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)) {
       // Fallback to disbursed_at if processed_at not available (shouldn't happen for processed loans)
@@ -381,10 +379,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         if (actualExhaustedDays < 1) {
           actualExhaustedDays = 1;
         }
-        console.log(`📅 Using actual exhausted days: ${actualExhaustedDays} (from disbursed_at ${disbursedDateStr} to ${currentDateStr})`);
       }
-    } else {
-      console.log(`📅 Using planned repayment days (for KFS/Agreement documents)`);
     }
 
     // Calculate PLANNED loan term days (for due date calculation) - always use planned term, not exhausted days
@@ -460,10 +455,8 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         // Only use processed_interest if it exists and is valid, but keep planned term days
         if (processedInterest !== null && processedInterest > 0) {
           // For display: show processed_interest, but total amount should still use planned term interest
-          console.log(`📊 processed_interest: ₹${processedInterest} (exhausted days: ${daysFromProcessed}), but total uses planned term: ₹${loanValues.interest.amount} (${loanValues.interest.days} days)`);
         } else {
           // processed_interest is null, use calculated interest with planned term days
-          console.log(`📊 Using calculated interest with planned term days: ₹${loanValues.interest.amount} (${loanValues.interest.days} days), exhausted days: ${daysFromProcessed}`);
         }
         // CRITICAL: Don't override loanValues.interest.days - keep planned term days for total amount calculation
       }
@@ -839,10 +832,8 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
                   }
                   return date;
                 });
-                console.log(`📅 [User APR] Using processed_due_date for EMI dates: ${allEmiDates.join(', ')}`);
               } else if (typeof parsedDueDate === 'string') {
                 allEmiDates = [parsedDueDate.split('T')[0].split(' ')[0]];
-                console.log(`📅 [User APR] Using processed_due_date for single payment: ${allEmiDates[0]}`);
               }
             } catch (e) {
               console.error('❌ [User APR] Error parsing processed_due_date:', e);
@@ -874,7 +865,6 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
                 // Parse date components directly to avoid timezone issues
                 const [year, month, day] = processedDateStr.split('-').map(Number);
                 baseDateForEmi = new Date(year, month - 1, day); // month is 0-indexed
-                console.log(`📅 [User APR] Using processed_at_date as base date for EMI calculation: ${processedDateStr}`);
               } else if (loan.disbursed_at_date) {
                 // Use disbursed_at_date from SQL DATE() function
                 let disbursedDateStr;
@@ -890,11 +880,9 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
                 }
                 const [year, month, day] = disbursedDateStr.split('-').map(Number);
                 baseDateForEmi = new Date(year, month - 1, day);
-                console.log(`📅 [User APR] Using disbursed_at_date as base date: ${disbursedDateStr}`);
               } else {
                 // Fallback: use today
                 baseDateForEmi = new Date();
-                console.log(`📅 [User APR] Using today as base date`);
               }
               baseDateForEmi.setHours(0, 0, 0, 0);
               let nextSalaryDate = getNextSalaryDate(baseDateForEmi, salaryDate);
@@ -1042,25 +1030,8 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         const totalCharges = processingFee + gst + repayableFee + interestForAPR;
         const apr = loanTermDaysForAPR > 0 ? ((totalCharges / principal) / loanTermDaysForAPR) * 36500 : 0;
         
-        // Debug: Log APR calculation details
-        console.log('APR Calculation Debug (User):', {
-          processingFee,
-          gst,
-          repayableFee,
-          interest: interest,
-          interestForAPR: interestForAPR,
-          totalCharges,
-          principal,
-          loanTermDaysForAPR,
-          interestCalculationDays: days,
-          emiCount,
-          interestRatePerDay: loanValues.interest?.rate_per_day || planData.interest_percent_per_day || (interest / (principal * days)),
-      // Use baseDateStr directly to avoid timezone conversion
-      disbursementDate: baseDateStr || getTodayString(),
-          emiPeriodDetails: emiCount > 1 ? emiPeriodDetails : undefined,
-          apr: apr.toFixed(2),
-          aprCalculation: `((${totalCharges} / ${principal}) / ${loanTermDaysForAPR}) * 36500 = ${apr.toFixed(2)}`
-        });
+        // Use baseDateStr directly to avoid timezone conversion
+        const disbursementDate = baseDateStr || getTodayString();
         
         // For single payment loans, ensure total_amount includes fees correctly (not multiplied by EMI count)
         // Check if this is actually a single payment loan by checking plan type
@@ -1121,7 +1092,6 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         // PRIORITY 1: Check if loan has processed_due_date (for processed loans)
         if (loan.processed_due_date) {
           try {
-            console.log(`📅 [User Repayment] Attempting to use processed_due_date: ${loan.processed_due_date}`);
             const parsedDueDate = typeof loan.processed_due_date === 'string' 
               ? JSON.parse(loan.processed_due_date) 
               : loan.processed_due_date;
@@ -1133,10 +1103,8 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
                 }
                 return date;
               });
-              console.log(`✅ [User Repayment] Using processed_due_date for EMI dates: ${allEmiDates.join(', ')}`);
             } else if (typeof parsedDueDate === 'string') {
               allEmiDates = [parsedDueDate.split('T')[0].split(' ')[0]];
-              console.log(`✅ [User Repayment] Using processed_due_date for single payment: ${allEmiDates[0]}`);
             }
           } catch (e) {
             console.error('❌ [User Repayment] Error parsing processed_due_date:', e, loan.processed_due_date);
@@ -1174,7 +1142,6 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               // processedDateStr is in format "YYYY-MM-DD"
               const [year, month, day] = processedDateStr.split('-').map(Number);
               baseDate = new Date(year, month - 1, day); // month is 0-indexed
-              console.log(`📅 [User] Using processed_at as base date for EMI calculation: ${processedDateStr}`);
             } else {
               baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
             }
@@ -1197,7 +1164,6 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             }
             
             // Debug: Log all generated EMI dates for repayment schedule
-            console.log('📅 [User] Repayment Schedule - All EMI Dates:', allEmiDates);
           }
         } else if (allEmiDates.length === 0 && isMultiEmi) {
           // For non-salary date Multi-EMI, calculate based on frequency
@@ -1418,10 +1384,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       kfsData.interest.amount = totalInterestFromSchedule;
       kfsData.calculations.total_repayable = totalRepayableFromSchedule;
       kfsData.calculations.total_amount = totalRepayableFromSchedule;
-      console.log(`📊 Multi-EMI loan: Updated interest: ₹${totalInterestFromSchedule}, total repayable: ₹${totalRepayableFromSchedule}`);
     }
-
-    console.log('✅ KFS data generated successfully for user');
 
     // If loan is processed and has PDF, return PDF URL instead of regenerating
     if (loan.processed_at && loan.kfs_pdf_url) {
@@ -1624,7 +1587,6 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
           }
           
           originalDueDate = allOriginalEmiDates[0]; // First EMI for extension
-          console.log(`📅 Calculated ${allOriginalEmiDates.length} EMI dates from plan snapshot: ${allOriginalEmiDates.join(', ')}, original due date (first EMI) = ${originalDueDate}`);
         } else if (!isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
           // Single payment with salary date
           const nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
@@ -1663,7 +1625,6 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
               allOriginalEmiDates.push(formatDateToString(emiDate));
             }
             originalDueDate = allOriginalEmiDates[0]; // First EMI for extension
-            console.log(`📅 Calculated ${allOriginalEmiDates.length} EMI dates (fixed days): ${allOriginalEmiDates.join(', ')}, original due date (first EMI) = ${originalDueDate}`);
           } else {
             originalDueDate = formatDateToString(dueDate);
             allOriginalEmiDates = [originalDueDate];
@@ -1841,10 +1802,10 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
           }
         }
         
-        const penaltyBaseRounded = Math.round(penaltyBase * 100) / 100;
+        const penaltyBaseRounded = toDecimal2(penaltyBase);
         const gstPercent = lateFeeStructure[0]?.gst_percent || 18; // Use GST from structure or default 18%
-        const penaltyGST = Math.round(penaltyBaseRounded * (gstPercent / 100) * 100) / 100;
-        const penaltyTotal = Math.round((penaltyBaseRounded + penaltyGST) * 100) / 100;
+        const penaltyGST = toDecimal2(penaltyBaseRounded * (gstPercent / 100));
+        const penaltyTotal = toDecimal2(penaltyBaseRounded + penaltyGST);
         
         // Debug logging for penalty calculation
         if (daysOverdue > 0) {
@@ -1903,7 +1864,7 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
     fees.penaltyTotal = penaltyAmount;
     
     // Recalculate total: Extension Fee + GST on Extension Fee + Interest + Penalty Base + GST on Penalty
-    fees.totalExtensionAmount = Math.round((fees.extensionFee + fees.gstAmount + fees.interestTillDate + penaltyAmount) * 100) / 100;
+    fees.totalExtensionAmount = toDecimal2(fees.extensionFee + fees.gstAmount + fees.interestTillDate + penaltyAmount);
     
     // Add debug logging to verify calculations
     console.log(`💰 Final Extension Calculation for loan #${loanId}:
@@ -2222,7 +2183,6 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         } else if (typeof parsedDueDate === 'string') {
           // Single payment loan: use the single date
           originalDueDate = parsedDueDate;
-          console.log(`📅 Single payment loan: Original due date = ${originalDueDate}`);
         }
       } catch (e) {
         // If parsing fails, treat as single date string
@@ -2298,7 +2258,6 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
           }
           
           originalDueDate = allOriginalEmiDates[allOriginalEmiDates.length - 1];
-          console.log(`📅 Calculated ${allOriginalEmiDates.length} EMI dates from plan snapshot: ${allOriginalEmiDates.join(', ')}, original due date = ${originalDueDate}`);
         } else if (!isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
           // Single payment with salary date
           const nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
@@ -2336,7 +2295,6 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
               allOriginalEmiDates.push(formatDateToString(emiDate));
             }
             originalDueDate = allOriginalEmiDates[allOriginalEmiDates.length - 1];
-            console.log(`📅 Calculated ${allOriginalEmiDates.length} EMI dates (fixed days): ${allOriginalEmiDates.join(', ')}, original due date = ${originalDueDate}`);
           } else {
             originalDueDate = formatDateToString(dueDate);
             console.log(`📅 Calculated single payment due date (fixed days): ${originalDueDate}`);
@@ -2434,7 +2392,6 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         const nextMonthSalaryDate = getSalaryDateForMonth(currentDueDateObj, salaryDate, 1);
         newDueDate = nextMonthSalaryDate;
         newDueDate.setHours(0, 0, 0, 0);
-        console.log(`📅 Single payment extension (Salary Date): ${formatDateLocal(currentDueDateObj)} → ${formatDateLocal(newDueDate)}`);
       }
     } else {
       // Fixed Days Plan: Original Due Date + 15 days (always, regardless of today's date)
@@ -2460,7 +2417,6 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         newDueDate = new Date(currentDueDateObj);
         newDueDate.setDate(newDueDate.getDate() + extensionPeriodDays);
         newDueDate.setHours(0, 0, 0, 0);
-        console.log(`📅 Single payment extension (Fixed Days): ${formatDateLocal(currentDueDateObj)} + ${extensionPeriodDays} days = ${formatDateLocal(newDueDate)}`);
       }
     }
     
@@ -2650,10 +2606,10 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
           }
         }
         
-        const penaltyBaseRounded = Math.round(penaltyBase * 100) / 100;
+        const penaltyBaseRounded = toDecimal2(penaltyBase);
         const gstPercent = lateFeeStructure[0]?.gst_percent || 18; // Use GST from structure or default 18%
-        const penaltyGST = Math.round(penaltyBaseRounded * (gstPercent / 100) * 100) / 100;
-        const penaltyTotal = Math.round((penaltyBaseRounded + penaltyGST) * 100) / 100;
+        const penaltyGST = toDecimal2(penaltyBaseRounded * (gstPercent / 100));
+        const penaltyTotal = toDecimal2(penaltyBaseRounded + penaltyGST);
         
         // Debug logging for penalty calculation
         if (daysOverdue > 0) {
@@ -2801,9 +2757,7 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         // Looks like base fee per EMI - multiply
         const basePostServiceFee = postServiceFee;
         postServiceFee = Math.round(postServiceFee * emiCount * 100) / 100;
-        console.log(`📊 Multi-EMI loan: Detected base fee from fees_breakdown (${feePercentOfPrincipal.toFixed(2)}% of principal), multiplying: ₹${basePostServiceFee} × ${emiCount} = ₹${postServiceFee}`);
       } else {
-        console.log(`📊 Multi-EMI loan: Post service fee from fees_breakdown appears to already be total (${feePercentOfPrincipal.toFixed(2)}% of principal), not multiplying`);
       }
     }
     
@@ -3134,6 +3088,507 @@ router.post('/:loanId/extension-letter/generate-pdf', authenticateAdmin, async (
     }
   }
 });
+
+/**
+ * GET /api/kfs/:loanId/noc
+ * Get NOC (No Dues Certificate) data for a cleared loan
+ * NOTE: This route must be BEFORE /:loanId to avoid route conflicts
+ */
+router.get('/:loanId/noc', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { loanId } = req.params;
+
+    console.log('📄 Generating NOC for loan ID:', loanId);
+
+    // Get loan details
+    const loans = await executeQuery(`
+      SELECT 
+        la.*,
+        DATE(la.disbursed_at) as disbursed_at_date,
+        u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
+        u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
+      FROM loan_applications la
+      INNER JOIN users u ON la.user_id = u.id
+      WHERE la.id = ?
+    `, [loanId]);
+
+    if (!loans || loans.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan application not found'
+      });
+    }
+
+    const loan = loans[0];
+
+    // Verify loan is cleared
+    if (loan.status !== 'cleared') {
+      return res.status(400).json({
+        success: false,
+        message: 'NOC can only be generated for cleared loans'
+      });
+    }
+
+    // Prepare borrower data
+    const borrower = {
+      name: `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'N/A',
+      first_name: loan.first_name || '',
+      last_name: loan.last_name || '',
+      email: loan.personal_email || loan.official_email || loan.email || '',
+      phone: loan.phone || '',
+      date_of_birth: loan.date_of_birth || '',
+      gender: loan.gender || '',
+      marital_status: loan.marital_status || '',
+      pan_number: loan.pan_number || ''
+    };
+
+    // Prepare company data
+    const company = {
+      name: 'SPHEETI FINTECH PRIVATE LIMITED',
+      cin: 'U65929MH2018PTC306088',
+      rbi_registration: 'N-13.02361',
+      address: 'Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI, MAHARASHTRA, 421001'
+    };
+
+    // Prepare loan data
+    const loanData = {
+      id: loan.id,
+      application_number: loan.application_number || loan.id,
+      loan_id: loan.application_number || loan.id,
+      sanctioned_amount: loan.sanctioned_amount || loan.loan_amount || 0,
+      loan_amount: loan.loan_amount || loan.sanctioned_amount || 0,
+      disbursed_at: loan.disbursed_at || loan.disbursed_at_date,
+      status: loan.status
+    };
+
+    // Generate NOC data
+    const nocData = {
+      company,
+      loan: loanData,
+      borrower,
+      generated_at: new Date().toISOString()
+    };
+
+    console.log('✅ NOC data generated successfully for loan ID:', loanId);
+
+    res.json({
+      success: true,
+      data: nocData
+    });
+
+  } catch (error) {
+    console.error('❌ Error generating NOC:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate NOC',
+      error: error.message || 'Unknown error occurred'
+    });
+  }
+});
+
+/**
+ * POST /api/kfs/:loanId/noc/generate-pdf
+ * Generate and download PDF for NOC (No Dues Certificate)
+ * NOTE: This route must be BEFORE /:loanId to avoid route conflicts
+ */
+router.post('/:loanId/noc/generate-pdf', authenticateAdmin, async (req, res) => {
+  try {
+    const { loanId } = req.params;
+    const { htmlContent } = req.body;
+
+    if (!htmlContent) {
+      return res.status(400).json({
+        success: false,
+        message: 'HTML content is required'
+      });
+    }
+
+    if (!loanId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Loan ID is required'
+      });
+    }
+
+    console.log('📄 Generating NOC PDF for loan ID:', loanId);
+
+    // Get loan data for filename
+    let applicationNumber = null;
+    try {
+      await initializeDatabase();
+      
+      const loans = await executeQuery(
+        'SELECT application_number, status FROM loan_applications WHERE id = ?',
+        [loanId]
+      );
+
+      if (!loans || loans.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Loan not found'
+        });
+      }
+
+      const loan = loans[0];
+
+      // Verify loan is cleared
+      if (loan.status !== 'cleared') {
+        return res.status(400).json({
+          success: false,
+          message: 'NOC can only be generated for cleared loans'
+        });
+      }
+
+      applicationNumber = loan.application_number || `LOAN_${loanId}`;
+    } catch (dbError) {
+      console.error('❌ Database error:', dbError);
+      applicationNumber = `LOAN_${loanId}`;
+    }
+
+    const filename = `No_Dues_Certificate_${applicationNumber}.pdf`;
+
+    // Validate PDF service is available
+    if (!pdfService) {
+      console.error('❌ PDF service is not available');
+      return res.status(500).json({
+        success: false,
+        message: 'PDF service not initialized'
+      });
+    }
+
+    // Generate PDF
+    let pdfResult;
+    try {
+      if (typeof htmlContent !== 'string' || htmlContent.trim().length === 0) {
+        throw new Error('Invalid HTML content provided');
+      }
+
+      console.log('📄 Starting NOC PDF generation, HTML length:', htmlContent.length);
+      pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
+      
+      if (!pdfResult) {
+        throw new Error('PDF generation returned null or undefined');
+      }
+      
+      let pdfBuffer;
+      if (Buffer.isBuffer(pdfResult)) {
+        pdfBuffer = pdfResult;
+      } else if (pdfResult.buffer) {
+        pdfBuffer = pdfResult.buffer;
+      } else {
+        throw new Error('PDF generation returned invalid result structure');
+      }
+      
+      if (!Buffer.isBuffer(pdfBuffer)) {
+        if (pdfBuffer instanceof Uint8Array || pdfBuffer.constructor?.name === 'Uint8Array') {
+          pdfBuffer = Buffer.from(pdfBuffer);
+        } else {
+          throw new Error('PDF generation returned invalid buffer type');
+        }
+      }
+      
+      pdfResult.buffer = pdfBuffer;
+      console.log('✅ NOC PDF generated successfully, buffer size:', pdfBuffer.length);
+    } catch (pdfError) {
+      console.error('❌ NOC PDF generation error:', pdfError);
+      if (!res.headersSent) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to generate PDF',
+          error: pdfError.message || 'PDF generation failed'
+        });
+      }
+      return;
+    }
+
+    console.log('📤 Sending NOC PDF, size:', pdfResult.buffer.length, 'bytes');
+
+    // Set headers for download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfResult.buffer.length);
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    // Send PDF buffer directly
+    res.end(pdfResult.buffer, 'binary');
+
+    console.log('✅ NOC PDF sent successfully');
+
+  } catch (error) {
+    console.error('❌ Error generating NOC PDF:', error);
+    
+    if (!res.headersSent) {
+      const accepts = req.headers.accept || '';
+      if (accepts.includes('application/json')) {
+        res.status(500).json({
+          success: false,
+          message: 'Failed to generate NOC PDF',
+          error: error.message || 'Unknown error occurred'
+        });
+      } else {
+        res.status(500).setHeader('Content-Type', 'text/plain');
+        res.send(`Error generating NOC PDF: ${error.message || 'Unknown error occurred'}`);
+      }
+    }
+  }
+});
+
+/**
+ * Helper function to generate NOC HTML content
+ * @param {object} nocData - NOC data object
+ * @returns {string} HTML content for NOC document
+ */
+function generateNOCHTML(nocData) {
+  const formatDate = (dateString) => {
+    if (!dateString || dateString === 'N/A') return 'N/A';
+    try {
+      // Handle YYYY-MM-DD format
+      if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        const [year, month, day] = dateString.split('-');
+        return `${day}-${month}-${year}`;
+      }
+      // Handle ISO datetime strings
+      if (typeof dateString === 'string' && dateString.includes('T')) {
+        const datePart = dateString.split('T')[0];
+        if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+          const [year, month, day] = datePart.split('-');
+          return `${day}-${month}-${year}`;
+        }
+      }
+      // Handle MySQL datetime format
+      if (typeof dateString === 'string' && dateString.includes(' ')) {
+        const datePart = dateString.split(' ')[0];
+        if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+          const [year, month, day] = datePart.split('-');
+          return `${day}-${month}-${year}`;
+        }
+      }
+      // Fallback
+      const date = new Date(dateString);
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}-${month}-${year}`;
+    } catch {
+      return dateString;
+    }
+  };
+
+  const borrowerName = nocData.borrower?.name || 
+    `${nocData.borrower?.first_name || ''} ${nocData.borrower?.last_name || ''}`.trim() || 
+    'N/A';
+  
+  const applicationNumber = nocData.loan?.application_number || nocData.loan?.loan_id || 'N/A';
+  const shortLoanId = applicationNumber && applicationNumber !== 'N/A' 
+    ? `PLL${String(applicationNumber).slice(-4)}`
+    : (nocData.loan?.id ? `PLL${String(nocData.loan.id).padStart(4, '0').slice(-4)}` : 'PLLXXX');
+  
+  const todayDate = formatDate(nocData.generated_at || new Date().toISOString());
+
+  return `
+    <div style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; line-height: 1.6; background-color: white;">
+      <div style="padding: 32px;">
+        <div style="text-align: center; margin-bottom: 16px; border-bottom: 1px solid #000; padding-bottom: 8px;">
+          <h2 style="font-weight: bold; margin-bottom: 4px; font-size: 14pt;">
+            SPHEETI FINTECH PRIVATE LIMITED
+          </h2>
+          <p style="font-size: 12px; margin-bottom: 4px;">
+            CIN: U65929MH2018PTC306088 | RBI Registration no: N-13.02361
+          </p>
+          <p style="font-size: 12px; margin-bottom: 8px;">
+            Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI, MAHARASHTRA, 421001
+          </p>
+        </div>
+
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h1 style="font-weight: bold; font-size: 13pt; text-transform: uppercase;">
+            NO DUES CERTIFICATE
+          </h1>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <p style="font-size: 12px;">
+            <strong>Date :</strong> ${todayDate}
+          </p>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <p style="font-size: 12px;">
+            <strong>Name of the Customer:</strong> ${borrowerName}
+          </p>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <p style="font-size: 12px;">
+            <strong>Sub: No Dues Certificate for Loan ID - ${shortLoanId}</strong>
+          </p>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <p style="font-weight: bold;">Dear Sir/Madam,</p>
+        </div>
+
+        <div style="margin-bottom: 24px; text-align: justify;">
+          <p>
+            This letter is to confirm that Spheeti Fintech Private Limited has received payment for the aforesaid loan ID and no amount is outstanding and payable by you to the Company under the aforesaid loan ID.
+          </p>
+        </div>
+
+        <div style="margin-top: 32px;">
+          <p style="margin-bottom: 4px; font-weight: bold;">Thanking you,</p>
+          <p style="font-weight: bold;">On behalf of Spheeti Fintech Private Limited</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Helper function to generate and send NOC email
+ * @param {number} loanId - Loan ID
+ * @returns {Promise<void>}
+ */
+async function generateAndSendNOCEmail(loanId) {
+  try {
+    console.log(`📧 Generating and sending NOC email for loan ID: ${loanId}`);
+
+    // Get loan details
+    const loans = await executeQuery(`
+      SELECT 
+        la.*,
+        DATE(la.disbursed_at) as disbursed_at_date,
+        u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
+        u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
+      FROM loan_applications la
+      INNER JOIN users u ON la.user_id = u.id
+      WHERE la.id = ?
+    `, [loanId]);
+
+    if (!loans || loans.length === 0) {
+      console.error(`❌ Loan #${loanId} not found for NOC email`);
+      return;
+    }
+
+    const loan = loans[0];
+
+    // Verify loan is cleared
+    if (loan.status !== 'cleared') {
+      console.log(`ℹ️ Loan #${loanId} is not cleared (status: ${loan.status}), skipping NOC email`);
+      return;
+    }
+
+    // Get recipient email
+    const recipientEmail = loan.personal_email || loan.official_email || loan.email;
+    const recipientName = `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'User';
+
+    if (!recipientEmail) {
+      console.error(`❌ No email found for loan #${loanId}, cannot send NOC email`);
+      return;
+    }
+
+    // Prepare NOC data
+    const borrower = {
+      name: recipientName,
+      first_name: loan.first_name || '',
+      last_name: loan.last_name || '',
+      email: recipientEmail,
+      phone: loan.phone || '',
+      date_of_birth: loan.date_of_birth || '',
+      gender: loan.gender || '',
+      marital_status: loan.marital_status || '',
+      pan_number: loan.pan_number || ''
+    };
+
+    const company = {
+      name: 'SPHEETI FINTECH PRIVATE LIMITED',
+      cin: 'U65929MH2018PTC306088',
+      rbi_registration: 'N-13.02361',
+      address: 'Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI, MAHARASHTRA, 421001'
+    };
+
+    const loanData = {
+      id: loan.id,
+      application_number: loan.application_number || loan.id,
+      loan_id: loan.application_number || loan.id,
+      sanctioned_amount: loan.sanctioned_amount || loan.loan_amount || 0,
+      loan_amount: loan.loan_amount || loan.sanctioned_amount || 0,
+      disbursed_at: loan.disbursed_at || loan.disbursed_at_date,
+      status: loan.status
+    };
+
+    const nocData = {
+      company,
+      loan: loanData,
+      borrower,
+      generated_at: new Date().toISOString()
+    };
+
+    // Generate HTML content
+    const htmlContent = generateNOCHTML(nocData);
+
+    // Generate PDF
+    const filename = `No_Dues_Certificate_${loan.application_number || loanId}.pdf`;
+    if (!pdfService) {
+      console.error('❌ PDF service not available for NOC email');
+      return;
+    }
+
+    let pdfResult;
+    try {
+      pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
+      
+      let pdfBuffer;
+      if (Buffer.isBuffer(pdfResult)) {
+        pdfBuffer = pdfResult;
+      } else if (pdfResult.buffer) {
+        pdfBuffer = pdfResult.buffer;
+      } else {
+        throw new Error('PDF generation returned invalid result structure');
+      }
+      
+      if (!Buffer.isBuffer(pdfBuffer)) {
+        if (pdfBuffer instanceof Uint8Array || pdfBuffer.constructor?.name === 'Uint8Array') {
+          pdfBuffer = Buffer.from(pdfBuffer);
+        } else {
+          throw new Error('PDF generation returned invalid buffer type');
+        }
+      }
+      
+      pdfResult.buffer = pdfBuffer;
+      console.log('✅ NOC PDF generated for email, size:', pdfBuffer.length, 'bytes');
+    } catch (pdfError) {
+      console.error('❌ Error generating NOC PDF for email:', pdfError);
+      return;
+    }
+
+    // Send email
+    try {
+      await emailService.sendNOCEmail({
+        loanId: loan.id,
+        recipientEmail: recipientEmail,
+        recipientName: recipientName,
+        loanData: {
+          application_number: loan.application_number || loan.id,
+          loan_amount: loan.loan_amount || loan.sanctioned_amount || 0
+        },
+        pdfBuffer: pdfResult.buffer,
+        pdfFilename: filename,
+        sentBy: null // System-generated
+      });
+
+      console.log(`✅ NOC email sent successfully to ${recipientEmail} for loan #${loanId}`);
+    } catch (emailError) {
+      console.error('❌ Error sending NOC email:', emailError);
+      // Don't throw - email failure shouldn't block loan clearance
+    }
+
+  } catch (error) {
+    console.error(`❌ Error generating and sending NOC email for loan #${loanId}:`, error);
+    // Don't throw - email failure shouldn't block loan clearance
+  }
+}
 
 /**
  * GET /api/kfs/:loanId
@@ -3741,7 +4196,6 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       // PRIORITY 1: Check if loan has processed_due_date (for processed loans)
       if (loan.processed_due_date) {
         try {
-          console.log(`📅 [Admin APR] Attempting to use processed_due_date: ${loan.processed_due_date}`);
           const parsedDueDate = typeof loan.processed_due_date === 'string' 
             ? JSON.parse(loan.processed_due_date) 
             : loan.processed_due_date;
@@ -3928,25 +4382,6 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
     
     const totalCharges = processingFee + gst + repayableFee + interestForAPR;
     const apr = loanTermDaysForAPR > 0 ? ((totalCharges / principal) / loanTermDaysForAPR) * 36500 : 0;
-    
-    // Debug: Log APR calculation details
-    console.log('APR Calculation Debug (Admin):', {
-      processingFee,
-      gst,
-      repayableFee,
-      interest: interest,
-      interestForAPR: interestForAPR,
-      totalCharges,
-      principal,
-      loanTermDaysForAPR,
-      interestCalculationDays: days,
-      emiCount,
-      interestRatePerDay: calculations.interest.rate_per_day || (interest / (principal * days)),
-      disbursementDate: baseDateStr || getTodayString(),
-      emiPeriodDetails: emiCount > 1 ? emiPeriodDetails : undefined,
-      apr: apr.toFixed(2),
-      aprCalculation: `((${totalCharges} / ${principal}) / ${loanTermDaysForAPR}) * 36500 = ${apr.toFixed(2)}`
-    });
 
     // Use firstDueDate as dueDate for KFS data
     const dueDate = firstDueDate;
@@ -4099,7 +4534,6 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
         // PRIORITY 1: Check processed_due_date first (for processed loans)
         if (loan.processed_due_date) {
           try {
-            console.log(`📅 [Admin Repayment] Attempting to use processed_due_date: ${loan.processed_due_date}`);
             const parsedDueDate = typeof loan.processed_due_date === 'string' 
               ? JSON.parse(loan.processed_due_date) 
               : loan.processed_due_date;
@@ -4147,7 +4581,6 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
               }
               const [year, month, day] = processedDateStr.split('-').map(Number);
               baseDate = new Date(year, month - 1, day);
-              console.log(`📅 [Admin Repayment] Using processed_at as base date for EMI calculation: ${processedDateStr}`);
             } else {
               baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
             }
@@ -4170,7 +4603,6 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
             }
             
             // Debug: Log all generated EMI dates for repayment schedule
-            console.log('📅 [Admin Repayment] Generated EMI Dates:', allEmiDates);
           }
         } else if (allEmiDates.length === 0 && isMultiEmi) {
           // For non-salary date Multi-EMI, calculate based on frequency
@@ -4383,10 +4815,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
       const totalRepayableFromSchedule = kfsData.repayment.schedule.reduce((sum, emi) => sum + (emi.instalment_amount || 0), 0);
       kfsData.interest.amount = totalInterestFromSchedule;
       kfsData.calculations.total_repayable = totalRepayableFromSchedule;
-      console.log(`📊 Multi-EMI loan: Updated interest: ₹${totalInterestFromSchedule}, total repayable: ₹${totalRepayableFromSchedule}`);
     }
-
-    console.log('✅ KFS data generated successfully');
 
     // If loan is processed and has PDF, return PDF URL
     if (loan.processed_at && loan.kfs_pdf_url) {

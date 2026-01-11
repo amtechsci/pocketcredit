@@ -490,7 +490,6 @@ router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, 
 
     // Now perform face match verification
     try {
-      console.log(`🔍 Starting face match verification for application ${applicationId}...`);
 
       // Get Digilocker photo from kyc_verifications
       const kycResults = await executeQuery(

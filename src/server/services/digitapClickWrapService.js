@@ -9,12 +9,6 @@ const DIGITAP_CLIENT_ID = process.env.DIGITAP_CLIENT_ID;
 const DIGITAP_CLIENT_SECRET = process.env.DIGITAP_CLIENT_SECRET;
 const DIGITAP_CLICKWRAP_DOC_CLASS_ID = process.env.DIGITAP_CLICKWRAP_DOC_CLASS_ID || 'EI1OTPxxxxx';
 
-// Log configuration on startup
-console.log('🔧 Digitap ClickWrap Configuration:');
-console.log('   Base URL:', DIGITAP_BASE_URL);
-console.log('   Client ID:', DIGITAP_CLIENT_ID ? 'Set (' + DIGITAP_CLIENT_ID.substring(0, 10) + '...)' : 'Missing');
-console.log('   Client Secret:', DIGITAP_CLIENT_SECRET ? 'Set' : 'Missing');
-console.log('   Doc Class ID:', DIGITAP_CLICKWRAP_DOC_CLASS_ID);
 if (DIGITAP_CLICKWRAP_DOC_CLASS_ID === 'EI1OTPxxxxx' || DIGITAP_CLICKWRAP_DOC_CLASS_ID.includes('xxxxx')) {
   console.warn('⚠️  WARNING: Using placeholder Doc Class ID. Please set DIGITAP_CLICKWRAP_DOC_CLASS_ID in your .env file with the actual value from Digitap.');
 }

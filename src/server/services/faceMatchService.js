@@ -40,7 +40,6 @@ function generateClientRefId() {
  */
 async function compareFaces(selfieImage, cardImage, applicationId) {
     try {
-        console.log(`🔍 Starting Digitap face match verification for application: ${applicationId}`);
 
         // Convert images to base64 if they're buffers
         const personBase64 = Buffer.isBuffer(selfieImage)

@@ -56,7 +56,6 @@ const sendOtp = async (req, res) => {
     if (!stored) {
       console.error('❌ Failed to store OTP in Redis');
       // Log OTP to console as fallback for development
-      console.log(`📱 OTP for ${mobile}: ${otp} (Valid for 5 minutes) - Redis failed`);
       return res.status(500).json({
         status: 'error',
         message: 'Failed to send OTP. Please try again.'
@@ -73,11 +72,9 @@ const sendOtp = async (req, res) => {
     try {
       const response = await fetch(smsUrl);
       const result = await response.text();
-      console.log(`📱 SMS sent to ${mobile}: ${result}`);
     } catch (error) {
       console.error('SMS sending failed:', error);
       // Log OTP to console as fallback
-      console.log(`📱 OTP for ${mobile}: ${otp} (Valid for 5 minutes) - SMS failed`);
     }
 
     res.json({
@@ -172,11 +169,9 @@ const verifyOtp = async (req, res) => {
     }
 
     // OTP is valid, delete it from Redis (skip for test OTP)
-    if (!isTestOtp) {
+    
       await del(otpKey);
-    } else {
-      console.log(`🧪 Test OTP (8800) used for login: ${mobile}`);
-    }
+    
 
     // Check if user exists
     let user = await findUserByMobileNumber(mobile);
@@ -188,11 +183,9 @@ const verifyOtp = async (req, res) => {
         phone_verified: true
       });
       
-      console.log(`✅ New user created: ${mobile}`);
     } else {
       // Update last login for existing user
       await updateLastLogin(user.id);
-      console.log(`✅ User login: ${mobile}`);
     }
 
     // Extract and save login data (only if extractLoginData is available and table exists)
@@ -231,9 +224,6 @@ const verifyOtp = async (req, res) => {
             loginData.longitude,
             true
           ]);
-          console.log(`✅ Login history saved for user ${user.id}`);
-        } else {
-          console.log('⚠️  user_login_history table does not exist yet, skipping login history');
         }
       } catch (loginHistoryError) {
         console.error('Error saving login history (non-critical):', loginHistoryError.message);

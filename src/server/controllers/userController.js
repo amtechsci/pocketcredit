@@ -577,8 +577,6 @@ const updateStudentProfile = async (req, res) => {
         userId
       ]);
 
-      console.log(`🚫 Student age hold applied for user ${userId}: Age ${age}, hold until ${turnNineteenDate.toISOString()}`);
-
       // Get updated user
       const users = await executeQuery('SELECT * FROM users WHERE id = ?', [userId]);
       const updatedUser = users[0];
@@ -602,7 +600,6 @@ const updateStudentProfile = async (req, res) => {
     // Not graduated: ₹10,000 | Graduated: ₹25,000
     const loanLimit = graduation_status === 'graduated' ? 25000 : 10000;
     
-    console.log(`💰 Setting loan limit for student: ₹${loanLimit} (Status: ${graduation_status})`);
     
     const updateData = {
       date_of_birth,
@@ -701,9 +698,6 @@ const updateGraduationStatus = async (req, res) => {
     const newLoanLimit = graduation_status === 'graduated' ? 25000 : 10000;
     const oldLoanLimit = users[0].loan_limit || 10000;
 
-    console.log(`🎓 Updating graduation status for user ${userId}: ${currentStatus} → ${graduation_status}`);
-    console.log(`💰 Loan limit change: ₹${oldLoanLimit} → ₹${newLoanLimit}`);
-
     // Update graduation status and loan limit
     const updateData = {
       graduation_status,
@@ -726,7 +720,6 @@ const updateGraduationStatus = async (req, res) => {
 
     // Invalidate dashboard cache so new loan limit is reflected immediately
     invalidateUserCache(userId);
-    console.log(`🔄 Dashboard cache invalidated for user ${userId}`);
 
     // Get updated profile
     const profileSummary = await getProfileSummary(updatedUser);

@@ -52,7 +52,6 @@ router.get('/', authenticateAdmin, async (req, res) => {
       dateTo = ''
     } = req.query;
 
-    console.log('🔍 Search request:', { search, status, page, limit });
 
     // Build the base query with basic JOINs to get essential user data
     let baseQuery = `
@@ -256,13 +255,9 @@ router.get('/', authenticateAdmin, async (req, res) => {
     baseQuery += ` LIMIT ${parseInt(limit)} OFFSET ${offset}`;
 
     // Execute the main query
-    console.log('🔍 Executing query with params:', queryParams);
-    console.log('🔍 Query:', baseQuery);
-    
     let applications;
     try {
       applications = await executeQuery(baseQuery, queryParams);
-      console.log('🔍 Query executed successfully, got', applications ? applications.length : 0, 'results');
     } catch (queryError) {
       console.error('❌ Query execution error:', queryError);
       throw queryError;
@@ -678,7 +673,6 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
             
             // If salary-based calculation didn't generate dates, use non-salary method
             if (allEmiDates.length === 0 && emiCount > 1) {
-              console.log(`📅 Salary-based EMI calculation didn't generate dates, using non-salary method for loan #${applicationId}`);
               const firstDueDate = calculatedValues?.interest?.repayment_date 
                 ? new Date(calculatedValues.interest.repayment_date)
                 : (() => {
@@ -737,7 +731,7 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
             processedDueDate = JSON.stringify(allEmiDates);
             
             // Create emi_schedule with dates, amounts, and status using REDUCING BALANCE method
-            const { formatDateToString, calculateDaysBetween, getTodayString } = require('../utils/loanCalculations');
+            const { formatDateToString, calculateDaysBetween, getTodayString, toDecimal2 } = require('../utils/loanCalculations');
             const emiSchedule = [];
             
             // Validate processedAmount is valid before calculation
@@ -749,21 +743,20 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
               });
             }
             
-            const principalPerEmi = Math.floor(processedAmount / emiCount * 100) / 100;
-            const remainder = Math.round((processedAmount - (principalPerEmi * emiCount)) * 100) / 100;
+            const principalPerEmi = toDecimal2(Math.floor(processedAmount / emiCount * 100) / 100);
+            const remainder = toDecimal2(processedAmount - (principalPerEmi * emiCount));
             
             // Calculate per-EMI fees (post service fee and GST are already total amounts)
             // IMPORTANT: postServiceFee and repayableFeeGST are TOTAL amounts, need to divide by emiCount for per-EMI
             // NOTE: Only use repayableFeeGST for EMI calculations, NOT disbursalFeeGST (which is deducted upfront)
             const totalRepayableFeeGST = calculatedValues?.totals?.repayableFeeGST || 0;
-            const postServiceFeePerEmi = Math.round((postServiceFee || 0) / emiCount * 100) / 100;
-            const postServiceFeeGSTPerEmi = Math.round((totalRepayableFeeGST / emiCount) * 100) / 100;
+            const postServiceFeePerEmi = toDecimal2((postServiceFee || 0) / emiCount);
+            const postServiceFeeGSTPerEmi = toDecimal2(totalRepayableFeeGST / emiCount);
             
             // Get interest rate per day
             const interestRatePerDay = parseFloat(loan.interest_percent_per_day || 0.001);
             
             // Log EMI calculation inputs for debugging
-            console.log(`📊 [EMI Calculation] Loan #${applicationId}: processedAmount=₹${processedAmount}, emiCount=${emiCount}, principalPerEmi=₹${principalPerEmi}, postServiceFee=₹${postServiceFee}, postServiceFeePerEmi=₹${postServiceFeePerEmi}, totalRepayableFeeGST=₹${totalRepayableFeeGST}, postServiceFeeGSTPerEmi=₹${postServiceFeeGSTPerEmi}, interestRatePerDay=${interestRatePerDay}`);
             
             // Calculate base date for interest calculation (processed_at takes priority over disbursed_at)
             // Reuse existing baseDate variable but update it if processed_at exists
@@ -797,17 +790,17 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
               
               // Calculate principal for this EMI (last EMI gets remainder)
               const principalForThisEmi = i === emiCount - 1
-                ? Math.round((principalPerEmi + remainder) * 100) / 100
+                ? toDecimal2(principalPerEmi + remainder)
                 : principalPerEmi;
               
               // Calculate interest for this period on reducing balance
-              const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
+              const interestForPeriod = toDecimal2(outstandingPrincipal * interestRatePerDay * daysForPeriod);
               
               // Calculate EMI amount: principal + interest + post service fee + GST
-              const emiAmount = Math.round((principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi) * 100) / 100;
+              const emiAmount = toDecimal2(principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi);
               
               // Reduce outstanding principal for next EMI
-              outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
+              outstandingPrincipal = toDecimal2(outstandingPrincipal - principalForThisEmi);
               
               emiSchedule.push({
                 emi_number: i + 1,
@@ -817,13 +810,11 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
                 status: 'pending'
               });
               
-              console.log(`📊 EMI ${i + 1}: ${previousDateStr} to ${emiDateStr} (${daysForPeriod} days), Principal: ₹${principalForThisEmi}, Interest: ₹${interestForPeriod}, Total: ₹${emiAmount}`);
             }
             
             // Update emi_schedule in the update query
             updateQuery += `, emi_schedule = ?`;
             updateParams.push(JSON.stringify(emiSchedule));
-            console.log(`📅 Created emi_schedule for multi-EMI loan with ${emiCount} EMIs`);
           } else {
             // Single payment: Calculate from plan snapshot and processed_at
             const { getNextSalaryDate, getSalaryDateForMonth, formatDateToString, calculateDaysBetween, parseDateToString } = require('../utils/loanCalculations');
@@ -887,7 +878,6 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
             
             updateQuery += `, emi_schedule = ?`;
             updateParams.push(JSON.stringify(emiScheduleForSingle));
-            console.log(`📅 Created emi_schedule for single payment loan`);
           }
         } catch (dueDateError) {
           console.error('Error calculating processed_due_date:', dueDateError);
@@ -961,6 +951,142 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
       } catch (partnerError) {
         console.error('Error updating partner lead payout:', partnerError);
         // Don't fail the status update if partner update fails
+      }
+    }
+
+    // Send NOC email if status changed to cleared
+    if (status === 'cleared') {
+      try {
+        const emailService = require('../services/emailService');
+        const pdfService = require('../services/pdfService');
+        
+        // Get loan details for NOC
+        const loanDetails = await executeQuery(`
+          SELECT 
+            la.*,
+            DATE(la.disbursed_at) as disbursed_at_date,
+            u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
+            u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
+          FROM loan_applications la
+          INNER JOIN users u ON la.user_id = u.id
+          WHERE la.id = ?
+        `, [applicationId]);
+        
+        if (loanDetails && loanDetails.length > 0) {
+          const loanDetail = loanDetails[0];
+          const recipientEmail = loanDetail.personal_email || loanDetail.official_email || loanDetail.email;
+          const recipientName = `${loanDetail.first_name || ''} ${loanDetail.last_name || ''}`.trim() || 'User';
+          
+          if (recipientEmail) {
+            // Generate NOC HTML
+            const formatDate = (dateString) => {
+              if (!dateString || dateString === 'N/A') return 'N/A';
+              try {
+                if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+                  const [year, month, day] = dateString.split('-');
+                  return `${day}-${month}-${year}`;
+                }
+                if (typeof dateString === 'string' && dateString.includes('T')) {
+                  const datePart = dateString.split('T')[0];
+                  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+                    const [year, month, day] = datePart.split('-');
+                    return `${day}-${month}-${year}`;
+                  }
+                }
+                if (typeof dateString === 'string' && dateString.includes(' ')) {
+                  const datePart = dateString.split(' ')[0];
+                  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+                    const [year, month, day] = datePart.split('-');
+                    return `${day}-${month}-${year}`;
+                  }
+                }
+                const date = new Date(dateString);
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}-${month}-${year}`;
+              } catch {
+                return dateString;
+              }
+            };
+            
+            const borrowerName = recipientName;
+            const applicationNumber = loanDetail.application_number || applicationId;
+            const shortLoanId = applicationNumber && applicationNumber !== 'N/A' 
+              ? `PLL${String(applicationNumber).slice(-4)}`
+              : `PLL${String(applicationId).padStart(4, '0').slice(-4)}`;
+            const todayDate = formatDate(new Date().toISOString());
+            
+            const htmlContent = `
+              <div style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; line-height: 1.6; background-color: white;">
+                <div style="padding: 32px;">
+                  <div style="text-align: center; margin-bottom: 16px; border-bottom: 1px solid #000; padding-bottom: 8px;">
+                    <h2 style="font-weight: bold; margin-bottom: 4px; font-size: 14pt;">
+                      SPHEETI FINTECH PRIVATE LIMITED
+                    </h2>
+                    <p style="font-size: 12px; margin-bottom: 4px;">
+                      CIN: U65929MH2018PTC306088 | RBI Registration no: N-13.02361
+                    </p>
+                    <p style="font-size: 12px; margin-bottom: 8px;">
+                      Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI, MAHARASHTRA, 421001
+                    </p>
+                  </div>
+                  <div style="text-align: center; margin-bottom: 24px;">
+                    <h1 style="font-weight: bold; font-size: 13pt; text-transform: uppercase;">
+                      NO DUES CERTIFICATE
+                    </h1>
+                  </div>
+                  <div style="margin-bottom: 16px;">
+                    <p style="font-size: 12px;"><strong>Date :</strong> ${todayDate}</p>
+                  </div>
+                  <div style="margin-bottom: 16px;">
+                    <p style="font-size: 12px;"><strong>Name of the Customer:</strong> ${borrowerName}</p>
+                  </div>
+                  <div style="margin-bottom: 16px;">
+                    <p style="font-size: 12px;"><strong>Sub: No Dues Certificate for Loan ID - ${shortLoanId}</strong></p>
+                  </div>
+                  <div style="margin-bottom: 16px;">
+                    <p style="font-weight: bold;">Dear Sir/Madam,</p>
+                  </div>
+                  <div style="margin-bottom: 24px; text-align: justify;">
+                    <p>This letter is to confirm that Spheeti Fintech Private Limited has received payment for the aforesaid loan ID and no amount is outstanding and payable by you to the Company under the aforesaid loan ID.</p>
+                  </div>
+                  <div style="margin-top: 32px;">
+                    <p style="margin-bottom: 4px; font-weight: bold;">Thanking you,</p>
+                    <p style="font-weight: bold;">On behalf of Spheeti Fintech Private Limited</p>
+                  </div>
+                </div>
+              </div>
+            `;
+            
+            // Generate PDF
+            const filename = `No_Dues_Certificate_${applicationNumber}.pdf`;
+            const pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
+            let pdfBuffer = Buffer.isBuffer(pdfResult) ? pdfResult : (pdfResult.buffer || pdfResult);
+            if (!Buffer.isBuffer(pdfBuffer) && pdfBuffer instanceof Uint8Array) {
+              pdfBuffer = Buffer.from(pdfBuffer);
+            }
+            
+            // Send email
+            await emailService.sendNOCEmail({
+              loanId: parseInt(applicationId),
+              recipientEmail: recipientEmail,
+              recipientName: recipientName,
+              loanData: {
+                application_number: applicationNumber,
+                loan_amount: loanDetail.loan_amount || loanDetail.sanctioned_amount || 0
+              },
+              pdfBuffer: pdfBuffer,
+              pdfFilename: filename,
+              sentBy: req.admin?.id || null
+            });
+            
+            console.log(`✅ NOC email sent successfully to ${recipientEmail} for loan #${applicationId} (admin status update)`);
+          }
+        }
+      } catch (nocEmailError) {
+        console.error('❌ Error sending NOC email (non-fatal):', nocEmailError);
+        // Don't fail - email failure shouldn't block status update
       }
     }
 

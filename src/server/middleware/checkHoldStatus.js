@@ -62,7 +62,6 @@ const checkHoldStatus = async (req, res, next) => {
             [userId]
           );
 
-          console.log(`✅ Hold expired and released for user ${userId}`);
           
           // Proceed to next middleware
           return next();

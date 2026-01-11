@@ -15,6 +15,7 @@
 
 const { executeQuery } = require('../config/database');
 const cronLogger = require('../services/cronLogger');
+const { toDecimal2 } = require('../utils/loanCalculations');
 
 /**
  * Parse due dates from processed_due_date field
@@ -122,10 +123,10 @@ function calculatePenalty(principal, daysOverdue, lateFeeStructure) {
     }
   }
 
-  const penaltyBaseRounded = Math.round(penaltyBase * 100) / 100;
+  const penaltyBaseRounded = toDecimal2(penaltyBase);
   const gstPercent = lateFeeStructure[0]?.gst_percent || 18; // Use GST from structure or default 18%
-  const penaltyGST = Math.round(penaltyBaseRounded * (gstPercent / 100) * 100) / 100;
-  const penaltyTotal = Math.round((penaltyBaseRounded + penaltyGST) * 100) / 100;
+  const penaltyGST = toDecimal2(penaltyBaseRounded * (gstPercent / 100));
+  const penaltyTotal = toDecimal2(penaltyBaseRounded + penaltyGST);
 
   return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
 }
@@ -209,8 +210,8 @@ async function calculateLoanInterestAndPenalty() {
         }
 
         // Calculate interest for the period
-        const interestForPeriod = Math.round(principal * interestRatePerDay * days * 100) / 100;
-        const newInterest = Math.round(((loan.processed_interest || 0) + interestForPeriod) * 100) / 100;
+        const interestForPeriod = toDecimal2(principal * interestRatePerDay * days);
+        const newInterest = toDecimal2((loan.processed_interest || 0) + interestForPeriod);
 
         // Calculate penalty if overdue
         // CRITICAL: Penalties should be calculated from SCRATCH each time based on total days overdue
@@ -254,8 +255,7 @@ async function calculateLoanInterestAndPenalty() {
           if (maxDaysOverdue > 0) {
             // Calculate total penalty from scratch using late_fee_structure
             const penaltyCalc = calculatePenalty(principal, maxDaysOverdue, lateFeeStructure);
-            newPenalty = penaltyCalc.penaltyTotal;
-            newPenalty = Math.round(newPenalty * 100) / 100;
+            newPenalty = toDecimal2(penaltyCalc.penaltyTotal);
             
             await cronLogger.debug(`Loan #${loan.id}: ${maxDaysOverdue} days overdue, Penalty: ₹${penaltyCalc.penaltyBase} + GST ₹${penaltyCalc.penaltyGST} = ₹${newPenalty}`);
           }

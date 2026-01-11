@@ -9,8 +9,6 @@ const { authenticateAdmin } = require('../middleware/auth');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const cashfreePayout = require('../services/cashfreePayout');
 
-console.log('[Payout Routes] Module loaded, registering routes...');
-
 /**
  * POST /api/payout/disburse-loan
  * Disburse loan amount to user's bank account via Cashfree Payout API
@@ -255,6 +253,60 @@ router.post('/disburse-loan', authenticateAdmin, async (req, res) => {
         } catch (partnerError) {
             console.error('[Payout] Error updating partner lead payout:', partnerError);
             // Don't fail the disbursal if partner update fails
+        }
+
+        // Step 7: Calculate and update credit limit for 2 EMI products
+        try {
+            // Check if this is a 2 EMI product
+            let is2EMIProduct = false;
+            if (loan.plan_snapshot) {
+                try {
+                    const planSnapshot = typeof loan.plan_snapshot === 'string' 
+                        ? JSON.parse(loan.plan_snapshot) 
+                        : loan.plan_snapshot;
+                    
+                    const emiCount = planSnapshot.emi_count || 1;
+                    const planType = planSnapshot.plan_type || 'single';
+                    
+                    is2EMIProduct = (emiCount === 2 && planType === 'multi_emi');
+                } catch (parseError) {
+                    console.warn('[Payout] Could not parse plan_snapshot:', parseError);
+                }
+            }
+
+            if (is2EMIProduct) {
+                console.log(`[Payout] Detected 2 EMI product - calculating credit limit for user ${loan.user_id}`);
+                
+                const { calculateCreditLimitFor2EMI, storePendingCreditLimit } = require('../utils/creditLimitCalculator');
+                const notificationService = require('../services/notificationService');
+                
+                // Calculate new credit limit (this includes the current loan being disbursed)
+                const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
+                
+                if (creditLimitData.newLimit > 0) {
+                    // Store as pending credit limit (requires user acceptance)
+                    await storePendingCreditLimit(loan.user_id, creditLimitData.newLimit, creditLimitData);
+                    
+                    // Send SMS and Email notification
+                    const recipientName = `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'Customer';
+                    await notificationService.sendCreditLimitNotification({
+                        userId: loan.user_id,
+                        mobile: loan.phone,
+                        email: customerEmail,
+                        recipientName: recipientName,
+                        newLimit: creditLimitData.newLimit
+                    });
+                    
+                    console.log(`[Payout] Pending credit limit stored (₹${creditLimitData.newLimit}) and notifications sent for user ${loan.user_id}`);
+                } else {
+                    console.warn(`[Payout] Could not calculate credit limit for user ${loan.user_id} - salary may be missing`);
+                }
+            } else {
+                console.log(`[Payout] Loan ${loanApplicationId} is not a 2 EMI product - skipping credit limit update`);
+            }
+        } catch (creditLimitError) {
+            console.error('[Payout] Error updating credit limit (non-fatal):', creditLimitError);
+            // Don't fail the disbursal if credit limit update fails
         }
 
         // Return success response

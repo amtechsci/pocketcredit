@@ -228,6 +228,27 @@ class AdminApiService {
     return response;
   }
 
+  // Admin Mobile OTP APIs
+  async sendOTP(mobile: string): Promise<ApiResponse<{ mobile: string; expiresIn: number }>> {
+    return this.request('POST', '/auth/send-otp', { mobile });
+  }
+
+  async verifyOTP(mobile: string, otp: string): Promise<ApiResponse<AdminLoginResponse>> {
+    const response = await this.request<AdminLoginResponse>('POST', '/auth/verify-otp', {
+      mobile,
+      otp
+    });
+
+    if (response.status === 'success' && response.data) {
+      this.token = response.data.token;
+      this.setAuthHeader(this.token);
+      localStorage.setItem('adminToken', this.token);
+      localStorage.setItem('adminUser', JSON.stringify(response.data.admin));
+    }
+
+    return response;
+  }
+
   async logout(): Promise<ApiResponse<any>> {
     const response = await this.request('POST', '/auth/logout');
 
@@ -1402,6 +1423,23 @@ class AdminApiService {
   }
 
   /**
+   * Get NOC (No Dues Certificate) data
+   */
+  async getNOC(loanId: number): Promise<ApiResponse<any>> {
+    try {
+      const response = await axios.get(`/api/kfs/${loanId}/noc`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
+
+  /**
    * Generate Extension Letter PDF
    */
   async generateExtensionLetterPDF(loanId: number, htmlContent: string, transactionId?: number, extensionNumber?: number): Promise<Blob> {
@@ -1410,6 +1448,51 @@ class AdminApiService {
         htmlContent,
         transactionId,
         extensionNumber
+      }, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        },
+        responseType: 'blob'
+      });
+      
+      // Check if response is actually a PDF (blob with PDF content type)
+      if (response.headers['content-type']?.includes('application/pdf')) {
+        return response.data;
+      }
+      
+      // If not PDF, might be an error message - try to parse it
+      if (response.headers['content-type']?.includes('application/json')) {
+        const text = await response.data.text();
+        const errorData = JSON.parse(text);
+        throw new Error(errorData.message || errorData.error || 'Failed to generate PDF');
+      }
+      
+      return response.data;
+    } catch (error: any) {
+      // If error response is a blob (JSON error sent as blob), try to parse it
+      if (error.response?.data instanceof Blob && error.response.status === 500) {
+        try {
+          const errorText = await error.response.data.text();
+          const errorData = JSON.parse(errorText);
+          throw new Error(errorData.message || errorData.error || 'Failed to generate PDF');
+        } catch (parseError) {
+          // If parsing fails, use original error
+          console.error('Error parsing error response:', parseError);
+        }
+      }
+      
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate NOC PDF
+   */
+  async generateNOCPDF(loanId: number, htmlContent: string): Promise<Blob> {
+    try {
+      const response = await axios.post(`/api/kfs/${loanId}/noc/generate-pdf`, {
+        htmlContent
       }, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
@@ -1525,6 +1608,173 @@ class AdminApiService {
 
   async search(query: string): Promise<ApiResponse<any>> {
     return this.request('GET', `/search?q=${encodeURIComponent(query)}`);
+  }
+
+  // ==================== Team Management APIs ====================
+
+  /**
+   * Get all team members (paginated)
+   */
+  async getTeamMembers(page: number = 1, limit: number = 50, filters?: {
+    role?: string;
+    search?: string;
+  }): Promise<ApiResponse<{
+    admins: Array<{
+      id: string;
+      name: string;
+      email: string;
+      role: 'superadmin' | 'manager' | 'officer';
+      permissions: string[];
+      is_active: boolean;
+      last_login?: string;
+      created_at: string;
+      updated_at: string;
+    }>;
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }>> {
+    return this.request('GET', '/team', undefined, {
+      page,
+      limit,
+      ...filters
+    });
+  }
+
+  /**
+   * Get team statistics
+   */
+  async getTeamStats(): Promise<ApiResponse<{
+    total: number;
+    superadmin: number;
+    manager: number;
+    officer: number;
+    active: number;
+    inactive: number;
+  }>> {
+    return this.request('GET', '/team/stats');
+  }
+
+  /**
+   * Get single team member details
+   */
+  async getTeamMember(id: string): Promise<ApiResponse<{
+    admin: {
+      id: string;
+      name: string;
+      email: string;
+      role: 'superadmin' | 'manager' | 'officer';
+      permissions: string[];
+      is_active: boolean;
+      last_login?: string;
+      created_at: string;
+      updated_at: string;
+    };
+  }>> {
+    return this.request('GET', `/team/${id}`);
+  }
+
+  /**
+   * Get team member activity log
+   */
+  async getTeamMemberActivity(id: string, limit: number = 50): Promise<ApiResponse<{
+    activities: Array<{
+      id: string;
+      action: string;
+      type: string;
+      metadata: any;
+      timestamp: string;
+      priority: string;
+      ip_address?: string;
+      user_agent?: string;
+    }>;
+    stats: {
+      today: number;
+      week: number;
+      month: number;
+    };
+  }>> {
+    return this.request('GET', `/team/${id}/activity`, undefined, { limit });
+  }
+
+  /**
+   * Create new team member
+   */
+  async createTeamMember(data: {
+    name: string;
+    email: string;
+    password: string;
+    role: 'superadmin' | 'manager' | 'officer';
+    permissions?: string[];
+    phone?: string;
+    department?: string;
+  }): Promise<ApiResponse<{
+    admin: {
+      id: string;
+      name: string;
+      email: string;
+      role: 'superadmin' | 'manager' | 'officer';
+      permissions: string[];
+      is_active: boolean;
+      last_login?: string;
+      created_at: string;
+      updated_at: string;
+    };
+  }>> {
+    return this.request('POST', '/team', data);
+  }
+
+  /**
+   * Update team member
+   */
+  async updateTeamMember(id: string, data: {
+    name?: string;
+    email?: string;
+    role?: 'superadmin' | 'manager' | 'officer';
+    permissions?: string[];
+    phone?: string;
+    department?: string;
+    is_active?: boolean;
+  }): Promise<ApiResponse<{
+    admin: {
+      id: string;
+      name: string;
+      email: string;
+      role: 'superadmin' | 'manager' | 'officer';
+      permissions: string[];
+      is_active: boolean;
+      last_login?: string;
+      created_at: string;
+      updated_at: string;
+    };
+  }>> {
+    return this.request('PUT', `/team/${id}`, data);
+  }
+
+  /**
+   * Toggle team member status (activate/deactivate)
+   */
+  async toggleTeamMemberStatus(id: string): Promise<ApiResponse<{
+    is_active: boolean;
+  }>> {
+    return this.request('PATCH', `/team/${id}/status`);
+  }
+
+  /**
+   * Update team member permissions
+   */
+  async updateTeamMemberPermissions(id: string, permissions: string[]): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/team/${id}/permissions`, { permissions });
+  }
+
+  /**
+   * Delete team member
+   */
+  async deleteTeamMember(id: string): Promise<ApiResponse<any>> {
+    return this.request('DELETE', `/team/${id}`);
   }
 
   // Policies Management

@@ -5,7 +5,6 @@ const router = express.Router();
 // Get recent activities - fetch real data
 router.get('/recent', async (req, res) => {
   try {
-    console.log('🔍 Fetching recent activities from database...');
     
     const { limit = 10 } = req.query;
     
@@ -145,7 +144,6 @@ router.get('/recent', async (req, res) => {
 // Get activity statistics - fetch real data
 router.get('/stats', async (req, res) => {
   try {
-    console.log('🔍 Fetching activity statistics from database...');
     
     // Initialize database connection
     await initializeDatabase();

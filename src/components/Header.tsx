@@ -155,6 +155,31 @@ export function Header() {
                     </Link>
                   ))}
                   
+                  {/* Login/Dashboard Button - Mobile */}
+                  {isAuthenticated ? (
+                    <Button
+                      variant="outline"
+                      className="w-full py-3 mt-2 flex items-center justify-center gap-2 touch-manipulation"
+                      asChild
+                    >
+                      <Link to="/dashboard" onClick={() => setIsMobileMenuOpen(false)}>
+                        <User className="h-4 w-4" />
+                        Dashboard
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      className="w-full py-3 mt-2 touch-manipulation"
+                      onClick={() => {
+                        handleLoginClick(navigate, isAuthenticated, user);
+                        setIsMobileMenuOpen(false);
+                      }}
+                    >
+                      Login
+                    </Button>
+                  )}
+                  
                   {/* Mobile Policies Section */}
                   <div className="border-t pt-4 mt-4">
                     <div className="px-4 py-2 text-sm font-semibold text-gray-500">Policies</div>

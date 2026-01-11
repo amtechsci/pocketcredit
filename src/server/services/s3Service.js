@@ -14,10 +14,8 @@ const loadEnv = () => {
   let loaded = false;
   for (const p of possiblePaths) {
     if (fs.existsSync(p)) {
-      console.log(`Trying to load .env from: ${p}`);
       const result = require('dotenv').config({ path: p });
       if (!result.error) {
-        console.log(`✅ Loaded .env from ${p}`);
         loaded = true;
         // We don't break immediately because we might want to overlay, 
         // but typically one is enough. Let's keep going to ensure we get *some* variables if split.
@@ -43,14 +41,6 @@ loadEnv();
 const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
-
-// Log S3 configuration on startup
-console.log('🔧 S3 Configuration:');
-console.log('  AWS_REGION:', process.env.AWS_REGION || 'ap-south-1');
-console.log('  AWS_S3_BUCKET:', process.env.AWS_S3_BUCKET || 'NOT SET');
-console.log('  S3_PREFIX:', process.env.S3_PREFIX || 'pocket (default)');
-console.log('  AWS_ACCESS_KEY_ID:', process.env.AWS_ACCESS_KEY_ID ? '✓ Set' : '✗ Not Set');
-console.log('  AWS_SECRET_ACCESS_KEY:', process.env.AWS_SECRET_ACCESS_KEY ? '✓ Set' : '✗ Not Set');
 
 // Initialize S3 Client
 const s3Client = new S3Client({

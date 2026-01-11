@@ -52,13 +52,10 @@ router.get('/pending', requireAuth, async (req, res) => {
         days_pending: 0 // Simplified calculation
       }));
 
-      console.log(`Processed ${responseData.length} applications successfully`);
       return responseData;
     })();
 
     const finalData = await Promise.race([queryPromise, timeoutPromise]);
-    const endTime = Date.now();
-    console.log(`⏱️ Pending applications query completed in ${endTime - startTime}ms`);
 
     res.json({
       success: true,

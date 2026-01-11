@@ -10,7 +10,6 @@ async function addCalculateBySalaryDateColumn() {
   });
 
   try {
-    console.log('🚀 Adding calculate_by_salary_date column to loan_plans table...\n');
 
     // Check if column already exists
     const [columns] = await pool.query(`
@@ -22,7 +21,6 @@ async function addCalculateBySalaryDateColumn() {
     `);
 
     if (columns.length > 0) {
-      console.log('✅ calculate_by_salary_date column already exists\n');
       await pool.end();
       return;
     }
@@ -35,7 +33,6 @@ async function addCalculateBySalaryDateColumn() {
       AFTER repayment_days
     `);
 
-    console.log('✅ Added calculate_by_salary_date column to loan_plans table\n');
     
     await pool.end();
   } catch (error) {
@@ -49,7 +46,6 @@ async function addCalculateBySalaryDateColumn() {
 if (require.main === module) {
   addCalculateBySalaryDateColumn()
     .then(() => {
-      console.log('Migration completed successfully');
       process.exit(0);
     })
     .catch((error) => {

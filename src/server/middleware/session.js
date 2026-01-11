@@ -52,17 +52,10 @@ const initializeSession = () => {
  * @param {Function} next - Express next function
  */
 const requireAuth = (req, res, next) => {
-  console.log('requireAuth: Checking session...');
-  console.log('requireAuth: req.session:', req.session);
-  console.log('requireAuth: req.session.authenticated:', req.session?.authenticated);
-  console.log('requireAuth: req.session.userId:', req.session?.userId);
-  
   if (req.session && req.session.authenticated && req.session.userId) {
-    console.log('requireAuth: Authentication successful');
     return next();
   }
   
-  console.log('requireAuth: Authentication failed');
   return res.status(401).json({
     status: 'error',
     message: 'Authentication required. Please login first.'

@@ -131,10 +131,6 @@ class CreditAnalyticsService {
           await new Promise(resolve => setTimeout(resolve, delay));
         }
 
-        console.log(`🔍 Requesting credit report for (attempt ${attempt}/${maxRetries}):`, { pan, mobile_no, client_ref_num });
-        if (attempt === 1) {
-          console.log('📋 Full request body:', JSON.stringify(requestBody, null, 2));
-        }
         
         const response = await axios.post(this.apiUrl, requestBody, {
           headers: {

@@ -17,13 +17,10 @@ const dbConfig = {
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  acquireTimeout: 10000, // 10 seconds
   // Connection settings
   charset: 'utf8mb4',
-  timezone: 'Asia/Kolkata',
+  timezone: '+05:30', // IST offset (Asia/Kolkata)
   connectTimeout: 10000, // 10 seconds
-  // Connection validation and retry settings
-  reconnect: false, // Let our custom logic handle reconnection
   // Enable SSL if required
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 };
@@ -42,15 +39,12 @@ const initializeDatabase = async () => {
       
       // Add connection pool event handlers for monitoring
       pool.on('connection', async (connection) => {
-        console.log('🔌 New database connection established');
       });
       
       pool.on('acquire', (connection) => {
-        console.log('📥 Connection acquired from pool');
       });
       
       pool.on('release', (connection) => {
-        console.log('📤 Connection released back to pool');
       });
       
       pool.on('error', (err) => {
@@ -62,9 +56,6 @@ const initializeDatabase = async () => {
       const connection = await getValidatedConnection();
       connection.release();
       
-      console.log('✅ MySQL database connection pool initialized successfully');
-      console.log(`📊 Connected to database: ${dbConfig.database}@${dbConfig.host}:${dbConfig.port}`);
-      console.log(`🔧 Pool settings: ${dbConfig.connectionLimit} max connections, ${dbConfig.acquireTimeout}ms timeout`);
       
       return pool;
     }
@@ -106,7 +97,6 @@ const testConnection = async () => {
     const connection = await currentPool.getConnection();
     await connection.execute('SELECT 1');
     connection.release();
-    console.log('✅ Database connection test successful');
     return true;
   } catch (error) {
     console.error('❌ Database connection test failed:', error.message);
@@ -121,7 +111,6 @@ const testConnection = async () => {
 const closeConnections = async () => {
   if (pool) {
     await pool.end();
-    console.log('🔌 Database connections closed');
     pool = null;
   }
 };
@@ -226,13 +215,11 @@ const getConnection = async () => {
 
 // Handle process termination
 process.on('SIGINT', async () => {
-  console.log('\n🛑 Received SIGINT. Closing database connections...');
   await closeConnections();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  console.log('\n🛑 Received SIGTERM. Closing database connections...');
   await closeConnections();
   process.exit(0);
 });

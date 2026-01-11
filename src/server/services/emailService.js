@@ -25,7 +25,9 @@ class EmailService {
       },
       tls: {
         rejectUnauthorized: false
-      }
+      },
+      debug: false,
+      logger: false
     });
   }
 
@@ -465,6 +467,124 @@ class EmailService {
               <li>Outstanding loan balance</li>
               <li>Terms and conditions</li>
             </ul>
+            <p>If you have any questions, please contact our support team.</p>
+            <p>Best regards,<br>Pocket Credit Team</p>
+          </div>
+          <div class="footer">
+            <p>This is an automated email. Please do not reply.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  /**
+   * Send NOC (No Dues Certificate) PDF via email
+   * @param {object} options - Email options
+   * @returns {Promise<object>} Email result
+   */
+  async sendNOCEmail(options) {
+    const {
+      loanId,
+      recipientEmail,
+      recipientName,
+      loanData,
+      pdfBuffer,
+      pdfFilename,
+      sentBy
+    } = options;
+
+    try {
+      console.log(`📧 Sending NOC email to ${recipientEmail}...`);
+
+      // Create email HTML template
+      const emailHTML = this.createNOCEmailTemplate({
+        recipientName,
+        loanData
+      });
+
+      // Send email
+      const info = await this.transporter.sendMail({
+        from: `"Pocket Credit" <${process.env.SMTP_USER || 'noreply@pocketcredit.in'}>`,
+        to: recipientEmail,
+        subject: `No Dues Certificate - Loan Application ${loanData.application_number}`,
+        html: emailHTML,
+        attachments: [
+          {
+            filename: pdfFilename || `No_Dues_Certificate_${loanData.application_number}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf'
+          }
+        ]
+      });
+
+      console.log('✅ NOC email sent successfully:', info.messageId);
+
+      // Log email in database
+      await this.logEmail({
+        loanId,
+        recipientEmail,
+        subject: `No Dues Certificate - Loan Application ${loanData.application_number}`,
+        status: 'sent',
+        sentBy,
+        messageId: info.messageId
+      });
+
+      return {
+        success: true,
+        messageId: info.messageId,
+        message: 'Email sent successfully'
+      };
+
+    } catch (error) {
+      console.error('❌ NOC email sending failed:', error);
+
+      // Log failed email
+      await this.logEmail({
+        loanId,
+        recipientEmail,
+        subject: `No Dues Certificate - Loan Application ${loanData.application_number}`,
+        status: 'failed',
+        sentBy,
+        errorMessage: error.message
+      });
+
+      throw new Error(`Failed to send email: ${error.message}`);
+    }
+  }
+
+  /**
+   * Create NOC email HTML template
+   * @param {object} data - Template data
+   * @returns {string} HTML email content
+   */
+  createNOCEmailTemplate(data) {
+    const { recipientName, loanData } = data;
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background-color: #059669; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; background-color: #f9fafb; }
+          .footer { padding: 20px; text-align: center; color: #6b7280; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>No Dues Certificate</h1>
+          </div>
+          <div class="content">
+            <p>Dear ${recipientName},</p>
+            <p>Congratulations! Your loan has been fully paid and cleared.</p>
+            <p>Your No Dues Certificate for Loan Application ${loanData.application_number} is attached to this email.</p>
+            <p>This certificate confirms that you have no outstanding dues with Spheeti Fintech Private Limited for the above-mentioned loan.</p>
+            <p>Please keep this certificate for your records. You may need it for future reference or documentation purposes.</p>
             <p>If you have any questions, please contact our support team.</p>
             <p>Best regards,<br>Pocket Credit Team</p>
           </div>

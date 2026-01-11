@@ -10,10 +10,8 @@ async function addDefaultLoanPlanFeatures() {
   });
 
   try {
-    console.log('🚀 Adding default loan plan features...\n');
 
     // 1. Add is_default column to loan_plans
-    console.log('1️⃣ Adding is_default column to loan_plans...');
     const [loanPlansColumns] = await pool.query(`
       SELECT COLUMN_NAME 
       FROM INFORMATION_SCHEMA.COLUMNS 
@@ -29,13 +27,10 @@ async function addDefaultLoanPlanFeatures() {
         COMMENT 'If 1, this plan is the default plan for new users/companies'
         AFTER is_active
       `);
-      console.log('✅ Added is_default column to loan_plans\n');
     } else {
-      console.log('✅ is_default column already exists\n');
     }
 
     // 2. Add default_loan_plan_id to companies table
-    console.log('2️⃣ Adding default_loan_plan_id to companies...');
     const [companiesColumns] = await pool.query(`
       SELECT COLUMN_NAME 
       FROM INFORMATION_SCHEMA.COLUMNS 
@@ -52,13 +47,10 @@ async function addDefaultLoanPlanFeatures() {
         AFTER is_verified,
         ADD FOREIGN KEY (default_loan_plan_id) REFERENCES loan_plans(id) ON DELETE SET NULL
       `);
-      console.log('✅ Added default_loan_plan_id to companies\n');
     } else {
-      console.log('✅ default_loan_plan_id column already exists\n');
     }
 
     // 3. Add selected_loan_plan_id to users table (for user profile plan selection)
-    console.log('3️⃣ Adding selected_loan_plan_id to users...');
     const [usersColumns] = await pool.query(`
       SELECT COLUMN_NAME 
       FROM INFORMATION_SCHEMA.COLUMNS 
@@ -75,13 +67,10 @@ async function addDefaultLoanPlanFeatures() {
         AFTER employment_type,
         ADD FOREIGN KEY (selected_loan_plan_id) REFERENCES loan_plans(id) ON DELETE SET NULL
       `);
-      console.log('✅ Added selected_loan_plan_id to users\n');
     } else {
-      console.log('✅ selected_loan_plan_id column already exists\n');
     }
 
     // 4. Set first active plan as default if no default exists
-    console.log('4️⃣ Setting default plan if none exists...');
     const [defaultPlans] = await pool.query(`
       SELECT id FROM loan_plans WHERE is_default = 1 AND is_active = 1 LIMIT 1
     `);
@@ -95,10 +84,8 @@ async function addDefaultLoanPlanFeatures() {
         await pool.query(`
           UPDATE loan_plans SET is_default = 1 WHERE id = ?
         `, [activePlans[0].id]);
-        console.log(`✅ Set plan ID ${activePlans[0].id} as default\n`);
       }
     } else {
-      console.log('✅ Default plan already exists\n');
     }
     
     await pool.end();
@@ -113,7 +100,6 @@ async function addDefaultLoanPlanFeatures() {
 if (require.main === module) {
   addDefaultLoanPlanFeatures()
     .then(() => {
-      console.log('Migration completed successfully');
       process.exit(0);
     })
     .catch((error) => {

@@ -1476,6 +1476,25 @@ class ApiService {
   async getExtensionHistory(loanId: number): Promise<ApiResponse<any>> {
     return this.request('GET', `/loan-extensions/history/${loanId}`);
   }
+
+  /**
+   * Credit Limit Management
+   */
+  async getPendingCreditLimit(): Promise<ApiResponse<any>> {
+    return this.request('GET', '/credit-limit/pending');
+  }
+
+  async getNextCreditLimit(): Promise<ApiResponse<any>> {
+    return this.request('GET', '/credit-limit/next');
+  }
+
+  async acceptCreditLimit(pendingLimitId: number): Promise<ApiResponse<any>> {
+    return this.request('POST', '/credit-limit/accept', { pendingLimitId });
+  }
+
+  async rejectCreditLimit(pendingLimitId: number): Promise<ApiResponse<any>> {
+    return this.request('POST', '/credit-limit/reject', { pendingLimitId });
+  }
 }
 
 // Export singleton instance

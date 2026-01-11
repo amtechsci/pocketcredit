@@ -61,7 +61,6 @@ async function extractPANFromPDF(pdfBuffer) {
  * Helper: Download and Upload Docs to S3
  */
 async function processAndUploadDocs(userId, transactionId, docs) {
-  console.log(`🔍 processAndUploadDocs called for User ${userId}, Txn ${transactionId}`);
   if (!docs || !Array.isArray(docs)) {
     console.log('⚠️ No docs array provided to processAndUploadDocs');
     return;
@@ -93,7 +92,6 @@ async function processAndUploadDocs(userId, transactionId, docs) {
       // Extract PAN from PANCR PDF documents
       let extractedPAN = null;
       if (docType === 'PANCR' && docExt === 'pdf') {
-        console.log(`   🔍 Attempting to extract PAN from ${docType} PDF...`);
         extractedPAN = await extractPANFromPDF(buffer);
         
         if (extractedPAN) {
@@ -156,16 +154,6 @@ async function processAndUploadDocs(userId, transactionId, docs) {
 router.post('/generate-kyc-url', requireAuth, async (req, res) => {
   const { mobile_number, application_id, first_name, last_name, email } = req.body;
   const userId = req.userId;
-
-  console.log('🔍 Digilocker KYC URL Request:', {
-    userId,
-    hasMobileNumber: !!mobile_number,
-    mobileNumber: mobile_number ? `${mobile_number.substring(0, 3)}***` : 'missing',
-    hasFirstName: !!first_name,
-    hasLastName: !!last_name,
-    hasEmail: !!email,
-    applicationId: application_id
-  });
 
   if (!mobile_number) {
     console.log('❌ Validation failed: Mobile number is required');
@@ -688,7 +676,6 @@ router.get('/check-pan-document/:applicationId', requireAuth, async (req, res) =
     const docs = verificationData.docs || verificationData.digilockerFiles || [];
     const docsArray = Array.isArray(docs) ? docs : [];
 
-    console.log(`🔍 Checking PAN document for user ${userId}, application ${applicationId}`);
     console.log(`📄 Documents array length: ${docsArray.length}`);
 
     // Check if PAN document exists in documents

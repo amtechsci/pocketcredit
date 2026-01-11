@@ -33,6 +33,7 @@ import { DashboardHeader } from '../DashboardHeader';
 import { ApplicationFlow } from '../ApplicationFlow';
 import { HoldBanner } from '../HoldBanner';
 import { GraduationUpsellCard } from '../GraduationUpsellCard';
+import { CreditLimitIncreaseModal } from '../modals/CreditLimitIncreaseModal';
 
 // Types for dashboard data
 interface DashboardData {
@@ -134,6 +135,8 @@ export function DynamicDashboardPage() {
   const [selectedLoanDetails, setSelectedLoanDetails] = useState<any>(null);
   const [showLoanDetailsModal, setShowLoanDetailsModal] = useState(false);
   const [loanDocumentStatus, setLoanDocumentStatus] = useState<{ [loanId: number]: { allUploaded: boolean; hasPending: boolean } }>({});
+  const [pendingCreditLimit, setPendingCreditLimit] = useState<any>(null);
+  const [showCreditLimitModal, setShowCreditLimitModal] = useState(false);
 
   // Combine applied loans (pre-disbursal) and running loans (account_manager) for "Active Loans" display
   // This ensures all in-progress loans are visible to the user
@@ -342,6 +345,18 @@ export function DynamicDashboardPage() {
         return;
       } else {
         setError('Failed to load dashboard data');
+      }
+
+      // Check for pending credit limit increase
+      try {
+        const creditLimitResponse = await apiService.getPendingCreditLimit();
+        if (creditLimitResponse.success && creditLimitResponse.hasPendingLimit && creditLimitResponse.data) {
+          setPendingCreditLimit(creditLimitResponse.data);
+          setShowCreditLimitModal(true);
+        }
+      } catch (creditLimitError) {
+        console.error('Error fetching pending credit limit:', creditLimitError);
+        // Don't block dashboard if this fails
       }
     } catch (error: any) {
       console.error('Failed to load dashboard data:', error);
@@ -1718,6 +1733,20 @@ export function DynamicDashboardPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Credit Limit Increase Modal */}
+      {pendingCreditLimit && (
+        <CreditLimitIncreaseModal
+          isOpen={showCreditLimitModal}
+          onClose={() => setShowCreditLimitModal(false)}
+          pendingLimit={pendingCreditLimit}
+          onAccept={async () => {
+            // Refresh dashboard data after accepting
+            await loadDashboardData();
+            setPendingCreditLimit(null);
+          }}
+        />
       )}
     </div>
   );

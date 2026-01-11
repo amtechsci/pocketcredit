@@ -45,7 +45,7 @@ class ActivityProcessor {
       });
 
       this.redisClient.on('connect', () => {
-        console.log('✅ Redis connected for activity processing');
+        // Redis connected
       });
 
       await this.redisClient.connect();
@@ -58,13 +58,11 @@ class ActivityProcessor {
    */
   async processActivities() {
     if (this.isProcessing) {
-      console.log('⏳ Activity processing already in progress, skipping...');
       return;
     }
 
     try {
       this.isProcessing = true;
-      console.log('🔄 Starting activity processing...');
 
       const client = await this.initializeRedis();
       await initializeDatabase();
@@ -73,7 +71,6 @@ class ActivityProcessor {
       const activities = await this.getActivityBatch(client);
       
       if (activities.length === 0) {
-        console.log('📭 No activities to process');
         return;
       }
 
@@ -183,8 +180,6 @@ class ActivityProcessor {
    * Start the activity processor
    */
   async start() {
-    console.log('🚀 Starting Activity Processor...');
-    
     // Process immediately on start
     await this.processActivities();
     
@@ -192,8 +187,6 @@ class ActivityProcessor {
     this.intervalId = setInterval(async () => {
       await this.processActivities();
     }, this.processingInterval);
-
-    console.log(`⏰ Activity processor started (interval: ${this.processingInterval / 1000}s)`);
   }
 
   /**

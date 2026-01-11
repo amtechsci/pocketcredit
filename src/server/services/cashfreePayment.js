@@ -40,8 +40,6 @@ class CashfreePaymentService {
             if (this.nodeEnv === 'production') {
                 console.error('❌ ERROR: Cashfree credentials are required in production!');
             }
-        } else {
-            console.log(`[CashfreePayment] Initialized - Environment: ${this.isProduction ? 'PRODUCTION' : 'SANDBOX'}`);
         }
     }
 

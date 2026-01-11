@@ -27,9 +27,6 @@ if (!CASHFREE_CLIENT_ID || !CASHFREE_CLIENT_SECRET) {
 }
 
 // Log environment on startup
-console.log(`[eNACH] Environment: ${NODE_ENV}`);
-console.log(`[eNACH] API Base: ${CASHFREE_API_BASE}`);
-console.log(`[eNACH] Production Mode: ${IS_PRODUCTION ? '✅ YES' : '❌ NO (Sandbox)'}`);
 
 // Helper to create Cashfree headers
 const getCashfreeHeaders = (idempotencyKey = null) => {
@@ -53,37 +50,25 @@ const getCashfreeHeaders = (idempotencyKey = null) => {
 // Helper to log API calls with full details
 const logApiCall = (method, url, headers, body, response = null, error = null) => {
     const logId = `[${Date.now()}]`;
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`${logId} [eNACH API CALL] ${method.toUpperCase()} ${url}`);
-    console.log(`${'='.repeat(80)}`);
+    
     
     // Log Headers (mask sensitive data)
     const safeHeaders = { ...headers };
     if (safeHeaders['x-client-secret']) {
         safeHeaders['x-client-secret'] = '***MASKED***';
     }
-    console.log(`${logId} [HEADERS]:`, JSON.stringify(safeHeaders, null, 2));
     
-    // Log Request Body
-    if (body) {
-        console.log(`${logId} [REQUEST BODY]:`, JSON.stringify(body, null, 2));
-    }
     
     // Log Response or Error
     if (error) {
-        console.log(`${logId} [ERROR]:`, {
+        console.error(`${logId} [ERROR]:`, {
             status: error.response?.status || 'N/A',
             statusText: error.response?.statusText || 'N/A',
             data: error.response?.data || error.message,
             code: error.code || 'N/A'
         });
-    } else if (response) {
-        console.log(`${logId} [RESPONSE STATUS]:`, response.status, response.statusText);
-        console.log(`${logId} [RESPONSE HEADERS]:`, JSON.stringify(response.headers || {}, null, 2));
-        console.log(`${logId} [RESPONSE DATA]:`, JSON.stringify(response.data || {}, null, 2));
     }
     
-    console.log(`${'='.repeat(80)}\n`);
 };
 
 /**
@@ -95,19 +80,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
     let subscriptionId = null; // Declare at function scope for error handling
     let planId = null;
     
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`[eNACH STARTED] ${requestId}`);
-    console.log(`${'='.repeat(80)}`);
-    console.log(`[${requestId}] [INCOMING REQUEST]`);
-    console.log(`[${requestId}] [METHOD]: POST /api/enach/create-subscription`);
-    console.log(`[${requestId}] [HEADERS]:`, JSON.stringify({
-        'content-type': req.headers['content-type'],
-        'authorization': req.headers['authorization'] ? 'Bearer ***MASKED***' : 'N/A',
-        'user-agent': req.headers['user-agent'],
-        'x-forwarded-for': req.headers['x-forwarded-for']
-    }, null, 2));
-    console.log(`[${requestId}] [REQUEST BODY]:`, JSON.stringify(req.body, null, 2));
-    console.log(`${'='.repeat(80)}\n`);
+    
     
     try {
         // Validate Cashfree configuration
@@ -147,13 +120,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             });
         }
 
-        console.log(`[${requestId}] [eNACH] Fetching loan application:`, {
-            applicationId: applicationIdInt,
-            userId: userId,
-            applicationIdType: typeof applicationIdInt,
-            userIdType: typeof userId
-        });
-
         const loanQuery = `
       SELECT 
         la.*,
@@ -170,13 +136,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
     `;
 
         const loans = await executeQuery(loanQuery, [applicationIdInt, userId]);
-
-        console.log(`[${requestId}] [eNACH] Loan query result:`, {
-            found: loans && loans.length > 0,
-            count: loans ? loans.length : 0,
-            applicationId: applicationIdInt,
-            userId: userId
-        });
 
         if (!loans || loans.length === 0) {
             // Check if application exists but belongs to different user
@@ -282,14 +241,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             
             logApiCall('POST', planUrl, planHeaders, planPayload, planResponse);
             
-            console.log(`[${requestId}] [eNACH] Plan created successfully: ${planId}`, {
-                cf_plan_id: planResponse.data.cf_plan_id,
-                plan_type: planResponse.data.plan_type,
-                plan_max_amount: planResponse.data.plan_max_amount,
-                plan_max_cycles: planResponse.data.plan_max_cycles,
-                status: planResponse.data.plan_status
-            });
-            
             // Verify the plan was created with correct type
             if (planResponse.data.plan_type !== 'ON_DEMAND') {
                 console.error(`[eNACH] ⚠️ WARNING: Plan created with wrong type! Expected ON_DEMAND, got ${planResponse.data.plan_type}`);
@@ -386,12 +337,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             // The subscription will be created and authorization link will be sent via SMS/Email
         };
 
-        console.log(`[${requestId}] [eNACH] Creating subscription for application ${applicationIdInt}`, {
-            subscription_id: subscriptionId,
-            plan_id: planId,
-            environment: IS_PRODUCTION ? 'PRODUCTION' : 'SANDBOX'
-        });
-
         const subscriptionHeaders = getCashfreeHeaders(subscriptionId);
         const subscriptionUrl = `${CASHFREE_API_BASE}/subscriptions`;
         
@@ -416,20 +361,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         }
 
         // Log full response structure to debug
-        console.log(`[eNACH] Subscription created: ${subscriptionId}`, {
-            cf_subscription_id: subscriptionResponse.data.cf_subscription_id,
-            status: subscriptionResponse.data.subscription_status,
-            environment: IS_PRODUCTION ? 'PRODUCTION' : 'SANDBOX',
-            response_keys: Object.keys(subscriptionResponse.data || {}),
-            has_authorization_details: !!subscriptionResponse.data.authorization_details,
-            has_subscription_session_id: !!subscriptionResponse.data.subscription_session_id,
-            has_checkout_url: !!subscriptionResponse.data.checkout_url,
-            has_subscription_checkout_url: !!subscriptionResponse.data.subscription_checkout_url,
-            subscription_session_id: subscriptionResponse.data.subscription_session_id?.substring(0, 50) + '...',
-            checkout_url: subscriptionResponse.data.checkout_url,
-            subscription_checkout_url: subscriptionResponse.data.subscription_checkout_url,
-            full_response: JSON.stringify(subscriptionResponse.data, null, 2)
-        });
+
 
         // Extract authorization URL from response (dashboard-based flow)
         // According to Cashfree docs, authorization_url is in authorization_details or directly in response
@@ -439,52 +371,31 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         // Priority 1: Check authorization_details.auth_link (most common location per Cashfree docs)
         if (subscriptionResponse.data.authorization_details?.auth_link) {
             authorizationUrl = subscriptionResponse.data.authorization_details.auth_link;
-            console.log(`[eNACH] Found authorization URL in authorization_details.auth_link: ${authorizationUrl}`);
         }
         // Priority 2: Check authorization_details.payment_method.enach.authorization_url
         // For eNACH, Cashfree may nest the URL in payment_method.enach
         else if (subscriptionResponse.data.authorization_details?.payment_method?.enach?.authorization_url) {
             authorizationUrl = subscriptionResponse.data.authorization_details.payment_method.enach.authorization_url;
-            console.log(`[eNACH] Found authorization URL in authorization_details.payment_method.enach: ${authorizationUrl}`);
         }
         // Priority 3: Check authorization_details.authorization_url (direct)
         else if (subscriptionResponse.data.authorization_details?.authorization_url) {
             authorizationUrl = subscriptionResponse.data.authorization_details.authorization_url;
-            console.log(`[eNACH] Found authorization URL in authorization_details.authorization_url: ${authorizationUrl}`);
         } 
         // Priority 4: Check direct authorization_url field in response root
         else if (subscriptionResponse.data.authorization_url) {
             authorizationUrl = subscriptionResponse.data.authorization_url;
-            console.log(`[eNACH] Found authorization URL in response root: ${authorizationUrl}`);
         } 
         // Priority 5: Check alternative field names in response root
         else if (subscriptionResponse.data.auth_link) {
             authorizationUrl = subscriptionResponse.data.auth_link;
-            console.log(`[eNACH] Found authorization URL in response root auth_link: ${authorizationUrl}`);
         } 
         else if (subscriptionResponse.data.authorization_link) {
             authorizationUrl = subscriptionResponse.data.authorization_link;
-            console.log(`[eNACH] Found authorization URL in response root authorization_link: ${authorizationUrl}`);
         }
         
         // Log what we found (or didn't find) for debugging
         if (!authorizationUrl) {
-            console.log(`[eNACH] No authorization URL found in response. Checking response structure...`);
-            console.log(`[eNACH] Response has authorization_details: ${!!subscriptionResponse.data.authorization_details}`);
-            if (subscriptionResponse.data.authorization_details) {
-                const authDetails = subscriptionResponse.data.authorization_details;
-                console.log(`[eNACH] authorization_details keys:`, Object.keys(authDetails));
-                console.log(`[eNACH] authorization_details.auth_link:`, authDetails.auth_link);
-                console.log(`[eNACH] authorization_details.authorization_url:`, authDetails.authorization_url);
-                // Check if payment_method exists
-                if (authDetails.payment_method) {
-                    console.log(`[eNACH] payment_method keys:`, Object.keys(authDetails.payment_method));
-                    if (authDetails.payment_method.enach) {
-                        console.log(`[eNACH] payment_method.enach keys:`, Object.keys(authDetails.payment_method.enach));
-                        console.log(`[eNACH] payment_method.enach.authorization_url:`, authDetails.payment_method.enach.authorization_url);
-                    }
-                }
-            }
+
         }
 
         // Step 3: Call Subscription Pay API to create an AUTH and get redirect URL
@@ -521,8 +432,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             };
             
             try {
-                console.log(`[${requestId}] [eNACH] Step 3: Calling Subscription Pay API to create AUTH and get redirect URL`);
-                
                 const authHeaders = getCashfreeHeaders(paymentId);
                 const authUrl = `${CASHFREE_API_BASE}/subscriptions/pay`;
                 
@@ -559,12 +468,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                     const payload = authPaymentResponse.data.data.payload;
                     const method = authPaymentResponse.data.data.method || (action === 'post' ? 'post' : 'get');
                     
-                    console.log(`[eNACH] ✅ Retrieved authorization data from Subscription Pay API`);
-                    console.log(`[eNACH] URL: ${authorizationUrl}`);
-                    console.log(`[eNACH] Action: ${action || 'N/A'}`);
-                    console.log(`[eNACH] Method: ${method || 'N/A'}`);
-                    console.log(`[eNACH] Channel: ${authPaymentResponse.data.channel || 'N/A'}`);
-                    console.log(`[eNACH] Payment status: ${authPaymentResponse.data.payment_status || 'N/A'}`);
                     
                     // Store additional redirect info for frontend
                     // We'll include this in the response so frontend can handle POST redirects
@@ -575,8 +478,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                         url: authorizationUrl
                     };
                 } else {
-                    console.warn(`[eNACH] ⚠️  Subscription Pay API response does not contain data.url`);
-                    console.warn(`[eNACH] Response structure:`, JSON.stringify(authPaymentResponse.data, null, 2));
                 }
             } catch (authError) {
                 const authHeaders = getCashfreeHeaders(paymentId);
@@ -591,7 +492,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 });
                 
                 // Don't fail the entire request - we can still fall back to SMS flow
-                console.warn(`[eNACH] Will fall back to SMS/Email flow if no other URL is found`);
             }
         }
 
@@ -599,12 +499,10 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         // Check for direct checkout_url in response
         if (!authorizationUrl && subscriptionResponse.data.checkout_url) {
             authorizationUrl = subscriptionResponse.data.checkout_url;
-            console.log(`[eNACH] Found checkout_url in response: ${authorizationUrl}`);
         }
         // Check for subscription_checkout_url
         else if (!authorizationUrl && subscriptionResponse.data.subscription_checkout_url) {
             authorizationUrl = subscriptionResponse.data.subscription_checkout_url;
-            console.log(`[eNACH] Found subscription_checkout_url in response: ${authorizationUrl}`);
         }
         // If still no URL, construct subscription checkout URL
         // Correct format: https://payments.cashfree.com/subscriptions/checkout/{subscription_session_id}
@@ -619,8 +517,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             // Cashfree requires an encoded/encrypted token that is only sent via SMS/Email
             // The raw session ID (like "sub_session_...") does NOT work in checkout URL
             // We cannot construct a valid URL without the encoded token from SMS
-            console.warn(`[eNACH] Cannot construct checkout URL - raw subscription_session_id will not work`);
-            console.warn(`[eNACH] Cashfree only provides encoded checkout token via SMS/Email`);
             // Do NOT set authorizationUrl - let it remain null so frontend handles SMS flow
         }
         
@@ -631,7 +527,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             console.warn('[eNACH] Full response structure logged above for debugging.');
         }
 
-        console.log(`[eNACH] Authorization URL: ${authorizationUrl || 'null (SMS flow)'}`);
 
         // Store subscription details in database (ALWAYS save, regardless of authorization URL)
         // This is critical for webhook matching - we need subscription_id in database
@@ -661,7 +556,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
                 JSON.stringify(subscriptionResponse.data),
                 authorizationUrl || null
             ]);
-            console.log(`[eNACH] ✅ Subscription saved to database: ${subscriptionId}`);
         } catch (dbError) {
             console.error('[eNACH] ❌ Error saving subscription to database:', dbError);
             // Continue anyway - don't fail the request if DB save fails
@@ -673,8 +567,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
         // We should inform the frontend about this
         let finalResponse;
         if (!authorizationUrl) {
-            console.log(`[${requestId}] [eNACH] No authorization URL - Cashfree will send authorization link via SMS`);
-            
             // Return success response with SMS flow indicator
             finalResponse = {
                 success: true,
@@ -709,11 +601,7 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
             };
         }
         
-        console.log(`\n${'='.repeat(80)}`);
-        console.log(`[eNACH ENDED] ${requestId}`);
-        console.log(`${'='.repeat(80)}`);
-        console.log(`[${requestId}] [RESPONSE TO CLIENT]:`, JSON.stringify(finalResponse, null, 2));
-        console.log(`${'='.repeat(80)}\n`);
+
         
         res.json(finalResponse);
 
@@ -773,12 +661,6 @@ router.post('/create-subscription', authenticateToken, async (req, res) => {
  */
 router.get('/subscription-status/:subscriptionId', authenticateToken, async (req, res) => {
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`[eNACH STARTED] ${requestId} - GET /subscription-status/:subscriptionId`);
-    console.log(`${'='.repeat(80)}`);
-    console.log(`[${requestId}] [INCOMING REQUEST]`);
-    console.log(`[${requestId}] [PARAMS]:`, JSON.stringify(req.params, null, 2));
-    console.log(`${'='.repeat(80)}\n`);
     
     try {
         const { subscriptionId } = req.params;
@@ -814,9 +696,6 @@ router.get('/subscription-status/:subscriptionId', authenticateToken, async (req
             data: statusResponse.data
         };
         
-        console.log(`[${requestId}] [RESPONSE]:`, JSON.stringify(successResponse, null, 2));
-        console.log(`[eNACH ENDED] ${requestId}\n`);
-        
         res.json(successResponse);
 
     } catch (error) {
@@ -832,9 +711,6 @@ router.get('/subscription-status/:subscriptionId', authenticateToken, async (req
             error: error.response?.data?.message || error.message
         };
         
-        console.log(`[${requestId}] [RESPONSE]:`, JSON.stringify(errorResponse, null, 2));
-        console.log(`[eNACH ENDED] ${requestId}\n`);
-        
         res.status(500).json(errorResponse);
     }
 });
@@ -845,12 +721,6 @@ router.get('/subscription-status/:subscriptionId', authenticateToken, async (req
  */
 router.get('/subscription/:applicationId', authenticateToken, async (req, res) => {
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`[eNACH STARTED] ${requestId} - GET /subscription/:applicationId`);
-    console.log(`${'='.repeat(80)}`);
-    console.log(`[${requestId}] [INCOMING REQUEST]`);
-    console.log(`[${requestId}] [PARAMS]:`, JSON.stringify(req.params, null, 2));
-    console.log(`${'='.repeat(80)}\n`);
     
     try {
         await initializeDatabase();
@@ -879,9 +749,6 @@ router.get('/subscription/:applicationId', authenticateToken, async (req, res) =
             };
         }
         
-        console.log(`[${requestId}] [RESPONSE]:`, JSON.stringify(response, null, 2));
-        console.log(`[eNACH ENDED] ${requestId}\n`);
-        
         res.json(response);
 
     } catch (error) {
@@ -891,9 +758,6 @@ router.get('/subscription/:applicationId', authenticateToken, async (req, res) =
             success: false,
             message: 'Failed to fetch subscription'
         };
-        
-        console.log(`[${requestId}] [RESPONSE]:`, JSON.stringify(errorResponse, null, 2));
-        console.log(`[eNACH ENDED] ${requestId}\n`);
         
         res.status(500).json(errorResponse);
     }

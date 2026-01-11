@@ -51,12 +51,9 @@ const initializeRedis = async () => {
       
       // Set up event listeners
       redisClient.on('connect', () => {
-        console.log('✅ Redis client connected successfully');
       });
       
       redisClient.on('ready', () => {
-        console.log('✅ Redis client ready to receive commands');
-        console.log(`📊 Connected to Redis: ${redisConfig.host}:${redisConfig.port}`);
       });
       
       redisClient.on('error', (error) => {
@@ -64,11 +61,9 @@ const initializeRedis = async () => {
       });
       
       redisClient.on('close', () => {
-        console.log('🔌 Redis connection closed');
       });
       
       redisClient.on('reconnecting', () => {
-        console.log('🔄 Redis client reconnecting...');
       });
       
       // Test the connection
@@ -114,7 +109,6 @@ const testConnection = async () => {
     
     const result = await redisClient.ping();
     if (result === 'PONG') {
-      console.log('✅ Redis connection test successful');
       return true;
     } else {
       console.error('❌ Redis ping failed');
@@ -133,7 +127,6 @@ const testConnection = async () => {
 const closeConnection = async () => {
   if (redisClient) {
     await redisClient.quit();
-    console.log('🔌 Redis connection closed');
     redisClient = null;
   }
 };
@@ -260,12 +253,10 @@ const expire = async (key, ttl) => {
 
 // Handle process termination
 process.on('SIGINT', async () => {
-  console.log('\n🛑 Received SIGINT. Closing Redis connection...');
   await closeConnection();
 });
 
 process.on('SIGTERM', async () => {
-  console.log('\n🛑 Received SIGTERM. Closing Redis connection...');
   await closeConnection();
 });
 

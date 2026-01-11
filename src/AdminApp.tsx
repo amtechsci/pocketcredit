@@ -15,10 +15,12 @@ import { SystemSettings } from './admin/pages/SystemSettings';
 import { KFSDocument } from './admin/pages/KFSDocument';
 import { LoanAgreementDocument } from './admin/pages/LoanAgreementDocument';
 import { ExtensionLetterDocument } from './admin/pages/ExtensionLetterDocument';
+import { NOCDocument } from './admin/pages/NOCDocument';
 import { SearchResultsPage } from './admin/pages/SearchResultsPage';
 import { PoliciesManagement } from './admin/pages/PoliciesManagement';
 import { AdminProvider } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
+import { useAdminAutoLogout } from './admin/hooks/useAdminAutoLogout';
 
 export interface AdminUser {
   id: string;
@@ -49,9 +51,16 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
 
   const handleLogout = () => {
     localStorage.removeItem('adminUser');
+    localStorage.removeItem('adminToken');
     setCurrentUser(null);
     navigate('/admin/login');
   };
+
+  // Auto-logout after 20 minutes of inactivity
+  useAdminAutoLogout({
+    onLogout: handleLogout,
+    enabled: !!currentUser
+  });
 
   const isActive = (path: string) => {
     return location.pathname === path;
@@ -333,6 +342,11 @@ export default function AdminApp() {
       <Route path="extension-letter/:loanId" element={
         <ProtectedRoute>
           <ExtensionLetterDocument />
+        </ProtectedRoute>
+      } />
+      <Route path="noc/:loanId" element={
+        <ProtectedRoute>
+          <NOCDocument />
         </ProtectedRoute>
       } />
       <Route path="search" element={

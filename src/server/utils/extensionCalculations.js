@@ -10,7 +10,8 @@ const {
   getNextSalaryDate,
   getSalaryDateForMonth,
   formatDateToString,
-  parseDateComponents
+  parseDateComponents,
+  toDecimal2
 } = require('./loanCalculations');
 
 const EXTENSION_FEE_RATE = 0.21; // 21% of principal
@@ -358,10 +359,10 @@ function calculateExtensionFees(loan, extensionDate = null) {
   }
   
   // Calculate extension fee (21% of principal)
-  const extensionFee = Math.round(principal * EXTENSION_FEE_RATE * 100) / 100;
+  const extensionFee = toDecimal2(principal * EXTENSION_FEE_RATE);
 
   // Calculate GST (18% of extension fee)
-  const gstAmount = Math.round(extensionFee * GST_RATE * 100) / 100;
+  const gstAmount = toDecimal2(extensionFee * GST_RATE);
 
   // Calculate interest till date
   const processedDateStr = parseDateToString(loan.processed_at);
@@ -373,7 +374,7 @@ function calculateExtensionFees(loan, extensionDate = null) {
   // Interest calculation: from processed_at to extensionDate (inclusive)
   const interestDays = calculateDaysBetween(processedDateStr, extensionDate);
   const interestRatePerDay = parseFloat(loan.processed_interest_percent_per_day || loan.interest_percent_per_day || 0.001);
-  const interestTillDate = Math.round(principal * interestRatePerDay * interestDays * 100) / 100;
+  const interestTillDate = toDecimal2(principal * interestRatePerDay * interestDays);
   
   console.log(`📊 Extension Fee Details:
     Principal: ₹${principal}
@@ -384,7 +385,7 @@ function calculateExtensionFees(loan, extensionDate = null) {
     Interest Till Date: ₹${interestTillDate}`);
 
   // Total extension amount
-  const totalExtensionAmount = Math.round((extensionFee + gstAmount + interestTillDate) * 100) / 100;
+  const totalExtensionAmount = toDecimal2(extensionFee + gstAmount + interestTillDate);
 
   console.log(`✅ Final Extension Payment: ₹${totalExtensionAmount} (Fee: ₹${extensionFee} + GST: ₹${gstAmount} + Interest: ₹${interestTillDate})`);
 
@@ -492,10 +493,10 @@ function calculateOutstandingBalance(loan) {
   }
 
   // Calculate GST on post service fee (18% of post service fee)
-  const postServiceFeeGST = Math.round(postServiceFee * GST_RATE * 100) / 100;
+  const postServiceFeeGST = toDecimal2(postServiceFee * GST_RATE);
 
   // Outstanding balance = Principal + Post Service Fee + GST on Post Service Fee
-  const outstandingBalance = Math.round((principal + postServiceFee + postServiceFeeGST) * 100) / 100;
+  const outstandingBalance = toDecimal2(principal + postServiceFee + postServiceFeeGST);
 
   console.log(`📊 Outstanding Balance Calculation:
     Principal: ₹${principal}

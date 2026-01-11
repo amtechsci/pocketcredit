@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { 
   Plus, 
@@ -24,8 +24,10 @@ import {
   Download,
   Upload,
   Filter,
-  RefreshCw
+  RefreshCw,
+  Loader2
 } from 'lucide-react';
+import { adminApiService } from '../../services/adminApi';
 
 interface AdminUser {
   id: string;
@@ -34,14 +36,28 @@ interface AdminUser {
   role: 'superadmin' | 'manager' | 'officer';
   permissions: string[];
   status?: 'active' | 'inactive';
+  is_active?: boolean;
   lastLogin?: string;
+  last_login?: string;
   createdAt?: string;
+  created_at?: string;
   phone?: string;
   department?: string;
 }
 
+interface ActivityLog {
+  id: string;
+  action: string;
+  type: string;
+  metadata: any;
+  timestamp: string;
+  priority: string;
+  ip_address?: string;
+  user_agent?: string;
+}
+
 export function AdminTeamManagement() {
-    const navigate = useNavigate();
+  const navigate = useNavigate();
   const params = useParams();
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
@@ -54,88 +70,45 @@ export function AdminTeamManagement() {
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
   const [viewingUser, setViewingUser] = useState<AdminUser | null>(null);
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [teamMembers, setTeamMembers] = useState<AdminUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState({
+    total: 0,
+    superadmin: 0,
+    manager: 0,
+    officer: 0,
+    active: 0,
+    inactive: 0
+  });
+  const [activityData, setActivityData] = useState<{
+    activities: ActivityLog[];
+    stats: { today: number; week: number; month: number };
+  } | null>(null);
+  const [loadingActivity, setLoadingActivity] = useState(false);
 
   const [newUser, setNewUser] = useState({
     name: '',
     email: '',
+    password: '',
     role: 'officer' as 'superadmin' | 'manager' | 'officer',
-    permissions: [] as string[]
+    permissions: [] as string[],
+    phone: '',
+    department: ''
   });
 
-  const teamMembers: AdminUser[] = [
-    {
-      id: 'admin1',
-      name: 'Sarah Johnson',
-      email: 'sarah.johnson@pocketcredit.com',
-      role: 'superadmin',
-      permissions: ['*'],
-      status: 'active',
-      lastLogin: '2025-01-09T10:30:00Z',
-      createdAt: '2024-01-15T09:00:00Z',
-      phone: '+1 555-0123',
-      department: 'IT'
-    },
-    {
-      id: 'manager1',
-      name: 'Raj Patel',
-      email: 'raj.patel@pocketcredit.com',
-      role: 'manager',
-      permissions: ['approve_loans', 'reject_loans', 'view_users', 'edit_loans', 'manage_officers'],
-      status: 'active',
-      lastLogin: '2025-01-09T09:15:00Z',
-      createdAt: '2024-03-20T10:00:00Z',
-      phone: '+91 98765 43210',
-      department: 'Operations'
-    },
-    {
-      id: 'manager2',
-      name: 'Priya Singh',
-      email: 'priya.singh@pocketcredit.com',
-      role: 'manager',
-      permissions: ['approve_loans', 'reject_loans', 'view_users', 'edit_loans', 'manage_officers'],
-      status: 'active',
-      lastLogin: '2025-01-08T16:45:00Z',
-      createdAt: '2024-05-10T14:30:00Z',
-      phone: '+91 87654 32109',
-      department: 'Risk Management'
-    },
-    {
-      id: 'officer1',
-      name: 'Amit Sharma',
-      email: 'amit.sharma@pocketcredit.com',
-      role: 'officer',
-      permissions: ['view_loans', 'view_users', 'add_notes', 'follow_up'],
-      status: 'active',
-      lastLogin: '2025-01-09T08:20:00Z',
-      createdAt: '2024-07-15T11:00:00Z',
-      phone: '+91 76543 21098',
-      department: 'Customer Service'
-    },
-    {
-      id: 'officer2',
-      name: 'Vikram Singh',
-      email: 'vikram.singh@pocketcredit.com',
-      role: 'officer',
-      permissions: ['view_loans', 'view_users', 'add_notes', 'follow_up'],
-      status: 'inactive',
-      lastLogin: '2025-01-05T17:30:00Z',
-      createdAt: '2024-09-01T13:15:00Z',
-      phone: '+91 65432 10987',
-      department: 'Collections'
-    },
-    {
-      id: 'officer3',
-      name: 'Neha Gupta',
-      email: 'neha.gupta@pocketcredit.com',
-      role: 'officer',
-      permissions: ['view_loans', 'view_users', 'add_notes', 'follow_up'],
-      status: 'active',
-      lastLogin: '2025-01-09T11:45:00Z',
-      createdAt: '2024-11-20T09:30:00Z',
-      phone: '+91 54321 09876',
-      department: 'Verification'
-    }
-  ];
+  const [editFormData, setEditFormData] = useState({
+    name: '',
+    email: '',
+    role: 'officer' as 'superadmin' | 'manager' | 'officer',
+    permissions: [] as string[],
+    phone: '',
+    department: '',
+    is_active: true
+  });
+
+  const [permissionsFormData, setPermissionsFormData] = useState<string[]>([]);
 
   const availablePermissions = [
     { id: 'approve_loans', label: 'Approve Loans', description: 'Can approve loan applications' },
@@ -150,6 +123,81 @@ export function AdminTeamManagement() {
     { id: 'view_analytics', label: 'View Analytics', description: 'Can access analytics dashboard' },
     { id: 'export_data', label: 'Export Data', description: 'Can export reports and data' }
   ];
+
+  // Fetch team members
+  const fetchTeamMembers = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await adminApiService.getTeamMembers(1, 100, {
+        role: roleFilter !== 'all' ? roleFilter : undefined,
+        search: searchTerm || undefined
+      });
+
+      if (response.status === 'success' && response.data) {
+        const transformedMembers = response.data.admins.map((admin: any) => ({
+          id: admin.id,
+          name: admin.name,
+          email: admin.email,
+          role: admin.role,
+          permissions: admin.permissions || [],
+          status: admin.is_active ? 'active' : 'inactive',
+          is_active: admin.is_active,
+          lastLogin: admin.last_login,
+          createdAt: admin.created_at,
+          phone: admin.phone,
+          department: admin.department
+        }));
+        setTeamMembers(transformedMembers);
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch team members:', err);
+      setError(err.message || 'Failed to fetch team members');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch team statistics
+  const fetchStats = async () => {
+    try {
+      const response = await adminApiService.getTeamStats();
+      if (response.status === 'success' && response.data) {
+        setStats(response.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch stats:', err);
+    }
+  };
+
+  // Fetch activity for a user
+  const fetchActivity = async (userId: string) => {
+    try {
+      setLoadingActivity(true);
+      const response = await adminApiService.getTeamMemberActivity(userId, 50);
+      if (response.status === 'success' && response.data) {
+        setActivityData(response.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch activity:', err);
+    } finally {
+      setLoadingActivity(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTeamMembers();
+    fetchStats();
+  }, []);
+
+  useEffect(() => {
+    // Debounce search
+    const timer = setTimeout(() => {
+      fetchTeamMembers();
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm, roleFilter]);
 
   const getRoleColor = (role: string) => {
     switch (role) {
@@ -184,54 +232,188 @@ export function AdminTeamManagement() {
     return matchesSearch && matchesRole;
   });
 
-  const handleCreateUser = () => {
-    if (newUser.name && newUser.email) {
-      const user: AdminUser = {
-        id: `user_${Date.now()}`,
+  const handleCreateUser = async () => {
+    if (!newUser.name || !newUser.email || !newUser.password) {
+      setError('Name, email, and password are required');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError(null);
+      const response = await adminApiService.createTeamMember({
         name: newUser.name,
         email: newUser.email,
+        password: newUser.password,
         role: newUser.role,
-        permissions: getRolePermissions(newUser.role)
-      };
-      
-      console.log('Creating user:', user);
-      setShowAddModal(false);
-      setNewUser({ name: '', email: '', role: 'officer', permissions: [] });
+        permissions: newUser.permissions.length > 0 ? newUser.permissions : getRolePermissions(newUser.role),
+        phone: newUser.phone || undefined,
+        department: newUser.department || undefined
+      });
+
+      if (response.status === 'success') {
+        setShowAddModal(false);
+        setNewUser({ name: '', email: '', password: '', role: 'officer', permissions: [], phone: '', department: '' });
+        await fetchTeamMembers();
+        await fetchStats();
+      } else {
+        setError(response.message || 'Failed to create user');
+      }
+    } catch (err: any) {
+      console.error('Failed to create user:', err);
+      setError(err.message || 'Failed to create user');
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleEditUser = (user: AdminUser) => {
     setEditingUser(user);
+    setEditFormData({
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      permissions: user.permissions || [],
+      phone: user.phone || '',
+      department: user.department || '',
+      is_active: user.is_active !== false
+    });
     setShowEditModal(true);
   };
 
-  const handleViewUser = (user: AdminUser) => {
+  const handleUpdateUser = async () => {
+    if (!editingUser) return;
+
+    try {
+      setSaving(true);
+      setError(null);
+      const response = await adminApiService.updateTeamMember(editingUser.id, editFormData);
+
+      if (response.status === 'success') {
+        setShowEditModal(false);
+        setEditingUser(null);
+        await fetchTeamMembers();
+        await fetchStats();
+      } else {
+        setError(response.message || 'Failed to update user');
+      }
+    } catch (err: any) {
+      console.error('Failed to update user:', err);
+      setError(err.message || 'Failed to update user');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleViewUser = async (user: AdminUser) => {
     setViewingUser(user);
     setShowViewModal(true);
   };
 
   const handleManagePermissions = (user: AdminUser) => {
     setEditingUser(user);
+    setPermissionsFormData(user.permissions || []);
     setShowPermissionsModal(true);
+  };
+
+  const handleSavePermissions = async () => {
+    if (!editingUser) return;
+
+    try {
+      setSaving(true);
+      setError(null);
+      const response = await adminApiService.updateTeamMemberPermissions(editingUser.id, permissionsFormData);
+
+      if (response.status === 'success') {
+        setShowPermissionsModal(false);
+        setEditingUser(null);
+        await fetchTeamMembers();
+      } else {
+        setError(response.message || 'Failed to update permissions');
+      }
+    } catch (err: any) {
+      console.error('Failed to update permissions:', err);
+      setError(err.message || 'Failed to update permissions');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleBulkActions = () => {
     setShowBulkActionsModal(true);
   };
 
-  const handleViewActivity = (user: AdminUser) => {
+  const handleViewActivity = async (user: AdminUser) => {
     setViewingUser(user);
     setShowActivityModal(true);
+    await fetchActivity(user.id);
   };
 
-  const handleDeleteUser = (userId: string) => {
-    if (confirm('Are you sure you want to delete this user?')) {
-      console.log('Deleting user:', userId);
+  const handleDeleteUser = async (userId: string) => {
+    if (!confirm('Are you sure you want to delete this user? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError(null);
+      const response = await adminApiService.deleteTeamMember(userId);
+
+      if (response.status === 'success') {
+        await fetchTeamMembers();
+        await fetchStats();
+      } else {
+        setError(response.message || 'Failed to delete user');
+        alert(response.message || 'Failed to delete user');
+      }
+    } catch (err: any) {
+      console.error('Failed to delete user:', err);
+      setError(err.message || 'Failed to delete user');
+      alert(err.message || 'Failed to delete user');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleToggleUserStatus = (userId: string) => {
-    console.log('Toggling user status:', userId);
+  const handleToggleUserStatus = async (userId: string) => {
+    try {
+      setSaving(true);
+      setError(null);
+      const response = await adminApiService.toggleTeamMemberStatus(userId);
+
+      if (response.status === 'success') {
+        await fetchTeamMembers();
+        await fetchStats();
+      } else {
+        setError(response.message || 'Failed to update user status');
+      }
+    } catch (err: any) {
+      console.error('Failed to toggle user status:', err);
+      setError(err.message || 'Failed to update user status');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const formatActivityTime = (timestamp: string) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    if (diffDays < 30) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+    return date.toLocaleDateString();
+  };
+
+  const getActivityType = (action: string) => {
+    if (action.includes('approved') || action.includes('activated') || action.includes('created')) return 'success';
+    if (action.includes('rejected') || action.includes('deleted') || action.includes('deactivated')) return 'warning';
+    return 'info';
   };
 
   return (
@@ -243,6 +425,14 @@ export function AdminTeamManagement() {
           <p className="text-gray-600">Manage admin accounts, roles, and permissions</p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => { fetchTeamMembers(); fetchStats(); }}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+            disabled={loading}
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
           <button
             onClick={handleBulkActions}
             className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
@@ -259,6 +449,19 @@ export function AdminTeamManagement() {
           </button>
         </div>
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-md flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-5 h-5" />
+            <span>{error}</span>
+          </div>
+          <button onClick={() => setError(null)} className="text-red-600 hover:text-red-800">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -286,107 +489,127 @@ export function AdminTeamManagement() {
         </div>
       </div>
 
+      {/* Loading State */}
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+          <span className="ml-2 text-gray-600">Loading team members...</span>
+        </div>
+      )}
+
       {/* Team Members Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredMembers.map((member) => (
-          <div key={member.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-gray-300 rounded-full flex items-center justify-center">
-                  <User className="w-6 h-6 text-gray-600" />
+      {!loading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredMembers.map((member) => (
+            <div key={member.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-gray-300 rounded-full flex items-center justify-center">
+                    <User className="w-6 h-6 text-gray-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">{member.name}</h3>
+                    <p className="text-sm text-gray-600">{member.email}</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-semibold text-gray-900">{member.name}</h3>
-                  <p className="text-sm text-gray-600">{member.email}</p>
-                </div>
-              </div>
-              <button className="text-gray-400 hover:text-gray-600">
-                <MoreHorizontal className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-gray-600">Role:</span>
-                <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getRoleColor(member.role)}`}>
-                  {member.role.replace('_', ' ').toUpperCase()}
-                </span>
+                <button className="text-gray-400 hover:text-gray-600">
+                  <MoreHorizontal className="w-4 h-4" />
+                </button>
               </div>
 
-              <div className="space-y-2">
-                <span className="text-gray-600 text-sm">Permissions:</span>
-                <div className="flex flex-wrap gap-1">
-                  {member.permissions.includes('*') ? (
-                    <span className="px-2 py-1 bg-purple-100 text-purple-800 text-xs rounded">
-                      All Permissions
-                    </span>
-                  ) : (
-                    member.permissions.slice(0, 3).map(permission => (
-                      <span key={permission} className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
-                        {availablePermissions.find(p => p.id === permission)?.label || permission}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Role:</span>
+                  <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getRoleColor(member.role)}`}>
+                    {member.role.replace('_', ' ').toUpperCase()}
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  <span className="text-gray-600 text-sm">Permissions:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {member.permissions.includes('*') ? (
+                      <span className="px-2 py-1 bg-purple-100 text-purple-800 text-xs rounded">
+                        All Permissions
                       </span>
-                    ))
-                  )}
-                  {member.permissions.length > 3 && !member.permissions.includes('*') && (
-                    <span className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
-                      +{member.permissions.length - 3} more
-                    </span>
-                  )}
+                    ) : (
+                      member.permissions.slice(0, 3).map(permission => (
+                        <span key={permission} className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
+                          {availablePermissions.find(p => p.id === permission)?.label || permission}
+                        </span>
+                      ))
+                    )}
+                    {member.permissions.length > 3 && !member.permissions.includes('*') && (
+                      <span className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
+                        +{member.permissions.length - 3} more
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="flex gap-1 mt-4 pt-4 border-t border-gray-200">
-              <button
-                onClick={() => handleViewUser(member)}
-                className="px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 text-xs"
-                title="View Details"
-              >
-                <Eye className="w-3 h-3" />
-              </button>
-              <button
-                onClick={() => handleEditUser(member)}
-                className="px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 text-xs"
-                title="Edit User"
-              >
-                <Edit className="w-3 h-3" />
-              </button>
-              <button
-                onClick={() => handleManagePermissions(member)}
-                className="px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 text-xs"
-                title="Manage Permissions"
-              >
-                <Settings className="w-3 h-3" />
-              </button>
-              <button
-                onClick={() => handleViewActivity(member)}
-                className="px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 text-xs"
-                title="View Activity"
-              >
-                <Activity className="w-3 h-3" />
-              </button>
-              <button
-                onClick={() => handleToggleUserStatus(member.id)}
-                className={`px-2 py-1 rounded text-xs ${
-                  member.status === 'active' 
-                    ? 'bg-orange-100 text-orange-700 hover:bg-orange-200' 
-                    : 'bg-green-100 text-green-700 hover:bg-green-200'
-                }`}
-                title={member.status === 'active' ? 'Deactivate' : 'Activate'}
-              >
-                {member.status === 'active' ? <UserX className="w-3 h-3" /> : <UserCheck className="w-3 h-3" />}
-              </button>
-              <button
-                onClick={() => handleDeleteUser(member.id)}
-                className="px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 text-xs"
-                title="Delete User"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
+              <div className="flex gap-1 mt-4 pt-4 border-t border-gray-200">
+                <button
+                  onClick={() => handleViewUser(member)}
+                  className="px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 text-xs"
+                  title="View Details"
+                >
+                  <Eye className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => handleEditUser(member)}
+                  className="px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 text-xs"
+                  title="Edit User"
+                >
+                  <Edit className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => handleManagePermissions(member)}
+                  className="px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 text-xs"
+                  title="Manage Permissions"
+                >
+                  <Settings className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => handleViewActivity(member)}
+                  className="px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 text-xs"
+                  title="View Activity"
+                >
+                  <Activity className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => handleToggleUserStatus(member.id)}
+                  disabled={saving}
+                  className={`px-2 py-1 rounded text-xs ${
+                    member.status === 'active' 
+                      ? 'bg-orange-100 text-orange-700 hover:bg-orange-200' 
+                      : 'bg-green-100 text-green-700 hover:bg-green-200'
+                  } disabled:opacity-50`}
+                  title={member.status === 'active' ? 'Deactivate' : 'Activate'}
+                >
+                  {member.status === 'active' ? <UserX className="w-3 h-3" /> : <UserCheck className="w-3 h-3" />}
+                </button>
+                <button
+                  onClick={() => handleDeleteUser(member.id)}
+                  disabled={saving}
+                  className="px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 text-xs disabled:opacity-50"
+                  title="Delete User"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {/* No Members */}
+      {!loading && filteredMembers.length === 0 && (
+        <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+          <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+          <p className="text-gray-600">No team members found</p>
+        </div>
+      )}
 
       {/* Add User Modal */}
       {showAddModal && (
@@ -402,7 +625,7 @@ export function AdminTeamManagement() {
               </button>
             </div>
 
-            <form className="space-y-4">
+            <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); handleCreateUser(); }}>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
@@ -430,16 +653,37 @@ export function AdminTeamManagement() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Password *</label>
+                  <input
+                    type="password"
+                    value={newUser.password}
+                    onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter password"
+                    required
+                    minLength={6}
+                  />
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
                   <input
                     type="tel"
+                    value={newUser.phone}
+                    onChange={(e) => setNewUser({ ...newUser, phone: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Enter phone number"
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
-                  <select className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <select 
+                    value={newUser.department}
+                    onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
                     <option value="">Select Department</option>
                     <option value="IT">IT</option>
                     <option value="Operations">Operations</option>
@@ -451,9 +695,6 @@ export function AdminTeamManagement() {
                     <option value="HR">HR</option>
                   </select>
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Role *</label>
                   <select
@@ -465,13 +706,6 @@ export function AdminTeamManagement() {
                     <option value="officer">Officer</option>
                     <option value="manager">Manager</option>
                     <option value="superadmin">Super Admin</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
-                  <select className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
                   </select>
                 </div>
               </div>
@@ -494,83 +728,36 @@ export function AdminTeamManagement() {
                   </div>
                 </div>
               </div>
-            </form>
 
-            <div className="flex gap-3 pt-4">
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateUser}
-                disabled={!newUser.name || !newUser.email}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                Create User
-              </button>
-            </div>
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving || !newUser.name || !newUser.email || !newUser.password}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    'Create User'
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-              <Shield className="w-5 h-5 text-purple-600" />
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-gray-900">
-                {teamMembers.filter(m => m.role === 'superadmin').length}
-              </div>
-              <div className="text-sm text-gray-600">Super Admins</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-              <User className="w-5 h-5 text-blue-600" />
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-gray-900">
-                {teamMembers.filter(m => m.role === 'manager').length}
-              </div>
-              <div className="text-sm text-gray-600">Managers</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-              <UserCheck className="w-5 h-5 text-green-600" />
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-gray-900">
-                {teamMembers.filter(m => m.role === 'officer').length}
-              </div>
-              <div className="text-sm text-gray-600">Officers</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
-              <Calendar className="w-5 h-5 text-gray-600" />
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-gray-900">{teamMembers.length}</div>
-              <div className="text-sm text-gray-600">Total Members</div>
-            </div>
-          </div>
-        </div>
-      </div>
+   
 
       {/* Edit User Modal */}
       {showEditModal && editingUser && (
@@ -586,13 +773,14 @@ export function AdminTeamManagement() {
               </button>
             </div>
             
-            <form className="space-y-4">
+            <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); handleUpdateUser(); }}>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
                   <input 
                     type="text" 
-                    defaultValue={editingUser.name}
+                    value={editFormData.name}
+                    onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   />
@@ -601,7 +789,8 @@ export function AdminTeamManagement() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">Email *</label>
                   <input 
                     type="email" 
-                    defaultValue={editingUser.email}
+                    value={editFormData.email}
+                    onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   />
@@ -613,14 +802,16 @@ export function AdminTeamManagement() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
                   <input 
                     type="tel" 
-                    defaultValue={editingUser.phone || ''}
+                    value={editFormData.phone}
+                    onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
                   <select 
-                    defaultValue={editingUser.department || ''}
+                    value={editFormData.department}
+                    onChange={(e) => setEditFormData({ ...editFormData, department: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Select Department</option>
@@ -640,7 +831,8 @@ export function AdminTeamManagement() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Role *</label>
                   <select 
-                    defaultValue={editingUser.role}
+                    value={editFormData.role}
+                    onChange={(e) => setEditFormData({ ...editFormData, role: e.target.value as 'superadmin' | 'manager' | 'officer' })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   >
@@ -652,7 +844,8 @@ export function AdminTeamManagement() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
                   <select 
-                    defaultValue={editingUser.status || 'active'}
+                    value={editFormData.is_active ? 'active' : 'inactive'}
+                    onChange={(e) => setEditFormData({ ...editFormData, is_active: e.target.value === 'active' })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="active">Active</option>
@@ -664,14 +857,17 @@ export function AdminTeamManagement() {
               <div className="flex gap-3 pt-4">
                 <button
                   type="submit"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    alert('User updated successfully!');
-                    setShowEditModal(false);
-                  }}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                  disabled={saving}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                 >
-                  Update User
+                  {saving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Updating...
+                    </>
+                  ) : (
+                    'Update User'
+                  )}
                 </button>
                 <button
                   type="button"
@@ -736,13 +932,13 @@ export function AdminTeamManagement() {
                 <div>
                   <label className="text-sm font-medium text-gray-500">Last Login</label>
                   <p className="text-gray-900">
-                    {viewingUser.lastLogin ? new Date(viewingUser.lastLogin).toLocaleString() : 'Never'}
+                    {viewingUser.lastLogin || viewingUser.last_login ? new Date(viewingUser.lastLogin || viewingUser.last_login!).toLocaleString() : 'Never'}
                   </p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-500">Created</label>
                   <p className="text-gray-900">
-                    {viewingUser.createdAt ? new Date(viewingUser.createdAt).toLocaleDateString() : 'Unknown'}
+                    {viewingUser.createdAt || viewingUser.created_at ? new Date(viewingUser.createdAt || viewingUser.created_at!).toLocaleDateString() : 'Unknown'}
                   </p>
                 </div>
                 <div>
@@ -803,8 +999,19 @@ export function AdminTeamManagement() {
                   <label key={permission.id} className="flex items-start gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
                     <input 
                       type="checkbox" 
-                      defaultChecked={editingUser.permissions.includes(permission.id) || editingUser.permissions.includes('*')}
-                      disabled={editingUser.permissions.includes('*')}
+                      checked={permissionsFormData.includes(permission.id) || permissionsFormData.includes('*')}
+                      disabled={permissionsFormData.includes('*')}
+                      onChange={(e) => {
+                        if (permission.id === '*') {
+                          setPermissionsFormData(['*']);
+                        } else {
+                          if (e.target.checked) {
+                            setPermissionsFormData([...permissionsFormData.filter(p => p !== '*'), permission.id]);
+                          } else {
+                            setPermissionsFormData(permissionsFormData.filter(p => p !== permission.id));
+                          }
+                        }
+                      }}
                       className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                     />
                     <div className="flex-1">
@@ -824,13 +1031,18 @@ export function AdminTeamManagement() {
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  alert('Permissions updated successfully!');
-                  setShowPermissionsModal(false);
-                }}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                onClick={handleSavePermissions}
+                disabled={saving}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >
-                Save Permissions
+                {saving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save Permissions'
+                )}
               </button>
             </div>
           </div>
@@ -870,6 +1082,7 @@ export function AdminTeamManagement() {
                       <input 
                         type="checkbox" 
                         className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        checked={selectedUsers.includes(member.id)}
                         onChange={(e) => {
                           if (e.target.checked) {
                             setSelectedUsers([...selectedUsers, member.id]);
@@ -920,7 +1133,7 @@ export function AdminTeamManagement() {
               </button>
               <button
                 onClick={() => {
-                  alert(`Bulk action applied to ${selectedUsers.length} users!`);
+                  alert(`Bulk action would apply to ${selectedUsers.length} users (feature to be implemented)`);
                   setShowBulkActionsModal(false);
                   setSelectedUsers([]);
                 }}
@@ -949,60 +1162,72 @@ export function AdminTeamManagement() {
             </div>
             
             <div className="space-y-4">
-              {/* Activity Stats */}
-              <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="bg-blue-50 rounded-lg p-4 text-center">
-                  <div className="text-2xl font-bold text-blue-600">24</div>
-                  <div className="text-sm text-blue-800">Actions Today</div>
+              {loadingActivity ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                  <span className="ml-2 text-gray-600">Loading activity...</span>
                 </div>
-                <div className="bg-green-50 rounded-lg p-4 text-center">
-                  <div className="text-2xl font-bold text-green-600">156</div>
-                  <div className="text-sm text-green-800">This Week</div>
-                </div>
-                <div className="bg-purple-50 rounded-lg p-4 text-center">
-                  <div className="text-2xl font-bold text-purple-600">1,234</div>
-                  <div className="text-sm text-purple-800">This Month</div>
-                </div>
-              </div>
-
-              {/* Activity Timeline */}
-              <div className="space-y-3">
-                <h5 className="font-medium text-gray-900">Recent Activity</h5>
-                <div className="space-y-2">
-                  {[
-                    { action: 'Approved loan application CL250912', time: '2 minutes ago', type: 'success' },
-                    { action: 'Viewed user profile for Rajesh Kumar', time: '15 minutes ago', type: 'info' },
-                    { action: 'Added note to loan application CL250913', time: '1 hour ago', type: 'info' },
-                    { action: 'Rejected loan application CL250914', time: '2 hours ago', type: 'warning' },
-                    { action: 'Logged in to admin panel', time: '3 hours ago', type: 'info' },
-                    { action: 'Exported user data report', time: '1 day ago', type: 'info' },
-                    { action: 'Updated permissions for Amit Sharma', time: '2 days ago', type: 'info' },
-                    { action: 'Created new team member account', time: '3 days ago', type: 'success' }
-                  ].map((activity, index) => (
-                    <div key={index} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
-                      <div className={`w-2 h-2 rounded-full ${
-                        activity.type === 'success' ? 'bg-green-500' :
-                        activity.type === 'warning' ? 'bg-orange-500' :
-                        'bg-blue-500'
-                      }`} />
-                      <div className="flex-1">
-                        <div className="text-sm text-gray-900">{activity.action}</div>
-                        <div className="text-xs text-gray-500 flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {activity.time}
-                        </div>
+              ) : (
+                <>
+                  {/* Activity Stats */}
+                  {activityData && (
+                    <div className="grid grid-cols-3 gap-4 mb-6">
+                      <div className="bg-blue-50 rounded-lg p-4 text-center">
+                        <div className="text-2xl font-bold text-blue-600">{activityData.stats.today}</div>
+                        <div className="text-sm text-blue-800">Actions Today</div>
                       </div>
-                      <div className={`px-2 py-1 text-xs rounded ${
-                        activity.type === 'success' ? 'bg-green-100 text-green-800' :
-                        activity.type === 'warning' ? 'bg-orange-100 text-orange-800' :
-                        'bg-blue-100 text-blue-800'
-                      }`}>
-                        {activity.type}
+                      <div className="bg-green-50 rounded-lg p-4 text-center">
+                        <div className="text-2xl font-bold text-green-600">{activityData.stats.week}</div>
+                        <div className="text-sm text-green-800">This Week</div>
+                      </div>
+                      <div className="bg-purple-50 rounded-lg p-4 text-center">
+                        <div className="text-2xl font-bold text-purple-600">{activityData.stats.month}</div>
+                        <div className="text-sm text-purple-800">This Month</div>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
+                  )}
+
+                  {/* Activity Timeline */}
+                  <div className="space-y-3">
+                    <h5 className="font-medium text-gray-900">Recent Activity</h5>
+                    <div className="space-y-2">
+                      {activityData && activityData.activities.length > 0 ? (
+                        activityData.activities.map((activity) => {
+                          const activityType = getActivityType(activity.action);
+                          return (
+                            <div key={activity.id} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
+                              <div className={`w-2 h-2 rounded-full ${
+                                activityType === 'success' ? 'bg-green-500' :
+                                activityType === 'warning' ? 'bg-orange-500' :
+                                'bg-blue-500'
+                              }`} />
+                              <div className="flex-1">
+                                <div className="text-sm text-gray-900">{activity.action}</div>
+                                <div className="text-xs text-gray-500 flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  {formatActivityTime(activity.timestamp)}
+                                </div>
+                              </div>
+                              <div className={`px-2 py-1 text-xs rounded ${
+                                activityType === 'success' ? 'bg-green-100 text-green-800' :
+                                activityType === 'warning' ? 'bg-orange-100 text-orange-800' :
+                                'bg-blue-100 text-blue-800'
+                              }`}>
+                                {activityType}
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="text-center py-8 text-gray-500">
+                          <Activity className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                          <p>No activity recorded</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

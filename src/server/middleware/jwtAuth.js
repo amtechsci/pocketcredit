@@ -15,26 +15,6 @@ const requireAuth = async (req, res, next) => {
     const token = authHeader && typeof authHeader === 'string' ? authHeader.split(' ')[1] : null; // Bearer TOKEN
 
     if (!token) {
-      console.log('❌ No token found in request headers');
-      console.log('   Request method:', req.method);
-      console.log('   Request path:', req.path);
-      console.log('   Request URL:', req.url);
-      console.log('   Request originalUrl:', req.originalUrl);
-      console.log('   Authorization header (raw):', authHeader);
-      console.log('   Authorization header type:', typeof authHeader);
-      console.log('   All header keys:', Object.keys(req.headers));
-      // Check for token in different possible locations
-      const allHeaders = req.headers;
-      console.log('   Checking all headers for authorization...');
-      for (const key in allHeaders) {
-        if (key.toLowerCase() === 'authorization') {
-          console.log(`   Found authorization header with key: "${key}", value: "${allHeaders[key]?.substring(0, 20)}..."`);
-        }
-      }
-      // Don't log full headers object in production to avoid sensitive data
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('   Headers object:', JSON.stringify(req.headers, null, 2));
-      }
       // Ensure response is sent and prevent further processing
       if (!res.headersSent) {
         res.status(401).json({
@@ -50,7 +30,6 @@ const requireAuth = async (req, res, next) => {
     try {
       decoded = jwt.verify(token, JWT_SECRET);
     } catch (jwtError) {
-      console.log('❌ JWT verification failed:', jwtError.message);
       return res.status(401).json({
         success: false,
         message: 'Invalid or expired token'
@@ -62,7 +41,6 @@ const requireAuth = async (req, res, next) => {
     try {
       user = await findUserById(decoded.id);
     } catch (dbError) {
-      console.error('❌ Database error while fetching user:', dbError);
       res.status(500).json({
         success: false,
         message: 'Database error during authentication'
@@ -71,7 +49,6 @@ const requireAuth = async (req, res, next) => {
     }
     
     if (!user) {
-      console.log('❌ User not found for ID:', decoded.id);
       res.status(401).json({
         success: false,
         message: 'User not found'
@@ -83,7 +60,6 @@ const requireAuth = async (req, res, next) => {
     // Users on hold can view their dashboard but can't progress (enforced by checkHoldStatus middleware)
     // Deleted users can view their deleted status message
     if (user.status !== 'active' && user.status !== 'on_hold' && user.status !== 'deleted') {
-      console.log('❌ User account is not active. Status:', user.status);
       return res.status(401).json({
         success: false,
         message: 'Account is not active'
@@ -97,8 +73,6 @@ const requireAuth = async (req, res, next) => {
     next();
 
   } catch (error) {
-    console.error('JWT Authentication error:', error);
-    console.error('Error stack:', error.stack);
     // Only send response if it hasn't been sent yet
     if (!res.headersSent) {
       res.status(500).json({
@@ -154,7 +128,6 @@ const requireAuthHybrid = async (req, res, next) => {
     });
 
   } catch (error) {
-    console.error('Hybrid Authentication error:', error);
     res.status(500).json({
       status: 'error',
       message: 'Authentication failed'

@@ -78,7 +78,6 @@ export function UserProfileDetail() {
   const { canEditUsers, currentUser } = useAdmin();
 
   // Debug admin context (commented out to reduce console noise)
-  // console.log('Admin context in UserProfileDetail:', { canEditUsers, currentUser });
 
   // Real data state
   const [userData, setUserData] = useState<any>(null);
@@ -405,10 +404,6 @@ export function UserProfileDetail() {
     try {
       // Get admin ID from the admin context
       const adminId = currentUser?.id || 'unknown';
-      console.log('Admin context:', currentUser);
-      console.log('Admin ID:', adminId);
-      console.log('Selected action:', selectedAction);
-      console.log('User data:', userData);
 
       let actionDetails = {};
 
@@ -462,7 +457,6 @@ export function UserProfileDetail() {
         adminId
       };
 
-      console.log('Sending validation request:', requestData);
 
       const response = await adminApiService.submitValidationAction(requestData);
 
@@ -471,7 +465,6 @@ export function UserProfileDetail() {
         if (selectedAction === 'need_document' && loanApplicationId) {
           try {
             await adminApiService.updateApplicationStatus(loanApplicationId.toString(), 'follow_up');
-            console.log('Loan status updated to follow_up');
           } catch (statusError) {
             console.error('Error updating loan status:', statusError);
             // Don't fail the whole operation if status update fails
@@ -518,7 +511,6 @@ export function UserProfileDetail() {
 
         if (response.status === 'success' && response.data) {
           setUserData(response.data);
-          console.log('Admin User Profile Loaded:', response.data);
 
           // Load user's selected loan plan from response data
           if (response.data.selectedLoanPlan) {
@@ -565,7 +557,6 @@ export function UserProfileDetail() {
     const fetchLoanPlans = async () => {
       try {
         const response = await adminApiService.getLoanPlans();
-        console.log('Loan plans response:', response);
         if (response.success && response.data) {
           setLoanPlans(response.data.filter((plan: any) => plan.is_active === 1 || plan.is_active === true));
         } else if (response.status === 'success' && response.data) {
@@ -831,7 +822,6 @@ export function UserProfileDetail() {
           const disbursalAmount = loanCalculations[loanId].disbursal.amount;
           const currentAmount = parseFloat(transactionForm.amount || '0');
           
-          console.log(`🔍 [Auto-update Amount] Loan #${loanId}: currentAmount=₹${currentAmount}, disbursalAmount=₹${disbursalAmount}, loanAmount=₹${loanAmount}, storedDisbursalAmount=₹${storedDisbursalAmount}, isAlreadyDisbursed=${isAlreadyDisbursed}`);
           
           // For loans not yet disbursed OR repeat_disbursal loans, always update if:
           // 1. Amount doesn't match calculated disbursal amount, OR
@@ -847,13 +837,10 @@ export function UserProfileDetail() {
             
             if (shouldUpdate) {
               setTransactionForm(prev => ({ ...prev, amount: disbursalAmount.toString() }));
-              console.log(`✅ Auto-updated disbursal amount for loan #${loanId} (status: ${loan?.status}, isRepeatDisbursal: ${isRepeatDisbursal}): ₹${currentAmount} → ₹${disbursalAmount}`);
+              
             }
           }
         } else if ((!isAlreadyDisbursed || isRepeatDisbursal) && !calculationsLoading[loanId]) {
-          // Calculation not available yet and not loading, fetch it
-          // Always fetch for repeat_disbursal loans (even if already disbursed)
-          console.log(`📊 [Auto-update Amount] Fetching loan calculation for loan #${loanId} (status: ${loan?.status}, isRepeatDisbursal: ${isRepeatDisbursal}) to get correct disbursal amount`);
           fetchLoanCalculation(loanId).catch(err => console.error('Error fetching loan calculation:', err));
         }
       }
@@ -2101,18 +2088,13 @@ export function UserProfileDetail() {
     const getVerificationData = () => {
       let raw = kycData?.verification_data;
       if (!raw) {
-        console.log('🔍 No verification_data found in kycData');
         return {};
       }
-      
-      console.log('🔍 Raw verification_data type:', typeof raw);
-      console.log('🔍 Raw verification_data keys:', typeof raw === 'object' && raw !== null ? Object.keys(raw) : 'N/A');
       
       // Parse if it's a JSON string
       if (typeof raw === 'string') {
         try {
           raw = JSON.parse(raw);
-          console.log('✅ Parsed JSON string, keys:', Object.keys(raw || {}));
         } catch (e) {
           console.error('❌ Error parsing verification_data:', e);
           return {};
@@ -2126,19 +2108,16 @@ export function UserProfileDetail() {
           if (typeof raw.kycData === 'string') {
             try {
               const parsedKycData = JSON.parse(raw.kycData);
-              console.log('✅ Parsed kycData string, keys:', Object.keys(parsedKycData || {}));
               return parsedKycData;
             } catch (e) {
               console.error('❌ Error parsing kycData string:', e);
             }
           } else if (typeof raw.kycData === 'object') {
-            console.log('✅ Found nested kycData object');
             return raw.kycData;
           }
         }
         // Check if the object itself has KYC fields (direct structure)
         if (raw.name || raw.maskedAdharNumber || raw.dob || raw.status) {
-          console.log('✅ Found direct KYC fields in root');
           return raw;
         }
         // If it has transactionId but no KYC fields, it might be the wrapper
@@ -2149,31 +2128,21 @@ export function UserProfileDetail() {
             if (typeof raw.verification_data.kycData === 'string') {
               try {
                 const parsedKycData = JSON.parse(raw.verification_data.kycData);
-                console.log('✅ Parsed nested kycData string, keys:', Object.keys(parsedKycData || {}));
                 return parsedKycData;
               } catch (e) {
                 console.error('❌ Error parsing nested kycData string:', e);
               }
             } else {
-              console.log('✅ Found kycData in nested verification_data');
               return raw.verification_data.kycData;
             }
           }
         }
       }
       
-      console.log('⚠️ Returning raw data as-is');
       return raw || {};
     };
 
     const verificationData = getVerificationData();
-    console.log('📊 Extracted verificationData keys:', Object.keys(verificationData));
-    console.log('📊 Sample verificationData:', {
-      name: verificationData.name,
-      dob: verificationData.dob,
-      gender: verificationData.gender,
-      maskedAdharNumber: verificationData.maskedAdharNumber
-    });
     const isVerified = ['verified', 'completed', 'success'].includes(kycData?.status?.toLowerCase());
     const hasTransactionId = kycData?.verification_data?.transactionId;
 
@@ -4940,6 +4909,15 @@ export function UserProfileDetail() {
                                 >
                                   View KFS
                                 </button>
+                                {loan.status === 'cleared' && (
+                                  <button
+                                    className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                                    onClick={() => window.open(`/admin/noc/${loanId}`, '_blank')}
+                                    title="View No Dues Certificate"
+                                  >
+                                    View NOC
+                                  </button>
+                                )}
                                 <button
                                   className="px-3 py-1 bg-purple-600 text-white rounded text-xs hover:bg-purple-700"
                                   onClick={() => {
@@ -8797,7 +8775,6 @@ export function UserProfileDetail() {
                           if (isAlreadyDisbursed && !isRepeatDisbursal) {
                             // For already disbursed loans in final status (and not repeat disbursal), use the stored disbursal_amount
                             amount = loan.disbursal_amount || loan.disbursalAmount;
-                            console.log(`📋 [onChange] Using stored disbursal_amount for final status loan #${loan.id || loan.loanId}: ₹${amount}`);
                           } else {
                             // For loans not yet disbursed OR repeat_disbursal loans, NEVER use stored disbursal_amount (might be from old loan)
                             // Always fetch calculation to get correct disbursal amount based on current loan_amount
@@ -8807,12 +8784,10 @@ export function UserProfileDetail() {
                               if (loanCalculations[loanId]?.disbursal?.amount !== undefined) {
                                 // Use cached calculation immediately
                                 amount = loanCalculations[loanId].disbursal.amount;
-                                console.log(`✅ [onChange] Using cached calculation for loan #${loanId} (status: ${loan.status}): ₹${amount}`);
                               } else {
                                 // Don't use stored disbursal_amount - it might be wrong for repeat_disbursal loans!
                                 // Use loan_amount as temporary placeholder (will be updated by useEffect when calculation arrives)
                                 amount = loan.loan_amount || loan.amount || loan.principalAmount || '';
-                                console.log(`📊 [onChange] Loan #${loanId} (status: ${loan.status}) - using loan_amount (₹${amount}) as placeholder, fetching calculation...`);
                                 // Trigger calculation fetch immediately to get correct disbursal amount
                                 fetchLoanCalculation(loanId).catch(err => console.error('Error fetching loan calculation:', err));
                               }

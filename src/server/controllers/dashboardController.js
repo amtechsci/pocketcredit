@@ -167,9 +167,6 @@ const getDashboardSummary = async (req, res) => {
 
 // Separate function to fetch dashboard data (for caching)
 const fetchDashboardData = async (userId) => {
-  console.log('🔍 Fetching dashboard data for user:', userId);
-  
-  // Get user basic info including credit score, loan limit, and hold status
   const userQuery = `
     SELECT 
       id, first_name, last_name, phone, email, created_at, 
@@ -180,7 +177,6 @@ const fetchDashboardData = async (userId) => {
     WHERE id = ?
   `;
   const users = await executeQuery(userQuery, [userId]);
-  console.log('👤 User query result:', users);
   
   if (!users || users.length === 0) {
     throw new Error('User not found');
@@ -246,7 +242,6 @@ const fetchDashboardData = async (userId) => {
     WHERE user_id = ?
   `;
   const financialDetails = await executeQuery(financialQuery, [userId]);
-  console.log('💰 Financial details result:', financialDetails);
   
   // Fetch tier information from loan_limit_tiers based on income_range
   let tierInfo = null;
@@ -406,8 +401,6 @@ const fetchDashboardData = async (userId) => {
 
   // Calculate payment score (simplified)
   const paymentScore = 98; // This would be calculated based on payment history
-
-  console.log(`💰 Dashboard - User ${user.id} loan_limit: ${user.loan_limit}`);
 
   // Prepare dashboard summary
   return {

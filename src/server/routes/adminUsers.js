@@ -17,8 +17,6 @@ router.get('/', authenticateAdmin, async (req, res) => {
       sortOrder = 'desc'
     } = req.query;
 
-    console.log('🔍 Users request:', { search, status, page, limit });
-
     // Build the base query
     let baseQuery = `
       SELECT 
@@ -98,13 +96,9 @@ router.get('/', authenticateAdmin, async (req, res) => {
     baseQuery += ` LIMIT ${parseInt(limit)} OFFSET ${offset}`;
 
     // Execute the main query
-    console.log('🔍 Executing users query with params:', queryParams);
-    console.log('🔍 Query:', baseQuery);
-
     let users;
     try {
       users = await executeQuery(baseQuery, queryParams);
-      console.log('🔍 Users query executed successfully, got', users.length, 'results');
     } catch (queryError) {
       console.error('❌ Users query execution error:', queryError);
       throw queryError;
@@ -556,14 +550,6 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
 
     // Request credit report from Experian
     const clientRefNum = `PC${userId}_${Date.now()}`;
-
-    console.log('🔍 Requesting credit report for user:', userId);
-    console.log('📋 User data:', {
-      phone: userData.phone,
-      pan: userData.pan_number,
-      dob: userData.date_of_birth,
-      email: userData.email
-    });
 
     // Normalize email - treat placeholder values as empty
     const placeholderEmails = ['N/A', 'NA', 'n/a', 'na', 'NONE', 'none', 'NULL', 'null', ''];

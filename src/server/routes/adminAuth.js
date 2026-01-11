@@ -1,8 +1,10 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const otpGenerator = require('otp-generator');
 const { generateToken, verifyToken } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 const { executeQuery, initializeDatabase } = require('../config/database');
+const { getRedisClient, set, get, del } = require('../config/redis');
 const { v4: uuidv4 } = require('uuid');
 const router = express.Router();
 
@@ -14,8 +16,6 @@ const ensureDbInitialized = async () => {
     dbInitialized = true;
   }
 };
-
-console.log('Admin auth routes loaded - MySQL VERSION');
 
 // Admin Login
 router.post('/login', validate(schemas.adminLogin), async (req, res) => {
@@ -64,12 +64,12 @@ router.post('/login', validate(schemas.adminLogin), async (req, res) => {
       });
     }
 
-    // Generate token
+    // Generate token (20 minutes expiration for security)
     const token = generateToken({
       id: admin.id,
       email: admin.email,
       role: admin.role
-    }, '8h'); // Admin tokens expire in 8 hours
+    }, '20m'); // Admin tokens expire in 20 minutes
 
     // Log admin login in MySQL
     const loginId = uuidv4();
@@ -120,6 +120,273 @@ router.post('/logout', (req, res) => {
     status: 'success',
     message: 'Admin logged out successfully'
   });
+});
+
+// Admin Send OTP (Mobile)
+router.post('/send-otp', async (req, res) => {
+  try {
+    const { mobile } = req.body;
+
+    // Validate mobile number
+    if (!mobile || !/^[6-9]\d{9}$/.test(mobile)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid 10-digit mobile number is required'
+      });
+    }
+
+    await ensureDbInitialized();
+
+    // Check if admin exists with this mobile number
+    // First, check if phone column exists in admins table
+    let adminExists = false;
+    try {
+      const columnCheck = await executeQuery(`
+        SELECT COUNT(*) as count 
+        FROM information_schema.columns 
+        WHERE table_schema = DATABASE() 
+        AND table_name = 'admins' 
+        AND column_name = 'phone'
+      `);
+      
+      if (columnCheck[0].count > 0) {
+        const admins = await executeQuery(
+          'SELECT id, name, email, role, is_active FROM admins WHERE phone = ?',
+          [mobile]
+        );
+        adminExists = admins.length > 0 && admins[0].is_active;
+      }
+    } catch (err) {
+      console.log('Phone column check failed, using email fallback:', err.message);
+    }
+
+    // If phone column doesn't exist or no admin found, you might want to return error
+    // For now, we'll allow OTP generation and check during verification
+    
+    // Generate 4-digit OTP
+    const otp = otpGenerator.generate(4, {
+      upperCaseAlphabets: false,
+      lowerCaseAlphabets: false,
+      specialChars: false,
+      digits: true
+    });
+
+    // Store OTP in Redis with 5-minute expiry (300 seconds)
+    const otpKey = `admin_otp:${mobile}`;
+    const otpData = {
+      otp,
+      mobile,
+      timestamp: Date.now(),
+      attempts: 0
+    };
+
+    const stored = await set(otpKey, otpData, 300); // 5 minutes
+
+    if (!stored) {
+      console.error('❌ Failed to store OTP in Redis');
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to send OTP. Please try again.'
+      });
+    }
+
+    // Send SMS using your SMS service (same template as user OTP)
+    const message = `${otp} is OTP for Creditlab login verification & valid till 2min. Don't share this OTP with anyone.`;
+    const template_id = '1407174844163241940';
+    const sender = 'CREDLB';
+    
+    const smsUrl = `https://sms.smswala.in/app/smsapi/index.php?key=2683C705E7CB39&campaign=16613&routeid=30&type=text&contacts=${mobile}&senderid=${sender}&msg=${encodeURIComponent(message)}&template_id=${template_id}&pe_id=1401337620000065797`;
+    
+    try {
+      const response = await fetch(smsUrl);
+      const result = await response.text();
+      console.log('Admin OTP SMS sent:', result);
+    } catch (error) {
+      console.error('SMS sending failed:', error);
+      // Log OTP to console as fallback for development
+      console.log('📱 Admin OTP (Development):', otp);
+    }
+
+    res.json({
+      status: 'success',
+      message: 'OTP sent successfully',
+      data: {
+        mobile,
+        expiresIn: 300 // 5 minutes in seconds
+      }
+    });
+
+  } catch (error) {
+    console.error('Admin send OTP error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to send OTP. Please try again.'
+    });
+  }
+});
+
+// Admin Verify OTP (Mobile)
+router.post('/verify-otp', async (req, res) => {
+  try {
+    const { mobile, otp } = req.body;
+
+    // Validate input
+    if (!mobile || !otp) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Mobile number and OTP are required'
+      });
+    }
+
+    if (!/^[6-9]\d{9}$/.test(mobile)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid 10-digit mobile number is required'
+      });
+    }
+
+    if (!/^\d{4}$/.test(otp)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'OTP must be 4 digits'
+      });
+    }
+
+    await ensureDbInitialized();
+
+    // Testing OTP - allow "8800" to bypass verification (for development/testing)
+    const TEST_OTP = '8800';
+    const isTestOtp = otp === TEST_OTP;
+
+    // Retrieve OTP from Redis (only if not using test OTP)
+    const otpKey = `admin_otp:${mobile}`;
+    let otpData = null;
+    
+    if (!isTestOtp) {
+      otpData = await get(otpKey);
+
+      if (!otpData) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'OTP not found or expired. Please request a new OTP.'
+        });
+      }
+    }
+
+    // Check if OTP matches (skip check for test OTP)
+    if (!isTestOtp && otpData.otp !== otp) {
+      // Increment attempts counter
+      otpData.attempts = (otpData.attempts || 0) + 1;
+      
+      // If too many attempts, delete the OTP
+      if (otpData.attempts >= 3) {
+        await del(otpKey);
+        return res.status(400).json({
+          status: 'error',
+          message: 'Too many incorrect attempts. Please request a new OTP.'
+        });
+      }
+      
+      // Update attempts in Redis
+      await set(otpKey, otpData, 300);
+      
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid OTP. Please try again.'
+      });
+    }
+
+    // OTP is valid, delete it from Redis (skip for test OTP)
+    if (!isTestOtp) {
+      await del(otpKey);
+    }
+
+    // Find admin by phone number
+    let admins = [];
+    try {
+      const columnCheck = await executeQuery(`
+        SELECT COUNT(*) as count 
+        FROM information_schema.columns 
+        WHERE table_schema = DATABASE() 
+        AND table_name = 'admins' 
+        AND column_name = 'phone'
+      `);
+      
+      if (columnCheck[0].count > 0) {
+        admins = await executeQuery(
+          'SELECT id, name, email, role, permissions, is_active FROM admins WHERE phone = ?',
+          [mobile]
+        );
+      }
+    } catch (err) {
+      console.error('Error checking admin by phone:', err);
+    }
+
+    if (admins.length === 0) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Admin not found with this mobile number'
+      });
+    }
+
+    const admin = admins[0];
+
+    // Check if admin is active
+    if (!admin.is_active) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Admin account is deactivated'
+      });
+    }
+
+    // Generate token (20 minutes expiration for security)
+    const token = generateToken({
+      id: admin.id,
+      email: admin.email,
+      role: admin.role
+    }, '20m'); // Admin tokens expire in 20 minutes
+
+    // Log admin login in MySQL
+    const loginId = uuidv4();
+    await executeQuery(`
+      INSERT INTO admin_login_history (id, admin_id, login_time, ip_address, user_agent, success)
+      VALUES (?, ?, NOW(), ?, ?, ?)
+    `, [
+      loginId,
+      admin.id,
+      req.ip || req.connection.remoteAddress,
+      req.get('User-Agent'),
+      true
+    ]);
+
+    // Update last login time
+    await executeQuery(
+      'UPDATE admins SET last_login = NOW() WHERE id = ?',
+      [admin.id]
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Admin login successful',
+      data: {
+        admin: {
+          id: admin.id,
+          name: admin.name,
+          email: admin.email,
+          role: admin.role,
+          permissions: Array.isArray(admin.permissions) ? admin.permissions : JSON.parse(admin.permissions || '[]')
+        },
+        token
+      }
+    });
+
+  } catch (error) {
+    console.error('Admin verify OTP error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'OTP verification failed. Please try again.'
+    });
+  }
 });
 
 // Verify Admin Token

@@ -1056,9 +1056,102 @@ export const RepaymentSchedulePage = () => {
                                         }
                                       }
                                     } else if (response.data.status === 'pending') {
-                                      toast.info(response.data.message || 'Your payment transaction is still pending. Please wait for payment confirmation.');
-                                    } else if (response.data.status === 'failed') {
-                                      toast.error(response.data.message || 'Payment transaction has failed. Please create a new payment order.');
+                                      // Check if we should use SDK, redirect, or create new order
+                                      if (response.data.paymentSessionId || response.data.useSdk) {
+                                        // Use Cashfree SDK (same as EMI payments)
+                                        toast.success('Opening payment gateway...');
+                                        try {
+                                          const isProduction = response.data.checkoutUrl?.includes('payments.cashfree.com') && 
+                                                             !response.data.checkoutUrl?.includes('payments-test');
+                                          
+                                          const cashfree = await load({ 
+                                            mode: isProduction ? "production" : "sandbox"
+                                          });
+
+                                          if (cashfree && response.data.paymentSessionId) {
+                                            cashfree.checkout({
+                                              paymentSessionId: response.data.paymentSessionId
+                                            });
+                                          } else {
+                                            throw new Error('Failed to load Cashfree SDK');
+                                          }
+                                        } catch (sdkError: any) {
+                                          console.error('Cashfree SDK error:', sdkError);
+                                          toast.error('Failed to open payment gateway. Please try again.');
+                                          
+                                          // Fallback to URL redirect if SDK fails
+                                          if (response.data.checkoutUrl) {
+                                            window.location.href = response.data.checkoutUrl;
+                                          } else {
+                                            toast.error('No payment session available');
+                                          }
+                                        }
+                                      } else if (response.data.redirectToPayment && response.data.checkoutUrl) {
+                                        // Fallback: Redirect to payment gateway
+                                        window.location.href = response.data.checkoutUrl;
+                                      } else if (response.data.createNewOrder) {
+                                        // Create new payment order
+                                        toast.info('Creating new payment order...');
+                                        const extensionId = extensionEligibility?.pending_extension?.id;
+                                        if (extensionId) {
+                                          try {
+                                            const paymentResponse = await apiService.createExtensionPayment(extensionId);
+                                            if (paymentResponse.success && paymentResponse.data.paymentSessionId) {
+                                              // Use SDK
+                                              const isProduction = paymentResponse.data.checkoutUrl?.includes('payments.cashfree.com') && 
+                                                                 !paymentResponse.data.checkoutUrl?.includes('payments-test');
+                                              const cashfree = await load({ 
+                                                mode: isProduction ? "production" : "sandbox"
+                                              });
+                                              if (cashfree) {
+                                                cashfree.checkout({
+                                                  paymentSessionId: paymentResponse.data.paymentSessionId
+                                                });
+                                              }
+                                            } else if (paymentResponse.success && paymentResponse.data.checkoutUrl) {
+                                              window.location.href = paymentResponse.data.checkoutUrl;
+                                            } else {
+                                              toast.error('Failed to create payment order. Please try again.');
+                                            }
+                                          } catch (error: any) {
+                                            toast.error(error.message || 'Failed to create payment order');
+                                          }
+                                        }
+                                      } else {
+                                        toast.info(response.data.message || 'Your payment transaction is still pending. Please wait for payment confirmation.');
+                                      }
+                                    } else if (response.data.status === 'expired' || response.data.status === 'failed') {
+                                      // Order expired or failed, create new one
+                                      if (response.data.createNewOrder) {
+                                        toast.info('Payment order expired. Creating new payment order...');
+                                        const extensionId = extensionEligibility?.pending_extension?.id;
+                                        if (extensionId) {
+                                          try {
+                                            const paymentResponse = await apiService.createExtensionPayment(extensionId);
+                                            if (paymentResponse.success && paymentResponse.data.paymentSessionId) {
+                                              // Use SDK
+                                              const isProduction = paymentResponse.data.checkoutUrl?.includes('payments.cashfree.com') && 
+                                                                 !paymentResponse.data.checkoutUrl?.includes('payments-test');
+                                              const cashfree = await load({ 
+                                                mode: isProduction ? "production" : "sandbox"
+                                              });
+                                              if (cashfree) {
+                                                cashfree.checkout({
+                                                  paymentSessionId: paymentResponse.data.paymentSessionId
+                                                });
+                                              }
+                                            } else if (paymentResponse.success && paymentResponse.data.checkoutUrl) {
+                                              window.location.href = paymentResponse.data.checkoutUrl;
+                                            } else {
+                                              toast.error('Failed to create payment order. Please try again.');
+                                            }
+                                          } catch (error: any) {
+                                            toast.error(error.message || 'Failed to create payment order');
+                                          }
+                                        }
+                                      } else {
+                                        toast.error(response.data.message || 'Payment transaction has failed. Please create a new payment order.');
+                                      }
                                     } else {
                                       toast.info(response.data.message || 'Payment status checked.');
                                     }
@@ -1624,9 +1717,102 @@ export const RepaymentSchedulePage = () => {
                                       }
                                     }
                                   } else if (response.data.status === 'pending') {
-                                    toast.info(response.data.message || 'Your payment transaction is still pending. Please wait for payment confirmation.');
-                                  } else if (response.data.status === 'failed') {
-                                    toast.error(response.data.message || 'Payment transaction has failed. Please create a new payment order.');
+                                    // Check if we should use SDK, redirect, or create new order
+                                    if (response.data.paymentSessionId || response.data.useSdk) {
+                                      // Use Cashfree SDK (same as EMI payments)
+                                      toast.success('Opening payment gateway...');
+                                      try {
+                                        const isProduction = response.data.checkoutUrl?.includes('payments.cashfree.com') && 
+                                                           !response.data.checkoutUrl?.includes('payments-test');
+                                        
+                                        const cashfree = await load({ 
+                                          mode: isProduction ? "production" : "sandbox"
+                                        });
+
+                                        if (cashfree && response.data.paymentSessionId) {
+                                          cashfree.checkout({
+                                            paymentSessionId: response.data.paymentSessionId
+                                          });
+                                        } else {
+                                          throw new Error('Failed to load Cashfree SDK');
+                                        }
+                                      } catch (sdkError: any) {
+                                        console.error('Cashfree SDK error:', sdkError);
+                                        toast.error('Failed to open payment gateway. Please try again.');
+                                        
+                                        // Fallback to URL redirect if SDK fails
+                                        if (response.data.checkoutUrl) {
+                                          window.location.href = response.data.checkoutUrl;
+                                        } else {
+                                          toast.error('No payment session available');
+                                        }
+                                      }
+                                    } else if (response.data.redirectToPayment && response.data.checkoutUrl) {
+                                      // Fallback: Redirect to payment gateway
+                                      window.location.href = response.data.checkoutUrl;
+                                    } else if (response.data.create_new_order) {
+                                      // Create new payment order
+                                      toast.info('Creating new payment order...');
+                                      const extensionId = extensionEligibility?.pending_extension?.id;
+                                      if (extensionId) {
+                                        try {
+                                          const paymentResponse = await apiService.createExtensionPayment(extensionId);
+                                          if (paymentResponse.success && paymentResponse.data.paymentSessionId) {
+                                            // Use SDK
+                                            const isProduction = paymentResponse.data.checkoutUrl?.includes('payments.cashfree.com') && 
+                                                               !paymentResponse.data.checkoutUrl?.includes('payments-test');
+                                            const cashfree = await load({ 
+                                              mode: isProduction ? "production" : "sandbox"
+                                            });
+                                            if (cashfree) {
+                                              cashfree.checkout({
+                                                paymentSessionId: paymentResponse.data.paymentSessionId
+                                              });
+                                            }
+                                          } else if (paymentResponse.success && paymentResponse.data.checkoutUrl) {
+                                            window.location.href = paymentResponse.data.checkoutUrl;
+                                          } else {
+                                            toast.error('Failed to create payment order. Please try again.');
+                                          }
+                                        } catch (error: any) {
+                                          toast.error(error.message || 'Failed to create payment order');
+                                        }
+                                      }
+                                    } else {
+                                      toast.info(response.data.message || 'Your payment transaction is still pending. Please wait for payment confirmation.');
+                                    }
+                                  } else if (response.data.status === 'expired' || response.data.status === 'failed') {
+                                    // Order expired or failed, create new one
+                                    if (response.data.create_new_order) {
+                                      toast.info('Payment order expired. Creating new payment order...');
+                                      const extensionId = extensionEligibility?.pending_extension?.id;
+                                      if (extensionId) {
+                                        try {
+                                          const paymentResponse = await apiService.createExtensionPayment(extensionId);
+                                          if (paymentResponse.success && paymentResponse.data.paymentSessionId) {
+                                            // Use SDK
+                                            const isProduction = paymentResponse.data.checkoutUrl?.includes('payments.cashfree.com') && 
+                                                               !paymentResponse.data.checkoutUrl?.includes('payments-test');
+                                            const cashfree = await load({ 
+                                              mode: isProduction ? "production" : "sandbox"
+                                            });
+                                            if (cashfree) {
+                                              cashfree.checkout({
+                                                paymentSessionId: paymentResponse.data.paymentSessionId
+                                              });
+                                            }
+                                          } else if (paymentResponse.success && paymentResponse.data.checkoutUrl) {
+                                            window.location.href = paymentResponse.data.checkoutUrl;
+                                          } else {
+                                            toast.error('Failed to create payment order. Please try again.');
+                                          }
+                                        } catch (error: any) {
+                                          toast.error(error.message || 'Failed to create payment order');
+                                        }
+                                      }
+                                    } else {
+                                      toast.error(response.data.message || 'Payment transaction has failed. Please create a new payment order.');
+                                    }
                                   } else {
                                     toast.info(response.data.message || 'Payment status checked.');
                                   }

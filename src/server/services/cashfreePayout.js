@@ -60,10 +60,6 @@ class CashfreePayoutService {
             if (this.nodeEnv === 'production') {
                 console.error('❌ ERROR: Cashfree credentials are required in production!');
             }
-        } else {
-            console.log(`[CashfreePayout] Initialized - Environment: ${this.isProduction ? 'PRODUCTION' : 'SANDBOX'}`);
-            console.log(`[CashfreePayout] API Base: ${this.baseURL}`);
-            console.log(`[CashfreePayout] API Version: ${this.apiVersion}`);
         }
 
         // Axios instance with defaults

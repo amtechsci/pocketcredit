@@ -18,10 +18,8 @@ const loadEnv = () => {
   let loaded = false;
   for (const p of possiblePaths) {
     if (fs.existsSync(p)) {
-      console.log(`Trying to load .env from: ${p}`);
       const result = require('dotenv').config({ path: p });
       if (!result.error) {
-        console.log(`✅ Loaded .env from ${p}`);
         loaded = true;
         break;
       }
@@ -30,7 +28,6 @@ const loadEnv = () => {
 
   // Fallback to default load
   if (!loaded) {
-    console.log('Trying default dotenv load...');
     require('dotenv').config();
   }
 };
@@ -77,6 +74,7 @@ const adminLoanPlansRoutes = require('./routes/adminLoanPlans');
 const adminFeeTypesRoutes = require('./routes/adminFeeTypes');
 const adminLateFeesRoutes = require('./routes/adminLateFees');
 const adminBankStatementRoutes = require('./routes/adminBankStatement');
+const adminTeamRoutes = require('./routes/adminTeam');
 const activityLogsRoutes = require('./routes/activityLogsSimple');
 const contactRoutes = require('./routes/contact');
 const eligibilityRoutes = require('./routes/eligibilityConfig');
@@ -144,7 +142,6 @@ const limiter = rateLimit({
   }
 });
 
-console.log(`🛡️  Rate limiting: ${rateLimitMax} requests per ${Math.ceil(rateLimitWindowMs / 60000)} minutes (${process.env.NODE_ENV || 'development'} mode)`);
 app.use('/api/', limiter);
 
 // CORS configuration - Allow localhost and local network IPs
@@ -243,6 +240,7 @@ app.use('/api/admin/loan-plans', adminLoanPlansRoutes);
 app.use('/api/admin/fee-types', adminFeeTypesRoutes);
 app.use('/api/admin/late-fees', adminLateFeesRoutes);
 app.use('/api/admin/bank-statement', adminBankStatementRoutes);
+app.use('/api/admin/team', adminTeamRoutes);
 app.use('/api/admin/activities', activityLogsRoutes);
 app.use('/api/admin/search', searchRoutes);
 app.use('/api/eligibility', eligibilityRoutes);
@@ -277,7 +275,6 @@ if (payoutRoutes.stack) {
     }
     return r.regexp?.toString();
   }).filter(Boolean);
-  console.log('✅ Payout routes registered:', routes);
 } else {
   console.warn('⚠️  Payout routes stack not found');
 }
@@ -337,10 +334,8 @@ adminLoanDocumentsRouter.get('/:applicationId', authenticateAdmin, async (req, r
       [applicationId]
     );
 
-    console.log(`📄 Admin documents response: ${documents?.length || 0} documents found for loan ${applicationId}`);
     if (documents && documents.length > 0) {
       documents.forEach((doc) => {
-        console.log(`  - ${doc.document_name} (${doc.document_type}) - ${doc.upload_status}`);
       });
     }
 
@@ -387,7 +382,6 @@ app.use('/api/bank-statement', userBankStatementRoutes);
 
 // Development-only routes (disabled in production for security)
 if (process.env.NODE_ENV !== 'production') {
-  console.log('🧪 Development routes enabled');
 }
 
 // Companies autocomplete
@@ -397,6 +391,9 @@ app.use('/api/companies', companiesRoutes);
 // Credit Analytics (Experian credit check)
 const creditAnalyticsRoutes = require('./routes/creditAnalytics');
 app.use('/api/credit-analytics', creditAnalyticsRoutes);
+
+const creditLimitRoutes = require('./routes/creditLimit');
+app.use('/api/credit-limit', creditLimitRoutes);
 
 // Policies management
 const policiesRoutes = require('./routes/policies');
@@ -466,7 +463,6 @@ const startServer = async () => {
     try {
       const { createUserLoginHistoryTable } = require('./migrations/create_user_login_history_table');
       await createUserLoginHistoryTable();
-      console.log('✅ Migrations completed');
     } catch (migrationError) {
       console.error('⚠️  Migration warning:', migrationError.message);
       // Continue even if migration fails (table might already exist)
@@ -486,10 +482,6 @@ const startServer = async () => {
 
     // Start the server
     app.listen(PORT, () => {
-      console.log(`🚀 Pocket Credit API server running on port ${PORT}`);
-      console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
-      console.log(`📚 API Base URL: http://localhost:${PORT}/api`);
-      console.log(`🔐 Authentication: http://localhost:${PORT}/api/auth`);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);

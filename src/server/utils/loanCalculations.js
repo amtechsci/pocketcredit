@@ -6,6 +6,19 @@
 const GST_RATE = 0.18; // 18% GST
 
 /**
+ * Ensure monetary value has exactly 2 decimal places (rounds to nearest cent)
+ * For loan applications, all monetary values should have 2 decimal places
+ * @param {number} value - Numeric value to format
+ * @returns {number} Value with exactly 2 decimal places
+ */
+function toDecimal2(value) {
+  if (value === null || value === undefined || isNaN(value)) {
+    return 0;
+  }
+  return parseFloat(parseFloat(value).toFixed(2));
+}
+
+/**
  * Parse MySQL datetime string or Date object to YYYY-MM-DD format (no timezone conversion)
  * @param {string|Date} dateValue - Date value from MySQL or Date object
  * @returns {string|null} Date string in YYYY-MM-DD format, or null if invalid
@@ -790,6 +803,8 @@ module.exports = {
   getTodayString,
   calculateDaysBetween,
   parseDateComponents,
-  formatDateToString
+  formatDateToString,
+  // Monetary formatting
+  toDecimal2
 };
 

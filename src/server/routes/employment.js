@@ -340,6 +340,18 @@ router.post('/details', requireAuth, async (req, res) => {
       [monthly_net_income, parseInt(salary_date), userId]
     );
 
+    // Adjust first-time loan amount to 8% of salary if applicable
+    try {
+      const { adjustFirstTimeLoanAmount } = require('../utils/creditLimitCalculator');
+      const adjustmentResult = await adjustFirstTimeLoanAmount(userId, parseFloat(monthly_net_income));
+      if (adjustmentResult.adjusted) {
+        console.log(`✅ First-time loan amount adjusted: Loan ${adjustmentResult.loanId} from ₹${adjustmentResult.oldAmount} to ₹${adjustmentResult.newAmount}`);
+      }
+    } catch (adjustmentError) {
+      // Don't fail the request if adjustment fails - log and continue
+      console.error('⚠️ Error adjusting first-time loan amount (non-critical):', adjustmentError.message);
+    }
+
     // Check if employment details already exist for this user (user-specific, one record per user)
     const existing = await executeQuery(
       'SELECT id FROM employment_details WHERE user_id = ?',
