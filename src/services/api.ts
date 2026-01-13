@@ -196,8 +196,7 @@ class ApiService {
 
   async verifyOTP(mobile: string, otp: string): Promise<ApiResponse<LoginResponse & { token?: string }>> {
     // Get stored UTM parameters
-    const { getStoredUTMParams } = require('../utils/utmTracker');
-    const utmParams = getStoredUTMParams();
+    const utmParams = this.getStoredUTMParams();
     
     // Include UTM parameters in request if present
     const requestBody: any = { mobile, otp };
@@ -215,6 +214,21 @@ class ApiService {
     }
 
     return response;
+  }
+
+  /**
+   * Get stored UTM parameters from localStorage
+   */
+  private getStoredUTMParams(): { utm_source?: string; utm_medium?: string; utm_campaign?: string } {
+    try {
+      const stored = localStorage.getItem('pocketcredit_utm_params');
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch (error) {
+      console.error('Error reading stored UTM parameters:', error);
+    }
+    return {};
   }
 
   async getUserProfile(): Promise<ApiResponse<{ user: User }>> {
@@ -317,8 +331,7 @@ class ApiService {
   // createLoanApplication - for new loan application flow
   async createLoanApplication(loanData: any): Promise<ApiResponse<any>> {
     // Get stored UTM parameters
-    const { getStoredUTMParams } = require('../utils/utmTracker');
-    const utmParams = getStoredUTMParams();
+    const utmParams = this.getStoredUTMParams();
     
     // Include UTM parameters in request if present
     const requestData: any = { ...loanData };
@@ -717,8 +730,7 @@ class ApiService {
     emi_amount?: number;
   }): Promise<ApiResponse<{ application: LoanApplication; next_steps: string[] }>> {
     // Get stored UTM parameters
-    const { getStoredUTMParams } = require('../utils/utmTracker');
-    const utmParams = getStoredUTMParams();
+    const utmParams = this.getStoredUTMParams();
     
     // Include UTM parameters in request if present
     const requestData: any = { ...loanData };
