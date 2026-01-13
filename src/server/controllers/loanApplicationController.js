@@ -103,6 +103,18 @@ const applyForLoan = async (req, res) => {
       });
     }
 
+    // Link loan to partner lead if UTM parameters are present
+    try {
+      const { utm_source } = req.body;
+      if (utm_source) {
+        const { linkLoanToLead } = require('../services/partnerPayoutService');
+        await linkLoanToLead(userId, newApplication.id, utm_source);
+      }
+    } catch (partnerLinkError) {
+      console.error('Error linking loan to partner lead (non-critical):', partnerLinkError.message);
+      // Don't fail loan creation if partner linking fails
+    }
+
     // Get application summary
     const applicationSummary = getApplicationSummary(newApplication);
 

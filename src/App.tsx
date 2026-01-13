@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { getAuthenticatedRedirect } from './utils/navigation';
@@ -66,6 +66,7 @@ import AdminApp from './AdminApp';
 import { Toaster } from './components/ui/sonner';
 import { PendingDocumentNotification } from './components/PendingDocumentNotification';
 import { DocumentRequiredGuard } from './components/DocumentRequiredGuard';
+import { initializeUTMTracking } from './utils/utmTracker';
 
 // Layout component for pages with header and footer
 function LayoutWithHeaderFooter({ children }: { children: React.ReactNode }) {
@@ -183,6 +184,11 @@ function AdminLoginPage() {
 
 function AppContent() {
   const { isAuthenticated, user, isLoading } = useAuth();
+
+  // Initialize UTM tracking on app load
+  useEffect(() => {
+    initializeUTMTracking();
+  }, []);
 
   // Show loading spinner while checking authentication
   if (isLoading) {

@@ -183,6 +183,39 @@ const verifyOtp = async (req, res) => {
         phone_verified: true
       });
       
+      // Link user to partner lead if UTM parameters are present
+      try {
+        const { utm_source, utm_medium } = req.body;
+        if (utm_source && utm_medium === 'partner_api') {
+          const { executeQuery, initializeDatabase } = require('../config/database');
+          await initializeDatabase();
+          
+          // Find partner lead by mobile number and utm_source
+          const leads = await executeQuery(
+            `SELECT id, partner_id, user_id 
+             FROM partner_leads 
+             WHERE mobile_number = ? AND utm_source = ? AND user_id IS NULL
+             ORDER BY lead_shared_at DESC 
+             LIMIT 1`,
+            [String(mobile), utm_source]
+          );
+          
+          if (leads && leads.length > 0) {
+            // Update partner lead with user_id
+            await executeQuery(
+              `UPDATE partner_leads 
+               SET user_id = ?, user_registered_at = NOW(), updated_at = NOW()
+               WHERE id = ?`,
+              [user.id, leads[0].id]
+            );
+            console.log(`✅ Linked user ${user.id} to partner lead ${leads[0].id} (utm_source: ${utm_source})`);
+          }
+        }
+      } catch (partnerLinkError) {
+        console.error('Error linking user to partner lead (non-critical):', partnerLinkError.message);
+        // Don't fail registration if partner linking fails
+      }
+      
     } else {
       // Update last login for existing user
       await updateLastLogin(user.id);

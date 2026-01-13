@@ -195,7 +195,19 @@ class ApiService {
   }
 
   async verifyOTP(mobile: string, otp: string): Promise<ApiResponse<LoginResponse & { token?: string }>> {
-    const response = await this.request<LoginResponse & { token?: string }>('POST', '/auth/verify-otp', { mobile, otp });
+    // Get stored UTM parameters
+    const { getStoredUTMParams } = require('../utils/utmTracker');
+    const utmParams = getStoredUTMParams();
+    
+    // Include UTM parameters in request if present
+    const requestBody: any = { mobile, otp };
+    if (utmParams.utm_source) {
+      requestBody.utm_source = utmParams.utm_source;
+      requestBody.utm_medium = utmParams.utm_medium || 'partner_api';
+      requestBody.utm_campaign = utmParams.utm_campaign;
+    }
+    
+    const response = await this.request<LoginResponse & { token?: string }>('POST', '/auth/verify-otp', requestBody);
 
     // Store JWT token if provided
     if (response.status === 'success' && response.data?.token) {
@@ -301,6 +313,21 @@ class ApiService {
 
   // NOTE: Old createLoanApplication method removed - use applyForLoan() instead
   // which calls /loan-applications/apply
+  
+  // createLoanApplication - for new loan application flow
+  async createLoanApplication(loanData: any): Promise<ApiResponse<any>> {
+    // Get stored UTM parameters
+    const { getStoredUTMParams } = require('../utils/utmTracker');
+    const utmParams = getStoredUTMParams();
+    
+    // Include UTM parameters in request if present
+    const requestData: any = { ...loanData };
+    if (utmParams.utm_source) {
+      requestData.utm_source = utmParams.utm_source;
+    }
+    
+    return this.request('POST', '/loan-applications/apply', requestData);
+  }
 
   async saveBankDetails(bankData: {
     application_id: number;
@@ -689,7 +716,17 @@ class ApiService {
     interest_rate?: number;
     emi_amount?: number;
   }): Promise<ApiResponse<{ application: LoanApplication; next_steps: string[] }>> {
-    return this.request('POST', '/loan-applications/apply', loanData);
+    // Get stored UTM parameters
+    const { getStoredUTMParams } = require('../utils/utmTracker');
+    const utmParams = getStoredUTMParams();
+    
+    // Include UTM parameters in request if present
+    const requestData: any = { ...loanData };
+    if (utmParams.utm_source) {
+      requestData.utm_source = utmParams.utm_source;
+    }
+    
+    return this.request('POST', '/loan-applications/apply', requestData);
   }
 
   async getLoanApplications(): Promise<ApiResponse<{
