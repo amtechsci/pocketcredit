@@ -5,3 +5,5 @@ src/build/
 src/dist/
 node_modules
 src/log
+src/partner_keys/partner_private.pem
+src/partner_keys/partner_public.pem

@@ -82,11 +82,19 @@ router.post('/login', authenticatePartnerBasic, async (req, res) => {
  */
 router.post('/refresh-token', authenticatePartnerBasic, async (req, res) => {
   try {
+    // Debug: Log all headers that might contain refresh token (for troubleshooting)
+    const relevantHeaders = Object.keys(req.headers).filter(k => 
+      k.toLowerCase().includes('refresh') || k.toLowerCase().includes('token')
+    );
+    if (relevantHeaders.length > 0) {
+      console.log('🔍 Refresh token endpoint - Relevant headers found:', relevantHeaders);
+    }
+    
     // Express normalizes headers to lowercase
     // Try common header name variations
     let refreshTokenHeader = null;
     
-    // Check common header name patterns
+    // Check common header name patterns (Express converts to lowercase)
     const headerVariations = [
       'refresh_token',
       'refresh-token', 
@@ -97,6 +105,7 @@ router.post('/refresh-token', authenticatePartnerBasic, async (req, res) => {
     for (const headerName of headerVariations) {
       if (req.headers[headerName]) {
         refreshTokenHeader = req.headers[headerName];
+        console.log(`✅ Found refresh token in header: ${headerName}`);
         break;
       }
     }
@@ -104,8 +113,10 @@ router.post('/refresh-token', authenticatePartnerBasic, async (req, res) => {
     // If not found in common patterns, search all headers (case-insensitive)
     if (!refreshTokenHeader) {
       for (const [key, value] of Object.entries(req.headers)) {
-        if (key.toLowerCase().replace(/[-_]/g, '') === 'refreshtoken') {
+        const normalizedKey = key.toLowerCase().replace(/[-_]/g, '');
+        if (normalizedKey === 'refreshtoken') {
           refreshTokenHeader = value;
+          console.log(`✅ Found refresh token in header: ${key}`);
           break;
         }
       }
@@ -113,11 +124,18 @@ router.post('/refresh-token', authenticatePartnerBasic, async (req, res) => {
     
     // Also check request body (common pattern for token refresh)
     const refreshTokenFromBody = req.body?.refresh_token || req.body?.refreshToken;
+    if (refreshTokenFromBody) {
+      console.log('✅ Found refresh token in request body');
+    }
     
     // Get token from header or body
     const tokenSource = refreshTokenHeader || refreshTokenFromBody;
     
     if (!tokenSource) {
+      // Enhanced debugging
+      console.log('❌ Refresh token not found. All headers:', Object.keys(req.headers));
+      console.log('❌ Request body:', req.body);
+      
       return res.status(401).json({
         status: false,
         code: 4114,
@@ -320,17 +338,30 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
     // Decrypt if encrypted
     if (isEncrypted) {
       try {
+        // Check if partner has public key configured
+        if (!partner.public_key_path) {
+          console.error('Partner does not have public_key_path configured');
+          return res.status(400).json({
+            status: false,
+            code: 4122,
+            message: 'Encryption not configured for this partner. Please configure partner public key.'
+          });
+        }
+
         const partnerPublicKey = loadKeyFromFile(partner.public_key_path);
         const ourPrivateKeyPath = process.env.PARTNER_PRIVATE_KEY_PATH || path.join(__dirname, '../../partnerKeys/private.pem');
         const ourPrivateKey = loadKeyFromFile(ourPrivateKeyPath);
 
         requestData = decryptFromPartner(requestData, partnerPublicKey, ourPrivateKey);
+        console.log('✅ Successfully decrypted encrypted request');
       } catch (decryptError) {
         console.error('Decryption error:', decryptError);
+        console.error('Decryption error details:', decryptError.message);
         return res.status(400).json({
           status: false,
           code: 2003,
-          message: 'Missing Parameters!'
+          message: 'Missing Parameters!',
+          error: process.env.NODE_ENV === 'development' ? decryptError.message : undefined
         });
       }
     }
@@ -498,8 +529,10 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
       message: responseMessage
     };
 
-    // Add UTM link for codes 2004 and 2005 (as per requirements)
-    if (dedupeCode === 2004 || dedupeCode === 2005) {
+    // Add UTM link ONLY for Fresh Lead (2005), not for Registered User (2004)
+    // Registered users are already in the system, so no need to share UTM link
+    // Active users (2006) are rejected and don't get UTM link
+    if (dedupeCode === 2005) {
       responseData.utm_link = utmLink;
       responseData.redirect_url = utmLink;
     }
