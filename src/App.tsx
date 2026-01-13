@@ -62,6 +62,7 @@ import { ChangeMobileNumberPage } from './components/pages/ChangeMobileNumberPag
 import { SendEmailPage } from './components/pages/SendEmailPage';
 import { Logo } from './components/Logo';
 import AdminApp from './AdminApp';
+import PartnerApp from './PartnerApp';
 
 import { Toaster } from './components/ui/sonner';
 import { PendingDocumentNotification } from './components/PendingDocumentNotification';
@@ -153,6 +154,9 @@ export default function App() {
       {/* Admin routes - no AuthProvider needed */}
       <Route path="/admin/login" element={<AdminLoginPage />} />
       <Route path="/admin/*" element={<AdminApp />} />
+
+      {/* Partner routes - separate from main app */}
+      <Route path="/partner/*" element={<PartnerApp />} />
 
       {/* All other routes - wrapped with AuthProvider */}
       <Route path="*" element={
