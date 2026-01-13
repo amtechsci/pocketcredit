@@ -176,7 +176,7 @@ router.post('/refresh-token', authenticatePartnerBasic, async (req, res) => {
  * Generate UTM link for partner
  */
 const generateUTMLink = (partnerUuid, mobileNumber) => {
-  const baseUrl = process.env.PARTNER_APP_URL || 'https://bit.ly/opencnapp';
+  const baseUrl = process.env.PARTNER_APP_URL || 'https://pocketcredit.in';
   const utmSource = encodeURIComponent(partnerUuid);
   const utmMedium = 'partner_api';
   const utmCampaign = encodeURIComponent(`lead_${mobileNumber}_${Date.now()}`);

@@ -8,7 +8,7 @@ const path = require('path');
  * This module provides encryption/decryption functionality for partner API.
  * It uses RSA-OAEP for key encryption and AES-256-GCM for data encryption.
  * 
- * Note: For production, consider using @capitalnow/secure-partner-sdk
+ * Note: For production, consider using @pocketcredit/secure-partner-sdk
  */
 
 const ALGORITHM = 'RSA-OAEP-AES256-GCM';

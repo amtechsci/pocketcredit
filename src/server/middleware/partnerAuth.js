@@ -150,7 +150,7 @@ const generatePartnerAccessToken = (partner) => {
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + (15 * 60), // 15 minutes
     aud: partner.partner_uuid,
-    iss: 'capitalnow'
+    iss: 'pocketcredit'
   };
   
   return jwt.sign(payload, PARTNER_JWT_SECRET);
@@ -169,7 +169,7 @@ const generatePartnerRefreshToken = (partner) => {
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60), // 30 days
     aud: partner.partner_uuid,
-    iss: 'capitalnow'
+    iss: 'pocketcredit'
   };
   
   return jwt.sign(payload, PARTNER_JWT_SECRET);
