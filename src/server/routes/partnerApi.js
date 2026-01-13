@@ -82,9 +82,19 @@ router.post('/login', authenticatePartnerBasic, async (req, res) => {
  */
 router.post('/refresh-token', authenticatePartnerBasic, async (req, res) => {
   try {
-    const refreshTokenHeader = req.headers['refresh_token'];
+    // Try multiple header name variations (Express converts to lowercase, some proxies convert underscores to hyphens)
+    const refreshTokenHeader = req.headers['refresh_token'] 
+      || req.headers['refresh-token']
+      || req.headers['x-refresh-token']
+      || req.headers['x-refresh_token'];
     
-    if (!refreshTokenHeader) {
+    // Also check request body (common pattern for token refresh)
+    const refreshTokenFromBody = req.body?.refresh_token || req.body?.refreshToken;
+    
+    // Get token from header or body
+    const tokenSource = refreshTokenHeader || refreshTokenFromBody;
+    
+    if (!tokenSource) {
       return res.status(401).json({
         status: false,
         code: 4114,
@@ -93,9 +103,9 @@ router.post('/refresh-token', authenticatePartnerBasic, async (req, res) => {
     }
 
     // Extract token (handle "Bearer " prefix if present)
-    const refreshToken = refreshTokenHeader.startsWith('Bearer ')
-      ? refreshTokenHeader.split(' ')[1]
-      : refreshTokenHeader;
+    const refreshToken = tokenSource.startsWith('Bearer ')
+      ? tokenSource.split(' ')[1]
+      : tokenSource;
 
     // Verify refresh token
     let decoded;
