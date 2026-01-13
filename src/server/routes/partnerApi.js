@@ -82,11 +82,34 @@ router.post('/login', authenticatePartnerBasic, async (req, res) => {
  */
 router.post('/refresh-token', authenticatePartnerBasic, async (req, res) => {
   try {
-    // Try multiple header name variations (Express converts to lowercase, some proxies convert underscores to hyphens)
-    const refreshTokenHeader = req.headers['refresh_token'] 
-      || req.headers['refresh-token']
-      || req.headers['x-refresh-token']
-      || req.headers['x-refresh_token'];
+    // Express normalizes headers to lowercase
+    // Try common header name variations
+    let refreshTokenHeader = null;
+    
+    // Check common header name patterns
+    const headerVariations = [
+      'refresh_token',
+      'refresh-token', 
+      'x-refresh-token',
+      'x-refresh_token'
+    ];
+    
+    for (const headerName of headerVariations) {
+      if (req.headers[headerName]) {
+        refreshTokenHeader = req.headers[headerName];
+        break;
+      }
+    }
+    
+    // If not found in common patterns, search all headers (case-insensitive)
+    if (!refreshTokenHeader) {
+      for (const [key, value] of Object.entries(req.headers)) {
+        if (key.toLowerCase().replace(/[-_]/g, '') === 'refreshtoken') {
+          refreshTokenHeader = value;
+          break;
+        }
+      }
+    }
     
     // Also check request body (common pattern for token refresh)
     const refreshTokenFromBody = req.body?.refresh_token || req.body?.refreshToken;
@@ -98,7 +121,7 @@ router.post('/refresh-token', authenticatePartnerBasic, async (req, res) => {
       return res.status(401).json({
         status: false,
         code: 4114,
-        message: 'Token is Required'
+        message: 'Token is Required. Please provide refresh_token in header (refresh_token or refresh-token) or request body.'
       });
     }
 
