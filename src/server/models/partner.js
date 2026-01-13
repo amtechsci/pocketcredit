@@ -49,15 +49,18 @@ const verifyPartnerCredentials = async (clientId, clientSecret) => {
   try {
     const partner = await findPartnerByClientId(clientId);
     if (!partner) {
+      console.log(`Partner not found: client_id=${clientId}`);
       return null;
     }
 
     // Verify password
     const isValid = await bcrypt.compare(clientSecret, partner.client_secret);
     if (!isValid) {
+      console.log(`Invalid client_secret for client_id=${clientId}`);
       return null;
     }
 
+    console.log(`✅ Partner authenticated: client_id=${clientId}, partner_uuid=${partner.partner_uuid}`);
     return partner;
   } catch (error) {
     console.error('Error verifying partner credentials:', error);

@@ -34,14 +34,28 @@ const authenticatePartnerBasic = async (req, res, next) => {
     }
 
     // Verify partner credentials
-    const { verifyPartnerCredentials } = require('../models/partner');
-    const partner = await verifyPartnerCredentials(clientId, clientSecret);
-
-    if (!partner) {
+    const { verifyPartnerCredentials, findPartnerByClientId } = require('../models/partner');
+    
+    // First check if partner exists (for better error messages)
+    const partnerExists = await findPartnerByClientId(clientId);
+    if (!partnerExists) {
+      console.error(`Partner login failed: Client ID '${clientId}' not found or inactive`);
       return res.status(401).json({
         status: false,
         code: 4111,
-        message: 'Invalid API credentials'
+        message: `Invalid API credentials: Client ID '${clientId}' not found or inactive`
+      });
+    }
+    
+    // Verify credentials
+    const partner = await verifyPartnerCredentials(clientId, clientSecret);
+
+    if (!partner) {
+      console.error(`Partner login failed: Invalid client_secret for Client ID '${clientId}'`);
+      return res.status(401).json({
+        status: false,
+        code: 4111,
+        message: 'Invalid API credentials: Client Secret does not match'
       });
     }
 

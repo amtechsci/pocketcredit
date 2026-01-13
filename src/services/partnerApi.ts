@@ -108,7 +108,11 @@ class PartnerApiService {
         this.accessToken = null;
         localStorage.removeItem('partner_access_token');
         localStorage.removeItem('partner_refresh_token');
-        throw new Error(result.message || 'Authentication failed. Please login again.');
+        // Return more detailed error message
+        const errorMessage = result.message || result.code 
+          ? `${result.message || 'Authentication failed'} (Code: ${result.code || 'N/A'})`
+          : 'Authentication failed. Please check your Client ID and Client Secret.';
+        throw new Error(errorMessage);
       }
       throw new Error(result.message || `Request failed: ${response.statusText}`);
     }
