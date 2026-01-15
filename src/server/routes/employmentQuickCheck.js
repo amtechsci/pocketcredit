@@ -88,10 +88,26 @@ router.post('/', requireAuth, async (req, res) => {
 
     if (holdTypes.includes(employment_type)) {
       // Hold application permanently
-      await executeQuery(
+      const holdReason = `Application held due to employment type: ${employment_type}`;
+      
+      console.log(`🔒 Placing user ${userId} on hold due to employment type: ${employment_type}`);
+      
+      const updateResult = await executeQuery(
         'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
-        ['on_hold', 'not_eligible', `Application held due to employment type: ${employment_type}`, userId]
+        ['on_hold', 'not_eligible', holdReason, userId]
       );
+
+      console.log(`✅ Hold status updated for user ${userId}. Result:`, updateResult);
+
+      // Verify the update was successful
+      const verifyUser = await executeQuery(
+        'SELECT status, eligibility_status, application_hold_reason FROM users WHERE id = ?',
+        [userId]
+      );
+
+      if (verifyUser && verifyUser.length > 0) {
+        console.log(`✅ Verified user ${userId} status:`, verifyUser[0]);
+      }
 
       return res.json({
         success: true,

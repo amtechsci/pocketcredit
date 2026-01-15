@@ -72,7 +72,7 @@ export function HoldBanner({ holdInfo }: HoldBannerProps) {
           </AlertTitle>
           <AlertDescription className="mt-2 space-y-3">
             <p className="text-sm text-orange-800">
-              We will update you once you are eligible.
+              We will let you know once you are eligible.
             </p>
             {holdInfo.hold_until_formatted && (
               <div className="flex items-center justify-between bg-white/70 p-3 rounded border border-orange-200">

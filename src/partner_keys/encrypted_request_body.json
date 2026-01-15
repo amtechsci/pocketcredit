@@ -1,0 +1,11 @@
+{
+  "partnerId": "PC_3267MCL11",
+  "encryptedData": "iuvRbpUpstu9FrLjfNZOk9SiFb6mM90xCsnGYxbxlfO1eIYiFG9lGYAruwT0v9decEQbI8w8Jnm4tnArqDngegzoa0djAsOQpi78JQGlxPQK4LTCIKgmFfOlnzYjxqIcN4f+Z1dbyDzT0Xqb/SE1Q63UVcmpySJ5B1m/4vnJKHEkT169RG+ci+E8dvvFJoexsJbSTy/4oy2NhNEfN+RrCBV/OpCE4nvdlOF+8mpHXHN+8cYYv3i4FVZQc4TgvdFZFz3WfxztTCLGx5UUdiM=",
+  "encryptedKey": "MV00tbiF8E4Me1gCr9AmtEZcuM5BoKCEjGGNB5SAjepD/huwci9Jxm9wX9zjSIeNWnQZdRBJUDFotymOpXvhPvCS/kFPBP5Q9GRHM11v2P2A95/s9LLUdwHXdZWPL5aYMVyru9B2oWGXy+CP0e+smvO/EMUvUXR8XNKs+Ev79FNiWi0mcL0fnvM6JzT94L/Uxs/cKWAJx3c3u+rxmcNpap1oEC51bpdbk3I79f2KBqMkPUs+mpgGC2iXJm71SzGjz4yWO9HvEVy5qN7XX/y2VVGYbvpzjrhyndMOnkEatraLpp39dJhLiePaSH419e365CtAIUYFAFNCAgZpYQWXSw==",
+  "authTag": "gh4geXrfgazavhiyEvSmtw==",
+  "iv": "Uaf+5y0wtUq+54QQ",
+  "signature": "H1DlVuPglNsVrKSaVg8yOLMo7uwYcWErXLh42yN1h6knuST01Iad9t2Uo9oXrJ8DGlyPcYkvLGUlA2tRtvqKsl4PX3LfjNqz4u7goQtCwL/3TOx2buB28ehYHKP0hCUDqfvBaNNscZ/Le8uC6LE9Wid8wFWcE4th6vNIVSvlz9a1wsRbWeWabsPSW9qDIIO3zv9rDCQ0xYpkMgid3N9v2Zyaq4tO5Wav8LjvldGgNdEhB3x6AXueEGqW5gdObEbtZs+iJg3L2uEYncD8I8xLF4CcdmoV2j7RjHwC05qfPFC+/WZhjrWv+KMcmubrVLLB+nIamgzU2VYUQoPpgRlFrA==",
+  "timestamp": 1768336691000,
+  "version": "1.0",
+  "algorithm": "RSA-OAEP-AES256-GCM"
+}

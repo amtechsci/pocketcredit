@@ -103,6 +103,8 @@ const getDashboardSummary = async (req, res) => {
     }
 
     // Check if user needs to complete profile
+    // Only allow dashboard if profile is fully completed
+    // If user was on hold at step 1 and admin unholds, they need to complete step 1 again
     if (!user.profile_completed) {
       // Check what specific data is missing
       const addresses = await executeQuery('SELECT * FROM addresses WHERE user_id = ?', [userId]);
@@ -203,10 +205,15 @@ const fetchDashboardData = async (userId) => {
   // Check if user is on hold and prepare hold information
   let holdInfo = null;
   if (user.status === 'on_hold') {
+    // Check if it's a cooling period based on reason message
+    const isCoolingPeriodReason = user.application_hold_reason && 
+      (user.application_hold_reason.toLowerCase().includes('cooling period') ||
+       user.application_hold_reason.toLowerCase().includes('cooling period'));
+    
     holdInfo = {
       is_on_hold: true,
       hold_reason: user.application_hold_reason,
-      hold_type: user.hold_until_date ? 'cooling_period' : 'permanent', // Use cooling_period for temporary holds (re-process)
+      hold_type: isCoolingPeriodReason ? 'cooling_period' : (user.hold_until_date ? 'cooling_period' : 'permanent'),
       status: user.status
     };
     

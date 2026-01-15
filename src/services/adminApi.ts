@@ -1881,6 +1881,57 @@ class AdminApiService {
       throw error;
     }
   }
+
+  // Cooling Period Users
+  async getCoolingPeriodUsers(page: number = 1, limit: number = 20, search: string = ''): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.get('/api/admin/users/cooling-period/list', {
+        params: { page, limit, search },
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
+
+  // Registered Users (just completed OTP step)
+  async getRegisteredUsers(page: number = 1, limit: number = 20, search: string = ''): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.get('/api/admin/users/registered/list', {
+        params: { page, limit, search },
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
+
+  // Approved Users (completed 2nd page and moved to next step)
+  async getApprovedUsers(page: number = 1, limit: number = 20, search: string = ''): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.get('/api/admin/users/approved/list', {
+        params: { page, limit, search },
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
 }
 
 // Export singleton instance

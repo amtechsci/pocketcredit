@@ -97,28 +97,32 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
       : 0;
 
     // Define percentage multipliers for each loan number
-    // 1st loan: 8%, 2nd loan: 11%, 3rd loan: 15.2%, 4th loan: 20.9%, 5th loan: 28%, 6th loan: 32.1%
+    // After 1st loan: 11%, After 2nd loan: 15.2%, After 3rd loan: 20.9%, 
+    // After 4th loan: 28%, After 5th loan: 32.1%, After 6th loan: Premium (₹1,50,000)
     const percentageMultipliers = [8, 11, 15.2, 20.9, 28, 32.1];
     
-    // loanCount includes the current loan being disbursed
-    // 1st loan: loanCount = 1, use index 0 (8%)
-    // 2nd loan: loanCount = 2, use index 1 (11%)
+    // loanCount = number of 2 EMI loans already disbursed (including current one being disbursed)
+    // After 1st loan disbursed (loanCount = 1), next limit is 11% (index 1)
+    // After 2nd loan disbursed (loanCount = 2), next limit is 15.2% (index 2)
     // etc.
-    const percentageIndex = Math.min(loanCount - 1, percentageMultipliers.length - 1);
-    const percentage = percentageMultipliers[Math.max(0, percentageIndex)];
+    // Next limit percentage index = loanCount (not loanCount - 1)
+    const nextPercentageIndex = Math.min(loanCount, percentageMultipliers.length - 1);
+    const nextPercentage = percentageMultipliers[nextPercentageIndex];
 
-    // Calculate new limit based on percentage
-    const calculatedLimitByPercentage = Math.round((salary * percentage) / 100);
+    // Calculate next limit based on next percentage tier
+    const calculatedLimitByPercentage = Math.round((salary * nextPercentage) / 100);
     
-    // Next limit should be based on current limit AND percentage calculation
-    // Use whichever is higher: current limit or calculated limit
+    // Next limit should be based on current limit AND next percentage calculation
+    // Use whichever is higher: current limit or calculated next limit
     const calculatedLimit = Math.max(currentLimit, calculatedLimitByPercentage);
     
-    // Check if max percentage (32.1%) is reached
-    const isMaxPercentageReached = percentage >= 32.1;
+    // Check if max percentage (32.1%) is reached for NEXT limit
+    const isMaxPercentageReached = nextPercentage >= 32.1;
     
-    // Check if next limit would cross ₹45,600
-    const wouldCrossMaxLimit = calculatedLimit > 45600;
+    // Check if next limit (based on percentage calculation) would cross ₹45,600
+    // This check should be based on the calculated percentage limit, not the max of current and calculated
+    // because premium limit should trigger when the progression-based limit crosses ₹45,600
+    const wouldCrossMaxLimit = calculatedLimitByPercentage > 45600;
     
     // If max percentage reached OR would cross ₹45,600, show premium limit of ₹1,50,000
     const showPremiumLimit = isMaxPercentageReached || wouldCrossMaxLimit;
@@ -131,12 +135,12 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
       newLimit = Math.min(calculatedLimit, 45600);
     }
 
-    console.log(`[CreditLimit] User ${userId}: Salary=₹${salary}, Current Limit=₹${currentLimit}, 2EMI Loans=${loanCount}, Percentage=${percentage}%, Calculated=₹${calculatedLimitByPercentage}, Final Limit=₹${newLimit}, Premium=${showPremiumLimit}`);
+    console.log(`[CreditLimit] User ${userId}: Salary=₹${salary}, Current Limit=₹${currentLimit}, 2EMI Loans=${loanCount}, Next Percentage=${nextPercentage}%, Calculated=₹${calculatedLimitByPercentage}, Final Limit=₹${newLimit}, Premium=${showPremiumLimit}`);
 
     return {
       newLimit,
       loanCount,
-      percentage,
+      percentage: nextPercentage, // Next percentage tier
       salary,
       currentLimit,
       calculatedLimit: calculatedLimitByPercentage,
@@ -445,6 +449,75 @@ async function adjustFirstTimeLoanAmount(userId, monthlySalary) {
   }
 }
 
+/**
+ * Check if user should be marked in cooling period after clearing a premium loan (₹1,50,000)
+ * @param {number} userId - User ID
+ * @param {number} loanId - Loan ID that was just cleared
+ * @returns {Promise<boolean>} - Returns true if user was marked in cooling period
+ */
+async function checkAndMarkCoolingPeriod(userId, loanId) {
+  try {
+    // Get the cleared loan details
+    const loanQuery = `
+      SELECT id, user_id, loan_amount, status, plan_snapshot
+      FROM loan_applications
+      WHERE id = ? AND user_id = ? AND status = 'cleared'
+    `;
+    const loans = await executeQuery(loanQuery, [loanId, userId]);
+    
+    if (!loans || loans.length === 0) {
+      return false;
+    }
+    
+    const loan = loans[0];
+    const loanAmount = parseFloat(loan.loan_amount) || 0;
+    
+    // Check if this is a premium loan (₹1,50,000) with 24 EMIs
+    let isPremiumLoan = false;
+    if (loanAmount === 150000) {
+      // Check if it's a 2 EMI product with premium tenure (24 EMIs)
+      try {
+        const planSnapshot = typeof loan.plan_snapshot === 'string' 
+          ? JSON.parse(loan.plan_snapshot) 
+          : loan.plan_snapshot;
+        
+        const emiCount = planSnapshot?.emi_count || 0;
+        const planType = planSnapshot?.plan_type || '';
+        
+        // Premium loan: ₹1,50,000 with 24 EMIs
+        if (emiCount === 24 || (planType === 'multi_emi' && emiCount >= 24)) {
+          isPremiumLoan = true;
+        }
+      } catch (parseError) {
+        // If plan_snapshot parsing fails, check by amount only
+        // ₹1,50,000 loans are premium by default
+        isPremiumLoan = true;
+      }
+    }
+    
+    if (isPremiumLoan) {
+      // Mark user in cooling period
+      await executeQuery(
+        `UPDATE users 
+         SET status = 'on_hold', 
+             hold_until_date = NULL, 
+             application_hold_reason = 'Your Profile is under cooling period. We will let you know once you are eligible.',
+             updated_at = NOW() 
+         WHERE id = ?`,
+        [userId]
+      );
+      
+      console.log(`[CreditLimit] User ${userId} marked in cooling period after clearing premium loan (₹1,50,000)`);
+      return true;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error(`[CreditLimit] Error checking cooling period for user ${userId}:`, error);
+    return false;
+  }
+}
+
 module.exports = {
   calculateCreditLimitFor2EMI,
   updateUserCreditLimit,
@@ -453,6 +526,7 @@ module.exports = {
   acceptPendingCreditLimit,
   rejectPendingCreditLimit,
   getMonthlyIncomeFromRange,
-  adjustFirstTimeLoanAmount
+  adjustFirstTimeLoanAmount,
+  checkAndMarkCoolingPeriod
 };
 

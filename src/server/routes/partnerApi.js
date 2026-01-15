@@ -38,8 +38,21 @@ router.post('/login', authenticatePartnerBasic, async (req, res) => {
       }
     };
 
-    // Check if encryption is enabled (if partner has public key)
-    const shouldEncrypt = process.env.PARTNER_API_ENCRYPTION_ENABLED === 'true' && partner.public_key_path;
+    // Check if this is a dashboard request (from web browser)
+    // Dashboard requests should NOT be encrypted for frontend compatibility
+    const isDashboardRequest = req.headers['x-dashboard-request'] === 'true' ||
+                               req.headers['x-requested-with'] === 'XMLHttpRequest' || 
+                               (req.headers['origin'] && req.headers['origin'].includes('pocketcredit.in')) ||
+                               (req.headers['referer'] && req.headers['referer'].includes('/partner/'));
+
+    // Only encrypt for API-to-API communication, not for dashboard
+    const shouldEncrypt = !isDashboardRequest && 
+                         process.env.PARTNER_API_ENCRYPTION_ENABLED === 'true' && 
+                         partner.public_key_path;
+    
+    if (isDashboardRequest) {
+      console.log('📱 Dashboard login request detected - skipping encryption');
+    }
 
     if (shouldEncrypt) {
       try {
@@ -64,7 +77,7 @@ router.post('/login', authenticatePartnerBasic, async (req, res) => {
       }
     }
 
-    // Return unencrypted response
+    // Return unencrypted response (for dashboard or when encryption fails)
     res.json(responseData);
   } catch (error) {
     console.error('Partner login error:', error);

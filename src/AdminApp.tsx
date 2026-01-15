@@ -18,6 +18,9 @@ import { ExtensionLetterDocument } from './admin/pages/ExtensionLetterDocument';
 import { NOCDocument } from './admin/pages/NOCDocument';
 import { SearchResultsPage } from './admin/pages/SearchResultsPage';
 import { PoliciesManagement } from './admin/pages/PoliciesManagement';
+import { CoolingPeriodPage } from './admin/pages/CoolingPeriodPage';
+import { RegisteredPage } from './admin/pages/RegisteredPage';
+import { ApprovedPage } from './admin/pages/ApprovedPage';
 import { AdminProvider } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
 import { useAdminAutoLogout } from './admin/hooks/useAdminAutoLogout';
@@ -101,16 +104,6 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                   Applications
                 </button>
                 <button
-                  onClick={() => navigate('/admin/extensions')}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/admin/extensions') 
-                      ? 'bg-blue-100 text-blue-700' 
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  Extensions
-                </button>
-                <button
                   onClick={() => navigate('/admin/users')}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     isActive('/admin/users') 
@@ -121,34 +114,34 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                   Users
                 </button>
                 <button
-                  onClick={() => navigate('/admin/users?status=on_hold')}
+                  onClick={() => navigate('/admin/registered')}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    location.search === '?status=on_hold'
-                      ? 'bg-red-100 text-red-700' 
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  Hold
-                </button>
-                <button
-                  onClick={() => navigate('/admin/users?status=deleted')}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    location.search === '?status=deleted'
-                      ? 'bg-gray-800 text-white' 
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  Delete
-                </button>
-                <button
-                  onClick={() => navigate('/admin/activity-logs')}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/admin/activity-logs') 
+                    isActive('/admin/registered')
                       ? 'bg-blue-100 text-blue-700' 
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
-                  Activity Logs
+                  Registered
+                </button>
+                <button
+                  onClick={() => navigate('/admin/approved')}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive('/admin/approved')
+                      ? 'bg-green-100 text-green-700' 
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  Approved
+                </button>
+                <button
+                  onClick={() => navigate('/admin/cooling-period')}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive('/admin/cooling-period')
+                      ? 'bg-orange-100 text-orange-700' 
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  Cooling Period
                 </button>
                 <button
                   onClick={() => navigate('/admin/reports')}
@@ -170,18 +163,6 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                     }`}
                   >
                     Team Management
-                  </button>
-                )}
-                {currentUser?.role === 'superadmin' && (
-                  <button
-                    onClick={() => navigate('/admin/policies')}
-                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      isActive('/admin/policies') 
-                        ? 'bg-blue-100 text-blue-700' 
-                        : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    Policies
                   </button>
                 )}
                 {currentUser?.role === 'superadmin' && (
@@ -297,6 +278,21 @@ export default function AdminApp() {
       <Route path="users" element={
         <ProtectedRoute>
           <AdminUsersPage />
+        </ProtectedRoute>
+      } />
+      <Route path="cooling-period" element={
+        <ProtectedRoute>
+          <CoolingPeriodPage />
+        </ProtectedRoute>
+      } />
+      <Route path="registered" element={
+        <ProtectedRoute>
+          <RegisteredPage />
+        </ProtectedRoute>
+      } />
+      <Route path="approved" element={
+        <ProtectedRoute>
+          <ApprovedPage />
         </ProtectedRoute>
       } />
       <Route path="activity-logs" element={

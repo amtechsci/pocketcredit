@@ -71,6 +71,11 @@ export function UserProfileDetail() {
   const [showUploadNewModal, setShowUploadNewModal] = useState(false);
   const [showAddTransactionModal, setShowAddTransactionModal] = useState(false);
   const [showAddFollowUpModal, setShowAddFollowUpModal] = useState(false);
+  const [followUpForm, setFollowUpForm] = useState({
+    type: '',
+    response: ''
+  });
+  const [submittingFollowUp, setSubmittingFollowUp] = useState(false);
   const [showAddNoteModal, setShowAddNoteModal] = useState(false);
   const [showSendSmsModal, setShowSendSmsModal] = useState(false);
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
@@ -2309,6 +2314,16 @@ export function UserProfileDetail() {
     const allEmployment = userData?.allEmployment || [];
     const latestEmployment = allEmployment[0] || {};
 
+    // Get employment type, income, and payment mode
+    const employmentType = latestEmployment.employment_type || userData?.employmentType || 'N/A';
+    const monthlyIncome = latestEmployment.monthly_salary_old || 
+                          userData?.allEmployment?.[0]?.monthly_salary_old ||
+                          userData?.monthlyIncome ||
+                          getUserData('personalInfo.monthlyIncome');
+    const paymentMode = latestEmployment.salary_payment_mode || 
+                       latestEmployment.payment_mode ||
+                       userData?.paymentMode || 'N/A';
+
     return (
       <div className="space-y-4">
         {/* Compact Summary Cards */}
@@ -2420,6 +2435,61 @@ export function UserProfileDetail() {
                 <span className="text-gray-500">Education:</span>
                 <span className="ml-2 text-gray-900">{latestEmployment.education || getUserData('personalInfo.education') || 'N/A'}</span>
               </div>
+            </div>
+          </div>
+
+          {/* Selected Options (from Step 2 - Employment Quick Check) */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <CheckCircle className="w-4 h-4" />
+              Selected Options (Step 2)
+            </h3>
+            <div className="space-y-2 text-sm">
+              <div>
+                <span className="text-gray-500">Employment Type:</span>
+                <span className="ml-2 text-gray-900 font-medium capitalize">
+                  {latestEmployment.employment_type || userData?.employmentType || 'N/A'}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500">Payment Mode:</span>
+                <span className="ml-2 text-gray-900 font-medium capitalize">
+                  {(() => {
+                    const mode = latestEmployment.salary_payment_mode || latestEmployment.payment_mode;
+                    if (!mode) return 'N/A';
+                    // Format: bank_transfer -> Bank Transfer, cash -> Cash, etc.
+                    return mode.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+                  })()}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500">Income Range:</span>
+                <span className="ml-2 text-gray-900 font-medium">
+                  {(() => {
+                    const range = userData?.incomeRange || latestEmployment.income_range;
+                    if (!range) return 'N/A';
+                    const rangeMap: { [key: string]: string } = {
+                      '1k-20k': '₹1k - ₹20k',
+                      '20k-30k': '₹20k - ₹30k',
+                      '30k-40k': '₹30k - ₹40k',
+                      'above-40k': 'Above ₹40k'
+                    };
+                    return rangeMap[range] || range;
+                  })()}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500">Date of Birth (Step 2):</span>
+                <span className="ml-2 text-gray-900 font-medium">
+                  {userData?.dateOfBirth ? formatDate(userData.dateOfBirth) : formatDate(getUserData('dateOfBirth')) || 'N/A'}
+                </span>
+              </div>
+              {userData?.application_hold_reason && (
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <span className="text-gray-500">Hold Reason:</span>
+                  <span className="ml-2 text-red-600 font-medium">{userData.application_hold_reason}</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -7018,144 +7088,65 @@ export function UserProfileDetail() {
               <tr>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Follow Up ID</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned To</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created Date</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Due Date</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Updated</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {getArray('followUpNotes').map((note, index) => (
-                <tr key={index} className="hover:bg-gray-50">
-                  <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {note.followUpId || `FU${String(index + 1).padStart(6, '0')}`}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${note.type === 'call' ? 'bg-blue-100 text-blue-800' :
-                      note.type === 'email' ? 'bg-green-100 text-green-800' :
-                        note.type === 'sms' ? 'bg-yellow-100 text-yellow-800' :
-                          note.type === 'visit' ? 'bg-purple-100 text-purple-800' :
-                            'bg-gray-100 text-gray-800'
-                      }`}>
-                      {note.type?.toUpperCase() || 'CALL'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${note.priority === 'high' ? 'bg-red-100 text-red-800' :
-                      note.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                        note.priority === 'low' ? 'bg-green-100 text-green-800' :
-                          'bg-gray-100 text-gray-800'
-                      }`}>
-                      {note.priority?.toUpperCase() || 'MEDIUM'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {note.subject || 'Follow Up Required'}
-                  </td>
-                  <td className="px-3 py-4 text-sm text-gray-900 max-w-xs truncate">
-                    {note.note}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {note.admin}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatDate(note.date)}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatDate(note.dueDate || note.date)}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${note.status === 'completed' ? 'bg-green-100 text-green-800' :
-                      note.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                        note.status === 'overdue' ? 'bg-red-100 text-red-800' :
-                          note.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
-                            'bg-gray-100 text-gray-800'
-                      }`}>
-                      {note.status || 'PENDING'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatDate(note.lastUpdated || note.date)}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm font-medium">
-                    <div className="flex items-center gap-2">
-                      <button className="text-blue-600 hover:text-blue-900">
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button className="text-green-600 hover:text-green-900">
-                        <CheckCircle className="w-4 h-4" />
-                      </button>
-                      <button className="text-orange-600 hover:text-orange-900">
-                        <Clock className="w-4 h-4" />
-                      </button>
-                      <button className="text-gray-600 hover:text-gray-900">
-                        <Edit className="w-4 h-4" />
-                      </button>
-                    </div>
+              {getArray('followUps').length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-3 py-8 text-center text-sm text-gray-500">
+                    No follow-ups found. Click "Add Follow Up" to create one.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                getArray('followUps').map((followUp: any, index: number) => (
+                  <tr key={followUp.id || index} className="hover:bg-gray-50">
+                    <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {followUp.follow_up_id || `FU${String(index + 1).padStart(6, '0')}`}
+                    </td>
+                    <td className="px-3 py-4 whitespace-nowrap">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${followUp.type === 'call' ? 'bg-blue-100 text-blue-800' :
+                        followUp.type === 'email' ? 'bg-green-100 text-green-800' :
+                          followUp.type === 'sms' ? 'bg-yellow-100 text-yellow-800' :
+                            followUp.type === 'meeting' ? 'bg-purple-100 text-purple-800' :
+                              'bg-gray-100 text-gray-800'
+                        }`}>
+                        {followUp.type?.toUpperCase() || 'CALL'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {followUp.subject || 'Follow Up Required'}
+                    </td>
+                    <td className="px-3 py-4 text-sm text-gray-900 max-w-xs truncate">
+                      {followUp.description || followUp.notes || ''}
+                    </td>
+                    <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {formatDate(followUp.created_at)}
+                    </td>
+                    <td className="px-3 py-4 whitespace-nowrap text-sm font-medium">
+                      <div className="flex items-center gap-2">
+                        <button className="text-blue-600 hover:text-blue-900">
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        <button className="text-green-600 hover:text-green-900">
+                          <CheckCircle className="w-4 h-4" />
+                        </button>
+                        <button className="text-orange-600 hover:text-orange-900">
+                          <Clock className="w-4 h-4" />
+                        </button>
+                        <button className="text-gray-600 hover:text-gray-900">
+                          <Edit className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
-        </div>
-
-        {/* Summary Cards */}
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-blue-50 p-4 rounded-lg">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <MessageSquare className="w-8 h-8 text-blue-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-blue-600">Total Follow Ups</p>
-                <p className="text-2xl font-semibold text-blue-900">{getUserData('followUpNotes')?.length || 0}</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-yellow-50 p-4 rounded-lg">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <Clock className="w-8 h-8 text-yellow-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-yellow-600">Pending</p>
-                <p className="text-2xl font-semibold text-yellow-900">
-                  {getArray('followUpNotes').filter(note => note.status === 'pending').length}
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-green-50 p-4 rounded-lg">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <CheckCircle className="w-8 h-8 text-green-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-green-600">Completed</p>
-                <p className="text-2xl font-semibold text-green-900">
-                  {getArray('followUpNotes').filter(note => note.status === 'completed').length}
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-red-50 p-4 rounded-lg">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <AlertCircle className="w-8 h-8 text-red-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-red-600">Overdue</p>
-                <p className="text-2xl font-semibold text-red-900">
-                  {getArray('followUpNotes').filter(note => note.status === 'overdue').length}
-                </p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -8953,204 +8944,117 @@ export function UserProfileDetail() {
               </button>
             </div>
 
-            <form className="space-y-4">
-              {/* Follow Up Type and Priority */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Follow Up Type *</label>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  >
-                    <option value="">Select Follow Up Type</option>
-                    <option value="call">Phone Call</option>
-                    <option value="email">Email</option>
-                    <option value="sms">SMS</option>
-                    <option value="visit">Personal Visit</option>
-                    <option value="meeting">Meeting</option>
-                    <option value="document_request">Document Request</option>
-                    <option value="verification">Verification</option>
-                    <option value="payment_reminder">Payment Reminder</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Priority *</label>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  >
-                    <option value="">Select Priority</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="urgent">Urgent</option>
-                  </select>
-                </div>
-              </div>
+            <form 
+              className="space-y-4"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!followUpForm.type || !followUpForm.response) {
+                  alert('Please fill in all required fields');
+                  return;
+                }
 
-              {/* Subject and Description */}
+                if (!params.userId) {
+                  alert('User ID is missing');
+                  return;
+                }
+
+                setSubmittingFollowUp(true);
+                try {
+                  const response = await adminApiService.addFollowUp(params.userId, {
+                    type: followUpForm.type,
+                    response: followUpForm.response,
+                    description: `Follow up: ${followUpForm.response}`,
+                    subject: `Follow Up - ${followUpForm.type}`,
+                    status: 'pending'
+                  });
+
+                  if (response.status === 'success') {
+                    alert('Follow up added successfully!');
+                    setShowAddFollowUpModal(false);
+                    setFollowUpForm({ type: '', response: '' });
+                    // Refresh user data to show new follow-up
+                    if (params.userId) {
+                      const profileResponse = await adminApiService.getUserProfile(params.userId);
+                      if (profileResponse.status === 'success') {
+                        setUserData(profileResponse.data);
+                      }
+                    }
+                  } else {
+                    alert('Failed to add follow up: ' + (response.message || 'Unknown error'));
+                  }
+                } catch (error: any) {
+                  console.error('Error adding follow up:', error);
+                  alert('Failed to add follow up: ' + (error.message || 'Unknown error'));
+                } finally {
+                  setSubmittingFollowUp(false);
+                }
+              }}
+            >
+              {/* Follow Up Type */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Subject *</label>
-                <input
-                  type="text"
-                  placeholder="Enter follow up subject"
+                <label className="block text-sm font-medium text-gray-700 mb-2">Follow Up Type *</label>
+                <select
+                  value={followUpForm.type}
+                  onChange={(e) => setFollowUpForm({ ...followUpForm, type: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
-                />
+                >
+                  <option value="">Select Follow Up Type</option>
+                  <option value="call">Phone Call</option>
+                  <option value="email">Email</option>
+                  <option value="sms">SMS</option>
+                  <option value="meeting">Meeting</option>
+                  <option value="other">Other</option>
+                </select>
               </div>
 
+              {/* Response */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Description *</label>
-                <textarea
-                  placeholder="Enter detailed description of the follow up"
-                  rows={4}
+                <label className="block text-sm font-medium text-gray-700 mb-2">Response *</label>
+                <select
+                  value={followUpForm.response}
+                  onChange={(e) => setFollowUpForm({ ...followUpForm, response: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
-                />
-              </div>
-
-              {/* Assignment and Scheduling */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Assigned To *</label>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  >
-                    <option value="">Select Assignee</option>
-                    <option value="admin1">Admin User 1</option>
-                    <option value="admin2">Admin User 2</option>
-                    <option value="manager1">Manager 1</option>
-                    <option value="officer1">Officer 1</option>
-                    <option value="team_lead">Team Lead</option>
-                    <option value="self">Self</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Due Date *</label>
-                  <input
-                    type="date"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Time and Duration */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Scheduled Time</label>
-                  <input
-                    type="time"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Estimated Duration (minutes)</label>
-                  <input
-                    type="number"
-                    placeholder="e.g., 30"
-                    min="5"
-                    max="480"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              {/* Contact Method and Status */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Contact Method</label>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Select Contact Method</option>
-                    <option value="phone">Phone Call</option>
-                    <option value="email">Email</option>
-                    <option value="sms">SMS</option>
-                    <option value="whatsapp">WhatsApp</option>
-                    <option value="in_person">In Person</option>
-                    <option value="video_call">Video Call</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="pending">Pending</option>
-                    <option value="in_progress">In Progress</option>
-                    <option value="completed">Completed</option>
-                    <option value="cancelled">Cancelled</option>
-                    <option value="rescheduled">Rescheduled</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Reminder Settings */}
-              <div className="border-t pt-4">
-                <h5 className="text-md font-medium text-gray-900 mb-3">Reminder Settings</h5>
-                <div className="space-y-3">
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="reminder-1day"
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="reminder-1day" className="ml-2 text-sm text-gray-700">
-                      Remind 1 day before due date
-                    </label>
-                  </div>
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="reminder-1hour"
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="reminder-1hour" className="ml-2 text-sm text-gray-700">
-                      Remind 1 hour before scheduled time
-                    </label>
-                  </div>
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="reminder-overdue"
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="reminder-overdue" className="ml-2 text-sm text-gray-700">
-                      Send overdue reminder if not completed
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              {/* Additional Information */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Additional Notes (Optional)</label>
-                <textarea
-                  placeholder="Add any additional notes or special instructions"
-                  rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+                >
+                  <option value="">Select Response</option>
+                  <optgroup label="Responded">
+                    <option value="responded_shall_mail_docs_eod">shall mail the docs by EOD</option>
+                    <option value="responded_shall_mail_docs_tomorrow">shall mail the docs tomorrow</option>
+                    <option value="responded_will_upload_docs_website">will upload docs on website/ app</option>
+                    <option value="responded_will_send_docs_whatsapp">will send docs on WhatsApp</option>
+                    <option value="responded_customer_not_interested">customer not interested</option>
+                    <option value="responded_not_responding_properly">not responding properly</option>
+                    <option value="responded_told_to_call_back_later">told to call back later</option>
+                    <option value="responded_wrong_number">wrong number</option>
+                    <option value="responded_didnt_not_apply_loan">didn't not apply loan</option>
+                    <option value="responded_interest_rate_is_high">interest rate is high</option>
+                    <option value="responded_dont_have_required_docs">don't have required docs</option>
+                    <option value="responded_uploaded_all_docs_done">uploaded all docs. It's done</option>
+                  </optgroup>
+                  <optgroup label="Not responded">
+                    <option value="not_responded_call_not_answering">Call not answering</option>
+                    <option value="not_responded_switched_off">switched off</option>
+                    <option value="not_responded_not_reachable">not reachable</option>
+                  </optgroup>
+                </select>
               </div>
 
               {/* Action Buttons */}
               <div className="flex gap-3 pt-4">
                 <button
                   type="submit"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    alert('Follow up added successfully!');
-                    setShowAddFollowUpModal(false);
-                  }}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                  disabled={submittingFollowUp}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Add Follow Up
+                  {submittingFollowUp ? 'Adding...' : 'Add Follow Up'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowAddFollowUpModal(false)}
+                  onClick={() => {
+                    setShowAddFollowUpModal(false);
+                    setFollowUpForm({ type: '', response: '' });
+                  }}
                   className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
                 >
                   Cancel

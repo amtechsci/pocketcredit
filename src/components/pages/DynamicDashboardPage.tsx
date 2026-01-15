@@ -336,11 +336,7 @@ export function DynamicDashboardPage() {
         const incompleteData = response.data as any;
         console.log('Profile incomplete, redirecting to completion:', incompleteData);
 
-        // If the backend says profile is incomplete, we should generally respect it
-        // especially for Step 1 (Employment Check) which is critical.
-        // For Step 2, our backend fix (profile_completed=1) should have prevented this status.
-        // So if we are here, it's either a new user or the fix didn't apply.
-        // Safe fallback is to redirect.
+        // Redirect to profile completion
         navigate('/profile-completion');
         return;
       } else {

@@ -566,11 +566,19 @@ function AppContent() {
         {/* Dashboard Pages (No Header/Footer) */}
         <Route path="/profile-completion" element={
           isAuthenticated ? (
-            <DashboardLayout>
-              <ErrorBoundary>
-                <ProfileCompletionPageSimple />
-              </ErrorBoundary>
-            </DashboardLayout>
+            user?.status === 'on_hold' ? (
+              <Navigate to="/hold-status" replace />
+            ) : user?.status === 'active' && user?.profile_completion_step >= 2 && user?.profile_completed ? (
+              <Navigate to="/dashboard" replace />
+            ) : user?.profile_completed ? (
+              <Navigate to="/dashboard" replace />
+            ) : (
+              <DashboardLayout>
+                <ErrorBoundary>
+                  <ProfileCompletionPageSimple />
+                </ErrorBoundary>
+              </DashboardLayout>
+            )
           ) : (
             <Navigate to="/auth" replace />
           )

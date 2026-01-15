@@ -4,6 +4,10 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 const { validateRequest } = require('../middleware/validation');
 const { getPresignedUrl, uploadStudentDocument } = require('../services/s3Service');
 const { getLoanCalculation } = require('../utils/loanCalculations');
+const pdfService = require('../services/pdfService');
+const emailService = require('../services/emailService');
+const axios = require('axios');
+const puppeteer = require('puppeteer');
 const router = express.Router();
 
 /**
@@ -25,6 +29,226 @@ function formatDateLocal(date) {
   return `${year}-${month}-${day}`;
 }
 
+/**
+ * Helper function to get KFS HTML using Puppeteer
+ */
+async function getKFSHTML(loanId, baseUrl = 'http://localhost:5000') {
+  let browser = null;
+  try {
+    console.log(`📊 Fetching KFS data for loan #${loanId}...`);
+    const kfsDataResponse = await axios.get(`${baseUrl}/api/kfs/${loanId}`, {
+      headers: {
+        'x-internal-call': 'true'
+      }
+    });
+    
+    if (!kfsDataResponse.data.success || !kfsDataResponse.data.data) {
+      throw new Error('Failed to get KFS data');
+    }
+    
+    const kfsData = kfsDataResponse.data.data;
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const kfsUrl = `${frontendUrl}/admin/kfs/${loanId}?internal=true`;
+    
+    console.log(`🌐 Rendering KFS HTML via Puppeteer...`);
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    
+    const page = await browser.newPage();
+    await page.goto(kfsUrl, { 
+      waitUntil: 'networkidle0',
+      timeout: 30000 
+    });
+    
+    await page.waitForSelector('.kfs-document-content', { timeout: 10000 });
+    
+    const htmlContent = await page.evaluate(() => {
+      const kfsElement = document.querySelector('.kfs-document-content');
+      return kfsElement ? kfsElement.outerHTML : null;
+    });
+    
+    if (!htmlContent) {
+      throw new Error('KFS content not found on page');
+    }
+    
+    return htmlContent;
+  } catch (error) {
+    console.error('Error getting KFS HTML:', error);
+    throw new Error(`Failed to get KFS HTML: ${error.message}`);
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.error('Error closing browser:', closeError);
+      }
+    }
+  }
+}
+
+/**
+ * Helper function to get Loan Agreement HTML using Puppeteer
+ */
+async function getLoanAgreementHTML(loanId, baseUrl = 'http://localhost:5000') {
+  let browser = null;
+  try {
+    console.log(`📊 Fetching Loan Agreement data for loan #${loanId}...`);
+    const kfsDataResponse = await axios.get(`${baseUrl}/api/kfs/${loanId}`, {
+      headers: {
+        'x-internal-call': 'true'
+      }
+    });
+    
+    if (!kfsDataResponse.data.success || !kfsDataResponse.data.data) {
+      throw new Error('Failed to get Loan Agreement data');
+    }
+    
+    const agreementData = kfsDataResponse.data.data;
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const agreementUrl = `${frontendUrl}/admin/loan-agreement/${loanId}?internal=true`;
+    
+    console.log(`🌐 Rendering Loan Agreement HTML via Puppeteer...`);
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    
+    const page = await browser.newPage();
+    await page.goto(agreementUrl, { 
+      waitUntil: 'networkidle0',
+      timeout: 30000 
+    });
+    
+    await page.waitForSelector('.loan-agreement-content, .agreement-document', { timeout: 10000 });
+    
+    const htmlContent = await page.evaluate(() => {
+      const agreementElement = document.querySelector('.loan-agreement-content') || 
+                              document.querySelector('.agreement-document');
+      return agreementElement ? agreementElement.outerHTML : null;
+    });
+    
+    if (!htmlContent) {
+      throw new Error('Loan Agreement content not found on page');
+    }
+    
+    return htmlContent;
+  } catch (error) {
+    console.error('Error getting Loan Agreement HTML:', error);
+    throw new Error(`Failed to get Loan Agreement HTML: ${error.message}`);
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.error('Error closing browser:', closeError);
+      }
+    }
+  }
+}
+
+/**
+ * Helper function to send KFS and Loan Agreement emails automatically
+ * Called when transaction details are updated
+ */
+async function sendKFSAndAgreementEmails(loanId) {
+  try {
+    console.log(`📧 Preparing to send KFS and Loan Agreement emails for loan #${loanId}...`);
+    
+    // Get loan and user details
+    const loans = await executeQuery(`
+      SELECT 
+        la.id, la.user_id, la.application_number, la.loan_amount, la.status,
+        u.email, u.first_name, u.last_name, u.personal_email, u.official_email
+      FROM loan_applications la
+      INNER JOIN users u ON la.user_id = u.id
+      WHERE la.id = ?
+    `, [loanId]);
+    
+    if (!loans || loans.length === 0) {
+      console.warn(`⚠️ Loan ${loanId} not found, skipping email send`);
+      return;
+    }
+    
+    const loan = loans[0];
+    const recipientEmail = loan.personal_email || loan.official_email || loan.email;
+    const recipientName = `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'User';
+    
+    if (!recipientEmail) {
+      console.warn(`⚠️ No email address found for user ${loan.user_id}, skipping email send`);
+      return;
+    }
+    
+    const apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:5000';
+    const applicationNumber = loan.application_number || `LOAN_${loanId}`;
+    
+    // Get HTML content
+    console.log(`📄 Getting KFS HTML for loan #${loanId}...`);
+    const kfsHTML = await getKFSHTML(loanId, apiBaseUrl);
+    
+    console.log(`📄 Getting Loan Agreement HTML for loan #${loanId}...`);
+    const loanAgreementHTML = await getLoanAgreementHTML(loanId, apiBaseUrl);
+    
+    // Generate PDFs
+    const kfsFilename = `KFS_${applicationNumber}.pdf`;
+    const agreementFilename = `Loan_Agreement_${applicationNumber}.pdf`;
+    
+    console.log(`📄 Generating KFS PDF: ${kfsFilename}`);
+    const kfsPDF = await pdfService.generateKFSPDF(kfsHTML, kfsFilename);
+    
+    console.log(`📄 Generating Loan Agreement PDF: ${agreementFilename}`);
+    const agreementPDF = await pdfService.generateKFSPDF(loanAgreementHTML, agreementFilename);
+    
+    // Send KFS email
+    try {
+      await emailService.sendKFSEmail({
+        loanId: loan.id,
+        recipientEmail: recipientEmail,
+        recipientName: recipientName,
+        loanData: {
+          application_number: loan.application_number,
+          sanctioned_amount: loan.loan_amount,
+          loan_term_days: 30,
+          status: loan.status
+        },
+        pdfBuffer: kfsPDF.buffer,
+        pdfFilename: kfsFilename,
+        sentBy: null // System-generated
+      });
+      console.log(`✅ KFS email sent successfully to: ${recipientEmail}`);
+    } catch (kfsEmailError) {
+      console.error('❌ Error sending KFS email (non-fatal):', kfsEmailError.message);
+    }
+    
+    // Send Loan Agreement email (using signed agreement email method)
+    // Note: The subject will say "Signed Loan Agreement" but it's sent automatically when transaction is updated
+    try {
+      await emailService.sendSignedAgreementEmail({
+        loanId: loan.id,
+        recipientEmail: recipientEmail,
+        recipientName: recipientName,
+        loanData: {
+          application_number: loan.application_number,
+          loan_amount: loan.loan_amount,
+          status: loan.status
+        },
+        pdfBuffer: agreementPDF.buffer,
+        pdfFilename: agreementFilename,
+        sentBy: null // System-generated
+      });
+      console.log(`✅ Loan Agreement email sent successfully to: ${recipientEmail}`);
+    } catch (agreementEmailError) {
+      console.error('❌ Error sending Loan Agreement email (non-fatal):', agreementEmailError.message);
+    }
+    
+    console.log(`✅ KFS and Loan Agreement emails sent successfully for loan #${loanId}`);
+  } catch (error) {
+    console.error(`❌ Error sending KFS and Loan Agreement emails for loan #${loanId}:`, error);
+    // Don't throw - this is a non-critical operation
+  }
+}
+
 // Get user profile with all related data
 router.get('/:userId', authenticateAdmin, async (req, res) => {
   try {
@@ -41,7 +265,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         eligibility_retry_date, selected_loan_plan_id, created_at, updated_at, last_login_at,
         pan_number, alternate_mobile, company_name, company_email, salary_date,
         personal_email, official_email, loan_limit, credit_score, experian_score,
-        monthly_net_income, work_experience_range
+        monthly_net_income, work_experience_range, employment_type, income_range,
+        application_hold_reason
       FROM users 
       WHERE id = ?
     `, [userId]);
@@ -619,6 +844,84 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     // Generate customer unique ID (CLID) - format: PC + user ID
     const clid = `PC${String(user.id).padStart(5, '0')}`;
 
+    // Fetch follow-ups
+    let followUps = [];
+    try {
+      // Check if table exists and fix admin_id column type if needed
+      try {
+        const tableCheck = await executeQuery(`
+          SELECT COLUMN_TYPE 
+          FROM INFORMATION_SCHEMA.COLUMNS 
+          WHERE TABLE_SCHEMA = DATABASE() 
+          AND TABLE_NAME = 'user_follow_ups' 
+          AND COLUMN_NAME = 'admin_id'
+        `);
+        
+        if (tableCheck.length > 0 && tableCheck[0].COLUMN_TYPE !== 'varchar(36)') {
+          // Drop foreign key if exists
+          try {
+            await executeQuery(`ALTER TABLE user_follow_ups DROP FOREIGN KEY user_follow_ups_ibfk_2`);
+          } catch (e) {
+            // Foreign key might not exist or have different name
+          }
+          // Alter column type
+          await executeQuery(`ALTER TABLE user_follow_ups MODIFY admin_id VARCHAR(36)`);
+          // Recreate foreign key
+          await executeQuery(`
+            ALTER TABLE user_follow_ups 
+            ADD CONSTRAINT user_follow_ups_ibfk_2 
+            FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL
+          `);
+        }
+      } catch (alterError) {
+        // Table might not exist yet, continue to create it
+      }
+      
+      // Create table if it doesn't exist
+      await executeQuery(`
+        CREATE TABLE IF NOT EXISTS user_follow_ups (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          user_id INT NOT NULL,
+          follow_up_id VARCHAR(50) UNIQUE,
+          type ENUM('call', 'email', 'sms', 'meeting', 'other') NOT NULL,
+          priority ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium',
+          subject VARCHAR(200),
+          description TEXT,
+          response VARCHAR(200),
+          assigned_to VARCHAR(100),
+          admin_id VARCHAR(36),
+          status ENUM('pending', 'in_progress', 'completed', 'cancelled', 'overdue') DEFAULT 'pending',
+          scheduled_date DATETIME,
+          due_date DATETIME,
+          completed_date DATETIME,
+          notes TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL,
+          INDEX idx_user_id (user_id),
+          INDEX idx_status (status),
+          INDEX idx_due_date (due_date),
+          INDEX idx_follow_up_id (follow_up_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      
+      // Fetch follow-ups
+      followUps = await executeQuery(`
+        SELECT 
+          uf.*,
+          a.name as admin_name,
+          a.email as admin_email
+        FROM user_follow_ups uf
+        LEFT JOIN admins a ON uf.admin_id = a.id
+        WHERE uf.user_id = ?
+        ORDER BY uf.created_at DESC
+      `, [userId]);
+    } catch (error) {
+      console.error('Error fetching follow-ups:', error);
+      followUps = [];
+    }
+
     // Transform user data to match frontend expectations
     const userProfile = {
       id: user.id,
@@ -661,6 +964,9 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       eligibilityRetryDate: user.eligibility_retry_date || 'N/A',
       selectedLoanPlanId: user.selected_loan_plan_id || null,
       selectedLoanPlan: selectedLoanPlan,
+      employmentType: user.employment_type || null, // Employment type from users table (Step 2 selection)
+      incomeRange: user.income_range || null, // Income range from users table (Step 2 selection)
+      application_hold_reason: user.application_hold_reason || null, // Hold reason if user is on hold
       personalInfo: {
         age: calculateAge(user.date_of_birth),
         gender: user.gender || 'N/A',
@@ -699,7 +1005,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       bankInfo: bankInfo, // Added for frontend compatibility
       references: references || [],
       transactions: [],
-      followUps: [],
+      followUps: followUps || [],
       notes: [],
       smsHistory: [],
       bankStatement: bankStatement,
@@ -913,6 +1219,22 @@ router.put('/:userId/loan-limit', authenticateAdmin, async (req, res) => {
       'UPDATE users SET loan_limit = ?, updated_at = NOW() WHERE id = ?',
       [parseFloat(loanLimit), userId]
     );
+
+    // If this is a 2 EMI product user, recalculate and update pending credit limit
+    // This ensures frontend shows correct next limit based on new logic
+    try {
+      const { calculateCreditLimitFor2EMI, storePendingCreditLimit } = require('../utils/creditLimitCalculator');
+      const creditLimitData = await calculateCreditLimitFor2EMI(userId, null, parseFloat(loanLimit));
+      
+      // Only store pending limit if it's different from current limit
+      if (creditLimitData.newLimit > parseFloat(loanLimit)) {
+        await storePendingCreditLimit(userId, creditLimitData.newLimit, creditLimitData);
+        console.log(`[CreditLimit] Recalculated next limit after manual update: ₹${creditLimitData.newLimit}`);
+      }
+    } catch (creditLimitError) {
+      console.error('❌ Error recalculating credit limit after manual update (non-fatal):', creditLimitError);
+      // Don't fail the update if recalculation fails
+    }
 
     console.log('✅ Loan limit updated successfully');
     res.json({
@@ -1845,9 +2167,9 @@ router.put('/:userId/transactions/:transactionId', authenticateAdmin, async (req
       });
     }
 
-    // Check if transaction exists and belongs to user
+    // Check if transaction exists and belongs to user, and get loan_application_id
     const transactionCheck = await executeQuery(
-      'SELECT id FROM transactions WHERE id = ? AND user_id = ?',
+      'SELECT id, loan_application_id FROM transactions WHERE id = ? AND user_id = ?',
       [transactionId, userId]
     );
 
@@ -1858,6 +2180,9 @@ router.put('/:userId/transactions/:transactionId', authenticateAdmin, async (req
       });
     }
 
+    const transaction = transactionCheck[0];
+    const loanApplicationId = transaction.loan_application_id;
+
     // Update transaction
     await executeQuery(
       `UPDATE transactions 
@@ -1867,6 +2192,17 @@ router.put('/:userId/transactions/:transactionId', authenticateAdmin, async (req
     );
 
     console.log('✅ Transaction reference number updated successfully');
+    
+    // Automatically send KFS and Loan Agreement emails if loan_application_id exists
+    if (loanApplicationId) {
+      console.log(`📧 Transaction updated for loan application #${loanApplicationId}, sending KFS and Loan Agreement emails...`);
+      // Send emails asynchronously (don't wait for it to complete)
+      sendKFSAndAgreementEmails(loanApplicationId).catch(error => {
+        console.error('❌ Error in background email sending:', error);
+        // Don't fail the transaction update if email sending fails
+      });
+    }
+    
     res.json({
       status: 'success',
       message: 'Transaction reference number updated successfully',
@@ -2566,6 +2902,15 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             // Don't fail - email failure shouldn't block loan clearance
           }
           
+          // Check if this is a premium loan (₹1,50,000) and mark user in cooling period
+          try {
+            const { checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
+            await checkAndMarkCoolingPeriod(loan.user_id, loanIdInt);
+          } catch (coolingPeriodError) {
+            console.error('❌ Error checking cooling period (non-fatal):', coolingPeriodError);
+            // Don't fail - cooling period check failure shouldn't block loan clearance
+          }
+          
           loanStatusUpdated = true;
           newStatus = 'cleared';
         } else {
@@ -2633,27 +2978,219 @@ router.get('/:userId/transactions', authenticateAdmin, async (req, res) => {
   }
 });
 
+// Get follow-ups for a user
+router.get('/:userId/follow-ups', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+
+    // Create table if it doesn't exist
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS user_follow_ups (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        user_id INT NOT NULL,
+        follow_up_id VARCHAR(50) UNIQUE,
+        type ENUM('call', 'email', 'sms', 'meeting', 'other') NOT NULL,
+        priority ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium',
+        subject VARCHAR(200),
+        description TEXT,
+        response VARCHAR(200),
+        assigned_to VARCHAR(100),
+        admin_id INT,
+        status ENUM('pending', 'in_progress', 'completed', 'cancelled', 'overdue') DEFAULT 'pending',
+        scheduled_date DATETIME,
+        due_date DATETIME,
+        completed_date DATETIME,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL,
+        INDEX idx_user_id (user_id),
+        INDEX idx_status (status),
+        INDEX idx_due_date (due_date),
+        INDEX idx_follow_up_id (follow_up_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // Fetch follow-ups
+    const followUps = await executeQuery(`
+      SELECT 
+        uf.*,
+        a.name as admin_name,
+        a.email as admin_email
+      FROM user_follow_ups uf
+      LEFT JOIN admins a ON uf.admin_id = a.id
+      WHERE uf.user_id = ?
+      ORDER BY uf.created_at DESC
+    `, [userId]);
+
+    res.json({
+      status: 'success',
+      data: followUps || []
+    });
+
+  } catch (error) {
+    console.error('Get follow-ups error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch follow-ups',
+      error: error.message
+    });
+  }
+});
+
 // Add follow-up
 router.post('/:userId/follow-ups', authenticateAdmin, async (req, res) => {
   try {
     console.log('📞 Adding follow-up for user:', req.params.userId);
     await initializeDatabase();
     const { userId } = req.params;
-    const { type, scheduledDate, notes, priority, status } = req.body;
+    const adminId = req.user?.id || req.user?.adminId || null;
+    
+    const { 
+      type, 
+      priority = 'medium', 
+      subject, 
+      description, 
+      response,
+      scheduledDate, 
+      dueDate,
+      notes, 
+      status = 'pending' 
+    } = req.body;
 
-    // For now, we'll store follow-up info in memory since table doesn't exist yet
-    console.log('✅ Follow-up added successfully (stored in memory)');
+    // Validate required fields
+    if (!type) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Follow-up type is required'
+      });
+    }
+
+    // Check if table exists and fix admin_id column type if needed
+    try {
+      const tableCheck = await executeQuery(`
+        SELECT COLUMN_TYPE 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'user_follow_ups' 
+        AND COLUMN_NAME = 'admin_id'
+      `);
+      
+      if (tableCheck.length > 0 && tableCheck[0].COLUMN_TYPE !== 'varchar(36)') {
+        // Drop foreign key if exists
+        try {
+          await executeQuery(`ALTER TABLE user_follow_ups DROP FOREIGN KEY user_follow_ups_ibfk_2`);
+        } catch (e) {
+          // Foreign key might not exist or have different name
+        }
+        // Alter column type
+        await executeQuery(`ALTER TABLE user_follow_ups MODIFY admin_id VARCHAR(36)`);
+        // Recreate foreign key
+        await executeQuery(`
+          ALTER TABLE user_follow_ups 
+          ADD CONSTRAINT user_follow_ups_ibfk_2 
+          FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL
+        `);
+      }
+    } catch (alterError) {
+      // Table might not exist yet, continue to create it
+    }
+
+    // Create table if it doesn't exist
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS user_follow_ups (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        user_id INT NOT NULL,
+        follow_up_id VARCHAR(50) UNIQUE,
+        type ENUM('call', 'email', 'sms', 'meeting', 'other') NOT NULL,
+        priority ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium',
+        subject VARCHAR(200),
+        description TEXT,
+        response VARCHAR(200),
+        assigned_to VARCHAR(100),
+        admin_id INT,
+        status ENUM('pending', 'in_progress', 'completed', 'cancelled', 'overdue') DEFAULT 'pending',
+        scheduled_date DATETIME,
+        due_date DATETIME,
+        completed_date DATETIME,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL,
+        INDEX idx_user_id (user_id),
+        INDEX idx_status (status),
+        INDEX idx_due_date (due_date),
+        INDEX idx_follow_up_id (follow_up_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // Generate follow-up ID
+    const followUpCount = await executeQuery(`
+      SELECT COUNT(*) as count FROM user_follow_ups WHERE user_id = ?
+    `, [userId]);
+    const count = followUpCount[0]?.count || 0;
+    const followUpId = `FU${String(count + 1).padStart(6, '0')}`;
+
+    // Insert follow-up
+    const result = await executeQuery(`
+      INSERT INTO user_follow_ups (
+        user_id, 
+        follow_up_id, 
+        type, 
+        priority, 
+        subject, 
+        description, 
+        response,
+        admin_id,
+        status, 
+        scheduled_date, 
+        due_date,
+        notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      userId,
+      followUpId,
+      type,
+      priority,
+      subject || `Follow Up - ${type}`,
+      description || notes || '',
+      response || null,
+      adminId,
+      status,
+      scheduledDate ? new Date(scheduledDate) : null,
+      dueDate ? new Date(dueDate) : (scheduledDate ? new Date(scheduledDate) : null),
+      notes || description || ''
+    ]);
+
+    const followUpIdInserted = result.insertId;
+
+    // Fetch the created follow-up
+    const followUp = await executeQuery(`
+      SELECT 
+        uf.*,
+        a.name as admin_name,
+        a.email as admin_email
+      FROM user_follow_ups uf
+      LEFT JOIN admins a ON uf.admin_id = a.id
+      WHERE uf.id = ?
+    `, [followUpIdInserted]);
+
+    console.log('✅ Follow-up added successfully');
     res.json({
       status: 'success',
       message: 'Follow-up added successfully',
-      data: { userId, type, scheduledDate, notes, priority, status }
+      data: followUp[0]
     });
 
   } catch (error) {
     console.error('Add follow-up error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to add follow-up'
+      message: 'Failed to add follow-up',
+      error: error.message
     });
   }
 });

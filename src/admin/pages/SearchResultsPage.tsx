@@ -79,7 +79,7 @@ export function SearchResultsPage() {
             Back
           </button>
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Search Results</h1>
-          <p className="text-gray-600">Search by name, PAN, number, alt number, ref numbers, bank loan id, PC id</p>
+          <p className="text-gray-600">Search by name, PAN, number, alt number, ref numbers, transaction/UTR, bank account number, bank loan id, PC id</p>
         </div>
 
         {/* Search Bar */}
@@ -90,7 +90,7 @@ export function SearchResultsPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name, PAN, number, alt number, ref numbers, bank loan id, PC id..."
+              placeholder="Search by name, PAN, number, alt number, ref numbers, transaction/UTR, bank account number, bank loan id, PC id..."
               className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
             <button
@@ -193,7 +193,7 @@ export function SearchResultsPage() {
           <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
             <Search className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Enter a search query</h3>
-            <p className="text-gray-600">Search by name, PAN, number, alt number, ref numbers, bank loan id, PC id</p>
+            <p className="text-gray-600">Search by name, PAN, number, alt number, ref numbers, transaction/UTR, bank account number, bank loan id, PC id</p>
           </div>
         )}
       </div>

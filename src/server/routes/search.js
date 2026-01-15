@@ -3,7 +3,7 @@ const { authenticateAdmin } = require('../middleware/auth');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const router = express.Router();
 
-// Global search endpoint - search by name, PAN, number, alt number, ref numbers, bank loan id, PC id
+// Global search endpoint - search by name, PAN, number, alt number, ref numbers, transaction/UTR, bank account number, bank loan id, PC id
 router.get('/', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
@@ -212,6 +212,74 @@ router.get('/', authenticateAdmin, async (req, res) => {
       }
     } catch (error) {
       console.error('Error in loan search:', error);
+    }
+
+    // 6. Search by transaction reference number (UTR)
+    try {
+      const transactionResults = await executeQuery(`
+        SELECT DISTINCT
+          t.user_id,
+          CONCAT(u.first_name, ' ', COALESCE(u.last_name, '')) as customer_name,
+          u.phone as number,
+          u.alternate_mobile as alt_number,
+          u.pan_number as pan,
+          CONCAT('PC', LPAD(u.id, 5, '0')) as clid,
+          'transaction' as source,
+          CONCAT('Transaction/UTR: ', t.reference_number) as found_in
+        FROM transactions t
+        INNER JOIN users u ON t.user_id = u.id
+        WHERE 
+          t.reference_number LIKE ?
+          AND t.reference_number IS NOT NULL
+          AND t.reference_number != ''
+      `, [searchTerm]);
+
+      for (const result of transactionResults) {
+        if (!seenUserIds.has(result.user_id)) {
+          seenUserIds.add(result.user_id);
+          allResults.push(result);
+        } else {
+          const existing = allResults.find(r => r.user_id === result.user_id);
+          if (existing && !existing.found_in.includes(result.found_in)) {
+            existing.found_in += `, ${result.found_in}`;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error in transaction search:', error);
+    }
+
+    // 7. Search by bank account number
+    try {
+      const bankResults = await executeQuery(`
+        SELECT DISTINCT
+          bd.user_id,
+          CONCAT(u.first_name, ' ', COALESCE(u.last_name, '')) as customer_name,
+          u.phone as number,
+          u.alternate_mobile as alt_number,
+          u.pan_number as pan,
+          CONCAT('PC', LPAD(u.id, 5, '0')) as clid,
+          'bank' as source,
+          CONCAT('Bank Account: ', bd.account_number, ' (', bd.bank_name, ')') as found_in
+        FROM bank_details bd
+        INNER JOIN users u ON bd.user_id = u.id
+        WHERE 
+          bd.account_number LIKE ?
+      `, [searchTerm]);
+
+      for (const result of bankResults) {
+        if (!seenUserIds.has(result.user_id)) {
+          seenUserIds.add(result.user_id);
+          allResults.push(result);
+        } else {
+          const existing = allResults.find(r => r.user_id === result.user_id);
+          if (existing && !existing.found_in.includes(result.found_in)) {
+            existing.found_in += `, ${result.found_in}`;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error in bank account search:', error);
     }
 
     // Format results

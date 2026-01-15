@@ -23,11 +23,15 @@ export const handleLogoClick = (
     } else if (user.status === 'on_hold') {
       // If user is on hold, redirect to hold status page
       navigate('/hold-status');
-    } else if (user.profile_completion_step >= 4) {
+    } else if (user.status === 'active' && user.profile_completion_step >= 2 && user.profile_completed) {
+      // If user is active, has completed step 2, AND profile is fully completed, show dashboard
+      navigate('/dashboard');
+    } else if (user.profile_completed) {
       // If profile is complete, go to dashboard
       navigate('/dashboard');
     } else {
       // If profile is incomplete, go to profile completion
+      // This includes users who were on hold at step 1 and need to complete it again
       navigate('/profile-completion');
     }
   } else {
@@ -54,13 +58,19 @@ export const getAuthenticatedRedirect = (user?: User | null): string => {
     return '/hold-status';
   }
   
-  // If profile is not complete, redirect to profile completion
-  if (user.profile_completion_step < 4) {
-    return '/profile-completion';
+  // If user is active, has completed step 2, AND profile is fully completed, show dashboard
+  if (user.status === 'active' && user.profile_completion_step >= 2 && user.profile_completed) {
+    return '/dashboard';
   }
   
   // If profile is complete, go to dashboard
-  return '/dashboard';
+  if (user.profile_completed) {
+    return '/dashboard';
+  }
+  
+  // If profile is not complete, redirect to profile completion
+  // This includes users who were on hold at step 1 and need to complete it again
+  return '/profile-completion';
 };
 
 /**

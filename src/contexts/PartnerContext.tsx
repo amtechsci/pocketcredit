@@ -73,9 +73,15 @@ export function PartnerProvider({ children }: { children: ReactNode }) {
           });
         }
       } else {
-        throw new Error(response.message || 'Login failed');
+        // Provide more detailed error message
+        const errorMessage = response.message 
+          ? `${response.message}${response.code ? ` (Code: ${response.code})` : ''}`
+          : 'Login failed. Please check your credentials.';
+        throw new Error(errorMessage);
       }
     } catch (error: any) {
+      // Re-throw with original error message
+      console.error('Partner login error:', error);
       throw error;
     }
   };

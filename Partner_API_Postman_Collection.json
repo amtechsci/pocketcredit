@@ -1,0 +1,975 @@
+{
+	"info": {
+		"_postman_id": "partner-api-collection-2025",
+		"name": "Partner API & Dedupe API",
+		"description": "Complete API collection for Partner API including authentication, dedupe checks, and dashboard endpoints",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "partner-api"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Login - Get Access Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.status && response.data) {",
+									"        pm.environment.set('access_token', response.data.access_token);",
+									"        pm.environment.set('refresh_token', response.data.refresh_token);",
+									"        console.log('Access token saved:', response.data.access_token);",
+									"    }",
+									"}",
+									"",
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response has status field', function () {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response).to.have.property('status');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "basic",
+							"basic": [
+								{
+									"key": "username",
+									"value": "{{client_id}}",
+									"type": "string"
+								},
+								{
+									"key": "password",
+									"value": "{{client_secret}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/partner/login",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"partner",
+								"login"
+							]
+						},
+						"description": "Authenticate partner using Basic Auth (client_id:client_secret) and receive access & refresh tokens"
+					},
+					"response": [
+						{
+							"name": "Success Response",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Basic Y2xpZW50X2lkOmNsaWVudF9zZWNyZXQ=",
+										"type": "text"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/v1/partner/login",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"partner",
+										"login"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"status\": true,\n    \"code\": 2000,\n    \"message\": \"Success\",\n    \"data\": {\n        \"access_token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n        \"refresh_token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n        \"token_type\": \"Bearer\",\n        \"expires_in\": 900\n    }\n}"
+						}
+					]
+				},
+				{
+					"name": "Refresh Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.status && response.data) {",
+									"        pm.environment.set('access_token', response.data.access_token);",
+									"        console.log('New access token saved');",
+									"    }",
+									"}",
+									"",
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "basic",
+							"basic": [
+								{
+									"key": "username",
+									"value": "{{client_id}}",
+									"type": "string"
+								},
+								{
+									"key": "password",
+									"value": "{{client_secret}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "refresh_token",
+								"value": "{{refresh_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/partner/refresh-token",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"partner",
+								"refresh-token"
+							]
+						},
+						"description": "Refresh access token using refresh token. Requires Basic Auth + refresh_token header"
+					},
+					"response": []
+				}
+			],
+			"description": "Authentication endpoints for partner API"
+		},
+		{
+			"name": "Dedupe API",
+			"item": [
+				{
+					"name": "Lead Dedupe Check - Basic",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response has status and code', function () {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response).to.have.property('status');",
+									"    pm.expect(response).to.have.property('code');",
+									"    pm.expect(response).to.have.property('message');",
+									"});",
+									"",
+									"pm.test('Dedupe code is valid', function () {",
+									"    const response = pm.response.json();",
+									"    const validCodes = [2004, 2005, 2006];",
+									"    pm.expect(validCodes).to.include(response.code);",
+									"});",
+									"",
+									"pm.test('UTM link present for fresh/registered leads', function () {",
+									"    const response = pm.response.json();",
+									"    if (response.code === 2004 || response.code === 2005) {",
+									"        pm.expect(response).to.have.property('utm_link');",
+									"    }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"mobile_number\": \"9876543210\",\n    \"pan_number\": \"ABCDE1234F\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/partner/lead-dedupe-check",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"partner",
+								"lead-dedupe-check"
+							]
+						},
+						"description": "Check if a lead already exists in the system. Returns dedupe status and UTM link for fresh/registered leads."
+					},
+					"response": [
+						{
+							"name": "Fresh Lead (2005)",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}",
+										"type": "text"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"mobile_number\": \"9876543210\",\n    \"pan_number\": \"ABCDE1234F\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/partner/lead-dedupe-check",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"partner",
+										"lead-dedupe-check"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"status\": true,\n    \"code\": 2005,\n    \"message\": \"Fresh Lead Registered Successfully!\",\n    \"utm_link\": \"https://pocketcredit.in?utm_source=partner_uuid&utm_medium=partner_api&utm_campaign=lead_9876543210_1234567890\",\n    \"redirect_url\": \"https://pocketcredit.in?utm_source=partner_uuid&utm_medium=partner_api&utm_campaign=lead_9876543210_1234567890\"\n}"
+						},
+						{
+							"name": "Registered User (2004)",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}",
+										"type": "text"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"mobile_number\": \"9876543210\",\n    \"pan_number\": \"ABCDE1234F\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/partner/lead-dedupe-check",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"partner",
+										"lead-dedupe-check"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"status\": true,\n    \"code\": 2004,\n    \"message\": \"Registered User\",\n    \"utm_link\": \"https://pocketcredit.in?utm_source=partner_uuid&utm_medium=partner_api&utm_campaign=lead_9876543210_1234567890\",\n    \"redirect_url\": \"https://pocketcredit.in?utm_source=partner_uuid&utm_medium=partner_api&utm_campaign=lead_9876543210_1234567890\"\n}"
+						},
+						{
+							"name": "Active User (2006)",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}",
+										"type": "text"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"mobile_number\": \"9876543210\",\n    \"pan_number\": \"ABCDE1234F\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/partner/lead-dedupe-check",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"partner",
+										"lead-dedupe-check"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"status\": false,\n    \"code\": 2006,\n    \"message\": \"Active Loan User\"\n}"
+						},
+						{
+							"name": "Validation Error - Missing Parameters",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}",
+										"type": "text"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"first_name\": \"John\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/partner/lead-dedupe-check",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"partner",
+										"lead-dedupe-check"
+									]
+								}
+							},
+							"status": "Bad Request",
+							"code": 400,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"status\": false,\n    \"code\": 2003,\n    \"message\": \"Missing Parameters!\"\n}"
+						}
+					]
+				},
+				{
+					"name": "Lead Dedupe Check - With Funnel Checks",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"mobile_number\": \"9876543210\",\n    \"pan_number\": \"ABCDE1234F\",\n    \"date_of_birth\": \"1990-01-15\",\n    \"employment_type\": \"Salaried\",\n    \"monthly_salary\": 35000,\n    \"payment_mode\": \"Bank Transfer\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/partner/lead-dedupe-check",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"partner",
+								"lead-dedupe-check"
+							]
+						},
+						"description": "Dedupe check with optional basic funnel validation:\n- Age: 18-45 years\n- Employment type: Salaried\n- Monthly salary: Minimum ₹20,000\n- Payment mode: Bank Transfer"
+					},
+					"response": []
+				},
+				{
+					"name": "Lead Dedupe Check - Encrypted (Optional)",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"partnerId\": \"{{partner_uuid}}\",\n    \"encryptedData\": \"base64_encrypted_data\",\n    \"encryptedKey\": \"base64_encrypted_key\",\n    \"authTag\": \"base64_auth_tag\",\n    \"iv\": \"base64_iv\",\n    \"signature\": \"base64_signature\",\n    \"version\": \"1.0\",\n    \"algorithm\": \"RSA-OAEP-AES256-GCM\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/partner/lead-dedupe-check",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"partner",
+								"lead-dedupe-check"
+							]
+						},
+						"description": "Encrypted request format (if encryption is enabled for partner). Uses RSA-OAEP for key encryption and AES-256-GCM for data encryption."
+					},
+					"response": []
+				}
+			],
+			"description": "Dedupe API endpoints for checking if leads already exist in the system"
+		},
+		{
+			"name": "Dashboard",
+			"item": [
+				{
+					"name": "Get All Leads",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response has leads array', function () {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.data).to.have.property('leads');",
+									"    pm.expect(response.data).to.have.property('pagination');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/partner/dashboard/leads?page=1&limit=50&status=fresh_lead&start_date=2025-01-01&end_date=2025-01-31",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"partner",
+								"dashboard",
+								"leads"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1",
+									"description": "Page number (default: 1)"
+								},
+								{
+									"key": "limit",
+									"value": "50",
+									"description": "Items per page (default: 50)"
+								},
+								{
+									"key": "status",
+									"value": "fresh_lead",
+									"description": "Filter by dedupe status: fresh_lead, registered_user, active_user",
+									"disabled": true
+								},
+								{
+									"key": "start_date",
+									"value": "2025-01-01",
+									"description": "Start date (YYYY-MM-DD)",
+									"disabled": true
+								},
+								{
+									"key": "end_date",
+									"value": "2025-01-31",
+									"description": "End date (YYYY-MM-DD)",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Get all leads shared by this partner with optional filters"
+					},
+					"response": [
+						{
+							"name": "Success Response",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/v1/partner/dashboard/leads?page=1&limit=50",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"partner",
+										"dashboard",
+										"leads"
+									],
+									"query": [
+										{
+											"key": "page",
+											"value": "1"
+										},
+										{
+											"key": "limit",
+											"value": "50"
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"status\": true,\n    \"code\": 2000,\n    \"message\": \"Success\",\n    \"data\": {\n        \"leads\": [\n            {\n                \"id\": 1,\n                \"first_name\": \"John\",\n                \"last_name\": \"Doe\",\n                \"mobile_number\": \"9876543210\",\n                \"pan_number\": \"ABCDE1234F\",\n                \"dedupe_status\": \"fresh_lead\",\n                \"dedupe_code\": 2005,\n                \"utm_link\": \"https://pocketcredit.in?utm_source=partner_uuid&utm_medium=partner_api&utm_campaign=lead_9876543210_1234567890\",\n                \"lead_shared_at\": \"2025-01-15T10:30:00.000Z\",\n                \"user_registered_at\": null,\n                \"loan_application_id\": null,\n                \"loan_status\": null,\n                \"disbursed_at\": null,\n                \"disbursal_amount\": null,\n                \"payout_eligible\": 0,\n                \"payout_amount\": null,\n                \"payout_grade\": null,\n                \"payout_status\": null,\n                \"user_id\": null,\n                \"email\": null,\n                \"application_number\": null,\n                \"days_to_disbursal\": null\n            }\n        ],\n        \"pagination\": {\n            \"page\": 1,\n            \"limit\": 50,\n            \"total\": 100,\n            \"total_pages\": 2\n        }\n    }\n}"
+						}
+					]
+				},
+				{
+					"name": "Get Statistics",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response has statistics', function () {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.data).to.have.property('total_leads');",
+									"    pm.expect(response.data).to.have.property('fresh_leads');",
+									"    pm.expect(response.data).to.have.property('registered_users');",
+									"    pm.expect(response.data).to.have.property('active_users');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/partner/dashboard/stats",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"partner",
+								"dashboard",
+								"stats"
+							]
+						},
+						"description": "Get partner statistics including total leads, fresh leads, registered users, active users, loan applications, disbursed loans, and payout information"
+					},
+					"response": [
+						{
+							"name": "Success Response",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/v1/partner/dashboard/stats",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"partner",
+										"dashboard",
+										"stats"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"status\": true,\n    \"code\": 2000,\n    \"message\": \"Success\",\n    \"data\": {\n        \"total_leads\": 1000,\n        \"fresh_leads\": 600,\n        \"registered_users\": 200,\n        \"active_users\": 200,\n        \"loan_applications\": 150,\n        \"disbursed_loans\": 100,\n        \"payout_eligible_leads\": 80,\n        \"total_payout_amount\": 50000.00\n    }\n}"
+						}
+					]
+				},
+				{
+					"name": "Get Lead Details",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test('Response has lead data', function () {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.data).to.have.property('id');",
+									"    pm.expect(response.data).to.have.property('first_name');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/partner/dashboard/lead/:leadId",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"partner",
+								"dashboard",
+								"lead",
+								":leadId"
+							],
+							"variable": [
+								{
+									"key": "leadId",
+									"value": "1",
+									"description": "Lead ID"
+								}
+							]
+						},
+						"description": "Get detailed information about a specific lead including user details, loan application, and payout information"
+					},
+					"response": [
+						{
+							"name": "Success Response",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/v1/partner/dashboard/lead/1",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"partner",
+										"dashboard",
+										"lead",
+										"1"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"status\": true,\n    \"code\": 2000,\n    \"message\": \"Success\",\n    \"data\": {\n        \"id\": 1,\n        \"partner_id\": 1,\n        \"partner_uuid\": \"partner_uuid_12345\",\n        \"user_id\": 123,\n        \"first_name\": \"John\",\n        \"last_name\": \"Doe\",\n        \"mobile_number\": \"9876543210\",\n        \"pan_number\": \"ABCDE1234F\",\n        \"dedupe_status\": \"fresh_lead\",\n        \"dedupe_code\": 2005,\n        \"utm_link\": \"https://pocketcredit.in?utm_source=partner_uuid&utm_medium=partner_api&utm_campaign=lead_9876543210_1234567890\",\n        \"lead_shared_at\": \"2025-01-15T10:30:00.000Z\",\n        \"user_registered_at\": \"2025-01-15T11:00:00.000Z\",\n        \"loan_application_id\": 456,\n        \"loan_status\": \"disbursed\",\n        \"disbursed_at\": \"2025-01-20T14:00:00.000Z\",\n        \"disbursal_amount\": 50000,\n        \"payout_eligible\": 1,\n        \"payout_amount\": 1000.00,\n        \"payout_grade\": \"A\",\n        \"payout_status\": \"eligible\",\n        \"email\": \"john.doe@example.com\",\n        \"user_status\": \"active\",\n        \"application_number\": \"APP123456\",\n        \"loan_amount\": 50000,\n        \"loan_created_at\": \"2025-01-15T11:30:00.000Z\"\n    }\n}"
+						},
+						{
+							"name": "Lead Not Found",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/v1/partner/dashboard/lead/99999",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"v1",
+										"partner",
+										"dashboard",
+										"lead",
+										"99999"
+									]
+								}
+							},
+							"status": "Not Found",
+							"code": 404,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"status\": false,\n    \"code\": 4040,\n    \"message\": \"Lead not found\"\n}"
+						}
+					]
+				}
+			],
+			"description": "Dashboard endpoints for partners to track leads and statistics"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Auto-refresh token if expired",
+					"const accessToken = pm.environment.get('access_token');",
+					"if (!accessToken) {",
+					"    console.log('No access token found. Please run Login request first.');",
+					"}"
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Global test script",
+					"pm.test('Response time is less than 5000ms', function () {",
+					"    pm.expect(pm.response.responseTime).to.be.below(5000);",
+					"});"
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:3000",
+			"type": "string"
+		},
+		{
+			"key": "client_id",
+			"value": "your_client_id",
+			"type": "string"
+		},
+		{
+			"key": "client_secret",
+			"value": "your_client_secret",
+			"type": "string"
+		},
+		{
+			"key": "partner_uuid",
+			"value": "your_partner_uuid",
+			"type": "string"
+		}
+	]
+}

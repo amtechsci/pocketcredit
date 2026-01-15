@@ -1,7 +1,92 @@
 const express = require('express');
 const { authenticateAdmin } = require('../middleware/auth');
 const { executeQuery, initializeDatabase } = require('../config/database');
+const { downloadFromS3 } = require('../services/s3Service');
+// pdf-parse v2.x - try to get the actual parsing function
+// The module exports an object, but should have a callable default function
+const pdfParseModule = require('pdf-parse');
+// In pdf-parse v2.x, the default export should still be the parsing function
+// Try accessing it via .default or use the module itself if it's callable
+const pdf = pdfParseModule.default || pdfParseModule;
 const router = express.Router();
+
+/**
+ * Extract PAN number from PDF text
+ * PAN format: 5 letters, 4 digits, 1 letter (e.g., FPFPM8829N)
+ * @param {string} text - PDF text content
+ * @returns {string|null} - Extracted PAN number or null
+ */
+function extractPANFromText(text) {
+  if (!text || typeof text !== 'string') {
+    return null;
+  }
+
+  // PAN pattern: 5 uppercase letters, 4 digits, 1 uppercase letter
+  // Look for patterns like "Permanent Account Number FPFPM8829N" or just the PAN itself
+  const panPattern = /\b([A-Z]{5}[0-9]{4}[A-Z]{1})\b/g;
+  const matches = text.match(panPattern);
+  
+  if (matches && matches.length > 0) {
+    // Return the first valid PAN found
+    const pan = matches[0].toUpperCase();
+    console.log(`   📄 Extracted PAN from PDF: ${pan}`);
+    return pan;
+  }
+
+  // Alternative: Look for "Permanent Account Number" followed by PAN
+  const panWithLabel = /Permanent\s+Account\s+Number\s+([A-Z]{5}[0-9]{4}[A-Z]{1})/gi;
+  const labelMatch = text.match(panWithLabel);
+  if (labelMatch) {
+    const pan = labelMatch[0].replace(/Permanent\s+Account\s+Number\s+/gi, '').trim().toUpperCase();
+    console.log(`   📄 Extracted PAN from PDF (with label): ${pan}`);
+    return pan;
+  }
+
+  return null;
+}
+
+/**
+ * Extract PAN from PANCR PDF document
+ * @param {Buffer} pdfBuffer - PDF file buffer
+ * @returns {Promise<string|null>} - Extracted PAN number or null
+ */
+async function extractPANFromPDF(pdfBuffer) {
+  let parser = null;
+  try {
+    // Ensure buffer is a Buffer object
+    if (!Buffer.isBuffer(pdfBuffer)) {
+      pdfBuffer = Buffer.from(pdfBuffer);
+    }
+    
+    console.log('   🔍 Attempting to parse PDF, buffer size:', pdfBuffer.length);
+    
+    // pdf-parse v2.4.5 uses PDFParse class
+    const { PDFParse } = require('pdf-parse');
+    
+    // Create parser instance with the PDF buffer
+    parser = new PDFParse({ data: pdfBuffer });
+    
+    // Extract text from PDF
+    const result = await parser.getText();
+    
+    const text = result.text || '';
+    console.log('   ✅ PDF parsed successfully, text length:', text.length);
+    return extractPANFromText(text);
+  } catch (error) {
+    console.error('   ❌ Error extracting PAN from PDF:', error.message);
+    console.error('   Error stack:', error.stack);
+    return null;
+  } finally {
+    // Clean up parser resources
+    if (parser) {
+      try {
+        await parser.destroy();
+      } catch (destroyError) {
+        // Ignore destroy errors
+      }
+    }
+  }
+}
 
 // Get all users with filters and pagination
 router.get('/', authenticateAdmin, async (req, res) => {
@@ -54,10 +139,20 @@ router.get('/', authenticateAdmin, async (req, res) => {
 
     // Status filter
     if (status && status !== 'all') {
-      // Map 'hold' to 'on_hold' for backward compatibility
-      const statusValue = status === 'hold' ? 'on_hold' : status;
-      whereConditions.push('u.status = ?');
-      queryParams.push(statusValue);
+      if (status === 'registered') {
+        // Registered: Users who just completed OTP step (phone_verified = 1 AND profile_completion_step < 2 or NULL)
+        // These are users who just completed OTP step and haven't moved to step 2 (employment quick check) yet
+        whereConditions.push(`(u.phone_verified = 1 AND (u.profile_completion_step < 2 OR u.profile_completion_step IS NULL))`);
+      } else if (status === 'approved') {
+        // Approved: Users who completed 2nd page (employment quick check) and got approved
+        // profile_completion_step >= 2, status = 'active', eligibility_status = 'eligible'
+        whereConditions.push(`(u.profile_completion_step >= 2 AND u.status = 'active' AND u.eligibility_status = 'eligible')`);
+      } else {
+        // Map 'hold' to 'on_hold' for backward compatibility
+        const statusValue = status === 'hold' ? 'on_hold' : status;
+        whereConditions.push('u.status = ?');
+        queryParams.push(statusValue);
+      }
     }
 
     // Add WHERE clause if conditions exist
@@ -507,7 +602,92 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
 
     const userData = user[0];
 
-    // If PAN or DOB not in users table, try to get from digitap_responses (pre-fill data)
+    // Priority 1: Check for PANCR document in kyc_documents and extract PAN via OCR
+    if (!userData.pan_number) {
+      try {
+        const pancrDocs = await executeQuery(
+          'SELECT id, s3_key, file_name FROM kyc_documents WHERE user_id = ? AND document_type = ? AND s3_key IS NOT NULL ORDER BY created_at DESC LIMIT 1',
+          [userId, 'PANCR']
+        );
+
+        if (pancrDocs && pancrDocs.length > 0 && pancrDocs[0].s3_key) {
+          console.log(`📄 Found PANCR document, extracting PAN via OCR...`);
+          try {
+            // Download PDF from S3
+            const pdfBuffer = await downloadFromS3(pancrDocs[0].s3_key);
+            console.log(`✅ Downloaded PANCR PDF from S3, size: ${pdfBuffer.length} bytes`);
+
+            // Extract PAN from PDF
+            const extractedPAN = await extractPANFromPDF(pdfBuffer);
+
+            if (extractedPAN) {
+              // Validate PAN format
+              const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+              if (panRegex.test(extractedPAN)) {
+                // Update users table with extracted PAN
+                await executeQuery(
+                  `UPDATE users 
+                   SET pan_number = ?,
+                       updated_at = NOW()
+                   WHERE id = ?`,
+                  [extractedPAN, userId]
+                );
+                console.log(`✅ Saved extracted PAN to users table: ${extractedPAN}`);
+
+                // Also save to verification_records table
+                await executeQuery(
+                  `INSERT INTO verification_records (user_id, document_type, document_number, verification_status, created_at, updated_at)
+                   VALUES (?, 'pan', ?, 'pending', NOW(), NOW())
+                   ON DUPLICATE KEY UPDATE
+                     document_number = VALUES(document_number),
+                     updated_at = NOW()`,
+                  [userId, extractedPAN]
+                );
+                console.log(`✅ Saved PAN to verification_records: ${extractedPAN}`);
+
+                userData.pan_number = extractedPAN;
+              } else {
+                console.warn(`⚠️ Extracted PAN format invalid: ${extractedPAN}`);
+              }
+            } else {
+              console.warn(`⚠️ Could not extract PAN from PANCR PDF`);
+            }
+          } catch (ocrError) {
+            console.error(`❌ Error processing PANCR document for OCR: ${ocrError.message}`);
+          }
+        }
+      } catch (kycError) {
+        console.error(`❌ Error checking kyc_documents for PANCR: ${kycError.message}`);
+      }
+    }
+
+    // Priority 2: Get PAN from verification_records (if already extracted)
+    if (!userData.pan_number) {
+      const panVerification = await executeQuery(
+        'SELECT document_number FROM verification_records WHERE user_id = ? AND document_type = ? ORDER BY updated_at DESC LIMIT 1',
+        [userId, 'pan']
+      );
+
+      if (panVerification && panVerification.length > 0 && panVerification[0].document_number) {
+        userData.pan_number = panVerification[0].document_number;
+        console.log(`✅ Using PAN from verification_records: ${userData.pan_number}`);
+      }
+    }
+
+    // Priority 2: Get DOB from user_info (Aadhar from Digilocker)
+    if (!userData.date_of_birth) {
+      const aadharInfo = await executeQuery(
+        'SELECT dob FROM user_info WHERE user_id = ? AND source = ? ORDER BY created_at DESC LIMIT 1',
+        [userId, 'digilocker']
+      );
+
+      if (aadharInfo && aadharInfo.length > 0 && aadharInfo[0].dob) {
+        userData.date_of_birth = aadharInfo[0].dob;
+        console.log(`✅ Using DOB from Aadhar (Digilocker): ${userData.date_of_birth}`);
+      }
+    }
+
+    // Fallback: If PAN or DOB still not found, try to get from digitap_responses (pre-fill data)
     if (!userData.pan_number || !userData.date_of_birth) {
       const digitapData = await executeQuery(
         'SELECT response_data FROM digitap_responses WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
@@ -519,9 +699,10 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
           ? JSON.parse(digitapData[0].response_data)
           : digitapData[0].response_data;
 
-        // Use pre-fill data if available
+        // Use pre-fill data if available (only if not already found)
         if (!userData.pan_number && prefillData.pan) {
           userData.pan_number = prefillData.pan;
+          console.log(`✅ Using PAN from digitap_responses: ${userData.pan_number}`);
         }
         if (!userData.date_of_birth && prefillData.dob) {
           // Convert DD/MM/YYYY to YYYY-MM-DD if needed
@@ -533,11 +714,12 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
           } else {
             userData.date_of_birth = prefillData.dob;
           }
+          console.log(`✅ Using DOB from digitap_responses: ${userData.date_of_birth}`);
         }
       }
     }
 
-    // Validate required fields after checking digitap data
+    // Validate required fields after checking all sources
     if (!userData.pan_number || !userData.date_of_birth) {
       return res.status(400).json({
         status: 'error',
@@ -709,6 +891,248 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
         response: error.response?.data || error.originalError?.response?.data,
         isServiceUnavailable: error.isServiceUnavailable
       } : undefined
+    });
+  }
+});
+
+// Get users in cooling period
+router.get('/cooling-period/list', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+
+    const {
+      page = 1,
+      limit = 20,
+      search = ''
+    } = req.query;
+
+    const pageNum = parseInt(page);
+    const pageSize = parseInt(limit);
+    const offset = (pageNum - 1) * pageSize;
+
+    // Build query for users in cooling period
+    // Cooling period = status = 'on_hold' with reason containing 'cooling period'
+    let baseQuery = `
+      SELECT 
+        u.id,
+        u.first_name,
+        u.last_name,
+        u.email,
+        u.phone,
+        u.status,
+        u.application_hold_reason,
+        u.loan_limit,
+        u.created_at,
+        u.updated_at
+      FROM users u
+      WHERE u.status = 'on_hold'
+        AND (u.application_hold_reason LIKE '%cooling period%' 
+             OR u.application_hold_reason LIKE '%Cooling period%'
+             OR u.application_hold_reason LIKE '%COOLING PERIOD%')
+    `;
+
+    const whereConditions = [];
+    const queryParams = [];
+
+    // Search filter
+    if (search) {
+      whereConditions.push(`(
+        u.first_name LIKE ? OR 
+        u.last_name LIKE ? OR 
+        u.email LIKE ? OR 
+        u.phone LIKE ?
+      )`);
+      const searchTerm = `%${search}%`;
+      queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+    }
+
+    if (whereConditions.length > 0) {
+      baseQuery += ' AND ' + whereConditions.join(' AND ');
+    }
+
+    // Get total count
+    const countQuery = `SELECT COUNT(*) as total FROM (${baseQuery}) as filtered_users`;
+    const countResult = await executeQuery(countQuery, queryParams);
+    const total = countResult && countResult.length > 0 ? countResult[0].total : 0;
+
+    // Add pagination and ordering
+    // Use direct values for LIMIT/OFFSET instead of placeholders to avoid MySQL parameter issues
+    baseQuery += ` ORDER BY u.updated_at DESC LIMIT ${parseInt(pageSize)} OFFSET ${parseInt(offset)}`;
+
+    const users = await executeQuery(baseQuery, queryParams);
+
+    res.json({
+      status: 'success',
+      data: {
+        users: users || [],
+        total: total,
+        page: pageNum,
+        limit: pageSize,
+        totalPages: Math.ceil(total / pageSize)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get cooling period users error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch cooling period users'
+    });
+  }
+});
+
+// GET /api/admin/users/registered/list
+// Get users who just completed OTP step
+router.get('/registered/list', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const search = req.query.search || '';
+    const offset = (page - 1) * limit;
+
+    let whereConditions = [];
+    let queryParams = [];
+
+    // Registered users: phone_verified = 1 AND profile_completion_step < 2 (or NULL)
+    // These are users who just completed OTP step and haven't moved to step 2 (employment quick check) yet
+    whereConditions.push(`(u.phone_verified = 1 AND (u.profile_completion_step < 2 OR u.profile_completion_step IS NULL))`);
+
+    // Search filter
+    if (search) {
+      whereConditions.push(`(
+        u.first_name LIKE ? OR 
+        u.last_name LIKE ? OR 
+        u.email LIKE ? OR 
+        u.phone LIKE ?
+      )`);
+      const searchTerm = `%${search}%`;
+      queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+    }
+
+    const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+
+    // Get total count
+    const countQuery = `SELECT COUNT(*) as total FROM users u ${whereClause}`;
+    const countResult = await executeQuery(countQuery, queryParams);
+    const total = countResult && countResult.length > 0 ? countResult[0].total : 0;
+
+    // Get users
+    // Use direct values for LIMIT/OFFSET instead of placeholders to avoid MySQL parameter issues
+    const usersQuery = `
+      SELECT 
+        u.id,
+        u.first_name,
+        u.last_name,
+        u.email,
+        u.phone,
+        u.status,
+        u.phone_verified,
+        u.profile_completion_step,
+        u.created_at,
+        u.updated_at
+      FROM users u
+      ${whereClause}
+      ORDER BY u.created_at DESC
+      LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
+    `;
+    const users = await executeQuery(usersQuery, queryParams);
+
+    res.json({
+      status: 'success',
+      data: {
+        users: users || [],
+        total: total,
+        page: page,
+        limit: limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get registered users error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch registered users'
+    });
+  }
+});
+
+// GET /api/admin/users/approved/list
+// Get users who completed 2nd page and moved to next step
+router.get('/approved/list', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const search = req.query.search || '';
+    const offset = (page - 1) * limit;
+
+    let whereConditions = [];
+    let queryParams = [];
+
+    // Approved users: profile_completion_step >= 2 AND status = 'active' AND eligibility_status = 'eligible'
+    whereConditions.push(`(u.profile_completion_step >= 2 AND u.status = 'active' AND u.eligibility_status = 'eligible')`);
+
+    // Search filter
+    if (search) {
+      whereConditions.push(`(
+        u.first_name LIKE ? OR 
+        u.last_name LIKE ? OR 
+        u.email LIKE ? OR 
+        u.phone LIKE ?
+      )`);
+      const searchTerm = `%${search}%`;
+      queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+    }
+
+    const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+
+    // Get total count
+    const countQuery = `SELECT COUNT(*) as total FROM users u ${whereClause}`;
+    const countResult = await executeQuery(countQuery, queryParams);
+    const total = countResult && countResult.length > 0 ? countResult[0].total : 0;
+
+    // Get users with employment details
+    // Use direct values for LIMIT/OFFSET instead of placeholders to avoid MySQL parameter issues
+    const usersQuery = `
+      SELECT 
+        u.id,
+        u.first_name,
+        u.last_name,
+        u.email,
+        u.phone,
+        u.status,
+        u.eligibility_status,
+        u.profile_completion_step,
+        u.employment_type,
+        u.income_range,
+        u.date_of_birth,
+        u.created_at,
+        u.updated_at
+      FROM users u
+      ${whereClause}
+      ORDER BY u.updated_at DESC
+      LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
+    `;
+    const users = await executeQuery(usersQuery, queryParams);
+
+    res.json({
+      status: 'success',
+      data: {
+        users: users || [],
+        total: total,
+        page: page,
+        limit: limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get approved users error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch approved users'
     });
   }
 });

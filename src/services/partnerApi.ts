@@ -124,20 +124,47 @@ class PartnerApiService {
    * Login with client_id and client_secret
    */
   async login(clientId: string, clientSecret: string): Promise<PartnerLoginResponse> {
-    const response = await this.request<PartnerLoginResponse>(
-      'POST',
-      '/login',
-      { client_id: clientId, client_secret: clientSecret },
-      true
-    );
+    // For dashboard login, we need unencrypted response
+    // Add header to indicate this is a dashboard request
+    const url = `${this.baseURL}/login`;
+    const credentials = btoa(`${clientId}:${clientSecret}`);
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${credentials}`,
+        'X-Requested-With': 'XMLHttpRequest', // Indicate dashboard request
+        'X-Dashboard-Request': 'true' // Explicit dashboard flag
+      }
+    });
 
-    if (response.status && response.data?.access_token) {
-      this.accessToken = response.data.access_token;
-      localStorage.setItem('partner_access_token', this.accessToken);
-      localStorage.setItem('partner_refresh_token', response.data.refresh_token);
+    const result = await response.json();
+
+    if (!response.ok) {
+      const errorMessage = result.message || result.code 
+        ? `${result.message || 'Authentication failed'} (Code: ${result.code || 'N/A'})`
+        : 'Authentication failed. Please check your Client ID and Client Secret.';
+      throw new Error(errorMessage);
     }
 
-    return response;
+    // Check if response is encrypted (has encryptedKey field)
+    let loginResponse: PartnerLoginResponse;
+    if (result.encryptedKey && result.encryptedData) {
+      // Response is encrypted - this shouldn't happen for dashboard, but handle it
+      throw new Error('Received encrypted response. Dashboard login should return unencrypted response. Please contact support.');
+    } else {
+      // Normal unencrypted response
+      loginResponse = result as PartnerLoginResponse;
+    }
+
+    if (loginResponse.status && loginResponse.data?.access_token) {
+      this.accessToken = loginResponse.data.access_token;
+      localStorage.setItem('partner_access_token', this.accessToken);
+      localStorage.setItem('partner_refresh_token', loginResponse.data.refresh_token);
+    }
+
+    return loginResponse;
   }
 
   /**

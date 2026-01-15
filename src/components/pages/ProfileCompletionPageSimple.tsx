@@ -17,15 +17,6 @@ import { apiService } from '../../services/api';
 import { DocumentUpload } from '../DocumentUpload';
 import { AdditionalDetailsStep } from './AdditionalDetailsStep';
 
-interface BasicProfileForm {
-  full_name: string;
-  pan_number: string;
-  gender: string;
-  latitude: number | null;
-  longitude: number | null;
-  date_of_birth: string;
-}
-
 interface EmploymentQuickCheckForm {
   employment_type: string;
   income_range: string;
@@ -46,7 +37,6 @@ const ProfileCompletionPageSimple = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const stepUpdatedRef = useRef(false);
-  const digitapCalledRef = useRef(false);
 
   // Helper functions to convert date formats
   const convertDDMMYYYYtoYYYYMMDD = (ddmmyyyy: string): string => {
@@ -154,15 +144,6 @@ const ProfileCompletionPageSimple = () => {
     }
   };
 
-  const [basicFormData, setBasicFormData] = useState<BasicProfileForm>({
-    full_name: '',
-    pan_number: '',
-    gender: '',
-    latitude: null,
-    longitude: null,
-    date_of_birth: '',
-  });
-
   const [employmentQuickCheckData, setEmploymentQuickCheckData] = useState<EmploymentQuickCheckForm>({
     employment_type: '',
     income_range: '',
@@ -177,12 +158,6 @@ const ProfileCompletionPageSimple = () => {
     graduation_status: 'not_graduated',
   });
 
-  // Digitap pre-fill states
-  const [digitapData, setDigitapData] = useState<any>(null);
-  const [showPrefillConfirm, setShowPrefillConfirm] = useState(false);
-  const [fetchingPrefill, setFetchingPrefill] = useState(false);
-  const [digitapCalled, setDigitapCalled] = useState(false);
-  const [showManualForm, setShowManualForm] = useState(false); // Control manual form visibility
 
   // Student document upload states
   const [uploadedDocs, setUploadedDocs] = useState<{
@@ -211,47 +186,47 @@ const ProfileCompletionPageSimple = () => {
   useEffect(() => {
     // Don't reset step if profile is already completed
     if (user && user.profile_completion_step && !user.profile_completed) {
-      const newStep = user.profile_completion_step;
+      // If user doesn't have employment_type, they need to complete step 1 first
+      // This handles the case where user was put on hold at step 1 and admin unholds them
+      if (!user.employment_type) {
+        setCurrentStep(1);
+        return;
+      }
+      
+      // Step 2 (Basic Information) is removed - skip to step 3 for students, or redirect to dashboard for salaried
+      let newStep = user.profile_completion_step;
+      if (newStep === 2) {
+        // If profile_completion_step is 2 but profile is completed, redirect to dashboard
+        if (user.profile_completed) {
+          navigate('/dashboard', { replace: true });
+          return;
+        }
+        // For students, step 2 was skipped, so go to step 3
+        if (user.employment_type === 'student') {
+          newStep = 3;
+        } else {
+          // For salaried users, if step 2 is set but not completed, redirect to dashboard
+          navigate('/dashboard', { replace: true });
+          return;
+        }
+      }
+      
       if (newStep !== currentStep && !stepUpdatedRef.current) {
         stepUpdatedRef.current = true;
         setCurrentStep(newStep);
         setTimeout(() => { stepUpdatedRef.current = false; }, 100);
       }
     }
-  }, [user?.profile_completion_step, user?.profile_completed]);
+  }, [user?.profile_completion_step, user?.profile_completed, user?.employment_type, navigate]);
 
   // Initialize form data when user loads
   useEffect(() => {
     if (user) {
-      const fullName = user.first_name && user.last_name ? `${user.first_name} ${user.last_name}`.trim() : user.first_name || '';
-      let lat = null;
-      let lng = null;
-      if (user.latlong) {
-        const [latitude, longitude] = user.latlong.split(',');
-        lat = parseFloat(latitude) || null;
-        lng = parseFloat(longitude) || null;
-      }
-
-      let formattedDOB = '';
-      if (user.date_of_birth) {
-        // Convert backend format (YYYY-MM-DD) to display format (DD/MM/YYYY)
-        formattedDOB = convertYYYYMMDDtoDDMMYYYY(user.date_of_birth);
-      }
-
-      setBasicFormData({
-        full_name: fullName,
-        pan_number: user.pan_number || '',
-        gender: user.gender ? user.gender.toLowerCase() : '',
-        latitude: lat,
-        longitude: lng,
-        date_of_birth: formattedDOB,
-      });
-
-      // Also initialize employment quick check data if it exists
+      // Initialize employment quick check data if it exists
       if (user.date_of_birth) {
         setEmploymentQuickCheckData(prev => ({
           ...prev,
-          date_of_birth: convertYYYYMMDDtoDDMMYYYY(user.date_of_birth)
+          date_of_birth: convertYYYYMMDDtoDDMMYYYY(user.date_of_birth || '')
         }));
       }
 
@@ -259,102 +234,43 @@ const ProfileCompletionPageSimple = () => {
       if (user.employment_type === 'student' && user.date_of_birth) {
         setStudentFormData(prev => ({
           ...prev,
-          date_of_birth: convertYYYYMMDDtoDDMMYYYY(user.date_of_birth)
+          date_of_birth: convertYYYYMMDDtoDDMMYYYY(user.date_of_birth || '')
         }));
       }
     }
   }, [user?.id]);
 
+  // Redirect if user is on hold
+  useEffect(() => {
+    if (user && user.status === 'on_hold') {
+      navigate('/hold-status', { replace: true });
+    }
+  }, [user, navigate]);
+
+  // Redirect if user is active and has completed employment quick check (step 2) AND profile is completed
+  // If user was on hold at step 1 and admin unholds, profile_completed will be false,
+  // so they'll stay on profile completion to complete step 1 again
+  useEffect(() => {
+    if (user && user.status === 'active' && user.profile_completion_step >= 2 && user.profile_completed) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [user, navigate]);
+
   // Redirect if profile is already complete
   useEffect(() => {
-    if (user && user.profile_completed) {
+    if (user && user.profile_completed && user.status !== 'on_hold') {
       navigate('/dashboard');
     }
   }, [user, navigate]);
 
-  // Auto-capture GPS location when Step 2 is reached (only for salaried)
+
+  // Redirect to dashboard if somehow user ends up on step 2 (which is removed)
   useEffect(() => {
-    const isSalaried = user?.employment_type === 'salaried' || employmentQuickCheckData.employment_type === 'salaried';
-
-    if (currentStep === 2 && isSalaried && !basicFormData.latitude && !basicFormData.longitude) {
-      console.log('📍 Auto-capturing location for salaried user...');
-      captureLocation();
+    if (currentStep === 2) {
+      console.log('Step 2 is removed, redirecting to dashboard');
+      navigate('/dashboard', { replace: true });
     }
-  }, [currentStep, user?.employment_type, employmentQuickCheckData.employment_type, basicFormData.latitude, basicFormData.longitude]);
-
-  // Auto-call Digitap API when Step 2 is reached (only for salaried)
-  useEffect(() => {
-    const isSalaried = user?.employment_type === 'salaried' || employmentQuickCheckData.employment_type === 'salaried';
-    const profileComplete = user?.profile_completed;
-
-    console.log('Digitap trigger check:', {
-      currentStep,
-      userEmploymentType: user?.employment_type,
-      formEmploymentType: employmentQuickCheckData.employment_type,
-      isSalaried,
-      profileComplete,
-      digitapCalled: digitapCalled,
-      digitapCalledRef: digitapCalledRef.current
-    });
-
-    // Don't call Digitap if profile is already complete or if it's already been called
-    if (currentStep === 2 && isSalaried && !digitapCalled && !digitapCalledRef.current && !profileComplete) {
-      console.log('✅ Triggering Digitap API call... SKIPPED BY USER REQUEST');
-      // digitapCalledRef.current = true; // Set ref immediately to prevent multiple calls
-      // fetchDigitapData();
-
-      // Force redirect if somehow we end up here
-      window.location.href = '/dashboard';
-
-      // Safety: Show manual form after 20 seconds if Digitap hasn't responded
-      // const timeoutId = setTimeout(() => {
-      //   if (!showPrefillConfirm && !showManualForm && !loading) {
-      //     console.log('⏰ Digitap timeout - showing manual form');
-      //     setShowManualForm(true);
-      //     toast.info('Taking too long? You can enter details manually');
-      //   }
-      // }, 20000); // 20 seconds
-
-      // return () => clearTimeout(timeoutId);
-      return;
-    }
-  }, [currentStep, user?.employment_type, employmentQuickCheckData.employment_type, digitapCalled, user?.profile_completed]);
-
-  // Skip Step 2 for students - go directly to Step 3
-  useEffect(() => {
-    if (currentStep === 2 && user?.employment_type === 'student') {
-      console.log('Student detected, skipping to Step 3 (College Information)');
-      setCurrentStep(3);
-    }
-  }, [currentStep, user?.employment_type]);
-
-  const captureLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error('Geolocation is not supported by your browser');
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setBasicFormData(prev => ({
-          ...prev,
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        }));
-        console.log('Location captured:', position.coords.latitude, position.coords.longitude);
-      },
-      (error) => {
-        const errorMessage = error.message || 'Failed to get location';
-        console.error('Location error:', errorMessage);
-        toast.error(errorMessage);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0
-      }
-    );
-  };
+  }, [currentStep, navigate]);
 
   // Fetch income ranges from API
   useEffect(() => {
@@ -404,128 +320,6 @@ const ProfileCompletionPageSimple = () => {
   const calculateLoanAmount = (incomeRange: string): number => {
     const range = incomeRanges.find(r => r.value === incomeRange);
     return range ? range.loan_limit : 0;
-  };
-
-  const fetchDigitapData = async () => {
-    setDigitapCalled(true);
-    setFetchingPrefill(true);
-
-    try {
-      console.log('Fetching Digitap prefill data...');
-      const response = await apiService.fetchDigitapPrefill();
-
-      if (response && response.data) {
-        console.log('Digitap data received:', response.data);
-
-        // Show confirmation dialog with the fetched data
-        setDigitapData(response.data);
-        toast.success('We found your details automatically! Saving and redirecting...');
-
-        // Auto-save and redirect
-        try {
-          console.log('Auto-saving Digitap data...');
-          const saveResponse = await apiService.saveDigitapPrefill({
-            name: response.data.name || '',
-            dob: response.data.dob || '',
-            pan: response.data.pan || '',
-            gender: response.data.gender ? response.data.gender.toLowerCase() : '',
-            email: response.data.email || '',
-            address: response.data.address || []
-          });
-
-          if (saveResponse && saveResponse.status === 'success') {
-            console.log('Digitap data saved automatically');
-            // Allow a moment for the toast to be seen
-            setTimeout(() => {
-              window.location.href = '/dashboard';
-            }, 1000);
-          } else {
-            console.error('Failed to auto-save, redirecting anyway');
-            window.location.href = '/dashboard';
-          }
-        } catch (saveError) {
-          console.error('Auto-save error:', saveError);
-          window.location.href = '/dashboard';
-        }
-      } else if ((response as any)?.hold_applied) {
-        // Credit score too low - hold applied
-        const creditScore = (response as any).credit_score;
-        const holdDays = (response as any).hold_days || 60;
-
-        console.log(`❌ Credit score (${creditScore}) below 630 - applying ${holdDays}-day hold`);
-
-        // Show detailed error message
-        toast.error(
-          (response as any).message ||
-          `Your credit score (${creditScore}) is below our minimum requirement of 630. You can reapply after ${holdDays} days.`,
-          { duration: 6000 }
-        );
-
-        // Wait a bit then redirect to dashboard where hold banner will be shown
-        setTimeout(() => {
-          window.location.href = '/dashboard';
-        }, 4000);
-      } else {
-        // API failed or returned no data - SKIP manual entry and go to Dashboard
-        console.log('Digitap API failed or no data, skipping manual entry...');
-        // setShowManualForm(true); // OLD: Show manual form when Digitap fails
-        toast.info('Skipping manual entry, redirecting to dashboard...');
-        setTimeout(() => {
-          window.location.href = '/dashboard';
-        }, 1000);
-      }
-    } catch (error) {
-      console.error('Digitap fetch error:', error);
-      // setShowManualForm(true); // OLD: Show manual form on error
-      toast.info('Skipping manual entry, redirecting to dashboard...');
-      setTimeout(() => {
-        window.location.href = '/dashboard';
-      }, 1000);
-    } finally {
-      setFetchingPrefill(false);
-    }
-  };
-
-  const handlePrefillConfirm = async () => {
-    if (!digitapData) return;
-
-    setLoading(true);
-    try {
-      // Save Digitap prefill data to database
-      const saveResponse = await apiService.saveDigitapPrefill({
-        name: digitapData.name || '',
-        dob: digitapData.dob || '',
-        pan: digitapData.pan || '',
-        gender: digitapData.gender ? digitapData.gender.toLowerCase() : '',
-        email: digitapData.email || '',
-        address: digitapData.address || []
-      });
-
-      if (saveResponse && saveResponse.status === 'success') {
-        console.log('Digitap data saved to database');
-        toast.success('Profile completed! Redirecting to dashboard...');
-
-        // Use window.location.href for a hard redirect to avoid React state timing issues
-        console.log('✅ Redirecting to dashboard with full page reload...');
-        setTimeout(() => {
-          window.location.href = '/dashboard';
-        }, 500);
-      } else {
-        console.error('Save prefill response:', saveResponse);
-        toast.error('Failed to save details');
-      }
-    } catch (error) {
-      console.error('Error saving prefill data:', error);
-      toast.error('Failed to save details');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handlePrefillReject = () => {
-    setShowPrefillConfirm(false);
-    setShowManualForm(true); // Show manual form when user rejects Digitap data
-    toast.info('Please enter your details manually');
   };
 
   const handleEmploymentQuickCheckSubmit = async (e: React.FormEvent) => {
@@ -600,7 +394,19 @@ const ProfileCompletionPageSimple = () => {
             window.location.href = '/dashboard';
           }, 1000);
         } else {
-          toast.error(response.data.message || 'You are not eligible at this time.');
+          // Handle hold status - check for hold indicators in response
+          const responseData = response.data as any;
+          if (responseData.hold_permanent || responseData.hold_reason) {
+            toast.error(responseData.message || 'Application has been placed on hold.');
+            // Refresh user data to get updated status
+            await refreshUser();
+            // Redirect to hold status page
+            setTimeout(() => {
+              navigate('/hold-status', { replace: true });
+            }, 1000);
+          } else {
+            toast.error(responseData.message || 'You are not eligible at this time.');
+          }
         }
       } else {
         toast.error('Failed to verify eligibility');
@@ -608,50 +414,6 @@ const ProfileCompletionPageSimple = () => {
     } catch (error: any) {
       console.error('Employment quick check error:', error);
       toast.error(error.message || 'Failed to verify eligibility');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleBasicProfileSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!basicFormData.pan_number || basicFormData.pan_number.length !== 10) {
-      toast.error('Please enter a valid PAN number (10 characters)');
-      return;
-    }
-
-    // Validate PAN format
-    const panPattern = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
-    if (!panPattern.test(basicFormData.pan_number.toUpperCase())) {
-      toast.error('Invalid PAN format. Please enter a valid PAN number (e.g., ABCDE1234F)');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      // Call PAN validation API
-      console.log('Validating PAN:', basicFormData.pan_number);
-      const response = await apiService.validatePAN(basicFormData.pan_number.toUpperCase());
-
-      if (response.status === 'success' && response.data) {
-        console.log('PAN validated successfully, data saved:', response.data);
-
-        toast.success('PAN validated! Your details have been saved automatically.');
-
-        // Refresh user data
-        await refreshUser();
-
-        // Redirect to dashboard
-        setTimeout(() => {
-          window.location.href = '/dashboard';
-        }, 500);
-      } else {
-        toast.error(response.message || 'Failed to validate PAN. Please try again.');
-      }
-    } catch (error: any) {
-      console.error('Error validating PAN:', error);
-      toast.error(error.response?.data?.message || 'Failed to validate PAN. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -719,7 +481,6 @@ const ProfileCompletionPageSimple = () => {
   const getStepTitle = () => {
     switch (currentStep) {
       case 1: return 'Employment Type Selection';
-      case 2: return 'Basic Information';
       case 3:
         if (user?.employment_type === 'salaried') {
           return 'Additional Details';
@@ -732,7 +493,6 @@ const ProfileCompletionPageSimple = () => {
   const getStepDescription = () => {
     switch (currentStep) {
       case 1: return 'Please select your employment type to proceed';
-      case 2: return 'Please provide your basic information';
       case 3:
         if (user?.employment_type === 'salaried') {
           return 'Verify your contact details and provide additional information';
@@ -768,7 +528,6 @@ const ProfileCompletionPageSimple = () => {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               {currentStep === 1 && <Shield className="w-5 h-5" />}
-              {currentStep === 2 && <User className="w-5 h-5" />}
               {currentStep === 3 && user?.employment_type === 'salaried' && <Mail className="w-5 h-5" />}
               {currentStep === 3 && user?.employment_type === 'student' && <MapPin className="w-5 h-5" />}
               {getStepTitle()}
@@ -880,111 +639,6 @@ const ProfileCompletionPageSimple = () => {
                   </Button>
                 </div>
               </form>
-            )}
-
-            {/* Step 2: Basic Information */}
-            {currentStep === 2 && (
-              <>
-                {/* Loading State for Digitap API */}
-                {fetchingPrefill && (
-                  <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-center">
-                    <div className="flex items-center justify-center space-x-2">
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-                      <p className="text-blue-600 font-medium">Fetching your details automatically...</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Prefill Confirmation Dialog */}
-                {showPrefillConfirm && digitapData && !fetchingPrefill && (
-                  <>
-                    <div className="mb-4 p-4 sm:p-6 bg-green-50 border border-green-200 rounded-lg">
-                      <div className="flex items-start space-x-3 mb-4">
-                        <div className="flex-shrink-0 mt-0.5">
-                          <svg className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="text-base sm:text-lg font-semibold text-green-900 mb-3">
-                            We found your details!
-                          </h3>
-                          <div className="space-y-1.5 sm:space-y-2 text-sm text-gray-700 mb-4">
-                            <p><strong>Name:</strong> {digitapData.name}</p>
-                            <p><strong>PAN:</strong> {digitapData.pan}</p>
-                            <p><strong>DOB:</strong> {digitapData.dob}</p>
-                            {digitapData.gender && (
-                              <p><strong>Gender:</strong> {digitapData.gender}</p>
-                            )}
-                            {digitapData.credit_score && (
-                              <p><strong>Credit Score:</strong> {digitapData.credit_score}</p>
-                            )}
-                          </div>
-                          <div className="flex flex-col sm:flex-row gap-3">
-                            <Button
-                              type="button"
-                              onClick={handlePrefillConfirm}
-                              disabled={loading}
-                              className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white"
-                            >
-                              {loading ? 'Saving...' : 'Use These Details'}
-                            </Button>
-                            <Button
-                              type="button"
-                              onClick={handlePrefillReject}
-                              variant="outline"
-                              className="w-full sm:w-auto border-gray-300 text-gray-700"
-                              disabled={loading}
-                            >
-                              Enter Manually
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    {/* Security Message */}
-                    <div className="mb-6 p-3 sm:p-4 bg-green-50 border border-green-200 rounded-lg flex items-center space-x-2">
-                      <Shield className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 flex-shrink-0" />
-                      <p className="text-xs sm:text-sm text-green-700">
-                        Your information is secured with 256-bit encryption
-                      </p>
-                    </div>
-                  </>
-                )}
-
-                {/* Manual Form - Only show when Digitap fails or user clicks "Enter Manually" */}
-                {showManualForm && (
-                  <form onSubmit={handleBasicProfileSubmit} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="pan_number">PAN Number *</Label>
-                      <Input
-                        id="pan_number"
-                        value={basicFormData.pan_number}
-                        onChange={(e) => setBasicFormData(prev => ({ ...prev, pan_number: e.target.value.toUpperCase() }))}
-                        placeholder="Enter PAN number (e.g., ABCDE1234F)"
-                        className="uppercase h-11"
-                        maxLength={10}
-                        pattern="[A-Z]{5}[0-9]{4}[A-Z]{1}"
-                        required
-                      />
-                      <p className="text-xs text-gray-500">
-                        We'll fetch your details automatically using your PAN number
-                      </p>
-                    </div>
-
-                    <div className="flex justify-end pt-2">
-                      <Button
-                        type="submit"
-                        disabled={loading}
-                        className="bg-blue-600 hover:bg-blue-700 h-11 w-full md:w-auto"
-                      >
-                        {loading ? 'Validating PAN...' : 'Continue'}
-                        <ArrowRight className="w-4 h-4 ml-2" />
-                      </Button>
-                    </div>
-                  </form>
-                )}
-              </>
             )}
 
             {/* Step 3: Additional Details (for salaried users) */}

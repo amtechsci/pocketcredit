@@ -567,6 +567,15 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                                     
                                     console.log(`✅ Loan #${loanId} fully paid and marked as CLEARED`);
                                     
+                                    // Check if this is a premium loan (₹1,50,000) and mark user in cooling period
+                                    try {
+                                        const { checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
+                                        await checkAndMarkCoolingPeriod(loan.user_id, loanId);
+                                    } catch (coolingPeriodError) {
+                                        console.error('❌ Error checking cooling period (non-fatal):', coolingPeriodError);
+                                        // Don't fail - cooling period check failure shouldn't block loan clearance
+                                    }
+                                    
                                     // Send NOC email to user
                                     try {
                                         await generateAndSendNOCEmail(loanId);
@@ -1440,6 +1449,14 @@ router.post('/webhook', async (req, res) => {
                                     
                                     console.log(`✅ Loan #${paymentOrder.loan_id} marked as CLEARED (${paymentType})`);
                                     
+                                    // Check if this is a premium loan (₹1,50,000) and mark user in cooling period
+                                    try {
+                                        const { checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
+                                        await checkAndMarkCoolingPeriod(paymentOrder.user_id, paymentOrder.loan_id);
+                                    } catch (coolingPeriodError) {
+                                        console.error('❌ Error checking cooling period (non-fatal):', coolingPeriodError);
+                                    }
+                                    
                                     // Send NOC email to user
                                     try {
                                         await generateAndSendNOCEmail(paymentOrder.loan_id);
@@ -1860,6 +1877,14 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                                 }
                                                 
                                                 console.log(`✅ Loan #${paymentOrder.loan_id} marked as CLEARED (${paymentType})`);
+                                                
+                                                // Check if this is a premium loan (₹1,50,000) and mark user in cooling period
+                                                try {
+                                                    const { checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
+                                                    await checkAndMarkCoolingPeriod(paymentOrder.user_id, paymentOrder.loan_id);
+                                                } catch (coolingPeriodError) {
+                                                    console.error('❌ Error checking cooling period (non-fatal):', coolingPeriodError);
+                                                }
                                                 
                                                 // Send NOC email to user
                                                 try {

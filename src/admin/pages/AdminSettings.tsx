@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import adminApiService from '../../services/adminApi';
+import { PoliciesManagement } from './PoliciesManagement';
 import { 
   Settings, 
   Save, 
@@ -29,7 +30,8 @@ import {
   Trash2,
   Plus,
   Star,
-  DollarSign
+  DollarSign,
+  FileText
 } from 'lucide-react';
 
 interface ApiConfig {
@@ -665,7 +667,8 @@ export function AdminSettings() {
     { id: 'loan-tiers', label: 'Loan Limits', icon: DollarSign, count: 0 },
     { id: 'loan-plans', label: 'Loan Plans', icon: CreditCard, count: 0 },
     { id: 'user-config', label: 'User Config', icon: Settings, count: 0 },
-    { id: 'eligibility', label: 'Eligibility Criteria', icon: CheckCircle, count: 0 }
+    { id: 'eligibility', label: 'Eligibility Criteria', icon: CheckCircle, count: 0 },
+    { id: 'policies', label: 'Policies', icon: FileText, count: 0 }
   ];
 
   const getStatusColor = (status: string) => {
@@ -3738,6 +3741,13 @@ export function AdminSettings() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Policies Tab */}
+        {activeTab === 'policies' && (
+          <div className="space-y-6">
+            <PoliciesManagement hideHeader={true} />
           </div>
         )}
 

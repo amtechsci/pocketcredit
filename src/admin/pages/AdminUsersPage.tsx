@@ -43,7 +43,9 @@ export function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   // Get status from URL query params, default to 'all'
-  const urlStatus = searchParams.get('status') || 'all';
+  // Map 'hold' to 'on_hold' for backend compatibility
+  const urlStatusParam = searchParams.get('status') || 'all';
+  const urlStatus = urlStatusParam === 'hold' ? 'on_hold' : urlStatusParam;
   const [statusFilter, setStatusFilter] = useState(urlStatus);
   const [sortBy, setSortBy] = useState('createdAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
@@ -53,8 +55,9 @@ export function AdminUsersPage() {
 
   // Update status filter when URL changes
   useEffect(() => {
-    const urlStatus = searchParams.get('status') || 'all';
-    setStatusFilter(urlStatus);
+    const urlStatusParam = searchParams.get('status') || 'all';
+    const mappedStatus = urlStatusParam === 'hold' ? 'on_hold' : urlStatusParam;
+    setStatusFilter(mappedStatus);
   }, [searchParams]);
 
   // Fetch users data
@@ -91,7 +94,15 @@ export function AdminUsersPage() {
   const handleStatusFilter = useCallback((value: string) => {
     setStatusFilter(value);
     setCurrentPage(1);
-  }, []);
+    // Update URL to reflect the filter
+    const newSearchParams = new URLSearchParams(searchParams);
+    if (value === 'all') {
+      newSearchParams.delete('status');
+    } else {
+      newSearchParams.set('status', value);
+    }
+    navigate(`/admin/users?${newSearchParams.toString()}`, { replace: true });
+  }, [navigate, searchParams]);
 
   const handleSort = useCallback((field: string) => {
     if (sortBy === field) {
@@ -274,10 +285,7 @@ export function AdminUsersPage() {
               Pending
             </button>
             <button
-              onClick={() => {
-                navigate('/admin/users?status=on_hold');
-                handleStatusFilter('on_hold');
-              }}
+              onClick={() => handleStatusFilter('on_hold')}
               className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
                 statusFilter === 'on_hold' || statusFilter === 'hold'
                   ? 'bg-red-100 text-red-700 border border-red-200'
@@ -287,10 +295,7 @@ export function AdminUsersPage() {
               Hold
             </button>
             <button
-              onClick={() => {
-                navigate('/admin/users?status=deleted');
-                handleStatusFilter('deleted');
-              }}
+              onClick={() => handleStatusFilter('deleted')}
               className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
                 statusFilter === 'deleted'
                   ? 'bg-gray-800 text-white border border-gray-900'
@@ -298,6 +303,26 @@ export function AdminUsersPage() {
               }`}
             >
               Delete
+            </button>
+            <button
+              onClick={() => handleStatusFilter('registered')}
+              className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
+                statusFilter === 'registered'
+                  ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Registered
+            </button>
+            <button
+              onClick={() => handleStatusFilter('approved')}
+              className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
+                statusFilter === 'approved'
+                  ? 'bg-green-100 text-green-700 border border-green-200'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Approved
             </button>
           </div>
         </div>

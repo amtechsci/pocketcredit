@@ -149,9 +149,14 @@ export function AdminDashboard() {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <input
               type="text"
-              placeholder="Search by User Name, Loan ID, Mobile..."
+              placeholder="Search by name, PAN, mobile, UTR, bank account, loan ID..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && searchQuery.trim()) {
+                  window.open(`/admin/search?q=${encodeURIComponent(searchQuery)}`, '_blank');
+                }
+              }}
               className="pl-10 pr-4 py-2 w-80 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>

@@ -20,7 +20,11 @@ interface Policy {
   updated_at: string;
 }
 
-export function PoliciesManagement() {
+interface PoliciesManagementProps {
+  hideHeader?: boolean;
+}
+
+export function PoliciesManagement({ hideHeader = false }: PoliciesManagementProps = {}) {
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -162,92 +166,125 @@ export function PoliciesManagement() {
       .replace(/^-+|-+$/g, '');
   };
 
-  return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Policies Management</h1>
-          <p className="text-gray-600 mt-1">Manage website policies and upload PDFs</p>
-        </div>
-        <Button
-          onClick={() => {
-            setEditingPolicy(null);
-            resetForm();
-            setShowAddModal(true);
-          }}
-          className="bg-blue-600 hover:bg-blue-700"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Add Policy
-        </Button>
-      </div>
-
-      {loading ? (
+  // Render policies list (common content)
+  const renderPoliciesList = () => {
+    if (loading) {
+      return (
         <div className="text-center py-12">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">Loading policies...</p>
         </div>
-      ) : (
-        <div className="grid gap-4">
-          {policies.map((policy) => (
-            <Card key={policy.id}>
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3">
-                      <FileText className="w-5 h-5 text-blue-600" />
-                      <div>
-                        <h3 className="font-semibold text-lg">{policy.policy_name}</h3>
-                        <p className="text-sm text-gray-600">Slug: {policy.policy_slug}</p>
-                        {policy.pdf_url && (
-                          <a
-                            href={policy.pdf_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm text-blue-600 hover:underline"
-                          >
-                            View PDF
-                          </a>
-                        )}
-                      </div>
+      );
+    }
+
+    return (
+      <div className="grid gap-4">
+        {policies.map((policy) => (
+          <Card key={policy.id}>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3">
+                    <FileText className="w-5 h-5 text-blue-600" />
+                    <div>
+                      <h3 className="font-semibold text-lg">{policy.policy_name}</h3>
+                      <p className="text-sm text-gray-600">Slug: {policy.policy_slug}</p>
+                      {policy.pdf_url && (
+                        <a
+                          href={policy.pdf_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-blue-600 hover:underline"
+                        >
+                          View PDF
+                        </a>
+                      )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {policy.is_system_policy && (
-                      <span 
-                        className="px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800 flex items-center gap-1"
-                        title="This is a system policy and cannot be deleted. You can only update the PDF or toggle active status."
-                      >
-                        <Shield className="w-3 h-3" />
-                        System Policy
-                      </span>
-                    )}
-                    <span className={`px-3 py-1 rounded-full text-sm ${policy.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
-                      {policy.is_active ? 'Active' : 'Inactive'}
+                </div>
+                <div className="flex items-center gap-2">
+                  {policy.is_system_policy && (
+                    <span 
+                      className="px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800 flex items-center gap-1"
+                      title="This is a system policy and cannot be deleted. You can only update the PDF or toggle active status."
+                    >
+                      <Shield className="w-3 h-3" />
+                      System Policy
                     </span>
+                  )}
+                  <span className={`px-3 py-1 rounded-full text-sm ${policy.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                    {policy.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleEdit(policy)}
+                  >
+                    <Edit className="w-4 h-4" />
+                  </Button>
+                  {!(policy.is_system_policy === 1 || policy.is_system_policy === true) && (
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleEdit(policy)}
+                      onClick={() => handleDelete(policy.id)}
+                      className="text-red-600 hover:text-red-700"
                     >
-                      <Edit className="w-4 h-4" />
+                      <Trash2 className="w-4 h-4" />
                     </Button>
-                    {!(policy.is_system_policy === 1 || policy.is_system_policy === true) && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDelete(policy.id)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    )}
-                  </div>
+                  )}
                 </div>
-              </CardContent>
-            </Card>
-          ))}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div className={hideHeader ? '' : 'p-6'}>
+      {hideHeader ? (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Policies Management</h2>
+              <p className="text-sm text-gray-600 mt-1">Manage website policies and upload PDFs</p>
+            </div>
+            <Button
+              onClick={() => {
+                setEditingPolicy(null);
+                resetForm();
+                setShowAddModal(true);
+              }}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add Policy
+            </Button>
+          </div>
+          {renderPoliciesList()}
         </div>
+      ) : (
+        <>
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">Policies Management</h1>
+              <p className="text-gray-600 mt-1">Manage website policies and upload PDFs</p>
+            </div>
+            <Button
+              onClick={() => {
+                setEditingPolicy(null);
+                resetForm();
+                setShowAddModal(true);
+              }}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add Policy
+            </Button>
+          </div>
+          {renderPoliciesList()}
+        </>
       )}
 
       {/* Add/Edit Modal */}

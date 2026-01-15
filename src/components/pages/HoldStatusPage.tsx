@@ -137,7 +137,7 @@ export function HoldStatusPage() {
                       Your profile is under cooling period
                     </h3>
                     <p className="text-sm text-gray-700 mb-4">
-                      We will update you once you are eligible.
+                      We will let you know once you are eligible.
                     </p>
                     
                     {holdInfo.hold_until_formatted && (
