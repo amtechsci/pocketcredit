@@ -194,6 +194,17 @@ function AdminLoginPage() {
 
   console.log('AdminLoginPage rendered - no AuthProvider');
 
+  // Check if user is already logged in
+  useEffect(() => {
+    const adminUser = localStorage.getItem('adminUser');
+    const adminToken = localStorage.getItem('adminToken');
+    
+    if (adminUser && adminToken) {
+      // Already logged in, redirect to dashboard
+      navigate('/stpl/dashboard', { replace: true });
+    }
+  }, [navigate]);
+
   const handleLogin = (user: any) => {
     localStorage.setItem('adminUser', JSON.stringify(user));
     navigate('/stpl/dashboard');
