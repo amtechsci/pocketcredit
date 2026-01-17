@@ -48,7 +48,7 @@ async function getKFSHTML(loanId, baseUrl = 'http://localhost:5000') {
     
     const kfsData = kfsDataResponse.data.data;
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const kfsUrl = `${frontendUrl}/admin/kfs/${loanId}?internal=true`;
+    const kfsUrl = `${frontendUrl}/stpl/kfs/${loanId}?internal=true`;
     
     console.log(`🌐 Rendering KFS HTML via Puppeteer...`);
     browser = await puppeteer.launch({
@@ -107,7 +107,7 @@ async function getLoanAgreementHTML(loanId, baseUrl = 'http://localhost:5000') {
     
     const agreementData = kfsDataResponse.data.data;
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const agreementUrl = `${frontendUrl}/admin/loan-agreement/${loanId}?internal=true`;
+    const agreementUrl = `${frontendUrl}/stpl/loan-agreement/${loanId}?internal=true`;
     
     console.log(`🌐 Rendering Loan Agreement HTML via Puppeteer...`);
     browser = await puppeteer.launch({

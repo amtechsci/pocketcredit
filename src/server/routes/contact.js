@@ -51,7 +51,7 @@ router.post('/send-email', requireAuth, async (req, res) => {
     }
 
     // Get support email from system settings
-    let supportEmail = 'support@pocketcredit.in'; // Default
+    let supportEmail = 'amproapk@gmail.com'; // Default
     
     try {
       const settings = await executeQuery(

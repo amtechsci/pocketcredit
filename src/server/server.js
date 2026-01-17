@@ -99,6 +99,27 @@ const PORT = process.env.PORT || 3002;
 // while preventing IP spoofing attacks
 app.set('trust proxy', 1);
 
+// Redirect /admin and /stpl paths to home page (admin only accessible via /stpl on subdomain)
+// This middleware should be before API routes but after static file serving
+app.use((req, res, next) => {
+  // Skip API routes and static files
+  if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+    return next();
+  }
+  
+  // Redirect /admin and /stpl paths to home page when accessed on main domain
+  // Admin panel should only be accessible via pkk.pocketcredit.in/stpl
+  const host = req.get('host') || req.headers.host || '';
+  const isAdminSubdomain = host.includes('pkk.pocketcredit.in');
+  
+  // If NOT on admin subdomain, block /admin and /stpl paths
+  if (!isAdminSubdomain && (req.path.startsWith('/admin') || req.path.startsWith('/stpl'))) {
+    return res.redirect('/');
+  }
+  
+  next();
+});
+
 // Security middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
@@ -162,6 +183,10 @@ app.use(cors({
 
     // Allow production domain
     if (origin === 'https://pocketcredit.in') return callback(null, true);
+    
+    // Allow admin subdomain
+    if (origin === 'https://pkk.pocketcredit.in') return callback(null, true);
+    if (origin === 'http://pkk.pocketcredit.in') return callback(null, true);
 
     // Allow Cashfree domains (for webhooks and callbacks)
     if (origin.includes('cashfree.com')) return callback(null, true);

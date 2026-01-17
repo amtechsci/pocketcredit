@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { getAuthenticatedRedirect } from './utils/navigation';
 import { Header } from './components/Header';
@@ -110,7 +110,7 @@ function AdminAccessPage() {
           </p>
           <div className="space-y-4">
             <a
-              href="/admin"
+              href="https://pkk.pocketcredit.in/stpl"
               className="w-full px-6 py-3 rounded-lg transition-colors btn-mobile touch-manipulation font-medium inline-block"
               style={{ backgroundColor: '#0052FF', color: 'white' }}
             >
@@ -149,11 +149,26 @@ function NotFoundPage() {
 }
 
 export default function App() {
+  // Check if /stpl is accessed on wrong domain and redirect
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  useEffect(() => {
+    if (location.pathname.startsWith('/stpl')) {
+      const hostname = window.location.hostname;
+      // Only allow /stpl on admin subdomain
+      if (!hostname.includes('pkk.pocketcredit.in') && hostname !== 'pkk.pocketcredit.in') {
+        // Redirect to home page if accessed on main domain
+        navigate('/', { replace: true });
+      }
+    }
+  }, [location.pathname, navigate]);
+
   return (
     <Routes>
-      {/* Admin routes - no AuthProvider needed */}
-      <Route path="/admin/login" element={<AdminLoginPage />} />
-      <Route path="/admin/*" element={<AdminApp />} />
+      {/* Admin routes - only /stpl path (no /admin) - only on subdomain */}
+      <Route path="/stpl/login" element={<AdminLoginPage />} />
+      <Route path="/stpl/*" element={<AdminApp />} />
 
       {/* Partner routes - separate from main app */}
       <Route path="/partner/*" element={<PartnerApp />} />
@@ -176,7 +191,7 @@ function AdminLoginPage() {
 
   const handleLogin = (user: any) => {
     localStorage.setItem('adminUser', JSON.stringify(user));
-    navigate('/admin/dashboard');
+    navigate('/stpl/dashboard');
   };
 
   return (
@@ -332,11 +347,6 @@ function AppContent() {
           </LayoutWithHeaderFooter>
         } />
 
-        <Route path="/admin/login" element={
-          <LayoutWithHeaderFooter>
-            <AdminLoginPage />
-          </LayoutWithHeaderFooter>
-        } />
 
         <Route path="/application" element={
           <DashboardLayout>

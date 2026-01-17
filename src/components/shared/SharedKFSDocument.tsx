@@ -515,7 +515,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             <td className="border border-black p-2">
                                 Name: Mr.Kiran<br />
                                 Number: +91 9573794121<br />
-                                Mail ID: Kiran@pocketcredit.in
+                                Mail ID: {kfsData?.grievance?.email || 'amproapk@gmail.com'}
                             </td>
                         </tr>
                         <tr>

@@ -133,7 +133,7 @@ class AdminApiService {
             // Redirect to admin login page
             // Use setTimeout to avoid blocking the error handling
             setTimeout(() => {
-              window.location.href = '/admin/login';
+              window.location.href = '/stpl/login';
             }, 100);
           }
         }
@@ -179,7 +179,7 @@ class AdminApiService {
         
         // Redirect to admin login page
         setTimeout(() => {
-          window.location.href = '/admin/login';
+          window.location.href = '/stpl/login';
         }, 100);
       }
     }

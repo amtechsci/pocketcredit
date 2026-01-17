@@ -104,22 +104,22 @@ export function AdminDashboard() {
     { 
       title: 'Pending Approvals', 
       count: dashboardData?.pendingApplications?.toString() || '0', 
-      action: () => navigate('/admin/applications?status=under_review') 
+      action: () => navigate('/stpl/applications?status=under_review') 
     },
     { 
       title: 'New Applications', 
       count: dashboardData?.newApplications?.toString() || '0', 
-      action: () => navigate('/admin/applications?status=submitted') 
+      action: () => navigate('/stpl/applications?status=submitted') 
     },
     { 
       title: 'Follow Up Required', 
       count: dashboardData?.followUpApplications?.toString() || '0', 
-      action: () => navigate('/admin/applications?status=follow_up') 
+      action: () => navigate('/stpl/applications?status=follow_up') 
     },
     { 
       title: 'Total Users', 
       count: dashboardData?.totalUsers?.toString() || '0', 
-      action: () => navigate('/admin/users') 
+      action: () => navigate('/stpl/users') 
     }
   ];
 
@@ -154,7 +154,7 @@ export function AdminDashboard() {
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && searchQuery.trim()) {
-                  window.open(`/admin/search?q=${encodeURIComponent(searchQuery)}`, '_blank');
+                  window.open(`/stpl/search?q=${encodeURIComponent(searchQuery)}`, '_blank');
                 }
               }}
               className="pl-10 pr-4 py-2 w-80 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"

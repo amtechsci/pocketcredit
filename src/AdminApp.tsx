@@ -33,6 +33,9 @@ export interface AdminUser {
   permissions: string[];
 }
 
+// Base path is always /stpl
+const BASE_PATH = '/stpl';
+
 // Admin Layout Component
 function AdminLayout({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<AdminUser | null>(null);
@@ -46,8 +49,8 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
       setCurrentUser(JSON.parse(user));
     } else {
       // Only redirect if not already on login page
-      if (location.pathname !== '/admin/login') {
-        navigate('/admin/login');
+      if (location.pathname !== '/stpl/login') {
+        navigate(`${BASE_PATH}/login`);
       }
     }
   }, [navigate, location.pathname]);
@@ -56,7 +59,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('adminUser');
     localStorage.removeItem('adminToken');
     setCurrentUser(null);
-    navigate('/admin/login');
+    navigate(`${BASE_PATH}/login`);
   };
 
   // Auto-logout after 20 minutes of inactivity
@@ -66,7 +69,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
   });
 
   const isActive = (path: string) => {
-    return location.pathname === path;
+    return location.pathname === path || location.pathname.startsWith(path + '/');
   };
 
   if (!currentUser) {
@@ -84,9 +87,9 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
               </div>
               <nav className="hidden md:flex items-center gap-6">
                 <button
-                  onClick={() => navigate('/admin/dashboard')}
+                  onClick={() => navigate(`${BASE_PATH}/dashboard`)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/admin/dashboard') 
+                    isActive(`${BASE_PATH}/dashboard`)
                       ? 'bg-blue-100 text-blue-700' 
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
@@ -94,9 +97,9 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                   Dashboard
                 </button>
                 <button
-                  onClick={() => navigate('/admin/applications')}
+                  onClick={() => navigate(`${BASE_PATH}/applications`)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/admin/applications') 
+                    isActive(`${BASE_PATH}/applications`)
                       ? 'bg-blue-100 text-blue-700' 
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
@@ -104,9 +107,9 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                   Applications
                 </button>
                 <button
-                  onClick={() => navigate('/admin/users')}
+                  onClick={() => navigate(`${BASE_PATH}/users`)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/admin/users') 
+                    isActive(`${BASE_PATH}/users`)
                       ? 'bg-blue-100 text-blue-700' 
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
@@ -114,9 +117,9 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                   Users
                 </button>
                 <button
-                  onClick={() => navigate('/admin/registered')}
+                  onClick={() => navigate(`${BASE_PATH}/registered`)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/admin/registered')
+                    isActive(`${BASE_PATH}/registered`)
                       ? 'bg-blue-100 text-blue-700' 
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
@@ -124,9 +127,9 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                   Registered
                 </button>
                 <button
-                  onClick={() => navigate('/admin/approved')}
+                  onClick={() => navigate(`${BASE_PATH}/approved`)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/admin/approved')
+                    isActive(`${BASE_PATH}/approved`)
                       ? 'bg-green-100 text-green-700' 
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
@@ -134,9 +137,9 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                   Approved
                 </button>
                 <button
-                  onClick={() => navigate('/admin/cooling-period')}
+                  onClick={() => navigate(`${BASE_PATH}/cooling-period`)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/admin/cooling-period')
+                    isActive(`${BASE_PATH}/cooling-period`)
                       ? 'bg-orange-100 text-orange-700' 
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
@@ -144,9 +147,9 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                   Cooling Period
                 </button>
                 <button
-                  onClick={() => navigate('/admin/reports')}
+                  onClick={() => navigate(`${BASE_PATH}/reports`)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive('/admin/reports') 
+                    isActive(`${BASE_PATH}/reports`)
                       ? 'bg-blue-100 text-blue-700' 
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
@@ -155,9 +158,9 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                 </button>
                 {currentUser?.role === 'superadmin' && (
                   <button
-                    onClick={() => navigate('/admin/team-management')}
+                    onClick={() => navigate(`${BASE_PATH}/team-management`)}
                     className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      isActive('/admin/team-management') 
+                      isActive(`${BASE_PATH}/team-management`)
                         ? 'bg-blue-100 text-blue-700' 
                         : 'text-gray-600 hover:text-gray-900'
                     }`}
@@ -167,9 +170,9 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                 )}
                 {currentUser?.role === 'superadmin' && (
                   <button
-                    onClick={() => navigate('/admin/settings')}
+                    onClick={() => navigate(`${BASE_PATH}/settings`)}
                     className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      isActive('/admin/settings') 
+                      isActive(`${BASE_PATH}/settings`)
                         ? 'bg-blue-100 text-blue-700' 
                         : 'text-gray-600 hover:text-gray-900'
                     }`}
@@ -183,7 +186,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
               {/* Search Button */}
               <button
                 onClick={() => {
-                  window.open('/admin/search', '_blank');
+                  window.open(`${BASE_PATH}/search`, '_blank');
                 }}
                 className="hidden md:flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 hover:text-gray-900"
               >
@@ -215,7 +218,7 @@ function AdminLoginPage() {
 
   const handleLogin = (user: AdminUser) => {
     localStorage.setItem('adminUser', JSON.stringify(user));
-    navigate('/admin/dashboard');
+    navigate(`${BASE_PATH}/dashboard`);
   };
 
   return (
@@ -237,8 +240,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       setCurrentUser(JSON.parse(user));
     } else {
       // Only redirect if not already on login page
-      if (location.pathname !== '/admin/login') {
-        navigate('/admin/login');
+      if (location.pathname !== '/stpl/login') {
+        navigate(`${BASE_PATH}/login`);
       }
     }
   }, [navigate, location.pathname]);
@@ -250,10 +253,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <AdminLayout>{children}</AdminLayout>;
 }
 
+// Component to redirect to login
+function AdminRedirect() {
+  return <Navigate to={`${BASE_PATH}/login`} replace />;
+}
+
 export default function AdminApp() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/admin/login" replace />} />
+      <Route path="/" element={<AdminRedirect />} />
       <Route path="login" element={<AdminLoginPage />} />
       <Route path="dashboard" element={
         <ProtectedRoute>
@@ -355,7 +363,7 @@ export default function AdminApp() {
           <UserProfileDetail />
         </ProtectedRoute>
       } />
-      <Route path="*" element={<Navigate to="/admin/login" replace />} />
+      <Route path="*" element={<AdminRedirect />} />
     </Routes>
   );
 }

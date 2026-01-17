@@ -27,7 +27,7 @@ export function NOCDocument() {
     const adminUser = localStorage.getItem('adminUser');
 
     if (!adminToken && !adminUser) {
-      navigate('/admin/login');
+      navigate('/stpl/login');
       return;
     }
   }, [navigate]);

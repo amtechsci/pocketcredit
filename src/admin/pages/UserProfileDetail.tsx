@@ -4967,14 +4967,14 @@ export function UserProfileDetail() {
                               <div className="flex flex-col gap-1">
                                 <button
                                   className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
-                                  onClick={() => window.open(`/admin/loan-agreement/${loanId}`, '_blank')}
+                                  onClick={() => window.open(`/stpl/loan-agreement/${loanId}`, '_blank')}
                                   title="View Loan Agreement"
                                 >
                                   Agreement
                                 </button>
                                 <button
                                   className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
-                                  onClick={() => window.open(`/admin/kfs/${loanId}`, '_blank')}
+                                  onClick={() => window.open(`/stpl/kfs/${loanId}`, '_blank')}
                                   title="View Key Facts Statement"
                                 >
                                   View KFS
@@ -4982,7 +4982,7 @@ export function UserProfileDetail() {
                                 {loan.status === 'cleared' && (
                                   <button
                                     className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
-                                    onClick={() => window.open(`/admin/noc/${loanId}`, '_blank')}
+                                    onClick={() => window.open(`/stpl/noc/${loanId}`, '_blank')}
                                     title="View No Dues Certificate"
                                   >
                                     View NOC
@@ -9833,7 +9833,7 @@ export function UserProfileDetail() {
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">
           <button
-            onClick={() => navigate('/admin/applications')}
+            onClick={() => navigate('/stpl/applications')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -9865,7 +9865,7 @@ export function UserProfileDetail() {
                     <button
                       onClick={() => {
                         const userIds = userData.duplicateChecks.panDuplicateUsers.map((u: any) => u.id).join(',');
-                        window.open(`/admin/users?search=${userIds}`, '_blank');
+                        window.open(`/stpl/users?search=${userIds}`, '_blank');
                       }}
                       className="text-red-800 underline hover:text-red-900"
                     >
@@ -9880,7 +9880,7 @@ export function UserProfileDetail() {
                     <button
                       onClick={() => {
                         const userIds = userData.duplicateChecks.bankAccountDuplicateUsers.map((u: any) => u.id).join(',');
-                        window.open(`/admin/users?search=${userIds}`, '_blank');
+                        window.open(`/stpl/users?search=${userIds}`, '_blank');
                       }}
                       className="text-red-800 underline hover:text-red-900"
                     >
@@ -9895,7 +9895,7 @@ export function UserProfileDetail() {
                     <button
                       onClick={() => {
                         const userIds = userData.duplicateChecks.mobileDuplicateUsers.map((u: any) => u.id).join(',');
-                        window.open(`/admin/users?search=${userIds}`, '_blank');
+                        window.open(`/stpl/users?search=${userIds}`, '_blank');
                       }}
                       className="text-red-800 underline hover:text-red-900"
                     >
@@ -9910,7 +9910,7 @@ export function UserProfileDetail() {
                     <button
                       onClick={() => {
                         const userIds = userData.duplicateChecks.referencePhoneDuplicateUsers.map((u: any) => u.id).join(',');
-                        window.open(`/admin/users?search=${userIds}`, '_blank');
+                        window.open(`/stpl/users?search=${userIds}`, '_blank');
                       }}
                       className="text-red-800 underline hover:text-red-900"
                     >
