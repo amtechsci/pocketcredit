@@ -57,13 +57,13 @@ export function SearchResultsPage() {
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchQuery.trim()) {
-      navigate(`/admin/search?q=${encodeURIComponent(searchQuery)}`);
+      navigate(`/stpl/search?q=${encodeURIComponent(searchQuery)}`);
       performSearch(searchQuery);
     }
   };
 
   const handleResultClick = (userId: number) => {
-    navigate(`/admin/users/${userId}`);
+    navigate(`/stpl/users/${userId}`);
   };
 
   return (

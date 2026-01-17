@@ -235,7 +235,7 @@ export function ApprovedPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         <button
-                          onClick={() => navigate(`/admin/user-profile/${user.id}`)}
+                          onClick={() => navigate(`/stpl/user-profile/${user.id}`)}
                           className="text-blue-600 hover:text-blue-900 flex items-center gap-1"
                         >
                           <Eye className="w-4 h-4" />

@@ -101,7 +101,7 @@ export function AdminUsersPage() {
     } else {
       newSearchParams.set('status', value);
     }
-    navigate(`/admin/users?${newSearchParams.toString()}`, { replace: true });
+    navigate(`/stpl/users?${newSearchParams.toString()}`, { replace: true });
   }, [navigate, searchParams]);
 
   const handleSort = useCallback((field: string) => {
@@ -447,14 +447,14 @@ export function AdminUsersPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => navigate(`/admin/user-profile/${user.id}`)}
+                          onClick={() => navigate(`/stpl/user-profile/${user.id}`)}
                           className="text-blue-600 hover:text-blue-900 p-1"
                           title="View Details"
                         >
                           <Eye className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => navigate(`/admin/users/${user.id}/edit`)}
+                          onClick={() => navigate(`/stpl/users/${user.id}/edit`)}
                           className="text-gray-600 hover:text-gray-900 p-1"
                           title="Edit User"
                         >

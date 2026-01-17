@@ -388,7 +388,7 @@ export function LoanApplicationsQueue() {
   };
 
   const handleViewDetails = (application: any) => {
-    navigate(`/admin/user-profile/${application.userId}`);
+    navigate(`/stpl/user-profile/${application.userId}`);
   };
 
   const handleAssignApplication = (applicationId: string) => {

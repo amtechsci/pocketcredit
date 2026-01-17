@@ -209,7 +209,7 @@ export function CoolingPeriodPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         <button
-                          onClick={() => navigate(`/admin/users/${user.id}`)}
+                          onClick={() => navigate(`/stpl/users/${user.id}`)}
                           className="text-blue-600 hover:text-blue-900 flex items-center gap-1"
                         >
                           <Eye className="w-4 h-4" />
