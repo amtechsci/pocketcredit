@@ -5599,19 +5599,35 @@ export function UserProfileDetail() {
                           ? loan.processed_gst
                           : (processingFeeGST + postServiceFeeGST);
 
-                        // Total interest for full tenure - use processed value if available, otherwise calculate
+                        // Total interest for full tenure - prioritize most reliable sources first
                         // For multi-EMI, prioritize backend-calculated total_interest to avoid timezone issues
-                        let totalInterestFullTenure;
-                        if (isProcessed && loan.processed_interest !== null) {
-                          totalInterestFullTenure = loan.processed_interest;
-                        } else if (calculation?.interest?.total_interest !== undefined && calculation?.interest?.total_interest !== null) {
-                          // Use backend-calculated total_interest (avoids timezone issues in schedule calculation)
-                          totalInterestFullTenure = calculation.interest.total_interest;
-                        } else if (calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 1) {
-                          // Multi-EMI loan: Sum interest from all EMI periods in the schedule
-                          totalInterestFullTenure = calculation.repayment.schedule.reduce((sum: number, emi: any) => sum + (emi.interest || 0), 0);
-                        } else {
-                          totalInterestFullTenure = calculation?.interest?.amount || loan.interest || 0;
+                        let totalInterestFullTenure = 0;
+                        
+                        // Priority 1: Processed interest (frozen at processing time, most reliable)
+                        if (isProcessed && loan.processed_interest !== null && loan.processed_interest !== undefined) {
+                          totalInterestFullTenure = parseFloat(loan.processed_interest) || 0;
+                        }
+                        // Priority 2: Backend-calculated total_interest (avoids timezone issues)
+                        else if (calculation?.interest?.total_interest !== undefined && calculation?.interest?.total_interest !== null) {
+                          totalInterestFullTenure = parseFloat(calculation.interest.total_interest) || 0;
+                        }
+                        // Priority 3: Sum from EMI schedule (for multi-EMI loans)
+                        else if (calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 1) {
+                          totalInterestFullTenure = calculation.repayment.schedule.reduce((sum: number, emi: any) => {
+                            return sum + (parseFloat(emi.interest) || 0);
+                          }, 0);
+                        }
+                        // Priority 4: Use interestTillDate (already calculated earlier)
+                        else if (interestTillDate > 0) {
+                          totalInterestFullTenure = interestTillDate;
+                        }
+                        // Priority 5: Calculation interest amount
+                        else if (calculation?.interest?.amount !== undefined && calculation?.interest?.amount !== null) {
+                          totalInterestFullTenure = parseFloat(calculation.interest.amount) || 0;
+                        }
+                        // Priority 6: Loan interest field
+                        else if (loan.interest !== undefined && loan.interest !== null) {
+                          totalInterestFullTenure = parseFloat(loan.interest) || 0;
                         }
 
                         // Calculate total amount
