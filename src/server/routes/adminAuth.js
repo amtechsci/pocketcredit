@@ -30,7 +30,7 @@ router.post('/login', validate(schemas.adminLogin), async (req, res) => {
     // Find admin in MySQL
     console.log('Querying MySQL for admin...');
     const admins = await executeQuery(
-      'SELECT id, name, email, phone, password, role, department, permissions, is_active FROM admins WHERE email = ?',
+      'SELECT id, name, email, phone, password, role, permissions, is_active FROM admins WHERE email = ?',
       [email]
     );
     console.log('MySQL query result:', admins.length, 'admins found');
@@ -100,7 +100,6 @@ router.post('/login', validate(schemas.adminLogin), async (req, res) => {
           email: admin.email,
           phone: admin.phone,
           role: admin.role,
-          department: admin.department,
           permissions: Array.isArray(admin.permissions) ? admin.permissions : JSON.parse(admin.permissions || '[]')
         },
         token
@@ -316,7 +315,7 @@ router.post('/verify-otp', async (req, res) => {
 
       if (columnCheck[0].count > 0) {
         admins = await executeQuery(
-          'SELECT id, name, email, phone, role, department, permissions, is_active FROM admins WHERE phone = ?',
+          'SELECT id, name, email, phone, role, permissions, is_active FROM admins WHERE phone = ?',
           [mobile]
         );
       }
@@ -377,7 +376,6 @@ router.post('/verify-otp', async (req, res) => {
           email: admin.email,
           phone: admin.phone,
           role: admin.role,
-          department: admin.department,
           permissions: Array.isArray(admin.permissions) ? admin.permissions : JSON.parse(admin.permissions || '[]')
         },
         token
@@ -412,7 +410,7 @@ router.get('/verify', async (req, res) => {
 
     // Find admin in MySQL to ensure they still exist and are active
     const admins = await executeQuery(
-      'SELECT id, name, email, phone, role, department, permissions, is_active FROM admins WHERE id = ?',
+      'SELECT id, name, email, phone, role, permissions, is_active FROM admins WHERE id = ?',
       [decoded.id]
     );
 
