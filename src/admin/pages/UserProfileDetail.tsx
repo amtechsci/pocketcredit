@@ -9393,41 +9393,6 @@ export function UserProfileDetail() {
           </div>
         </div>
       )}
-
-      {/* Add Note Modal */}
-      {
-        {/* Action Buttons */ }
-          </div>
-
-    {/* Action Buttons */ }
-    < div className = "flex gap-3 pt-4" >
-            <button
-              type="submit"
-              disabled={submittingFollowUp}
-              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {submittingFollowUp ? 'Adding...' : 'Add Follow Up'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShowAddFollowUpModal(false);
-                setFollowUpForm({ type: '', response: '' });
-              }}
-              className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
-            >
-              Cancel
-            </button>
-          </div >
-        </form >
-          </div >
-        </div >
-      )
-}
-
-{/* Add Account Manager Entry Modal */ }
-{
-  showAddAccountManagerModal && (
     <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
       <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
         <div className="flex items-center justify-between mb-4">
@@ -10643,6 +10608,7 @@ export function UserProfileDetail() {
         {activeTab === 'follow-up' && renderFollowUpTab()}
         {activeTab === 'notes' && renderNotesTab()}
         {activeTab === 'sms' && renderSmsTab()}
+        {activeTab === 'account-manager' && renderAccountManagerTab()}
       </div>
 
       {/* Modals */}
