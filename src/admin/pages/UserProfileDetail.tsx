@@ -5585,37 +5585,45 @@ export function UserProfileDetail() {
                         // Check if loan is EMI (has schedule with length > 1)
                         const isEmiLoan = calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 1;
                         
-                        // Parse fees_breakdown if it's a JSON string (for EMI loans)
-                        let feesBreakdownArray: any[] = [];
-                        if (isEmiLoan && loan.fees_breakdown) {
-                          try {
-                            feesBreakdownArray = typeof loan.fees_breakdown === 'string'
-                              ? JSON.parse(loan.fees_breakdown)
-                              : loan.fees_breakdown;
-                            if (!Array.isArray(feesBreakdownArray)) {
-                              feesBreakdownArray = [];
+                         // Processing fee - for EMI loans, get from calculation.fees.deductFromDisbursal or fees_breakdown
+                        let processingFee = 0;
+                        let processingFeeGST = 0;
+                        if (isEmiLoan) {
+                          // First try: Get from calculation.fees.deductFromDisbursal (from API response)
+                          if (calculation?.fees?.deductFromDisbursal && Array.isArray(calculation.fees.deductFromDisbursal)) {
+                            const processingFeeItem = calculation.fees.deductFromDisbursal.find((fee: any) => {
+                              const feeName = (fee.fee_name || fee.name || '').toLowerCase();
+                              return feeName.includes('processing fee');
+                            });
+                            if (processingFeeItem) {
+                              processingFee = parseFloat(processingFeeItem.total_with_gst) || 0;
+                              processingFeeGST = parseFloat(processingFeeItem.gst_amount) || 0;
                             }
-                          } catch (e) {
-                            console.error('Error parsing fees_breakdown:', e);
-                            feesBreakdownArray = [];
+                          }
+                          
+                          // Second try: Get from loan.fees_breakdown if calculation doesn't have it
+                          if (processingFee === 0 && loan.fees_breakdown) {
+                            try {
+                              const feesBreakdownArray = typeof loan.fees_breakdown === 'string'
+                                ? JSON.parse(loan.fees_breakdown)
+                                : loan.fees_breakdown;
+                              if (Array.isArray(feesBreakdownArray)) {
+                                const processingFeeItem = feesBreakdownArray.find((fee: any) => {
+                                  const feeName = (fee.fee_name || fee.name || '').toLowerCase();
+                                  return feeName.includes('processing fee');
+                                });
+                                if (processingFeeItem) {
+                                  processingFee = parseFloat(processingFeeItem.total_with_gst) || 0;
+                                  processingFeeGST = parseFloat(processingFeeItem.gst_amount) || 0;
+                                }
+                              }
+                            } catch (e) {
+                              console.error('Error parsing fees_breakdown:', e);
+                            }
                           }
                         }
                         
-                        // Processing fee - for EMI loans, get from fees_breakdown, otherwise use processed value or calculate
-                        let processingFee = 0;
-                        let processingFeeGST = 0;
-                        if (isEmiLoan && feesBreakdownArray.length > 0) {
-                          // Find processing fee from fees_breakdown
-                          const processingFeeItem = feesBreakdownArray.find((fee: any) => {
-                            const feeName = (fee.fee_name || fee.name || '').toLowerCase();
-                            return feeName.includes('processing fee');
-                          });
-                          if (processingFeeItem) {
-                            processingFee = parseFloat(processingFeeItem.total_with_gst) || 0;
-                            processingFeeGST = parseFloat(processingFeeItem.gst_amount) || 0;
-                          }
-                        }
-                        // Fallback to existing logic if not EMI or fees_breakdown not available
+                        // Fallback to existing logic if not EMI or fees not found in breakdown
                         if (processingFee === 0) {
                           processingFee = isProcessed && loan.processed_p_fee !== null
                             ? loan.processed_p_fee
@@ -5623,21 +5631,45 @@ export function UserProfileDetail() {
                           processingFeeGST = calculation?.totals?.disbursalFeeGST || 0;
                         }
 
-                        // Post service fee - for EMI loans, get from fees_breakdown, otherwise use processed value or calculate
+                        // Post service fee - for EMI loans, get from calculation.fees.addToTotal or fees_breakdown
                         let postServiceFee = 0;
                         let postServiceFeeGST = 0;
-                        if (isEmiLoan && feesBreakdownArray.length > 0) {
-                          // Find post service fee from fees_breakdown
-                          const postServiceFeeItem = feesBreakdownArray.find((fee: any) => {
-                            const feeName = (fee.fee_name || fee.name || '').toLowerCase();
-                            return feeName.includes('post service fee');
-                          });
-                          if (postServiceFeeItem) {
-                            postServiceFee = parseFloat(postServiceFeeItem.total_with_gst) || 0;
-                            postServiceFeeGST = parseFloat(postServiceFeeItem.gst_amount) || 0;
+                        if (isEmiLoan) {
+                          // First try: Get from calculation.fees.addToTotal (from API response)
+                          if (calculation?.fees?.addToTotal && Array.isArray(calculation.fees.addToTotal)) {
+                            const postServiceFeeItem = calculation.fees.addToTotal.find((fee: any) => {
+                              const feeName = (fee.fee_name || fee.name || '').toLowerCase();
+                              return feeName.includes('post service fee');
+                            });
+                            if (postServiceFeeItem) {
+                              postServiceFee = parseFloat(postServiceFeeItem.total_with_gst) || 0;
+                              postServiceFeeGST = parseFloat(postServiceFeeItem.gst_amount) || 0;
+                            }
+                          }
+                          
+                          // Second try: Get from loan.fees_breakdown if calculation doesn't have it
+                          if (postServiceFee === 0 && loan.fees_breakdown) {
+                            try {
+                              const feesBreakdownArray = typeof loan.fees_breakdown === 'string'
+                                ? JSON.parse(loan.fees_breakdown)
+                                : loan.fees_breakdown;
+                              if (Array.isArray(feesBreakdownArray)) {
+                                const postServiceFeeItem = feesBreakdownArray.find((fee: any) => {
+                                  const feeName = (fee.fee_name || fee.name || '').toLowerCase();
+                                  return feeName.includes('post service fee');
+                                });
+                                if (postServiceFeeItem) {
+                                  postServiceFee = parseFloat(postServiceFeeItem.total_with_gst) || 0;
+                                  postServiceFeeGST = parseFloat(postServiceFeeItem.gst_amount) || 0;
+                                }
+                              }
+                            } catch (e) {
+                              console.error('Error parsing fees_breakdown:', e);
+                            }
                           }
                         }
-                        // Fallback to existing logic if not EMI or fees_breakdown not available
+                        
+                        // Fallback to existing logic if not EMI or fees not found in breakdown
                         if (postServiceFee === 0) {
                           postServiceFee = isProcessed && loan.processed_post_service_fee !== null
                             ? loan.processed_post_service_fee
