@@ -1296,7 +1296,7 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
       }
 
       console.log('✅ KFS PDF generated and saved:', response.data);
-      toast.success('KFS PDF generated, saved, and sent to your email!');
+      toast.success('KFS PDF generated and saved successfully!');
       
       // Automatically mark as reviewed after generating
       setTimeout(() => {

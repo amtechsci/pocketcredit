@@ -156,10 +156,11 @@ async function sendKFSAndAgreementEmails(loanId) {
   try {
     console.log(`📧 Preparing to send KFS and Loan Agreement emails for loan #${loanId}...`);
 
-    // Get loan and user details
+    // Get loan and user details (including PDF URLs)
     const loans = await executeQuery(`
       SELECT 
         la.id, la.user_id, la.application_number, la.loan_amount, la.status,
+        la.kfs_pdf_url, la.loan_agreement_pdf_url,
         u.email, u.first_name, u.last_name, u.personal_email, u.official_email
       FROM loan_applications la
       INNER JOIN users u ON la.user_id = u.id
@@ -183,22 +184,55 @@ async function sendKFSAndAgreementEmails(loanId) {
     const apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:5000';
     const applicationNumber = loan.application_number || `LOAN_${loanId}`;
 
-    // Get HTML content
-    console.log(`📄 Getting KFS HTML for loan #${loanId}...`);
-    const kfsHTML = await getKFSHTML(loanId, apiBaseUrl);
-
-    console.log(`📄 Getting Loan Agreement HTML for loan #${loanId}...`);
-    const loanAgreementHTML = await getLoanAgreementHTML(loanId, apiBaseUrl);
-
-    // Generate PDFs
     const kfsFilename = `KFS_${applicationNumber}.pdf`;
     const agreementFilename = `Loan_Agreement_${applicationNumber}.pdf`;
 
-    console.log(`📄 Generating KFS PDF: ${kfsFilename}`);
-    const kfsPDF = await pdfService.generateKFSPDF(kfsHTML, kfsFilename);
+    // Try to use existing PDFs from S3, otherwise generate new ones
+    let kfsPDF = null;
+    let agreementPDF = null;
+    const { downloadFromS3 } = require('../services/s3Service');
 
-    console.log(`📄 Generating Loan Agreement PDF: ${agreementFilename}`);
-    const agreementPDF = await pdfService.generateKFSPDF(loanAgreementHTML, agreementFilename);
+    // Get KFS PDF - use existing from S3 if available, otherwise generate
+    if (loan.kfs_pdf_url) {
+      try {
+        console.log(`📥 Downloading KFS PDF from S3: ${loan.kfs_pdf_url}`);
+        const kfsBuffer = await downloadFromS3(loan.kfs_pdf_url);
+        kfsPDF = { buffer: kfsBuffer };
+        console.log(`✅ KFS PDF downloaded from S3, size: ${kfsBuffer.length} bytes`);
+      } catch (s3Error) {
+        console.warn(`⚠️ Failed to download KFS PDF from S3 (${loan.kfs_pdf_url}), will generate new one:`, s3Error.message);
+        // Fall through to generate new PDF
+      }
+    }
+
+    if (!kfsPDF) {
+      // Generate new KFS PDF
+      console.log(`📄 Generating KFS HTML for loan #${loanId}...`);
+      const kfsHTML = await getKFSHTML(loanId, apiBaseUrl);
+      console.log(`📄 Generating KFS PDF: ${kfsFilename}`);
+      kfsPDF = await pdfService.generateKFSPDF(kfsHTML, kfsFilename);
+    }
+
+    // Get Loan Agreement PDF - use existing from S3 if available, otherwise generate
+    if (loan.loan_agreement_pdf_url) {
+      try {
+        console.log(`📥 Downloading Loan Agreement PDF from S3: ${loan.loan_agreement_pdf_url}`);
+        const agreementBuffer = await downloadFromS3(loan.loan_agreement_pdf_url);
+        agreementPDF = { buffer: agreementBuffer };
+        console.log(`✅ Loan Agreement PDF downloaded from S3, size: ${agreementBuffer.length} bytes`);
+      } catch (s3Error) {
+        console.warn(`⚠️ Failed to download Loan Agreement PDF from S3 (${loan.loan_agreement_pdf_url}), will generate new one:`, s3Error.message);
+        // Fall through to generate new PDF
+      }
+    }
+
+    if (!agreementPDF) {
+      // Generate new Loan Agreement PDF
+      console.log(`📄 Getting Loan Agreement HTML for loan #${loanId}...`);
+      const loanAgreementHTML = await getLoanAgreementHTML(loanId, apiBaseUrl);
+      console.log(`📄 Generating Loan Agreement PDF: ${agreementFilename}`);
+      agreementPDF = await pdfService.generateKFSPDF(loanAgreementHTML, agreementFilename);
+    }
 
     // Send KFS email
     try {
@@ -2821,6 +2855,17 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
           loanStatusUpdated = true;
           newStatus = 'account_manager';
+          
+          // Send KFS and Loan Agreement emails after loan moves to account_manager
+          // This is when admin adds transaction (loan_disbursement)
+          console.log(`📧 Triggering email send for loan #${loanIdInt} (moved to account_manager)`);
+          try {
+            await sendKFSAndAgreementEmails(loanIdInt);
+            console.log(`✅ KFS and Loan Agreement emails sent for loan #${loanIdInt}`);
+          } catch (emailError) {
+            console.error(`❌ Error sending emails for loan #${loanIdInt} (non-fatal):`, emailError.message);
+            // Continue - email failure shouldn't block the transaction
+          }
         } else {
           console.warn(`❌ Loan #${loanIdInt} belongs to user ${loan.user_id}, not requested user ${userId}`);
         }

@@ -476,39 +476,8 @@ router.get('/callback', async (req, res) => {
       // Continue - we'll still mark as signed and send email
     }
 
-    // Get user details for email
-    const [user] = await executeQuery(
-      'SELECT first_name, last_name, email, personal_email, official_email FROM users WHERE id = ?',
-      [application.user_id]
-    );
-
-    // Send email with signed agreement (if user email exists)
-    if (user) {
-      const recipientEmail = user.personal_email || user.official_email || user.email;
-      const recipientName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'User';
-      
-      if (recipientEmail) {
-        try {
-          await emailService.sendSignedAgreementEmail({
-            loanId: application.id,
-            recipientEmail: recipientEmail,
-            recipientName: recipientName,
-            loanData: {
-              application_number: application.application_number,
-              loan_amount: application.loan_amount,
-              status: application.status
-            },
-            pdfBuffer: pdfBuffer,
-            pdfFilename: `Signed_Agreement_${application.application_number}.pdf`,
-            sentBy: null // System-generated
-          });
-          console.log('✅ Email sent with signed agreement to:', recipientEmail);
-        } catch (emailError) {
-          console.error('❌ Failed to send email (non-fatal):', emailError.message);
-          // Continue - email failure shouldn't block the process
-        }
-      }
-    }
+    // Note: Email sending is now done when admin adds transaction (loan_disbursement)
+    // PDF is generated and saved to S3 here when user accepts agreement
 
     // Determine new status based on current status
     // Repeat loans: repeat_disbursal -> ready_to_repeat_disbursal
@@ -516,17 +485,55 @@ router.get('/callback', async (req, res) => {
     const isRepeatLoan = application.status === 'repeat_disbursal';
     const newStatus = isRepeatLoan ? 'ready_to_repeat_disbursal' : 'ready_for_disbursement';
     
-    // Update database: mark as signed and store S3 key if available
-    await executeQuery(
-      `UPDATE loan_applications 
-       SET agreement_signed = 1,
-           status = ?,
-           clickwrap_signed_at = NOW(),
-           clickwrap_signed_pdf_s3_key = ?,
-           updated_at = NOW()
-       WHERE id = ?`,
-      [newStatus, s3Key, applicationId]
-    );
+    // Update database: mark as signed, store S3 key, and update loan_agreement_pdf_url
+    // Check if loan_agreement_pdf_url column exists first
+    const updateParts = [
+      'agreement_signed = 1',
+      'status = ?',
+      'clickwrap_signed_at = NOW()',
+      'clickwrap_signed_pdf_s3_key = ?'
+    ];
+    const updateParams = [newStatus, s3Key];
+    
+    // Add loan_agreement_pdf_url if S3 key is available
+    if (s3Key) {
+      try {
+        const columnCheck = await executeQuery(`
+          SELECT COLUMN_NAME 
+          FROM INFORMATION_SCHEMA.COLUMNS 
+          WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = 'loan_applications' 
+            AND COLUMN_NAME = 'loan_agreement_pdf_url'
+        `);
+        
+        if (columnCheck && columnCheck.length > 0) {
+          updateParts.push('loan_agreement_pdf_url = ?');
+          updateParams.push(s3Key);
+        } else {
+          // Column doesn't exist, try to add it
+          try {
+            await executeQuery(
+              `ALTER TABLE loan_applications 
+               ADD COLUMN loan_agreement_pdf_url VARCHAR(500) NULL COMMENT 'S3 key/URL for the loan agreement PDF'`
+            );
+            updateParts.push('loan_agreement_pdf_url = ?');
+            updateParams.push(s3Key);
+          } catch (alterError) {
+            console.error('❌ Error adding loan_agreement_pdf_url column:', alterError);
+            // Continue without updating loan_agreement_pdf_url
+          }
+        }
+      } catch (checkError) {
+        console.error('❌ Error checking loan_agreement_pdf_url column:', checkError);
+        // Continue without updating loan_agreement_pdf_url
+      }
+    }
+    
+    updateParts.push('updated_at = NOW()');
+    updateParams.push(applicationId);
+    
+    const updateQuery = `UPDATE loan_applications SET ${updateParts.join(', ')} WHERE id = ?`;
+    await executeQuery(updateQuery, updateParams);
     
     console.log(`✅ Agreement marked as signed - status updated from ${application.status} to ${newStatus}`);
 

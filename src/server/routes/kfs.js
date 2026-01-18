@@ -5279,44 +5279,16 @@ router.post('/:loanId/generate-and-save', requireAuth, async (req, res) => {
       // Continue anyway - we still want to send email
     }
 
-    // Send email with PDF attachment
-    console.log('📧 Sending KFS email...');
-    try {
-      const recipientEmail = loan.personal_email || loan.official_email || loan.email;
-      const recipientName = `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'User';
-
-      if (recipientEmail) {
-        await emailService.sendKFSEmail({
-          loanId: loan.id,
-          recipientEmail: recipientEmail,
-          recipientName: recipientName,
-          loanData: {
-            application_number: loan.application_number,
-            sanctioned_amount: loan.loan_amount,
-            loan_term_days: 30, // Default - could be fetched from plan
-            status: loan.status
-          },
-          pdfBuffer: pdfResult.buffer,
-          pdfFilename: filename,
-          sentBy: userId // User ID who triggered it
-        });
-        console.log('✅ KFS email sent successfully to:', recipientEmail);
-      } else {
-        console.warn('⚠️ No email address found for user, skipping email');
-      }
-    } catch (emailError) {
-      console.error('❌ Error sending KFS email (non-fatal):', emailError.message);
-      // Continue - email failure shouldn't block the process
-    }
-
+    // Note: Email sending is now done when admin adds transaction (loan_disbursement)
+    // PDF is generated and saved to S3 here when user accepts KFS
+    
     res.json({
       success: true,
-      message: 'KFS PDF generated, saved to S3, and email sent successfully',
+      message: 'KFS PDF generated and saved to S3 successfully',
       data: {
         s3Key: s3Key,
         filename: filename,
-        pdfSize: pdfResult.buffer.length,
-        emailSent: !!loan.email || !!loan.personal_email || !!loan.official_email
+        pdfSize: pdfResult.buffer.length
       }
     });
 

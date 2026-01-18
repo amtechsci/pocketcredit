@@ -5034,20 +5034,24 @@ export function UserProfileDetail() {
                             {/* Action Buttons */}
                             <td className="px-3 py-4 whitespace-nowrap text-sm font-medium">
                               <div className="flex flex-col gap-1">
-                                <button
-                                  className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
-                                  onClick={() => window.open(`/stpl/loan-agreement/${loanId}`, '_blank')}
-                                  title="View Loan Agreement"
-                                >
-                                  Agreement
-                                </button>
-                                <button
-                                  className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
-                                  onClick={() => window.open(`/stpl/kfs/${loanId}`, '_blank')}
-                                  title="View Key Facts Statement"
-                                >
-                                  View KFS
-                                </button>
+                                {loan.loan_agreement_pdf_url && (
+                                  <button
+                                    className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                                    onClick={() => window.open(loan.loan_agreement_pdf_url, '_blank')}
+                                    title="View Loan Agreement"
+                                  >
+                                    Agreement
+                                  </button>
+                                )}
+                                {loan.kfs_pdf_url && (
+                                  <button
+                                    className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
+                                    onClick={() => window.open(loan.kfs_pdf_url, '_blank')}
+                                    title="View Key Facts Statement"
+                                  >
+                                    View KFS
+                                  </button>
+                                )}
                                 {loan.status === 'cleared' && (
                                   <button
                                     className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
