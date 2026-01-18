@@ -5614,8 +5614,19 @@ export function UserProfileDetail() {
                           totalInterestFullTenure = calculation?.interest?.amount || loan.interest || 0;
                         }
 
-                        // Calculate total amount: principal + post service fee + gst on post service fee + interest balance till current date + penalty if any + gst on penalty
-                        const totalAmount = principal + postServiceFee + postServiceFeeGST + interestTillDate + penaltyData.total;
+                        // Calculate total amount
+                        // For EMI loans: Sum all instalment_amount from schedule (same as EMI Details modal)
+                        // For single payment loans: principal + post service fee + gst + interest + penalty
+                        let totalAmount = 0;
+                        if (calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 1) {
+                          // Multi-EMI loan: Sum all instalment_amount from schedule (includes penalty if any)
+                          totalAmount = calculation.repayment.schedule.reduce((sum: number, emi: any) => {
+                            return sum + parseFloat(emi.instalment_amount || emi.emi_amount || 0);
+                          }, 0);
+                        } else {
+                          // Single payment loan: Use formula calculation
+                          totalAmount = principal + postServiceFee + postServiceFeeGST + interestTillDate + penaltyData.total;
+                        }
 
                         // Loan extension fields (placeholder - these would come from database)
                         const loanExtensionAvailedDate = loan.extension_availed_date || 'N/A';
