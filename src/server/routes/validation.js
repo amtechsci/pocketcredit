@@ -8,7 +8,7 @@ const router = express.Router();
 router.get('/options/:type', authenticateAdmin, async (req, res) => {
   try {
     const { type } = req.params;
-    
+
     if (!['need_document', 'not_process', 'process', 'cancel', 're_process', 'unhold', 'delete'].includes(type)) {
       return res.status(400).json({
         status: 'error',
@@ -116,13 +116,13 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
   try {
     console.log('Validation submit request body:', req.body);
     console.log('Admin from middleware:', req.admin);
-    
-    const { 
-      userId, 
-      loanApplicationId, 
-      actionType, 
+
+    const {
+      userId,
+      loanApplicationId,
+      actionType,
       actionDetails,
-      adminId 
+      adminId
     } = req.body;
 
     // Use admin ID from the authenticated admin if not provided in body
@@ -137,7 +137,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       });
     }
 
-    if (!['need_document', 'process', 'not_process', 'cancel', 're_process', 'unhold', 'delete'].includes(actionType)) {
+    if (!['need_document', 'process', 'not_process', 'cancel', 're_process', 'unhold', 'delete', 'qa_verification', 'qa_approve'].includes(actionType)) {
       return res.status(400).json({
         status: 'error',
         message: 'Invalid action type'
@@ -145,7 +145,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
     }
 
     // Block certain actions if user has any loan in account_manager status
-    const blockedActions = ['not_process', 're_process', 'delete', 'cancel', 'process'];
+    const blockedActions = ['not_process', 're_process', 'delete', 'cancel', 'process', 'qa_approve'];
     if (blockedActions.includes(actionType)) {
       // Check if user has any loan with account_manager status
       const accountManagerLoans = await executeQuery(
@@ -162,12 +162,12 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // Ensure the status enum includes 'on_hold' and 'deleted' values
+    // Ensure the status enum includes 'on_hold', 'deleted', 'qa_verification' values
     try {
       await executeQuery(
-        `ALTER TABLE users MODIFY COLUMN status ENUM('active', 'inactive', 'suspended', 'on_hold', 'deleted') DEFAULT 'active'`
+        `ALTER TABLE users MODIFY COLUMN status ENUM('active', 'inactive', 'suspended', 'on_hold', 'deleted', 'qa_verification') DEFAULT 'active'`
       );
-      console.log('✅ Updated users.status enum to include on_hold and deleted');
+      console.log('✅ Updated users.status enum to include on_hold, deleted, and qa_verification');
     } catch (enumError) {
       // Ignore error if enum already has these values or if it's a different error
       if (!enumError.message.includes('Duplicate value') && !enumError.message.includes('already exists')) {
@@ -178,7 +178,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
     // Ensure the action_type enum includes all action types
     try {
       await executeQuery(
-        `ALTER TABLE user_validation_history MODIFY COLUMN action_type ENUM('need_document', 'process', 'not_process', 'cancel', 're_process', 'unhold', 'delete') NOT NULL`
+        `ALTER TABLE user_validation_history MODIFY COLUMN action_type ENUM('need_document', 'process', 'not_process', 'cancel', 're_process', 'unhold', 'delete', 'qa_verification', 'qa_approve') NOT NULL`
       );
       console.log('✅ Updated user_validation_history.action_type enum to include all action types');
     } catch (enumError) {
@@ -191,7 +191,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
     // For cancel action, validate loan before saving history
     let loanToUpdate = null;
     let actualLoanId = loanApplicationId;
-    
+
     if (actionType === 'cancel') {
       // Try to find the loan to cancel
       if (loanApplicationId) {
@@ -210,7 +210,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
         }
 
         const currentLoan = loanCheck[0];
-        
+
         // Verify loan belongs to the user
         if (currentLoan.user_id !== userId) {
           console.error(`❌ Loan ${loanApplicationId} does not belong to user ${userId}`);
@@ -219,7 +219,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
             message: 'Loan application does not belong to this user'
           });
         }
-        
+
         // Block cancellation if loan is in account_manager status
         if (currentLoan.status === 'account_manager') {
           return res.status(400).json({
@@ -250,7 +250,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
 
         if (activeLoans.length > 0) {
           const foundLoan = activeLoans[0];
-          
+
           // Block cancellation if loan is in account_manager status (though shouldn't be in the query)
           if (foundLoan.status === 'account_manager') {
             return res.status(400).json({
@@ -281,10 +281,10 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
        (user_id, loan_application_id, admin_id, action_type, action_details) 
        VALUES (?, ?, ?, ?, ?)`,
       [
-        userId, 
-        actualLoanId || null, 
-        finalAdminId, 
-        actionType, 
+        userId,
+        actualLoanId || null,
+        finalAdminId,
+        actionType,
         JSON.stringify(actionDetails)
       ]
     );
@@ -295,12 +295,13 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
 
     if (loanApplicationId || loanToUpdate) {
       let newStatus = null;
-      
+
       switch (actionType) {
         case 'need_document':
           newStatus = 'follow_up';
           break;
         case 'process':
+        case 'qa_approve':
           newStatus = 'disbursal';
           break;
         case 'not_process':
@@ -313,7 +314,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
 
       if (newStatus) {
         const targetLoanId = actualLoanId || loanApplicationId;
-        
+
         if (targetLoanId) {
           // Update loan status
           const updateResult = await executeQuery(
@@ -322,7 +323,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
           );
 
           const affectedRows = updateResult?.affectedRows || (typeof updateResult === 'number' ? updateResult : 0);
-          
+
           if (affectedRows > 0) {
             loanUpdateSuccess = true;
             const oldStatus = loanToUpdate?.status || 'unknown';
@@ -342,7 +343,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       // Cancel with hold (existing logic)
       let userStatus = 'on_hold';
       let holdUntilDate = null;
-      
+
       if (actionDetails.holdDuration === 'forever') {
         // User is held permanently
       } else if (actionDetails.holdDuration === 'days' && actionDetails.holdDays) {
@@ -371,7 +372,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       // Re-process: Hold for 45 days (cooling period)
       const holdUntilDate = new Date();
       holdUntilDate.setDate(holdUntilDate.getDate() + 45);
-      
+
       await executeQuery(
         `UPDATE users 
          SET status = 'on_hold', hold_until_date = ?, application_hold_reason = 'Profile under cooling period', updated_at = CURRENT_TIMESTAMP 
@@ -398,21 +399,21 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
         [userId]
       );
       console.log(`✅ User ${userId} marked as DELETED`);
-      
+
 
       // Get user's primary phone and PAN before deletion
       const userData = await executeQuery(
         `SELECT phone, pan_number FROM users WHERE id = ?`,
         [userId]
       );
-      
+
       const primaryPhone = userData[0]?.phone || null;
       const panNumber = userData[0]?.pan_number || null;
 
       // Delete user data except primary number, PAN, Aadhar, and loan data
       // Note: Aadhaar is stored in verification_records table, so we'll preserve those records
       // Wrap each delete in try-catch to handle missing tables gracefully
-      
+
       const deleteOperations = [
         { query: `DELETE FROM addresses WHERE user_id = ?`, name: 'addresses' },
         { query: `DELETE FROM bank_details WHERE user_id = ?`, name: 'bank_details' },
@@ -438,7 +439,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
           }
         }
       }
-      
+
       // Delete verification records EXCEPT PAN and Aadhaar (keep these as per requirements)
       try {
         await executeQuery(
@@ -453,7 +454,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
           console.error(`⚠️ Error deleting verification records:`, error.message);
         }
       }
-      
+
       // Clear user profile data but keep primary identifiers
       // Only update columns that exist in the users table
       try {
@@ -473,6 +474,24 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
         console.error(`⚠️ Error clearing user profile data:`, error.message);
         // Continue even if some columns don't exist
       }
+    } else if (actionType === 'qa_verification') {
+      // QA Verification
+      await executeQuery(
+        `UPDATE users 
+       SET status = 'qa_verification', updated_at = CURRENT_TIMESTAMP 
+       WHERE id = ?`,
+        [userId]
+      );
+      console.log(`✅ User ${userId} marked as QA VERIFICATION`);
+    } else if (actionType === 'qa_approve') {
+      // QA Approve: Move to disbursal (handled above) and ensure user is active
+      await executeQuery(
+        `UPDATE users 
+         SET status = 'active', updated_at = CURRENT_TIMESTAMP 
+         WHERE id = ?`,
+        [userId]
+      );
+      console.log(`✅ User ${userId} marked as ACTIVE (QA Approved)`);
     }
 
     // Build response message
@@ -513,7 +532,7 @@ router.get('/history/:userId', authenticateAdmin, async (req, res) => {
   try {
     console.log('Fetching validation history for user:', req.params.userId);
     console.log('Query params:', req.query);
-    
+
     const { userId } = req.params;
     const { loanApplicationId } = req.query;
 
@@ -530,21 +549,21 @@ router.get('/history/:userId', authenticateAdmin, async (req, res) => {
       LEFT JOIN admins a ON uvh.admin_id = a.id
       WHERE uvh.user_id = ?
     `;
-    
+
     const params = [userId];
-    
+
     if (loanApplicationId) {
       query += ' AND uvh.loan_application_id = ?';
       params.push(loanApplicationId);
     }
-    
+
     query += ' ORDER BY uvh.created_at DESC';
 
     console.log('Executing query:', query);
     console.log('With params:', params);
 
     const history = await executeQuery(query, params);
-    
+
     console.log('Query results:', history);
 
     // Parse action_details JSON and format response
@@ -610,14 +629,14 @@ router.get('/user/history', requireAuth, async (req, res) => {
       FROM user_validation_history uvh
       WHERE uvh.user_id = ?
     `;
-    
+
     const params = [userId];
-    
+
     if (loanApplicationId) {
       query += ' AND uvh.loan_application_id = ?';
       params.push(loanApplicationId);
     }
-    
+
     query += ' ORDER BY uvh.created_at DESC';
 
     const history = await executeQuery(query, params);
@@ -683,9 +702,9 @@ router.get('/status/:userId', authenticateAdmin, async (req, res) => {
       FROM validation_status
       WHERE user_id = ?
     `;
-    
+
     const params = [userId];
-    
+
     if (loanApplicationId) {
       query += ' AND loan_application_id = ?';
       params.push(loanApplicationId);
@@ -732,7 +751,7 @@ router.get('/status/:userId', authenticateAdmin, async (req, res) => {
 router.put('/status/:userId', authenticateAdmin, async (req, res) => {
   try {
     const { userId } = req.params;
-    const { 
+    const {
       loanApplicationId,
       kyc_verification,
       income_verification,

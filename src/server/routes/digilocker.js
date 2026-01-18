@@ -4,7 +4,12 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
 const { uploadKYCDocument } = require('../services/s3Service');
 const axios = require('axios');
-const pdf = require('pdf-parse');
+// pdf-parse v2.x - supports both old and new API
+// The module exports an object, but should have a callable default function
+const pdfParseModule = require('pdf-parse');
+// In pdf-parse v2.x, the default export should still be the parsing function
+// Try accessing it via .default or use the module itself if it's callable
+const pdf = pdfParseModule.default || pdfParseModule;
 
 /**
  * Extract PAN number from PDF text
@@ -43,17 +48,54 @@ function extractPANFromText(text) {
 
 /**
  * Extract PAN from PANCR PDF document
+ * Uses the same robust OCR extraction method as Credit Analytics
  * @param {Buffer} pdfBuffer - PDF file buffer
  * @returns {Promise<string|null>} - Extracted PAN number or null
  */
 async function extractPANFromPDF(pdfBuffer) {
+  let parser = null;
   try {
-    const data = await pdf(pdfBuffer);
-    const text = data.text;
-    return extractPANFromText(text);
+    // Ensure buffer is a Buffer object
+    if (!Buffer.isBuffer(pdfBuffer)) {
+      pdfBuffer = Buffer.from(pdfBuffer);
+    }
+    
+    console.log('   🔍 Attempting to parse PDF, buffer size:', pdfBuffer.length);
+    
+    // Try to use PDFParse class for pdf-parse v2.4.5+ (more robust)
+    try {
+      const { PDFParse } = require('pdf-parse');
+      
+      // Create parser instance with the PDF buffer
+      parser = new PDFParse({ data: pdfBuffer });
+      
+      // Extract text from PDF
+      const result = await parser.getText();
+      
+      const text = result.text || '';
+      console.log('   ✅ PDF parsed successfully using PDFParse class, text length:', text.length);
+      return extractPANFromText(text);
+    } catch (classError) {
+      // Fallback to old API if PDFParse class is not available
+      console.log('   ⚠️ PDFParse class not available, using fallback method');
+      const data = await pdf(pdfBuffer);
+      const text = data.text || '';
+      console.log('   ✅ PDF parsed successfully using fallback method, text length:', text.length);
+      return extractPANFromText(text);
+    }
   } catch (error) {
     console.error('   ❌ Error extracting PAN from PDF:', error.message);
+    console.error('   Error stack:', error.stack);
     return null;
+  } finally {
+    // Clean up parser resources
+    if (parser) {
+      try {
+        await parser.destroy();
+      } catch (destroyError) {
+        // Ignore destroy errors
+      }
+    }
   }
 }
 

@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { 
-  Plus, 
-  Search, 
-  Edit, 
-  Trash2, 
-  User, 
-  Mail, 
+import {
+  Plus,
+  Search,
+  Edit,
+  Trash2,
+  User,
+  Mail,
   Phone,
   Shield,
   UserCheck,
@@ -227,7 +227,7 @@ export function AdminTeamManagement() {
 
   const filteredMembers = teamMembers.filter(member => {
     const matchesSearch = member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         member.email.toLowerCase().includes(searchTerm.toLowerCase());
+      member.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = roleFilter === 'all' || member.role === roleFilter;
     return matchesSearch && matchesRole;
   });
@@ -580,11 +580,10 @@ export function AdminTeamManagement() {
                 <button
                   onClick={() => handleToggleUserStatus(member.id)}
                   disabled={saving}
-                  className={`px-2 py-1 rounded text-xs ${
-                    member.status === 'active' 
-                      ? 'bg-orange-100 text-orange-700 hover:bg-orange-200' 
-                      : 'bg-green-100 text-green-700 hover:bg-green-200'
-                  } disabled:opacity-50`}
+                  className={`px-2 py-1 rounded text-xs ${member.status === 'active'
+                    ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                    : 'bg-green-100 text-green-700 hover:bg-green-200'
+                    } disabled:opacity-50`}
                   title={member.status === 'active' ? 'Deactivate' : 'Activate'}
                 >
                   {member.status === 'active' ? <UserX className="w-3 h-3" /> : <UserCheck className="w-3 h-3" />}
@@ -617,7 +616,7 @@ export function AdminTeamManagement() {
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
             <div className="flex items-center justify-between mb-4">
               <h4 className="text-lg font-semibold text-gray-900">Add Team Member</h4>
-              <button 
+              <button
                 onClick={() => setShowAddModal(false)}
                 className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
               >
@@ -679,7 +678,7 @@ export function AdminTeamManagement() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
-                  <select 
+                  <select
                     value={newUser.department}
                     onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -693,6 +692,7 @@ export function AdminTeamManagement() {
                     <option value="Verification">Verification</option>
                     <option value="Finance">Finance</option>
                     <option value="HR">HR</option>
+                    <option value="QA">QA</option>
                   </select>
                 </div>
                 <div>
@@ -757,7 +757,7 @@ export function AdminTeamManagement() {
         </div>
       )}
 
-   
+
 
       {/* Edit User Modal */}
       {showEditModal && editingUser && (
@@ -765,20 +765,20 @@ export function AdminTeamManagement() {
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
             <div className="flex items-center justify-between mb-4">
               <h4 className="text-lg font-semibold text-gray-900">Edit Team Member</h4>
-              <button 
+              <button
                 onClick={() => setShowEditModal(false)}
                 className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); handleUpdateUser(); }}>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={editFormData.name}
                     onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -787,8 +787,8 @@ export function AdminTeamManagement() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Email *</label>
-                  <input 
-                    type="email" 
+                  <input
+                    type="email"
                     value={editFormData.email}
                     onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -800,8 +800,8 @@ export function AdminTeamManagement() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
-                  <input 
-                    type="tel" 
+                  <input
+                    type="tel"
                     value={editFormData.phone}
                     onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -809,7 +809,7 @@ export function AdminTeamManagement() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
-                  <select 
+                  <select
                     value={editFormData.department}
                     onChange={(e) => setEditFormData({ ...editFormData, department: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -823,6 +823,7 @@ export function AdminTeamManagement() {
                     <option value="Verification">Verification</option>
                     <option value="Finance">Finance</option>
                     <option value="HR">HR</option>
+                    <option value="QA">QA</option>
                   </select>
                 </div>
               </div>
@@ -830,7 +831,7 @@ export function AdminTeamManagement() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Role *</label>
-                  <select 
+                  <select
                     value={editFormData.role}
                     onChange={(e) => setEditFormData({ ...editFormData, role: e.target.value as 'superadmin' | 'manager' | 'officer' })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -843,7 +844,7 @@ export function AdminTeamManagement() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
-                  <select 
+                  <select
                     value={editFormData.is_active ? 'active' : 'inactive'}
                     onChange={(e) => setEditFormData({ ...editFormData, is_active: e.target.value === 'active' })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -888,14 +889,14 @@ export function AdminTeamManagement() {
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
             <div className="flex items-center justify-between mb-4">
               <h4 className="text-lg font-semibold text-gray-900">User Details</h4>
-              <button 
+              <button
                 onClick={() => setShowViewModal(false)}
                 className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="space-y-6">
               {/* User Info */}
               <div className="flex items-center gap-4">
@@ -923,9 +924,8 @@ export function AdminTeamManagement() {
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-500">Status</label>
-                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                    viewingUser.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                  }`}>
+                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${viewingUser.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    }`}>
                     {viewingUser.status?.toUpperCase() || 'UNKNOWN'}
                   </span>
                 </div>
@@ -975,20 +975,20 @@ export function AdminTeamManagement() {
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-3xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
             <div className="flex items-center justify-between mb-4">
               <h4 className="text-lg font-semibold text-gray-900">Manage Permissions - {editingUser.name}</h4>
-              <button 
+              <button
                 onClick={() => setShowPermissionsModal(false)}
                 className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="space-y-4">
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                 <div className="flex items-center gap-2">
                   <AlertCircle className="w-5 h-5 text-yellow-600" />
                   <p className="text-sm text-yellow-800">
-                    <strong>Warning:</strong> Changing permissions will affect what this user can access. 
+                    <strong>Warning:</strong> Changing permissions will affect what this user can access.
                     Make sure to review all changes before saving.
                   </p>
                 </div>
@@ -997,8 +997,8 @@ export function AdminTeamManagement() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {availablePermissions.map(permission => (
                   <label key={permission.id} className="flex items-start gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
-                    <input 
-                      type="checkbox" 
+                    <input
+                      type="checkbox"
                       checked={permissionsFormData.includes(permission.id) || permissionsFormData.includes('*')}
                       disabled={permissionsFormData.includes('*')}
                       onChange={(e) => {
@@ -1055,14 +1055,14 @@ export function AdminTeamManagement() {
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
             <div className="flex items-center justify-between mb-4">
               <h4 className="text-lg font-semibold text-gray-900">Bulk Actions</h4>
-              <button 
+              <button
                 onClick={() => setShowBulkActionsModal(false)}
                 className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="space-y-4">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <div className="flex items-center gap-2">
@@ -1079,8 +1079,8 @@ export function AdminTeamManagement() {
                 <div className="space-y-2 max-h-40 overflow-y-auto">
                   {teamMembers.map(member => (
                     <label key={member.id} className="flex items-center gap-3 p-2 border border-gray-200 rounded-lg hover:bg-gray-50">
-                      <input 
-                        type="checkbox" 
+                      <input
+                        type="checkbox"
                         className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                         checked={selectedUsers.includes(member.id)}
                         onChange={(e) => {
@@ -1153,14 +1153,14 @@ export function AdminTeamManagement() {
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-4xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
             <div className="flex items-center justify-between mb-4">
               <h4 className="text-lg font-semibold text-gray-900">Activity Log - {viewingUser.name}</h4>
-              <button 
+              <button
                 onClick={() => setShowActivityModal(false)}
                 className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="space-y-4">
               {loadingActivity ? (
                 <div className="flex items-center justify-center py-12">
@@ -1196,11 +1196,10 @@ export function AdminTeamManagement() {
                           const activityType = getActivityType(activity.action);
                           return (
                             <div key={activity.id} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
-                              <div className={`w-2 h-2 rounded-full ${
-                                activityType === 'success' ? 'bg-green-500' :
+                              <div className={`w-2 h-2 rounded-full ${activityType === 'success' ? 'bg-green-500' :
                                 activityType === 'warning' ? 'bg-orange-500' :
-                                'bg-blue-500'
-                              }`} />
+                                  'bg-blue-500'
+                                }`} />
                               <div className="flex-1">
                                 <div className="text-sm text-gray-900">{activity.action}</div>
                                 <div className="text-xs text-gray-500 flex items-center gap-1">
@@ -1208,11 +1207,10 @@ export function AdminTeamManagement() {
                                   {formatActivityTime(activity.timestamp)}
                                 </div>
                               </div>
-                              <div className={`px-2 py-1 text-xs rounded ${
-                                activityType === 'success' ? 'bg-green-100 text-green-800' :
+                              <div className={`px-2 py-1 text-xs rounded ${activityType === 'success' ? 'bg-green-100 text-green-800' :
                                 activityType === 'warning' ? 'bg-orange-100 text-orange-800' :
-                                'bg-blue-100 text-blue-800'
-                              }`}>
+                                  'bg-blue-100 text-blue-800'
+                                }`}>
                                 {activityType}
                               </div>
                             </div>

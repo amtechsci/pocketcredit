@@ -30,13 +30,13 @@ router.post('/login', validate(schemas.adminLogin), async (req, res) => {
     // Find admin in MySQL
     console.log('Querying MySQL for admin...');
     const admins = await executeQuery(
-      'SELECT id, name, email, password, role, permissions, is_active FROM admins WHERE email = ?',
+      'SELECT id, name, email, phone, password, role, department, permissions, is_active FROM admins WHERE email = ?',
       [email]
     );
     console.log('MySQL query result:', admins.length, 'admins found');
-    
+
     console.log('Found admin:', admins.length > 0 ? 'Yes' : 'No');
-    
+
     if (admins.length === 0) {
       console.log('Admin not found for email:', email);
       return res.status(401).json({
@@ -98,7 +98,9 @@ router.post('/login', validate(schemas.adminLogin), async (req, res) => {
           id: admin.id,
           name: admin.name,
           email: admin.email,
+          phone: admin.phone,
           role: admin.role,
+          department: admin.department,
           permissions: Array.isArray(admin.permissions) ? admin.permissions : JSON.parse(admin.permissions || '[]')
         },
         token
@@ -148,7 +150,7 @@ router.post('/send-otp', async (req, res) => {
         AND table_name = 'admins' 
         AND column_name = 'phone'
       `);
-      
+
       if (columnCheck[0].count > 0) {
         const admins = await executeQuery(
           'SELECT id, name, email, role, is_active FROM admins WHERE phone = ?',
@@ -162,7 +164,7 @@ router.post('/send-otp', async (req, res) => {
 
     // If phone column doesn't exist or no admin found, you might want to return error
     // For now, we'll allow OTP generation and check during verification
-    
+
     // Generate 4-digit OTP
     const otp = otpGenerator.generate(4, {
       upperCaseAlphabets: false,
@@ -194,9 +196,9 @@ router.post('/send-otp', async (req, res) => {
     const message = `${otp} is OTP for Creditlab login verification & valid till 2min. Don't share this OTP with anyone.`;
     const template_id = '1407174844163241940';
     const sender = 'CREDLB';
-    
+
     const smsUrl = `https://sms.smswala.in/app/smsapi/index.php?key=2683C705E7CB39&campaign=16613&routeid=30&type=text&contacts=${mobile}&senderid=${sender}&msg=${encodeURIComponent(message)}&template_id=${template_id}&pe_id=1401337620000065797`;
-    
+
     try {
       const response = await fetch(smsUrl);
       const result = await response.text();
@@ -261,7 +263,7 @@ router.post('/verify-otp', async (req, res) => {
     // Retrieve OTP from Redis (only if not using test OTP)
     const otpKey = `admin_otp:${mobile}`;
     let otpData = null;
-    
+
     if (!isTestOtp) {
       otpData = await get(otpKey);
 
@@ -277,7 +279,7 @@ router.post('/verify-otp', async (req, res) => {
     if (!isTestOtp && otpData.otp !== otp) {
       // Increment attempts counter
       otpData.attempts = (otpData.attempts || 0) + 1;
-      
+
       // If too many attempts, delete the OTP
       if (otpData.attempts >= 3) {
         await del(otpKey);
@@ -286,10 +288,10 @@ router.post('/verify-otp', async (req, res) => {
           message: 'Too many incorrect attempts. Please request a new OTP.'
         });
       }
-      
+
       // Update attempts in Redis
       await set(otpKey, otpData, 300);
-      
+
       return res.status(400).json({
         status: 'error',
         message: 'Invalid OTP. Please try again.'
@@ -311,10 +313,10 @@ router.post('/verify-otp', async (req, res) => {
         AND table_name = 'admins' 
         AND column_name = 'phone'
       `);
-      
+
       if (columnCheck[0].count > 0) {
         admins = await executeQuery(
-          'SELECT id, name, email, role, permissions, is_active FROM admins WHERE phone = ?',
+          'SELECT id, name, email, phone, role, department, permissions, is_active FROM admins WHERE phone = ?',
           [mobile]
         );
       }
@@ -373,7 +375,9 @@ router.post('/verify-otp', async (req, res) => {
           id: admin.id,
           name: admin.name,
           email: admin.email,
+          phone: admin.phone,
           role: admin.role,
+          department: admin.department,
           permissions: Array.isArray(admin.permissions) ? admin.permissions : JSON.parse(admin.permissions || '[]')
         },
         token
@@ -393,7 +397,7 @@ router.post('/verify-otp', async (req, res) => {
 router.get('/verify', async (req, res) => {
   try {
     const token = req.headers.authorization?.replace('Bearer ', '');
-    
+
     if (!token) {
       return res.status(401).json({
         status: 'error',
@@ -402,16 +406,16 @@ router.get('/verify', async (req, res) => {
     }
 
     const decoded = verifyToken(token);
-    
+
     // Ensure database is initialized
     await ensureDbInitialized();
-    
+
     // Find admin in MySQL to ensure they still exist and are active
     const admins = await executeQuery(
-      'SELECT id, name, email, role, permissions, is_active FROM admins WHERE id = ?',
+      'SELECT id, name, email, phone, role, department, permissions, is_active FROM admins WHERE id = ?',
       [decoded.id]
     );
-    
+
     if (admins.length === 0 || !admins[0].is_active) {
       return res.status(401).json({
         status: 'error',
@@ -428,7 +432,9 @@ router.get('/verify', async (req, res) => {
           id: admin.id,
           name: admin.name,
           email: admin.email,
+          phone: admin.phone,
           role: admin.role,
+          department: admin.department,
           permissions: Array.isArray(admin.permissions) ? admin.permissions : JSON.parse(admin.permissions || '[]')
         }
       }

@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAdmin } from '../context/AdminContext';
 import { adminApiService } from '../../services/adminApi';
-import { 
-  Search, 
+import {
+  Search,
   Filter,
   MoreVertical,
   Eye,
@@ -54,11 +54,18 @@ export function AdminUsersPage() {
   const [totalUsers, setTotalUsers] = useState(0);
 
   // Update status filter when URL changes
+  // Update status filter when URL changes
   useEffect(() => {
+    const isQA = currentUser?.department === 'QA' && currentUser?.role !== 'superadmin';
+    if (isQA) {
+      setStatusFilter('qa_verification');
+      return;
+    }
+
     const urlStatusParam = searchParams.get('status') || 'all';
     const mappedStatus = urlStatusParam === 'hold' ? 'on_hold' : urlStatusParam;
     setStatusFilter(mappedStatus);
-  }, [searchParams]);
+  }, [searchParams, currentUser]);
 
   // Fetch users data
   const fetchUsers = useCallback(async () => {
@@ -70,7 +77,7 @@ export function AdminUsersPage() {
         sortBy,
         sortOrder
       });
-      
+
       if (response.status === 'success' && response.data) {
         setUsers(response.data.users || []);
         setTotalUsers(response.data.total || 0);
@@ -130,6 +137,8 @@ export function AdminUsersPage() {
         return 'bg-red-100 text-red-800';
       case 'pending':
         return 'bg-yellow-100 text-yellow-800';
+      case 'qa_verification':
+        return 'bg-purple-100 text-purple-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
@@ -143,6 +152,8 @@ export function AdminUsersPage() {
         return <XCircle className="w-4 h-4" />;
       case 'pending':
         return <Clock className="w-4 h-4" />;
+      case 'qa_verification':
+        return <CheckCircle className="w-4 h-4" />;
       default:
         return <Clock className="w-4 h-4" />;
     }
@@ -158,7 +169,7 @@ export function AdminUsersPage() {
           <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
           <p className="text-gray-600">Manage and monitor all registered users</p>
         </div>
-        
+
         <div className="flex items-center gap-4">
           <button
             onClick={() => navigate('/stpl/users/new')}
@@ -183,7 +194,7 @@ export function AdminUsersPage() {
             </div>
           </div>
         </div>
-        
+
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -197,7 +208,7 @@ export function AdminUsersPage() {
             </div>
           </div>
         </div>
-        
+
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -211,7 +222,7 @@ export function AdminUsersPage() {
             </div>
           </div>
         </div>
-        
+
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -243,86 +254,93 @@ export function AdminUsersPage() {
           </div>
 
           {/* Status Filter */}
-          <div className="flex gap-2">
+          {/* Status Filter */}
+          <div className="flex gap-2 flex-wrap">
+            {!(currentUser?.department === 'QA' && currentUser?.role !== 'superadmin') && (
+              <>
+                <button
+                  onClick={() => handleStatusFilter('all')}
+                  className={`px-3 py-1.5 text-sm rounded-full transition-colors ${statusFilter === 'all'
+                      ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => handleStatusFilter('active')}
+                  className={`px-3 py-1.5 text-sm rounded-full transition-colors ${statusFilter === 'active'
+                      ? 'bg-green-100 text-green-700 border border-green-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                >
+                  Active
+                </button>
+                <button
+                  onClick={() => handleStatusFilter('inactive')}
+                  className={`px-3 py-1.5 text-sm rounded-full transition-colors ${statusFilter === 'inactive'
+                      ? 'bg-red-100 text-red-700 border border-red-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                >
+                  Inactive
+                </button>
+                <button
+                  onClick={() => handleStatusFilter('pending')}
+                  className={`px-3 py-1.5 text-sm rounded-full transition-colors ${statusFilter === 'pending'
+                      ? 'bg-yellow-100 text-yellow-700 border border-yellow-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                >
+                  Pending
+                </button>
+                <button
+                  onClick={() => handleStatusFilter('on_hold')}
+                  className={`px-3 py-1.5 text-sm rounded-full transition-colors ${statusFilter === 'on_hold' || statusFilter === 'hold'
+                      ? 'bg-red-100 text-red-700 border border-red-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                >
+                  Hold
+                </button>
+                <button
+                  onClick={() => handleStatusFilter('deleted')}
+                  className={`px-3 py-1.5 text-sm rounded-full transition-colors ${statusFilter === 'deleted'
+                      ? 'bg-gray-800 text-white border border-gray-900'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => handleStatusFilter('registered')}
+                  className={`px-3 py-1.5 text-sm rounded-full transition-colors ${statusFilter === 'registered'
+                      ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                >
+                  Registered
+                </button>
+                <button
+                  onClick={() => handleStatusFilter('approved')}
+                  className={`px-3 py-1.5 text-sm rounded-full transition-colors ${statusFilter === 'approved'
+                      ? 'bg-green-100 text-green-700 border border-green-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                >
+                  Approved
+                </button>
+              </>
+            )}
+
             <button
-              onClick={() => handleStatusFilter('all')}
-              className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                statusFilter === 'all'
-                  ? 'bg-blue-100 text-blue-700 border border-blue-200'
+              onClick={() => handleStatusFilter('qa_verification')}
+              className={`px-3 py-1.5 text-sm rounded-full transition-colors ${statusFilter === 'qa_verification'
+                  ? 'bg-purple-100 text-purple-700 border border-purple-200'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+                }`}
             >
-              All
-            </button>
-            <button
-              onClick={() => handleStatusFilter('active')}
-              className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                statusFilter === 'active'
-                  ? 'bg-green-100 text-green-700 border border-green-200'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Active
-            </button>
-            <button
-              onClick={() => handleStatusFilter('inactive')}
-              className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                statusFilter === 'inactive'
-                  ? 'bg-red-100 text-red-700 border border-red-200'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Inactive
-            </button>
-            <button
-              onClick={() => handleStatusFilter('pending')}
-              className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                statusFilter === 'pending'
-                  ? 'bg-yellow-100 text-yellow-700 border border-yellow-200'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Pending
-            </button>
-            <button
-              onClick={() => handleStatusFilter('on_hold')}
-              className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                statusFilter === 'on_hold' || statusFilter === 'hold'
-                  ? 'bg-red-100 text-red-700 border border-red-200'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Hold
-            </button>
-            <button
-              onClick={() => handleStatusFilter('deleted')}
-              className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                statusFilter === 'deleted'
-                  ? 'bg-gray-800 text-white border border-gray-900'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Delete
-            </button>
-            <button
-              onClick={() => handleStatusFilter('registered')}
-              className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                statusFilter === 'registered'
-                  ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Registered
-            </button>
-            <button
-              onClick={() => handleStatusFilter('approved')}
-              className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                statusFilter === 'approved'
-                  ? 'bg-green-100 text-green-700 border border-green-200'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Approved
+              QA Verification
             </button>
           </div>
         </div>
@@ -422,11 +440,10 @@ export function AdminUsersPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        user.kycCompleted 
-                          ? 'bg-green-100 text-green-800' 
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${user.kycCompleted
+                          ? 'bg-green-100 text-green-800'
                           : 'bg-yellow-100 text-yellow-800'
-                      }`}>
+                        }`}>
                         {user.kycCompleted ? <CheckCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
                         {user.kycCompleted ? 'Completed' : 'Pending'}
                       </span>
@@ -461,7 +478,7 @@ export function AdminUsersPage() {
                           <Edit className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => {/* TODO: Implement delete */}}
+                          onClick={() => {/* TODO: Implement delete */ }}
                           className="text-red-600 hover:text-red-900 p-1"
                           title="Delete User"
                         >
@@ -520,11 +537,10 @@ export function AdminUsersPage() {
                       <button
                         key={page}
                         onClick={() => handlePageChange(page)}
-                        className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
-                          currentPage === page
+                        className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${currentPage === page
                             ? 'z-10 bg-blue-50 border-blue-500 text-blue-600'
                             : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
-                        }`}
+                          }`}
                       >
                         {page}
                       </button>

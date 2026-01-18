@@ -41,38 +41,38 @@ async function getKFSHTML(loanId, baseUrl = 'http://localhost:5000') {
         'x-internal-call': 'true'
       }
     });
-    
+
     if (!kfsDataResponse.data.success || !kfsDataResponse.data.data) {
       throw new Error('Failed to get KFS data');
     }
-    
+
     const kfsData = kfsDataResponse.data.data;
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     const kfsUrl = `${frontendUrl}/stpl/kfs/${loanId}?internal=true`;
-    
+
     console.log(`🌐 Rendering KFS HTML via Puppeteer...`);
     browser = await puppeteer.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
-    
+
     const page = await browser.newPage();
-    await page.goto(kfsUrl, { 
+    await page.goto(kfsUrl, {
       waitUntil: 'networkidle0',
-      timeout: 30000 
+      timeout: 30000
     });
-    
+
     await page.waitForSelector('.kfs-document-content', { timeout: 10000 });
-    
+
     const htmlContent = await page.evaluate(() => {
       const kfsElement = document.querySelector('.kfs-document-content');
       return kfsElement ? kfsElement.outerHTML : null;
     });
-    
+
     if (!htmlContent) {
       throw new Error('KFS content not found on page');
     }
-    
+
     return htmlContent;
   } catch (error) {
     console.error('Error getting KFS HTML:', error);
@@ -100,39 +100,39 @@ async function getLoanAgreementHTML(loanId, baseUrl = 'http://localhost:5000') {
         'x-internal-call': 'true'
       }
     });
-    
+
     if (!kfsDataResponse.data.success || !kfsDataResponse.data.data) {
       throw new Error('Failed to get Loan Agreement data');
     }
-    
+
     const agreementData = kfsDataResponse.data.data;
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     const agreementUrl = `${frontendUrl}/stpl/loan-agreement/${loanId}?internal=true`;
-    
+
     console.log(`🌐 Rendering Loan Agreement HTML via Puppeteer...`);
     browser = await puppeteer.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
-    
+
     const page = await browser.newPage();
-    await page.goto(agreementUrl, { 
+    await page.goto(agreementUrl, {
       waitUntil: 'networkidle0',
-      timeout: 30000 
+      timeout: 30000
     });
-    
+
     await page.waitForSelector('.loan-agreement-content, .agreement-document', { timeout: 10000 });
-    
+
     const htmlContent = await page.evaluate(() => {
-      const agreementElement = document.querySelector('.loan-agreement-content') || 
-                              document.querySelector('.agreement-document');
+      const agreementElement = document.querySelector('.loan-agreement-content') ||
+        document.querySelector('.agreement-document');
       return agreementElement ? agreementElement.outerHTML : null;
     });
-    
+
     if (!htmlContent) {
       throw new Error('Loan Agreement content not found on page');
     }
-    
+
     return htmlContent;
   } catch (error) {
     console.error('Error getting Loan Agreement HTML:', error);
@@ -155,7 +155,7 @@ async function getLoanAgreementHTML(loanId, baseUrl = 'http://localhost:5000') {
 async function sendKFSAndAgreementEmails(loanId) {
   try {
     console.log(`📧 Preparing to send KFS and Loan Agreement emails for loan #${loanId}...`);
-    
+
     // Get loan and user details
     const loans = await executeQuery(`
       SELECT 
@@ -165,41 +165,41 @@ async function sendKFSAndAgreementEmails(loanId) {
       INNER JOIN users u ON la.user_id = u.id
       WHERE la.id = ?
     `, [loanId]);
-    
+
     if (!loans || loans.length === 0) {
       console.warn(`⚠️ Loan ${loanId} not found, skipping email send`);
       return;
     }
-    
+
     const loan = loans[0];
     const recipientEmail = loan.personal_email || loan.official_email || loan.email;
     const recipientName = `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'User';
-    
+
     if (!recipientEmail) {
       console.warn(`⚠️ No email address found for user ${loan.user_id}, skipping email send`);
       return;
     }
-    
+
     const apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:5000';
     const applicationNumber = loan.application_number || `LOAN_${loanId}`;
-    
+
     // Get HTML content
     console.log(`📄 Getting KFS HTML for loan #${loanId}...`);
     const kfsHTML = await getKFSHTML(loanId, apiBaseUrl);
-    
+
     console.log(`📄 Getting Loan Agreement HTML for loan #${loanId}...`);
     const loanAgreementHTML = await getLoanAgreementHTML(loanId, apiBaseUrl);
-    
+
     // Generate PDFs
     const kfsFilename = `KFS_${applicationNumber}.pdf`;
     const agreementFilename = `Loan_Agreement_${applicationNumber}.pdf`;
-    
+
     console.log(`📄 Generating KFS PDF: ${kfsFilename}`);
     const kfsPDF = await pdfService.generateKFSPDF(kfsHTML, kfsFilename);
-    
+
     console.log(`📄 Generating Loan Agreement PDF: ${agreementFilename}`);
     const agreementPDF = await pdfService.generateKFSPDF(loanAgreementHTML, agreementFilename);
-    
+
     // Send KFS email
     try {
       await emailService.sendKFSEmail({
@@ -220,7 +220,7 @@ async function sendKFSAndAgreementEmails(loanId) {
     } catch (kfsEmailError) {
       console.error('❌ Error sending KFS email (non-fatal):', kfsEmailError.message);
     }
-    
+
     // Send Loan Agreement email (using signed agreement email method)
     // Note: The subject will say "Signed Loan Agreement" but it's sent automatically when transaction is updated
     try {
@@ -241,7 +241,7 @@ async function sendKFSAndAgreementEmails(loanId) {
     } catch (agreementEmailError) {
       console.error('❌ Error sending Loan Agreement email (non-fatal):', agreementEmailError.message);
     }
-    
+
     console.log(`✅ KFS and Loan Agreement emails sent successfully for loan #${loanId}`);
   } catch (error) {
     console.error(`❌ Error sending KFS and Loan Agreement emails for loan #${loanId}:`, error);
@@ -326,7 +326,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     // Get latest loan application status for profile status display
     const latestApplication = applications && applications.length > 0 ? applications[0] : null;
     const profileStatus = latestApplication ? latestApplication.status : (user.status || 'active');
-    
+
     // Get assigned account manager if status is account_manager
     let assignedManager = null;
     if (profileStatus === 'account_manager' && latestApplication?.approved_by) {
@@ -338,7 +338,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
 
     // Calculate pocket credit score (default 640, increase by 6 if loan cleared on/before due date)
     let pocketCreditScore = user.credit_score || 640;
-    
+
     // Check if user has any cleared loans that were cleared on or before due date
     if (applications && applications.length > 0) {
       const clearedLoans = applications.filter(app => app.status === 'cleared');
@@ -351,7 +351,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           const tenureDays = loan.tenure_months ? loan.tenure_months * 30 : 30;
           dueDate.setDate(dueDate.getDate() + tenureDays);
           const clearedDate = loan.updated_at ? new Date(loan.updated_at) : new Date();
-          
+
           if (clearedDate <= dueDate) {
             pocketCreditScore += 6;
           }
@@ -457,7 +457,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
             bankStatement.txn_id = txnId;
           }
         }
-        
+
         // Store all bank statement records
         bankStatementRecords = bankStmtResults.map(record => ({
           id: record.id,
@@ -573,13 +573,13 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         ORDER BY source, created_at DESC
       `;
       const userInfoResults = await executeQuery(userInfoQuery, [userId]);
-      
+
       userInfoRecords = userInfoResults.map(record => {
         let additionalDetails = {};
         if (record.additional_details) {
           try {
-            additionalDetails = typeof record.additional_details === 'string' 
-              ? JSON.parse(record.additional_details) 
+            additionalDetails = typeof record.additional_details === 'string'
+              ? JSON.parse(record.additional_details)
               : record.additional_details;
           } catch (e) {
             console.error('Error parsing additional_details:', e);
@@ -612,7 +612,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         LIMIT 50
       `;
       const loginHistoryResults = await executeQuery(loginHistoryQuery, [userId]);
-      
+
       // Transform login history to match frontend expectations for both formats
       loginHistory = (loginHistoryResults || []).map(login => {
         // Format device string
@@ -621,14 +621,14 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         if (login.browser_version) deviceParts.push(login.browser_version);
         if (login.os_name) deviceParts.push(`on ${login.os_name}`);
         const deviceString = deviceParts.length > 0 ? deviceParts.join(' ') : login.device_type || 'Unknown Device';
-        
+
         // Format location string
         const locationParts = [];
         if (login.location_city) locationParts.push(login.location_city);
         if (login.location_region) locationParts.push(login.location_region);
         if (login.location_country) locationParts.push(login.location_country);
         const locationString = locationParts.length > 0 ? locationParts.join(', ') : 'Unknown Location';
-        
+
         return {
           // Original database fields (for detailed table view in Personal tab)
           id: login.id,
@@ -708,7 +708,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         WHERE pan_number = ? AND id != ?
         ORDER BY created_at DESC
       `, [user.pan_number, userId]);
-      
+
       if (panDuplicates && panDuplicates.length > 0) {
         duplicateChecks.panExists = true;
         duplicateChecks.panDuplicateUsers = panDuplicates.map(u => ({
@@ -733,7 +733,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
             AND bd.user_id != ?
           ORDER BY bd.created_at DESC
         `, [...accountNumbers, userId]);
-        
+
         if (bankDuplicates && bankDuplicates.length > 0) {
           duplicateChecks.bankAccountExists = true;
           duplicateChecks.bankAccountDuplicateUsers = bankDuplicates.map(u => ({
@@ -756,7 +756,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         WHERE phone = ? AND id != ?
         ORDER BY created_at DESC
       `, [user.phone, userId]);
-      
+
       if (mobileDuplicates && mobileDuplicates.length > 0) {
         duplicateChecks.mobileExists = true;
         duplicateChecks.mobileDuplicateUsers = mobileDuplicates.map(u => ({
@@ -779,7 +779,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         const placeholders = referencePhones.map(() => '?').join(',');
         // Need 4 copies: one for each CASE and two for WHERE clause
         const allParams = [...referencePhones, ...referencePhones, ...referencePhones, ...referencePhones, userId];
-        
+
         const referencePhoneDuplicates = await executeQuery(`
           SELECT DISTINCT u.id, u.first_name, u.last_name, u.phone, u.email, u.alternate_mobile, u.created_at,
                  COALESCE(
@@ -793,7 +793,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
             AND u.id != ?
           ORDER BY u.created_at DESC
         `, allParams);
-        
+
         if (referencePhoneDuplicates && referencePhoneDuplicates.length > 0) {
           duplicateChecks.referencePhoneExists = true;
           duplicateChecks.referencePhoneDuplicateUsers = referencePhoneDuplicates.map(u => ({
@@ -856,7 +856,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           AND TABLE_NAME = 'user_follow_ups' 
           AND COLUMN_NAME = 'admin_id'
         `);
-        
+
         if (tableCheck.length > 0 && tableCheck[0].COLUMN_TYPE !== 'varchar(36)') {
           // Drop foreign key if exists
           try {
@@ -876,14 +876,15 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       } catch (alterError) {
         // Table might not exist yet, continue to create it
       }
-      
+
       // Create table if it doesn't exist
       await executeQuery(`
         CREATE TABLE IF NOT EXISTS user_follow_ups (
           id INT PRIMARY KEY AUTO_INCREMENT,
           user_id INT NOT NULL,
+          loan_application_id INT DEFAULT NULL,
           follow_up_id VARCHAR(50) UNIQUE,
-          type ENUM('call', 'email', 'sms', 'meeting', 'other') NOT NULL,
+          type ENUM('call', 'email', 'sms', 'meeting', 'other', 'account_manager') NOT NULL,
           priority ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium',
           subject VARCHAR(200),
           description TEXT,
@@ -905,7 +906,23 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           INDEX idx_follow_up_id (follow_up_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `);
-      
+
+      // Ensure loan_application_id column exists
+      try {
+        const colCheck = await executeQuery(`SHOW COLUMNS FROM user_follow_ups LIKE 'loan_application_id'`);
+        if (colCheck.length === 0) {
+          await executeQuery(`ALTER TABLE user_follow_ups ADD COLUMN loan_application_id INT DEFAULT NULL AFTER user_id`);
+        }
+      } catch (e) { }
+
+      // Ensure 'account_manager' is in ENUM
+      try {
+        await executeQuery(`
+          ALTER TABLE user_follow_ups 
+          MODIFY type ENUM('call', 'email', 'sms', 'meeting', 'other', 'account_manager') NOT NULL
+        `);
+      } catch (e) { }
+
       // Fetch follow-ups
       followUps = await executeQuery(`
         SELECT 
@@ -954,7 +971,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       creditScore: pocketCreditScore, // Pocket credit score (calculated)
       experianScore: user.experian_score || null, // Experian score from API
       work_experience_range: user.work_experience_range || null, // Work experience range from users table
-      limitVsSalaryPercent: (user.monthly_net_income && user.loan_limit) 
+      limitVsSalaryPercent: (user.monthly_net_income && user.loan_limit)
         ? ((parseFloat(user.loan_limit) / parseFloat(user.monthly_net_income)) * 100).toFixed(1)
         : null,
       profileCompletionStep: user.profile_completion_step || 1,
@@ -984,15 +1001,15 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         company: (employment && employment[0])?.company_name || 'N/A',
         industry: (employment && employment[0])?.industry || 'N/A',
         department: (employment && employment[0])?.department || 'N/A',
-        monthlyIncome: (employment && employment[0]?.monthly_salary_old && parseFloat(employment[0].monthly_salary_old) > 0) 
-          ? parseFloat(employment[0].monthly_salary_old) 
+        monthlyIncome: (employment && employment[0]?.monthly_salary_old && parseFloat(employment[0].monthly_salary_old) > 0)
+          ? parseFloat(employment[0].monthly_salary_old)
           : (parseFloat(user.monthly_net_income) || monthlyIncomeValue || 0),
-        workExperience: (employment && employment[0]?.work_experience_years !== null && employment[0]?.work_experience_years !== undefined && employment[0]?.work_experience_years !== '') 
-          ? employment[0].work_experience_years 
+        workExperience: (employment && employment[0]?.work_experience_years !== null && employment[0]?.work_experience_years !== undefined && employment[0]?.work_experience_years !== '')
+          ? employment[0].work_experience_years
           : (employment && employment[0]?.work_experience_years === 0 ? 0 : null),
         designation: (employment && employment[0])?.designation || 'N/A',
-        totalExperience: (employment && employment[0]?.work_experience_years !== null && employment[0]?.work_experience_years !== undefined && employment[0]?.work_experience_years !== '') 
-          ? employment[0].work_experience_years 
+        totalExperience: (employment && employment[0]?.work_experience_years !== null && employment[0]?.work_experience_years !== undefined && employment[0]?.work_experience_years !== '')
+          ? employment[0].work_experience_years
           : (employment && employment[0]?.work_experience_years === 0 ? 0 : null)
       },
       // All addresses (not just primary)
@@ -1029,13 +1046,13 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         };
 
         // Calculate interest_rate from interest_percent_per_day for display
-        const interestRate = app.interest_percent_per_day 
-          ? (app.interest_percent_per_day * 365 * 100).toFixed(2) 
+        const interestRate = app.interest_percent_per_day
+          ? (app.interest_percent_per_day * 365 * 100).toFixed(2)
           : null;
-        
+
         const emi = calculateEMI(
-          app.loan_amount, 
-          app.interest_percent_per_day || 0.001, 
+          app.loan_amount,
+          app.interest_percent_per_day || 0.001,
           app.tenure_months
         );
         const processingFee = Math.round(app.loan_amount * 0.025); // 2.5% processing fee
@@ -1225,7 +1242,7 @@ router.put('/:userId/loan-limit', authenticateAdmin, async (req, res) => {
     try {
       const { calculateCreditLimitFor2EMI, storePendingCreditLimit } = require('../utils/creditLimitCalculator');
       const creditLimitData = await calculateCreditLimitFor2EMI(userId, null, parseFloat(loanLimit));
-      
+
       // Only store pending limit if it's different from current limit
       if (creditLimitData.newLimit > parseFloat(loanLimit)) {
         await storePendingCreditLimit(userId, creditLimitData.newLimit, creditLimitData);
@@ -1506,6 +1523,83 @@ router.put('/:userId/addresses/:addressId', authenticateAdmin, async (req, res) 
   }
 });
 
+// Create new follow-up
+router.post('/:userId/follow-ups', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+    const adminId = req.admin.id;
+    const {
+      type,
+      subject,
+      description,
+      response,
+      loan_application_id,
+      scheduled_date,
+      notes,
+      status,
+      assigned_to,
+      priority
+    } = req.body;
+
+    if (!type) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Type is required'
+      });
+    }
+
+    // Generate Follow Up ID (FU + Timestamp + Random)
+    const followUpId = `FU${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+    const query = `
+      INSERT INTO user_follow_ups (
+        user_id, loan_application_id, follow_up_id, type, priority, 
+        subject, description, response, assigned_to, admin_id, 
+        status, scheduled_date, notes, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+    `;
+
+    const values = [
+      userId,
+      loan_application_id || null,
+      followUpId,
+      type,
+      priority || 'medium',
+      subject || 'Follow Up',
+      description || null,
+      response || null,
+      assigned_to || null,
+      adminId,
+      status || 'pending',
+      scheduled_date || null,
+      notes || null
+    ];
+
+    const result = await executeQuery(query, values);
+
+    res.json({
+      status: 'success',
+      message: 'Follow-up created successfully',
+      data: {
+        id: result.insertId,
+        follow_up_id: followUpId,
+        user_id: userId,
+        type,
+        subject,
+        created_at: new Date()
+      }
+    });
+
+  } catch (error) {
+    console.error('Create follow-up error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to create follow-up'
+    });
+  }
+});
+
 // Update user employment information
 router.put('/:userId/employment-info', authenticateAdmin, async (req, res) => {
   try {
@@ -1589,7 +1683,7 @@ router.put('/:userId/employment-info', authenticateAdmin, async (req, res) => {
     // Also update users table with company_name and monthly_net_income
     const userUpdates = [];
     const userValues = [];
-    
+
     if (finalCompanyName !== undefined) {
       userUpdates.push('company_name = ?');
       userValues.push(finalCompanyName);
@@ -1852,7 +1946,7 @@ router.put('/:userId/references/:referenceId', authenticateAdmin, async (req, re
         AND TABLE_NAME = 'references' 
         AND COLUMN_NAME = 'admin_notes'
       `);
-      
+
       if (!columnCheck || columnCheck.length === 0) {
         await executeQuery(`
           ALTER TABLE \`references\` 
@@ -2007,7 +2101,7 @@ router.post('/:userId/documents/upload', authenticateAdmin, upload.single('docum
 
     // Get loan_application_id - use provided one or get the most recent loan application
     let loanApplicationIdToUse = loanApplicationId ? parseInt(loanApplicationId) : null;
-    
+
     if (!loanApplicationIdToUse) {
       // Get the most recent loan application for this user
       const recentLoanApp = await executeQuery(`
@@ -2016,7 +2110,7 @@ router.post('/:userId/documents/upload', authenticateAdmin, upload.single('docum
         ORDER BY created_at DESC 
         LIMIT 1
       `, [userId]);
-      
+
       if (recentLoanApp && recentLoanApp.length > 0) {
         loanApplicationIdToUse = recentLoanApp[0].id;
       } else {
@@ -2032,7 +2126,7 @@ router.post('/:userId/documents/upload', authenticateAdmin, upload.single('docum
       SELECT id FROM loan_applications 
       WHERE id = ? AND user_id = ?
     `, [loanApplicationIdToUse, userId]);
-    
+
     if (!loanAppCheck || loanAppCheck.length === 0) {
       return res.status(400).json({
         status: 'error',
@@ -2098,14 +2192,14 @@ router.post('/:userId/documents/upload', authenticateAdmin, upload.single('docum
       documentType,
       documentTitle
     });
-    
+
     res.json({
       status: 'success',
       message: 'Document uploaded successfully',
-      data: { 
+      data: {
         id: insertResult.insertId,
-        userId, 
-        documentType, 
+        userId,
+        documentType,
         documentTitle,
         fileName: req.file.originalname,
         fileSize: req.file.size,
@@ -2192,7 +2286,7 @@ router.put('/:userId/transactions/:transactionId', authenticateAdmin, async (req
     );
 
     console.log('✅ Transaction reference number updated successfully');
-    
+
     // Automatically send KFS and Loan Agreement emails if loan_application_id exists
     if (loanApplicationId) {
       console.log(`📧 Transaction updated for loan application #${loanApplicationId}, sending KFS and Loan Agreement emails...`);
@@ -2202,7 +2296,7 @@ router.put('/:userId/transactions/:transactionId', authenticateAdmin, async (req
         // Don't fail the transaction update if email sending fails
       });
     }
-    
+
     res.json({
       status: 'success',
       message: 'Transaction reference number updated successfully',
@@ -2270,7 +2364,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
         'SELECT id, status FROM loan_applications WHERE id = ?',
         [loan_application_id]
       );
-      
+
       if (loanCheck.length > 0) {
         const loanStatus = loanCheck[0].status;
         if (loanStatus === 'account_manager' || loanStatus === 'cleared') {
@@ -2337,10 +2431,10 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
           // Check if already processed
           // Check if loan needs processing or re-processing
-          const needsProcessing = !loan.processed_at || 
-                                  !loan.processed_amount || 
-                                  loan.processed_amount <= 0;
-          
+          const needsProcessing = !loan.processed_at ||
+            !loan.processed_amount ||
+            loan.processed_amount <= 0;
+
           if (loan.processed_at && !needsProcessing) {
             console.log(`⚠️ Loan #${loanIdInt} already processed at ${loan.processed_at} with valid values`);
           } else {
@@ -2364,7 +2458,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             const gst = (calculatedValues?.totals?.disbursalFeeGST || 0) + (calculatedValues?.totals?.repayableFeeGST || 0);
             const interest = calculatedValues?.interest?.amount || loan.total_interest || 0;
             const penalty = 0; // No penalty at processing time
-            
+
             // Validate processedAmount - it should never be null or 0 for account_manager loans
             if (!processedAmount || processedAmount <= 0) {
               console.error(`❌ ERROR: processedAmount is invalid (${processedAmount}) for loan #${loanIdInt}. Cannot create EMI schedule.`);
@@ -2373,7 +2467,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 message: 'Cannot move loan to account_manager status: Invalid loan amount. Please ensure the loan has a valid disbursal amount or loan amount.'
               });
             }
-            
+
             // Calculate processed_due_date - single date for single payment, JSON array for multi-EMI
             let processedDueDate = null;
             let emiScheduleForUpdate = null; // Initialize emi_schedule for update
@@ -2387,39 +2481,39 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
               } catch (e) {
                 console.error('Error parsing plan_snapshot:', e);
               }
-              
+
               const emiCount = planSnapshot.emi_count || null;
               const isMultiEmi = emiCount && emiCount > 1;
-              
+
               if (isMultiEmi) {
                 // Multi-EMI: Generate all EMI dates and store as JSON array
                 const { getNextSalaryDate, getSalaryDateForMonth } = require('../utils/loanCalculations');
                 const { executeQuery: execQuery } = require('../config/database');
-                
+
                 // Get user salary date
                 const userResult = await execQuery('SELECT salary_date FROM users WHERE id = ?', [loan.user_id]);
                 const userSalaryDate = userResult[0]?.salary_date || null;
-                
+
                 // Calculate base date (disbursement date or today)
                 const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
                 baseDate.setHours(0, 0, 0, 0);
-                
+
                 // Generate all EMI dates
                 const allEmiDates = [];
-                
+
                 if (planSnapshot.emi_frequency === 'monthly' && planSnapshot.calculate_by_salary_date && userSalaryDate) {
                   // Salary-based monthly EMIs
                   const salaryDate = parseInt(userSalaryDate);
                   if (salaryDate >= 1 && salaryDate <= 31) {
                     let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
-                    
+
                     // Check if duration is less than minimum days
                     const minDuration = planSnapshot.repayment_days || 15;
                     const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
                     if (daysToNextSalary < minDuration) {
                       nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
                     }
-                    
+
                     // Ensure nextSalaryDate matches the salary date exactly
                     const firstEmiYear = nextSalaryDate.getFullYear();
                     const firstEmiMonth = nextSalaryDate.getMonth();
@@ -2431,31 +2525,31 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                       correctedFirstEmiDate.setHours(0, 0, 0, 0);
                     }
                     nextSalaryDate = correctedFirstEmiDate;
-                    
+
                     // Generate all EMI dates
                     for (let i = 0; i < emiCount; i++) {
                       const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
                       allEmiDates.push(formatDateLocal(emiDate)); // Store as YYYY-MM-DD without timezone conversion
-                  }
-                } else {
+                    }
+                  } else {
                     console.warn(`⚠️ Invalid salary date (${userSalaryDate}) for loan #${loanIdInt}, will fall back to non-salary calculation`);
                   }
                 }
-                
+
                 // If salary-based calculation didn't generate dates, use non-salary method
                 if (allEmiDates.length === 0 && emiCount > 1) {
-                  const firstDueDate = calculatedValues?.interest?.repayment_date 
+                  const firstDueDate = calculatedValues?.interest?.repayment_date
                     ? new Date(calculatedValues.interest.repayment_date)
                     : (() => {
-                        const dueDate = new Date(baseDate);
-                        dueDate.setDate(dueDate.getDate() + (planSnapshot.repayment_days || 15));
-                        dueDate.setHours(0, 0, 0, 0);
-                        return dueDate;
-                      })();
-                  
+                      const dueDate = new Date(baseDate);
+                      dueDate.setDate(dueDate.getDate() + (planSnapshot.repayment_days || 15));
+                      dueDate.setHours(0, 0, 0, 0);
+                      return dueDate;
+                    })();
+
                   const daysPerEmi = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
                   const daysBetween = daysPerEmi[planSnapshot.emi_frequency] || 30;
-                  
+
                   for (let i = 0; i < emiCount; i++) {
                     const emiDate = new Date(firstDueDate);
                     if (planSnapshot.emi_frequency === 'monthly') {
@@ -2467,7 +2561,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     allEmiDates.push(formatDateLocal(emiDate));
                   }
                 }
-                
+
                 // Validate EMI dates were generated
                 if (!allEmiDates || allEmiDates.length !== emiCount) {
                   console.error(`❌ ERROR: Failed to generate EMI dates for loan #${loanIdInt}. Expected ${emiCount} dates but got ${allEmiDates?.length || 0}`);
@@ -2476,14 +2570,14 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     message: `Cannot create EMI schedule: Failed to generate ${emiCount} EMI dates. Please check loan plan configuration.`
                   });
                 }
-                
+
                 // Store as JSON array for multi-EMI
                 processedDueDate = JSON.stringify(allEmiDates);
-                
+
                 // Create emi_schedule with dates, amounts, and status using REDUCING BALANCE method
                 const { formatDateToString, calculateDaysBetween, getTodayString, toDecimal2 } = require('../utils/loanCalculations');
                 const emiSchedule = [];
-                
+
                 // Validate processedAmount is valid before calculation
                 if (!processedAmount || processedAmount <= 0 || isNaN(processedAmount)) {
                   console.error(`❌ ERROR: Invalid processedAmount (${processedAmount}) for loan #${loanIdInt} EMI calculation`);
@@ -2492,35 +2586,35 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     message: 'Cannot create EMI schedule: Invalid processed amount. Please ensure the loan has a valid disbursal amount.'
                   });
                 }
-                
+
                 const principalPerEmi = toDecimal2(Math.floor(processedAmount / emiCount * 100) / 100);
                 const remainder = toDecimal2(processedAmount - (principalPerEmi * emiCount));
-                
+
                 // Calculate per-EMI fees (post service fee and GST are already total amounts)
                 // IMPORTANT: postServiceFee and repayableFeeGST are TOTAL amounts, need to divide by emiCount for per-EMI
                 // NOTE: Only use repayableFeeGST for EMI calculations, NOT disbursalFeeGST (which is deducted upfront)
                 const totalRepayableFeeGST = calculatedValues?.totals?.repayableFeeGST || 0;
                 const postServiceFeePerEmi = toDecimal2((postServiceFee || 0) / emiCount);
                 const postServiceFeeGSTPerEmi = toDecimal2(totalRepayableFeeGST / emiCount);
-                
+
                 // Get interest rate per day from loan or plan snapshot
                 const interestRatePerDay = parseFloat(loan.interest_percent_per_day || planSnapshot.interest_percent_per_day || 0.001);
-                
+
                 // Log EMI calculation inputs for debugging
-                
+
                 // Calculate base date for interest calculation (processed_at takes priority over disbursed_at)
                 // Reuse existing baseDate variable but update it if processed_at exists
                 const interestBaseDate = loan.processed_at ? new Date(loan.processed_at) : baseDate;
                 interestBaseDate.setHours(0, 0, 0, 0);
                 const baseDateStr = formatDateToString(interestBaseDate) || getTodayString();
-                
+
                 // Track outstanding principal for reducing balance calculation
                 let outstandingPrincipal = processedAmount;
-                
+
                 // Calculate EMI amounts using reducing balance method
                 for (let i = 0; i < emiCount; i++) {
                   const emiDateStr = allEmiDates[i];
-                  
+
                   // Calculate days for this period
                   let previousDateStr;
                   if (i === 0) {
@@ -2534,24 +2628,24 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     prevDueDate.setDate(prevDueDate.getDate() + 1); // Add 1 day (inclusive counting)
                     previousDateStr = formatDateToString(prevDueDate);
                   }
-                  
+
                   // Calculate days between dates (inclusive)
                   const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStr);
-                  
+
                   // Calculate principal for this EMI (last EMI gets remainder)
                   const principalForThisEmi = i === emiCount - 1
                     ? toDecimal2(principalPerEmi + remainder)
                     : principalPerEmi;
-                  
+
                   // Calculate interest for this period on reducing balance
                   const interestForPeriod = toDecimal2(outstandingPrincipal * interestRatePerDay * daysForPeriod);
-                  
+
                   // Calculate EMI amount: principal + interest + post service fee + GST
                   const emiAmount = toDecimal2(principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi);
-                  
+
                   // Reduce outstanding principal for next EMI
                   outstandingPrincipal = toDecimal2(outstandingPrincipal - principalForThisEmi);
-                  
+
                   emiSchedule.push({
                     emi_number: i + 1,
                     instalment_no: i + 1,
@@ -2559,26 +2653,26 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     emi_amount: emiAmount,
                     status: 'pending'
                   });
-                  
+
                 }
-                
+
                 // Store emi_schedule to be updated
                 emiScheduleForUpdate = JSON.stringify(emiSchedule);
               } else {
                 // Single payment: Calculate from plan snapshot and processed_at
                 const { getNextSalaryDate, getSalaryDateForMonth, formatDateToString, calculateDaysBetween, parseDateToString } = require('../utils/loanCalculations');
-                
+
                 // Get user salary date
                 const userResult = await executeQuery('SELECT salary_date FROM users WHERE id = ?', [loan.user_id]);
                 const userSalaryDate = userResult[0]?.salary_date || null;
-                
+
                 // Calculate base date (use processed_at if available, otherwise disbursed_at or today)
-                const baseDate = loan.processed_at 
-                  ? new Date(loan.processed_at) 
+                const baseDate = loan.processed_at
+                  ? new Date(loan.processed_at)
                   : (loan.disbursed_at ? new Date(loan.disbursed_at) : new Date());
                 baseDate.setHours(0, 0, 0, 0);
                 const baseDateStr = formatDateToString(baseDate);
-                
+
                 // Try to get from calculatedValues first
                 if (calculatedValues?.interest?.repayment_date) {
                   processedDueDate = formatDateLocal(calculatedValues.interest.repayment_date);
@@ -2587,14 +2681,14 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                   // Calculate from plan snapshot
                   const usesSalaryDate = planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true;
                   const salaryDate = userSalaryDate ? parseInt(userSalaryDate) : null;
-                  
+
                   if (usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
                     // Salary-date-based calculation
                     const nextSalaryDate = getNextSalaryDate(baseDateStr, salaryDate);
                     const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 15;
                     const nextSalaryDateStr = formatDateToString(nextSalaryDate);
                     const daysToSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
-                    
+
                     if (daysToSalary < minDuration) {
                       // Extend to next month's salary date
                       processedDueDate = formatDateToString(getSalaryDateForMonth(nextSalaryDateStr, salaryDate, 1));
@@ -2612,7 +2706,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     console.log(`📅 Single payment loan ${loanId}: Due date = ${processedDueDate} (fixed days: ${repaymentDays}, base: ${baseDateStr})`);
                   }
                 }
-                
+
                 // Create emi_schedule for single payment loan
                 // NOTE: Only use repayableFeeGST for repayment amount, NOT disbursalFeeGST (which is deducted upfront)
                 const repayableFeeGST = calculatedValues?.totals?.repayableFeeGST || 0;
@@ -2624,13 +2718,13 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                   emi_amount: totalAmount,
                   status: 'pending'
                 }];
-                
+
                 emiScheduleForUpdate = JSON.stringify(emiScheduleForSingle);
               }
             } catch (dueDateError) {
               console.error('Error calculating processed_due_date:', dueDateError);
               // Fallback to single date
-              processedDueDate = calculatedValues?.interest?.repayment_date 
+              processedDueDate = calculatedValues?.interest?.repayment_date
                 ? formatDateLocal(calculatedValues.interest.repayment_date)
                 : null;
             }
@@ -2638,12 +2732,12 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             // 4. Generate and upload KFS and Loan Agreement PDFs
             let kfsPdfUrl = null;
             let loanAgreementPdfUrl = null;
-            
+
             try {
               console.log(`📄 Generating PDFs for loan #${loanIdInt}...`);
               const { generateAndUploadLoanPDFs } = require('../utils/generateLoanPDFs');
               const pdfResult = await generateAndUploadLoanPDFs(loanIdInt, loan.user_id);
-              
+
               if (pdfResult.success) {
                 kfsPdfUrl = pdfResult.kfs.s3Key;
                 loanAgreementPdfUrl = pdfResult.agreement.s3Key;
@@ -2656,7 +2750,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
             // 5. Update loan status and save calculated values
             console.log(`Attempting to update loan status to account_manager with calculated values...`);
-            
+
             // Build UPDATE query with emi_schedule if available
             let updateQueryParts = [
               `status = 'account_manager'`,
@@ -2671,7 +2765,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
               `processed_penalty = ?`,
               `processed_due_date = ?`
             ];
-            
+
             let updateParams = [
               processedAmount,
               exhaustedPeriodDays,
@@ -2682,16 +2776,16 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
               penalty,
               processedDueDate
             ];
-            
+
             // Add emi_schedule if it was created
             if (emiScheduleForUpdate) {
               updateQueryParts.push(`emi_schedule = ?`);
               updateParams.push(emiScheduleForUpdate);
             }
-            
+
             updateQueryParts.push(`kfs_pdf_url = ?`, `loan_agreement_pdf_url = ?`, `updated_at = NOW()`);
             updateParams.push(kfsPdfUrl, loanAgreementPdfUrl, loanIdInt);
-            
+
             const updateQuery = `UPDATE loan_applications SET ${updateQueryParts.join(', ')} WHERE id = ?`;
             const updateResult = await executeQuery(updateQuery, updateParams);
 
@@ -2705,7 +2799,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 `SELECT id FROM partner_leads WHERE loan_application_id = ? LIMIT 1`,
                 [loanIdInt]
               );
-              
+
               if (partnerLeads && partnerLeads.length > 0) {
                 const loanData = await executeQuery(
                   `SELECT loan_amount, disbursal_amount FROM loan_applications WHERE id = ?`,
@@ -2742,9 +2836,9 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
     if (txType === 'full_payment' && loan_application_id) {
       const loanIdInt = parseInt(loan_application_id);
       const userIdInt = parseInt(userId);
-      
+
       console.log(`💳 Processing full_payment transaction for loan #${loanIdInt}, user #${userIdInt}`);
-      
+
       // Verify loan exists and get loan data
       const loans = await executeQuery(
         'SELECT id, user_id, status FROM loan_applications WHERE id = ?',
@@ -2756,7 +2850,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
         // Check ownership
         if (loan.user_id == userIdInt || loan.user_id == userId) {
           console.log(`✅ Loan ownership confirmed. Current status: ${loan.status}`);
-          
+
           // Update loan status to cleared
           await executeQuery(`
             UPDATE loan_applications 
@@ -2767,12 +2861,12 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
           `, [loanIdInt]);
 
           console.log(`✅ Loan #${loanIdInt} marked as cleared (full payment received)`);
-          
+
           // Send NOC email to user
           try {
             const emailService = require('../services/emailService');
             const pdfService = require('../services/pdfService');
-            
+
             // Get loan details for NOC
             const loanDetails = await executeQuery(`
               SELECT 
@@ -2784,12 +2878,12 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
               INNER JOIN users u ON la.user_id = u.id
               WHERE la.id = ?
             `, [loanIdInt]);
-            
+
             if (loanDetails && loanDetails.length > 0) {
               const loanDetail = loanDetails[0];
               const recipientEmail = loanDetail.personal_email || loanDetail.official_email || loanDetail.email;
               const recipientName = `${loanDetail.first_name || ''} ${loanDetail.last_name || ''}`.trim() || 'User';
-              
+
               if (recipientEmail) {
                 // Generate NOC HTML (same logic as payment.js)
                 const formatDate = (dateString) => {
@@ -2822,14 +2916,14 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     return dateString;
                   }
                 };
-                
+
                 const borrowerName = recipientName;
                 const applicationNumber = loanDetail.application_number || loanIdInt;
-                const shortLoanId = applicationNumber && applicationNumber !== 'N/A' 
+                const shortLoanId = applicationNumber && applicationNumber !== 'N/A'
                   ? `PLL${String(applicationNumber).slice(-4)}`
                   : `PLL${String(loanIdInt).padStart(4, '0').slice(-4)}`;
                 const todayDate = formatDate(new Date().toISOString());
-                
+
                 const htmlContent = `
                   <div style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; line-height: 1.6; background-color: white;">
                     <div style="padding: 32px;">
@@ -2871,7 +2965,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     </div>
                   </div>
                 `;
-                
+
                 // Generate PDF
                 const filename = `No_Dues_Certificate_${applicationNumber}.pdf`;
                 const pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
@@ -2879,7 +2973,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 if (!Buffer.isBuffer(pdfBuffer) && pdfBuffer instanceof Uint8Array) {
                   pdfBuffer = Buffer.from(pdfBuffer);
                 }
-                
+
                 // Send email
                 await emailService.sendNOCEmail({
                   loanId: loanIdInt,
@@ -2893,7 +2987,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                   pdfFilename: filename,
                   sentBy: null
                 });
-                
+
                 console.log(`✅ NOC email sent successfully to ${recipientEmail} for loan #${loanIdInt}`);
               }
             }
@@ -2901,7 +2995,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             console.error('❌ Error sending NOC email (non-fatal):', nocEmailError);
             // Don't fail - email failure shouldn't block loan clearance
           }
-          
+
           // Check if this is a premium loan (₹1,50,000) and mark user in cooling period
           try {
             const { checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
@@ -2910,7 +3004,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             console.error('❌ Error checking cooling period (non-fatal):', coolingPeriodError);
             // Don't fail - cooling period check failure shouldn't block loan clearance
           }
-          
+
           loanStatusUpdated = true;
           newStatus = 'cleared';
         } else {
@@ -2926,9 +3020,9 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
     res.json({
       status: 'success',
       message: loanStatusUpdated
-        ? (newStatus === 'cleared' 
-            ? 'Transaction added and loan marked as Cleared (fully paid)' 
-            : 'Transaction added and loan status updated to Account Manager')
+        ? (newStatus === 'cleared'
+          ? 'Transaction added and loan marked as Cleared (fully paid)'
+          : 'Transaction added and loan status updated to Account Manager')
         : 'Transaction added successfully',
       data: {
         transaction_id: transactionId,
@@ -3047,17 +3141,17 @@ router.post('/:userId/follow-ups', authenticateAdmin, async (req, res) => {
     await initializeDatabase();
     const { userId } = req.params;
     const adminId = req.user?.id || req.user?.adminId || null;
-    
-    const { 
-      type, 
-      priority = 'medium', 
-      subject, 
-      description, 
+
+    const {
+      type,
+      priority = 'medium',
+      subject,
+      description,
       response,
-      scheduledDate, 
+      scheduledDate,
       dueDate,
-      notes, 
-      status = 'pending' 
+      notes,
+      status = 'pending'
     } = req.body;
 
     // Validate required fields
@@ -3077,7 +3171,7 @@ router.post('/:userId/follow-ups', authenticateAdmin, async (req, res) => {
         AND TABLE_NAME = 'user_follow_ups' 
         AND COLUMN_NAME = 'admin_id'
       `);
-      
+
       if (tableCheck.length > 0 && tableCheck[0].COLUMN_TYPE !== 'varchar(36)') {
         // Drop foreign key if exists
         try {
@@ -3274,7 +3368,7 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
     }
 
     const kycRecord = kycRecords[0];
-    
+
     // Parse verification_data if it's a JSON string
     let verificationData;
     if (typeof kycRecord.verification_data === 'string') {
@@ -3287,11 +3381,11 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
     } else {
       verificationData = kycRecord.verification_data || {};
     }
-    
+
     // Get transactionId from various possible locations
-    const transactionId = verificationData.transactionId || 
-                          verificationData.transaction_id || 
-                          (verificationData.verification_data && verificationData.verification_data.transactionId);
+    const transactionId = verificationData.transactionId ||
+      verificationData.transaction_id ||
+      (verificationData.verification_data && verificationData.verification_data.transactionId);
 
     if (!transactionId) {
       return res.status(400).json({
@@ -3317,7 +3411,7 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
 
     // Import axios and processAndUploadDocs
     const axios = require('axios');
-    
+
     // Import processAndUploadDocs function
     let processAndUploadDocs;
     try {
@@ -3340,11 +3434,11 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
     // Call Digilocker API to fetch actual KYC data
     // Use get-digilocker-details endpoint (same as get-details route)
     const useProduction = process.env.DIGILOCKER_USE_PRODUCTION === 'true';
-    const apiUrl = process.env.DIGILOCKER_GET_DETAILS_URL || 
+    const apiUrl = process.env.DIGILOCKER_GET_DETAILS_URL ||
       (useProduction
         ? 'https://api.digitap.ai/ent/v1/kyc/get-digilocker-details'
         : 'https://apidemo.digitap.work/ent/v1/kyc/get-digilocker-details');
-    
+
     // Get auth token
     let authToken = process.env.DIGILOCKER_AUTH_TOKEN;
     if (!authToken && process.env.DIGILOCKER_CLIENT_ID && process.env.DIGILOCKER_CLIENT_SECRET) {
@@ -3380,7 +3474,7 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
 
     if (digilockerResponse.data && digilockerResponse.data.code === "200") {
       const kycData = digilockerResponse.data.model || digilockerResponse.data.data;
-      
+
       console.log('📊 KYC Data fetched successfully. Keys:', Object.keys(kycData || {}));
 
       // Update kyc_verifications table with full KYC data
@@ -3400,7 +3494,7 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
         const { saveUserInfoFromDigilocker, saveAddressFromDigilocker } = require('../services/userInfoService');
         await saveUserInfoFromDigilocker(kycRecord.user_id, kycData, transactionId);
         console.log('✅ User info extracted and saved from Digilocker KYC.');
-        
+
         // Also save address if available
         await saveAddressFromDigilocker(kycRecord.user_id, kycData, transactionId);
         console.log('✅ Address extracted and saved from Digilocker KYC.');
@@ -3412,11 +3506,11 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
       // Also fetch documents using list-docs endpoint
       let documentsProcessed = 0;
       try {
-        const listDocsUrl = process.env.DIGILOCKER_LIST_DOCS_URL || 
+        const listDocsUrl = process.env.DIGILOCKER_LIST_DOCS_URL ||
           (useProduction
             ? 'https://api.digitap.ai/ent/v1/digilocker/list-docs'
             : 'https://apidemo.digitap.work/ent/v1/digilocker/list-docs');
-        
+
         console.log('📄 Fetching documents from list-docs endpoint...');
         const docsResponse = await axios.post(
           listDocsUrl,
@@ -3433,9 +3527,9 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
         if (docsResponse.data && docsResponse.data.code === '200') {
           const docs = docsResponse.data.model || docsResponse.data.data;
           const docsParsed = typeof docs === 'string' ? JSON.parse(docs) : docs;
-          
+
           console.log(`📄 Found ${Array.isArray(docsParsed) ? docsParsed.length : 0} documents`);
-          
+
           // Process and upload documents
           if (docsParsed && Array.isArray(docsParsed) && docsParsed.length > 0) {
             console.log(`🚀 Processing ${docsParsed.length} documents...`);

@@ -469,9 +469,6 @@ export const PostDisbursalFlowPage = () => {
             <p className="text-gray-600 mb-4">
               No loan application in disbursal status found.
             </p>
-            <Button onClick={() => navigate('/dashboard')}>
-              Go to Dashboard
-            </Button>
           </CardContent>
         </Card>
       </div>
@@ -888,20 +885,11 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
       {/* Bank Account Details Section */}
       <Card className="border-gray-300">
         <CardHeader>
-          <CardTitle className="text-lg flex items-center justify-between">
+          <CardTitle className="text-lg flex items-center">
             <span className="flex items-center gap-2">
               <Building2 className="w-5 h-5 text-blue-600" />
               Your Bank Account
             </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleAddBankAccount}
-              className="text-sm"
-            >
-              <Plus className="w-4 h-4 mr-1" />
-              {bankDetails ? 'Change Bank' : 'Add Bank'}
-            </Button>
           </CardTitle>
         </CardHeader>
         <CardContent>

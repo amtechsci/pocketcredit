@@ -29,7 +29,9 @@ export interface AdminUser {
   id: string;
   name: string;
   email: string;
+  phone?: string;
   role: 'superadmin' | 'manager' | 'officer';
+  department?: string;
   permissions: string[];
 }
 
@@ -88,82 +90,74 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
               <nav className="hidden md:flex items-center gap-6">
                 <button
                   onClick={() => navigate(`${BASE_PATH}/dashboard`)}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive(`${BASE_PATH}/dashboard`)
-                      ? 'bg-blue-100 text-blue-700' 
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/dashboard`)
+                      ? 'bg-blue-100 text-blue-700'
                       : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                    }`}
                 >
                   Dashboard
                 </button>
                 <button
                   onClick={() => navigate(`${BASE_PATH}/applications`)}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive(`${BASE_PATH}/applications`)
-                      ? 'bg-blue-100 text-blue-700' 
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/applications`)
+                      ? 'bg-blue-100 text-blue-700'
                       : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                    }`}
                 >
                   Applications
                 </button>
                 <button
                   onClick={() => navigate(`${BASE_PATH}/users`)}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive(`${BASE_PATH}/users`)
-                      ? 'bg-blue-100 text-blue-700' 
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/users`)
+                      ? 'bg-blue-100 text-blue-700'
                       : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                    }`}
                 >
                   Users
                 </button>
                 <button
                   onClick={() => navigate(`${BASE_PATH}/registered`)}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive(`${BASE_PATH}/registered`)
-                      ? 'bg-blue-100 text-blue-700' 
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/registered`)
+                      ? 'bg-blue-100 text-blue-700'
                       : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                    }`}
                 >
                   Registered
                 </button>
                 <button
                   onClick={() => navigate(`${BASE_PATH}/approved`)}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive(`${BASE_PATH}/approved`)
-                      ? 'bg-green-100 text-green-700' 
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/approved`)
+                      ? 'bg-green-100 text-green-700'
                       : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                    }`}
                 >
                   Approved
                 </button>
                 <button
                   onClick={() => navigate(`${BASE_PATH}/cooling-period`)}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive(`${BASE_PATH}/cooling-period`)
-                      ? 'bg-orange-100 text-orange-700' 
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/cooling-period`)
+                      ? 'bg-orange-100 text-orange-700'
                       : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                    }`}
                 >
                   Cooling Period
                 </button>
                 <button
                   onClick={() => navigate(`${BASE_PATH}/reports`)}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive(`${BASE_PATH}/reports`)
-                      ? 'bg-blue-100 text-blue-700' 
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/reports`)
+                      ? 'bg-blue-100 text-blue-700'
                       : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                    }`}
                 >
                   Reports
                 </button>
                 {currentUser?.role === 'superadmin' && (
                   <button
                     onClick={() => navigate(`${BASE_PATH}/team-management`)}
-                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      isActive(`${BASE_PATH}/team-management`)
-                        ? 'bg-blue-100 text-blue-700' 
+                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/team-management`)
+                        ? 'bg-blue-100 text-blue-700'
                         : 'text-gray-600 hover:text-gray-900'
-                    }`}
+                      }`}
                   >
                     Team Management
                   </button>
@@ -171,11 +165,10 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                 {currentUser?.role === 'superadmin' && (
                   <button
                     onClick={() => navigate(`${BASE_PATH}/settings`)}
-                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      isActive(`${BASE_PATH}/settings`)
-                        ? 'bg-blue-100 text-blue-700' 
+                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/settings`)
+                        ? 'bg-blue-100 text-blue-700'
                         : 'text-gray-600 hover:text-gray-900'
-                    }`}
+                      }`}
                   >
                     Settings
                   </button>

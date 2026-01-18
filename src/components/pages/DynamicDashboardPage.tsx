@@ -280,14 +280,14 @@ export function DynamicDashboardPage() {
           }
 
           // PRIORITY 3: Check for post-disbursal (disbursal, repeat_disbursal, ready_to_repeat_disbursal statuses)
-          // ready_to_repeat_disbursal should redirect to post-disbursal (not application-under-review)
+          // NOTE: We no longer automatically redirect - users can navigate freely to dashboard
+          // The dashboard will show their post-disbursal loans, and they can navigate to post-disbursal flow when ready
           const disbursalApp = applications.find(
             (app: any) => app.status === 'disbursal' || app.status === 'repeat_disbursal' || app.status === 'ready_to_repeat_disbursal'
           );
           if (disbursalApp) {
-            console.log(`🔄 Found ${disbursalApp.status} loan, redirecting to post-disbursal flow`);
-            navigate(`/post-disbursal?applicationId=${disbursalApp.id}`);
-            return;
+            console.log(`✅ Found ${disbursalApp.status} loan - user can access dashboard and navigate to post-disbursal when ready`);
+            // Don't redirect - allow user to stay on dashboard
           }
 
           // PRIORITY 4: Check for account_manager status
