@@ -7052,9 +7052,11 @@ export function UserProfileDetail() {
                           `₹${parseInt(account.Current_Balance).toLocaleString('en-IN')}` :
                           '₹0'}
                       </td>
-                      <td className="border border-gray-300 px-2 py-2 text-right">
-                        {account.Amount_Overdue ?
-                          `₹${parseInt(account.Amount_Overdue).toLocaleString('en-IN')}` :
+                      <td className={`border border-gray-300 px-2 py-2 text-right font-semibold ${
+                        account.Amount_Past_Due && parseInt(account.Amount_Past_Due) > 0 ? 'text-red-600' : 'text-gray-600'
+                      }`}>
+                        {account.Amount_Past_Due && parseInt(account.Amount_Past_Due) > 0 ?
+                          `₹${parseInt(account.Amount_Past_Due).toLocaleString('en-IN')}` :
                           '₹0'}
                       </td>
                     </tr>

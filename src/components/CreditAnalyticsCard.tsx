@@ -321,36 +321,11 @@ export function CreditAnalyticsCard({ userKycCompleted }: CreditAnalyticsCardPro
                           '₹0'}
                       </td>
                       <td className={`border border-gray-300 px-2 py-2 text-right font-semibold ${
-                        (() => {
-                          // Check multiple possible field names for overdue amount
-                          const overdueAmount = account.Amount_Overdue || 
-                                                account.Overdue_Amount || 
-                                                account.AmountOverdue || 
-                                                account.OverdueAmount ||
-                                                account.Amount_Overdue_Total ||
-                                                account.Total_Overdue ||
-                                                account.Overdue ||
-                                                account.Overdue_Amt ||
-                                                0;
-                          const overdueValue = overdueAmount ? parseInt(overdueAmount) : 0;
-                          return overdueValue > 0 ? 'text-red-600' : 'text-gray-600';
-                        })()
+                        account.Amount_Past_Due && parseInt(account.Amount_Past_Due) > 0 ? 'text-red-600' : 'text-gray-600'
                       }`}>
-                        {(() => {
-                          // Check multiple possible field names for overdue amount
-                          const overdueAmount = account.Amount_Overdue || 
-                                                account.Overdue_Amount || 
-                                                account.AmountOverdue || 
-                                                account.OverdueAmount ||
-                                                account.Amount_Overdue_Total ||
-                                                account.Total_Overdue ||
-                                                account.Overdue ||
-                                                account.Overdue_Amt ||
-                                                null;
-                          return overdueAmount && parseInt(overdueAmount) > 0
-                            ? `₹${parseInt(overdueAmount).toLocaleString('en-IN')}`
-                            : '₹0';
-                        })()}
+                        {account.Amount_Past_Due && parseInt(account.Amount_Past_Due) > 0 ?
+                          `₹${parseInt(account.Amount_Past_Due).toLocaleString('en-IN')}` :
+                          '₹0'}
                       </td>
                     </tr>
                   ))}
