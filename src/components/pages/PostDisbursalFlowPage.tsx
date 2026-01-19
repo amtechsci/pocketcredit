@@ -1295,8 +1295,8 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
         throw new Error(response.message || 'Failed to generate and save KFS PDF');
       }
 
-      console.log('✅ KFS PDF generated and saved:', response.data);
-      toast.success('KFS PDF generated and saved successfully!');
+      console.log('✅ KFS accepted:', response.data);
+      toast.success('KFS accepted successfully! PDF will be generated when loan is disbursed.');
       
       // Automatically mark as reviewed after generating
       setTimeout(() => {

@@ -539,10 +539,27 @@ router.get('/:id/credit-analytics', authenticateAdmin, async (req, res) => {
       }
     }
 
+    // Generate presigned URL if pdf_url is an S3 key (starts with "pocket/" or doesn't start with "http")
+    let pdfUrl = creditData.pdf_url;
+    if (pdfUrl && !pdfUrl.startsWith('http')) {
+      try {
+        // pdf_url is an S3 key, generate presigned URL (expires in 1 hour)
+        const { getPresignedUrl } = require('../services/s3Service');
+        pdfUrl = await getPresignedUrl(pdfUrl, 3600);
+        console.log('✅ Generated presigned URL for credit report PDF');
+      } catch (error) {
+        console.error('❌ Failed to generate presigned URL for credit report PDF:', error);
+        // Keep original S3 key if presigned URL generation fails
+      }
+    }
+
     res.json({
       status: 'success',
       message: 'Credit analytics data retrieved successfully',
-      data: creditData
+      data: {
+        ...creditData,
+        pdf_url: pdfUrl
+      }
     });
 
   } catch (error) {
@@ -790,10 +807,45 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
       throw new Error(`Failed to validate eligibility: ${validationError.message}`);
     }
 
-    // Extract PDF URL from response
-    const pdfUrl = creditAnalyticsService.extractPdfUrl(creditReportResponse);
-    if (pdfUrl) {
-      console.log('📄 PDF URL extracted from response:', pdfUrl);
+    // Extract PDF URL from response and download to S3
+    let s3PdfKey = null;
+    const experianPdfUrl = creditAnalyticsService.extractPdfUrl(creditReportResponse);
+    
+    if (experianPdfUrl) {
+      console.log('📄 PDF URL extracted from response:', experianPdfUrl);
+      
+      try {
+        // Download PDF from Experian URL
+        const axios = require('axios');
+        console.log('📥 Downloading credit report PDF from Experian...');
+        const pdfResponse = await axios.get(experianPdfUrl, {
+          responseType: 'arraybuffer',
+          timeout: 30000,
+          headers: {
+            'Accept': 'application/pdf'
+          }
+        });
+        
+        const pdfBuffer = Buffer.from(pdfResponse.data);
+        console.log(`✅ Downloaded PDF from Experian, size: ${pdfBuffer.length} bytes`);
+        
+        // Validate it's a PDF
+        if (pdfBuffer.length < 100 || !pdfBuffer.toString('ascii', 0, 4).startsWith('%PDF')) {
+          throw new Error('Downloaded file does not appear to be a valid PDF');
+        }
+        
+        // Upload to S3
+        const { uploadGeneratedPDF } = require('../services/s3Service');
+        const fileName = `Credit_Report_${clientRefNum}.pdf`;
+        const uploadResult = await uploadGeneratedPDF(pdfBuffer, fileName, userId, 'credit-report');
+        s3PdfKey = uploadResult.key;
+        console.log(`✅ Uploaded credit report PDF to S3: ${s3PdfKey}`);
+      } catch (pdfError) {
+        console.error('❌ Error downloading/uploading credit report PDF:', pdfError.message);
+        // Continue without PDF - don't fail the entire credit check
+        // Save the original Experian URL as fallback
+        s3PdfKey = experianPdfUrl;
+      }
     } else {
       console.log('⚠️ PDF URL not found in credit report response');
     }
@@ -823,7 +875,7 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
           validation.negativeIndicators.hasWilfulDefault ? 1 : 0,
           JSON.stringify(validation.negativeIndicators),
           JSON.stringify(creditReportResponse),
-          pdfUrl || null
+          s3PdfKey || null
         ]
       );
       console.log('✅ Credit check saved to database');

@@ -5146,25 +5146,22 @@ router.get('/:loanId/email-history', authenticateAdmin, async (req, res) => {
 
 /**
  * POST /api/kfs/:loanId/generate-and-save
- * Generate KFS PDF, upload to S3, save URL, and send email
- * No e-signature needed - just PDF generation and storage
+ * Mark KFS as accepted by user
+ * PDF generation is now done when admin adds transaction (loan_disbursement)
  */
 router.post('/:loanId/generate-and-save', requireAuth, async (req, res) => {
   try {
     await initializeDatabase();
     const { loanId } = req.params;
     const userId = req.userId;
-    const { htmlContent } = req.body;
 
-    console.log('📄 Generating KFS PDF for loan ID:', loanId, 'User ID:', userId);
+    console.log('✅ User accepted KFS for loan ID:', loanId, 'User ID:', userId);
 
     // Verify loan belongs to user
     const loans = await executeQuery(`
       SELECT 
-        la.id, la.user_id, la.application_number, la.loan_amount, la.status,
-        u.email, u.first_name, u.last_name, u.personal_email, u.official_email
+        la.id, la.user_id, la.application_number, la.loan_amount, la.status
       FROM loan_applications la
-      INNER JOIN users u ON la.user_id = u.id
       WHERE la.id = ? AND la.user_id = ?
     `, [loanId, userId]);
 
@@ -5175,128 +5172,23 @@ router.post('/:loanId/generate-and-save', requireAuth, async (req, res) => {
       });
     }
 
-    const loan = loans[0];
-
-    if (!htmlContent) {
-      return res.status(400).json({
-        success: false,
-        message: 'HTML content is required to generate PDF'
-      });
-    }
-
-    // Generate PDF
-    const filename = `KFS_${loan.application_number}.pdf`;
-    console.log('📄 Generating KFS PDF:', filename);
-    
-    let pdfResult;
-    try {
-      pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
-      console.log('✅ PDF generated successfully, size:', pdfResult.buffer.length, 'bytes');
-    } catch (pdfError) {
-      console.error('❌ Error generating PDF:', pdfError);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to generate PDF: ' + pdfError.message
-      });
-    }
-
-    // Upload to S3
-    console.log('📤 Uploading KFS PDF to S3...');
-    let s3Key = null;
-    try {
-      const uploadResult = await uploadGeneratedPDF(
-        pdfResult.buffer,
-        filename,
-        userId,
-        'kfs'
-      );
-      
-      if (uploadResult.success) {
-        s3Key = uploadResult.key;
-        console.log('✅ KFS PDF uploaded to S3:', s3Key);
-      } else {
-        console.error('❌ Failed to upload KFS PDF to S3:', uploadResult.error);
-        return res.status(500).json({
-          success: false,
-          message: 'Failed to upload PDF to S3: ' + (uploadResult.error || 'Unknown error')
-        });
-      }
-    } catch (s3Error) {
-      console.error('❌ Error uploading KFS PDF to S3:', s3Error);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to upload PDF to S3: ' + s3Error.message
-      });
-    }
-
-    // Save S3 key to database
-    console.log('💾 Saving KFS PDF URL to database...');
-    try {
-      // Check if column exists first
-      const columnCheck = await executeQuery(`
-        SELECT COLUMN_NAME 
-        FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_SCHEMA = DATABASE() 
-          AND TABLE_NAME = 'loan_applications' 
-          AND COLUMN_NAME = 'kfs_pdf_url'
-      `);
-      
-      if (columnCheck && columnCheck.length > 0) {
-        await executeQuery(
-          `UPDATE loan_applications 
-           SET kfs_pdf_url = ?,
-               updated_at = NOW()
-           WHERE id = ?`,
-          [s3Key, loanId]
-        );
-        console.log('✅ KFS PDF URL saved to database');
-      } else {
-        // Column doesn't exist, try to add it
-        console.log('⚠️ kfs_pdf_url column not found, attempting to add it...');
-        try {
-          await executeQuery(
-            `ALTER TABLE loan_applications 
-             ADD COLUMN kfs_pdf_url VARCHAR(500) NULL COMMENT 'S3 key/URL for the generated KFS PDF'`
-          );
-          console.log('✅ Added kfs_pdf_url column');
-          
-          // Now save the URL
-          await executeQuery(
-            `UPDATE loan_applications 
-             SET kfs_pdf_url = ?,
-                 updated_at = NOW()
-             WHERE id = ?`,
-            [s3Key, loanId]
-          );
-          console.log('✅ KFS PDF URL saved to database');
-        } catch (alterError) {
-          console.error('❌ Error adding kfs_pdf_url column:', alterError);
-          // Continue anyway - we still want to send email
-        }
-      }
-    } catch (dbError) {
-      console.error('❌ Error saving KFS PDF URL to database:', dbError);
-      // Continue anyway - we still want to send email
-    }
-
-    // Note: Email sending is now done when admin adds transaction (loan_disbursement)
-    // PDF is generated and saved to S3 here when user accepts KFS
+    // Just mark KFS as accepted - PDF generation will be done by admin when adding transaction
+    // We can add a column to track this if needed, but for now just return success
     
     res.json({
       success: true,
-      message: 'KFS PDF generated and saved to S3 successfully',
+      message: 'KFS accepted successfully. PDF will be generated when loan is disbursed.',
       data: {
-        s3Key: s3Key,
-        filename: filename,
-        pdfSize: pdfResult.buffer.length
+        loanId: loanId,
+        accepted: true
       }
     });
 
   } catch (error) {
-    console.error('❌ Error in generate-and-save KFS:', error);
+    console.error('❌ Error in accepting KFS:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to generate and save KFS: ' + error.message
+      message: 'Failed to accept KFS: ' + error.message
     });
   }
 });

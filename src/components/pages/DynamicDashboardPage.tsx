@@ -34,6 +34,7 @@ import { ApplicationFlow } from '../ApplicationFlow';
 import { HoldBanner } from '../HoldBanner';
 import { GraduationUpsellCard } from '../GraduationUpsellCard';
 import { CreditLimitIncreaseModal } from '../modals/CreditLimitIncreaseModal';
+import { CreditAnalyticsCard } from '../CreditAnalyticsCard';
 
 // Types for dashboard data
 interface DashboardData {
@@ -1007,6 +1008,11 @@ export function DynamicDashboardPage() {
 
           {/* Right Sidebar */}
           <div className="col-span-4 space-y-6">
+            {/* Credit Analytics Card - Show after KYC completion */}
+            {user?.kyc_completed && (
+              <CreditAnalyticsCard userKycCompleted={user.kyc_completed} />
+            )}
+            
             {/* Graduation Upsell Card for Students */}
             {userData.employment_type === 'student' &&
               userData.graduation_status === 'not_graduated' &&
@@ -1024,6 +1030,11 @@ export function DynamicDashboardPage() {
 
       {/* Mobile Layout */}
       <div className="lg:hidden space-y-6">
+        {/* Credit Analytics Card - Mobile - Show after KYC completion */}
+        {user?.kyc_completed && (
+          <CreditAnalyticsCard userKycCompleted={user.kyc_completed} />
+        )}
+
         {/* Active Loans */}
         <Card className="p-6">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">

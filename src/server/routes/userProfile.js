@@ -187,12 +187,13 @@ async function sendKFSAndAgreementEmails(loanId) {
     const kfsFilename = `KFS_${applicationNumber}.pdf`;
     const agreementFilename = `Loan_Agreement_${applicationNumber}.pdf`;
 
-    // Try to use existing PDFs from S3, otherwise generate new ones
+    // PDFs should already be generated and uploaded during transaction addition
+    // Download them from S3 using the URLs that were just saved
     let kfsPDF = null;
     let agreementPDF = null;
     const { downloadFromS3 } = require('../services/s3Service');
 
-    // Get KFS PDF - use existing from S3 if available, otherwise generate
+    // Get KFS PDF from S3 (should be available since it was just generated)
     if (loan.kfs_pdf_url) {
       try {
         console.log(`📥 Downloading KFS PDF from S3: ${loan.kfs_pdf_url}`);
@@ -200,20 +201,22 @@ async function sendKFSAndAgreementEmails(loanId) {
         kfsPDF = { buffer: kfsBuffer };
         console.log(`✅ KFS PDF downloaded from S3, size: ${kfsBuffer.length} bytes`);
       } catch (s3Error) {
-        console.warn(`⚠️ Failed to download KFS PDF from S3 (${loan.kfs_pdf_url}), will generate new one:`, s3Error.message);
-        // Fall through to generate new PDF
+        console.error(`❌ Failed to download KFS PDF from S3:`, s3Error.message);
+        // Fallback: generate new one if download fails
+        console.log(`📄 Generating KFS HTML for loan #${loanId}...`);
+        const kfsHTML = await getKFSHTML(loanId, apiBaseUrl);
+        console.log(`📄 Generating KFS PDF: ${kfsFilename}`);
+        kfsPDF = await pdfService.generateKFSPDF(kfsHTML, kfsFilename);
       }
-    }
-
-    if (!kfsPDF) {
-      // Generate new KFS PDF
+    } else {
+      // If URL not available, generate new one
       console.log(`📄 Generating KFS HTML for loan #${loanId}...`);
       const kfsHTML = await getKFSHTML(loanId, apiBaseUrl);
       console.log(`📄 Generating KFS PDF: ${kfsFilename}`);
       kfsPDF = await pdfService.generateKFSPDF(kfsHTML, kfsFilename);
     }
 
-    // Get Loan Agreement PDF - use existing from S3 if available, otherwise generate
+    // Get Loan Agreement PDF from S3 (should be available since it was just generated)
     if (loan.loan_agreement_pdf_url) {
       try {
         console.log(`📥 Downloading Loan Agreement PDF from S3: ${loan.loan_agreement_pdf_url}`);
@@ -221,13 +224,15 @@ async function sendKFSAndAgreementEmails(loanId) {
         agreementPDF = { buffer: agreementBuffer };
         console.log(`✅ Loan Agreement PDF downloaded from S3, size: ${agreementBuffer.length} bytes`);
       } catch (s3Error) {
-        console.warn(`⚠️ Failed to download Loan Agreement PDF from S3 (${loan.loan_agreement_pdf_url}), will generate new one:`, s3Error.message);
-        // Fall through to generate new PDF
+        console.error(`❌ Failed to download Loan Agreement PDF from S3:`, s3Error.message);
+        // Fallback: generate new one if download fails
+        console.log(`📄 Getting Loan Agreement HTML for loan #${loanId}...`);
+        const loanAgreementHTML = await getLoanAgreementHTML(loanId, apiBaseUrl);
+        console.log(`📄 Generating Loan Agreement PDF: ${agreementFilename}`);
+        agreementPDF = await pdfService.generateKFSPDF(loanAgreementHTML, agreementFilename);
       }
-    }
-
-    if (!agreementPDF) {
-      // Generate new Loan Agreement PDF
+    } else {
+      // If URL not available, generate new one
       console.log(`📄 Getting Loan Agreement HTML for loan #${loanId}...`);
       const loanAgreementHTML = await getLoanAgreementHTML(loanId, apiBaseUrl);
       console.log(`📄 Generating Loan Agreement PDF: ${agreementFilename}`);

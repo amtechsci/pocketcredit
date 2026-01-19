@@ -1093,6 +1093,13 @@ class ApiService {
   }
 
   /**
+   * Get Credit Analytics Data (full report)
+   */
+  async getCreditAnalyticsData(): Promise<ApiResponse<any>> {
+    return this.request('GET', '/credit-analytics/data');
+  }
+
+  /**
    * Account Aggregator - Initiate AA flow
    */
   async initiateAccountAggregator(data: {
