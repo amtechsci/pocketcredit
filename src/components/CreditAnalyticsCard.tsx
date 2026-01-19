@@ -174,6 +174,34 @@ export function CreditAnalyticsCard({ userKycCompleted }: CreditAnalyticsCardPro
   const accountSummary = reportData.CAIS_Account?.CAIS_Account_DETAILS || [];
   const enquirySummary = reportData.CAPS?.CAPS_Summary || {};
 
+  // Debug: Log first account to see actual field names and values
+  if (accountSummary.length > 0) {
+    const firstAccount = accountSummary[0];
+    console.log('🔍 Credit Analytics - First Account Structure:', {
+      allKeys: Object.keys(firstAccount),
+      sampleAccount: firstAccount,
+      overdueFields: {
+        Amount_Overdue: firstAccount.Amount_Overdue,
+        'Amount_Overdue (type)': typeof firstAccount.Amount_Overdue,
+        Overdue_Amount: firstAccount.Overdue_Amount,
+        AmountOverdue: firstAccount.AmountOverdue,
+        Current_Balance: firstAccount.Current_Balance,
+        'Current_Balance (type)': typeof firstAccount.Current_Balance,
+        Subscriber_Name: firstAccount.Subscriber_Name,
+        Account_Status: firstAccount.Account_Status
+      },
+      // Check all fields that might contain "overdue" or "due"
+      allOverdueRelatedFields: Object.keys(firstAccount).filter(key => 
+        key.toLowerCase().includes('overdue') || 
+        key.toLowerCase().includes('due') ||
+        key.toLowerCase().includes('outstanding')
+      ).reduce((acc, key) => {
+        acc[key] = firstAccount[key];
+        return acc;
+      }, {} as any)
+    });
+  }
+
   // Debug: Log first account to see actual field names
   if (accountSummary.length > 0 && process.env.NODE_ENV === 'development') {
     console.log('🔍 First account structure:', {
