@@ -142,15 +142,9 @@ export const DigilockerKYCPage: React.FC = () => {
           // KYC already completed and PAN exists (or check skipped) - redirect to next step
           toast.success('KYC already verified! Proceeding to next step...');
           setTimeout(() => {
-            if (applicationId) {
-              navigate('/loan-application/employment-details', {
-                state: { applicationId },
-                replace: true
-              });
-            } else {
-              // If no applicationId, try to get latest application or go to dashboard
-              navigate('/dashboard', { replace: true });
-            }
+            navigate('/loan-application/credit-analytics', {
+              replace: true
+            });
           }, 1500);
         } else {
           // KYC not complete - show the form
@@ -218,9 +212,7 @@ export const DigilockerKYCPage: React.FC = () => {
 
   const handleSkipKYC = () => {
     toast.info('Skipping KYC verification. You can complete it later.');
-    navigate('/loan-application/employment-details', {
-      state: { applicationId }
-    });
+    navigate('/loan-application/credit-analytics');
   };
 
   const handlePanChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -248,14 +240,9 @@ export const DigilockerKYCPage: React.FC = () => {
         
         // Wait a moment then proceed to next step
         setTimeout(() => {
-          if (applicationId) {
-            navigate('/loan-application/employment-details', {
-              state: { applicationId },
-              replace: true
-            });
-          } else {
-            navigate('/dashboard', { replace: true });
-          }
+          navigate('/loan-application/credit-analytics', {
+            replace: true
+          });
         }, 1500);
       } else {
         toast.error(response.message || 'Failed to validate PAN. Please try again.');

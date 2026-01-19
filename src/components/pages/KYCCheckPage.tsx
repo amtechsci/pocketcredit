@@ -62,11 +62,9 @@ export const KYCCheckPage: React.FC = () => {
               // Continue to next step even if PAN check fails
             }
             
-            // Wait 2 seconds then proceed to employment details
+            // Wait 2 seconds then proceed to credit analytics
             setTimeout(() => {
-              navigate('/loan-application/employment-details', {
-                state: { applicationId }
-              });
+              navigate('/loan-application/credit-analytics');
             }, 2000);
           } else if (kycStatus === 'failed') {
             setStatus('failed');

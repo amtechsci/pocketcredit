@@ -34,7 +34,6 @@ import { ApplicationFlow } from '../ApplicationFlow';
 import { HoldBanner } from '../HoldBanner';
 import { GraduationUpsellCard } from '../GraduationUpsellCard';
 import { CreditLimitIncreaseModal } from '../modals/CreditLimitIncreaseModal';
-import { CreditAnalyticsCard } from '../CreditAnalyticsCard';
 
 // Types for dashboard data
 interface DashboardData {
@@ -152,6 +151,20 @@ export function DynamicDashboardPage() {
     });
     return combined;
   }, [appliedLoans, runningLoans]);
+
+  // Calculate total outstanding amount from active loans for display
+  // Only count outstanding amounts for disbursed loans (account_manager status)
+  const totalOutstandingAmount = useMemo(() => {
+    return activeLoansForDisplay.reduce((total, loan) => {
+      // Only count outstanding amount for loans that have been disbursed (account_manager status)
+      if (loan.status === 'account_manager') {
+        const outstanding = loan.outstanding_amount || loan.total_outstanding || 0;
+        return total + (typeof outstanding === 'number' ? outstanding : parseFloat(String(outstanding)) || 0);
+      }
+      // Pre-disbursal loans (applied loans) have no outstanding amount yet
+      return total;
+    }, 0);
+  }, [activeLoansForDisplay]);
 
   // Check if user is on hold and redirect
   useEffect(() => {
@@ -750,15 +763,15 @@ export function DynamicDashboardPage() {
               </div>
             )}
             {/* Hide loan stats for students */}
-            {userData.employment_type !== 'student' && (
+            {userData.employment_type !== 'student' && activeLoansForDisplay.length > 0 && (
               <>
                 <div className="bg-white/10 rounded-lg p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <CreditCardIcon className="w-5 h-5" />
                     <p className="text-blue-100 text-sm">Active Loans</p>
                   </div>
-                  <p className="text-3xl font-bold">{summary.active_loans}</p>
-                  <p className="text-xs text-blue-200">{formatCurrency(summary.outstanding_amount)} outstanding</p>
+                  <p className="text-3xl font-bold">{activeLoansForDisplay.length}</p>
+                  <p className="text-xs text-blue-200">{formatCurrency(totalOutstandingAmount)} outstanding</p>
                 </div>
 
               </>
@@ -1008,11 +1021,6 @@ export function DynamicDashboardPage() {
 
           {/* Right Sidebar */}
           <div className="col-span-4 space-y-6">
-            {/* Credit Analytics Card - Show after KYC completion */}
-            {user?.kyc_completed && (
-              <CreditAnalyticsCard userKycCompleted={user.kyc_completed} />
-            )}
-            
             {/* Graduation Upsell Card for Students */}
             {userData.employment_type === 'student' &&
               userData.graduation_status === 'not_graduated' &&
@@ -1030,11 +1038,6 @@ export function DynamicDashboardPage() {
 
       {/* Mobile Layout */}
       <div className="lg:hidden space-y-6">
-        {/* Credit Analytics Card - Mobile - Show after KYC completion */}
-        {user?.kyc_completed && (
-          <CreditAnalyticsCard userKycCompleted={user.kyc_completed} />
-        )}
-
         {/* Active Loans */}
         <Card className="p-6">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">

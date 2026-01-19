@@ -294,15 +294,72 @@ router.post('/check', requireAuth, async (req, res) => {
       console.log('⚠️ PDF URL not found in credit report response');
     }
 
-    // Save credit check to database (one-time per user)
-    await executeQuery(
+    // BRE ENGINE: Evaluate BRE conditions after credit report is received
+    let breEvaluationResult = null;
+    let finalEligibility = validation.isEligible;
+    let allRejectionReasons = [...validation.reasons];
+    
+    try {
+      const breEngineService = require('../services/breEngineService');
+      
+      // Evaluate BRE conditions
+      breEvaluationResult = breEngineService.evaluateBREConditions(creditReportResponse);
+      console.log('📊 BRE Evaluation Result:', {
+        passed: breEvaluationResult.passed,
+        reasons: breEvaluationResult.reasons,
+        results: breEvaluationResult.breResults
+      });
+
+      // If BRE conditions failed, user is not eligible
+      if (!breEvaluationResult.passed) {
+        finalEligibility = false;
+        allRejectionReasons = [...validation.reasons, ...breEvaluationResult.reasons];
+        
+        // Store BRE evaluation results
+        const breRejectionData = {
+          bre_reasons: breEvaluationResult.reasons,
+          bre_results: breEvaluationResult.breResults,
+          evaluated_at: new Date().toISOString()
+        };
+        
+        // Merge BRE data into negative_indicators
+        const updatedNegativeIndicators = {
+          ...validation.negativeIndicators,
+          bre_evaluation: breRejectionData
+        };
+        validation.negativeIndicators = updatedNegativeIndicators;
+      }
+    } catch (breError) {
+      console.error('⚠️  BRE: Error in BRE evaluation:', breError);
+      // Continue without BRE evaluation - use original validation
+    }
+
+    // Save credit check to database (update if exists, insert if new)
+    const creditCheckResult = await executeQuery(
       `INSERT INTO credit_checks (
         user_id, request_id, client_ref_num, 
         credit_score, result_code, api_message, 
         is_eligible, rejection_reasons,
         has_settlements, has_writeoffs, has_suit_files, has_wilful_default,
         negative_indicators, full_report, pdf_url, checked_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        request_id = VALUES(request_id),
+        client_ref_num = VALUES(client_ref_num),
+        credit_score = VALUES(credit_score),
+        result_code = VALUES(result_code),
+        api_message = VALUES(api_message),
+        is_eligible = VALUES(is_eligible),
+        rejection_reasons = VALUES(rejection_reasons),
+        has_settlements = VALUES(has_settlements),
+        has_writeoffs = VALUES(has_writeoffs),
+        has_suit_files = VALUES(has_suit_files),
+        has_wilful_default = VALUES(has_wilful_default),
+        negative_indicators = VALUES(negative_indicators),
+        full_report = VALUES(full_report),
+        pdf_url = VALUES(pdf_url),
+        checked_at = NOW(),
+        updated_at = NOW()`,
       [
         userId,
         creditReportResponse.request_id,
@@ -310,8 +367,8 @@ router.post('/check', requireAuth, async (req, res) => {
         validation.creditScore,
         creditReportResponse.result_code,
         creditReportResponse.message,
-        validation.isEligible,
-        validation.reasons.length > 0 ? JSON.stringify(validation.reasons) : null,
+        finalEligibility,
+        allRejectionReasons.length > 0 ? JSON.stringify(allRejectionReasons) : null,
         validation.negativeIndicators.hasSettlements,
         validation.negativeIndicators.hasWriteOffs,
         validation.negativeIndicators.hasSuitFiles,
@@ -322,29 +379,112 @@ router.post('/check', requireAuth, async (req, res) => {
       ]
     );
 
-    // If not eligible, update user profile to on_hold
-    if (!validation.isEligible) {
-      const holdReason = `Credit check failed: ${validation.reasons.join(', ')}`;
-      const holdDuration = 60; // 60 days hold
+    // Get credit check ID for BRE update
+    let creditCheckId = null;
+    if (creditCheckResult && creditCheckResult.insertId) {
+      creditCheckId = creditCheckResult.insertId;
+    } else {
+      const existingCheck = await executeQuery(
+        'SELECT id FROM credit_checks WHERE user_id = ? ORDER BY checked_at DESC LIMIT 1',
+        [userId]
+      );
+      if (existingCheck.length > 0) {
+        creditCheckId = existingCheck[0].id;
+      }
+    }
+
+    // If not eligible (either from validation or BRE), update user profile to on_hold
+    if (!finalEligibility) {
+      const holdUntil = new Date();
+      holdUntil.setDate(holdUntil.getDate() + 45);
+      
+      // Determine hold reason based on what failed
+      let holdReason;
+      if (breEvaluationResult && !breEvaluationResult.passed) {
+        holdReason = `Experian Hold: ${breEvaluationResult.reasons.join('; ')}`;
+      } else {
+        holdReason = `Credit check failed: ${validation.reasons.join(', ')}`;
+      }
 
       await executeQuery(
         `UPDATE users 
-         SET on_hold = TRUE, 
-             hold_reason = ?, 
-             hold_until = DATE_ADD(NOW(), INTERVAL ? DAY)
+         SET status = 'on_hold', 
+             eligibility_status = 'not_eligible',
+             application_hold_reason = ?,
+             hold_until_date = ?,
+             updated_at = NOW()
          WHERE id = ?`,
-        [holdReason, holdDuration, userId]
+        [holdReason, holdUntil, userId]
       );
+
+      console.log(`🚫 User ${userId} held for 45 days. Reason: ${holdReason}`);
+      
+      // Update credit check with BRE data if available
+      if (breEvaluationResult && !breEvaluationResult.passed && creditCheckId) {
+        const breRejectionData = {
+          bre_reasons: breEvaluationResult.reasons,
+          bre_results: breEvaluationResult.breResults,
+          evaluated_at: new Date().toISOString()
+        };
+        
+        await executeQuery(
+          `UPDATE credit_checks 
+           SET negative_indicators = JSON_SET(COALESCE(negative_indicators, '{}'), '$.bre_evaluation', ?),
+               updated_at = NOW()
+           WHERE id = ?`,
+          [JSON.stringify(breRejectionData), creditCheckId]
+        );
+      }
+    } else {
+      // If eligible (score > 580), update loan application step to 'employment-details'
+      // This allows the user to proceed to the next step
+      try {
+        const applications = await executeQuery(
+          `SELECT id, current_step, status FROM loan_applications 
+           WHERE user_id = ? AND status IN ('pending', 'under_review', 'in_progress', 'submitted')
+           ORDER BY created_at DESC LIMIT 1`,
+          [userId]
+        );
+
+        if (applications && applications.length > 0) {
+          const application = applications[0];
+          // Update to 'employment-details' if we're at 'credit-analytics' or earlier
+          if (!application.current_step || 
+              application.current_step === 'credit-analytics' || 
+              application.current_step === 'kyc-verification' ||
+              application.current_step === 'application') {
+            await executeQuery(
+              `UPDATE loan_applications 
+               SET current_step = 'employment-details', updated_at = NOW() 
+               WHERE id = ?`,
+              [application.id]
+            );
+            console.log(`✅ Updated loan application ${application.id} step from '${application.current_step}' to 'employment-details' after credit check passed`);
+          }
+        }
+      } catch (stepUpdateError) {
+        // Don't fail the credit check if step update fails, but log it
+        console.warn('⚠️  Could not update loan application step after credit check:', stepUpdateError.message);
+      }
     }
 
     res.json({
       status: 'success',
-      message: validation.isEligible ? 'Credit check passed' : 'Credit check failed',
+      message: finalEligibility ? 'Credit check passed' : 'Credit check failed',
       data: {
-        is_eligible: validation.isEligible,
+        is_eligible: finalEligibility,
         credit_score: validation.creditScore,
-        reasons: validation.reasons,
-        request_id: creditReportResponse.request_id
+        reasons: allRejectionReasons,
+        request_id: creditReportResponse.request_id,
+        bre_evaluation: breEvaluationResult ? {
+          passed: breEvaluationResult.passed,
+          reasons: breEvaluationResult.reasons,
+          results: breEvaluationResult.breResults
+        } : null,
+        on_hold: !finalEligibility,
+        hold_reason: !finalEligibility ? (breEvaluationResult && !breEvaluationResult.passed 
+          ? `Experian Hold: ${breEvaluationResult.reasons.join('; ')}`
+          : `Credit check failed: ${validation.reasons.join(', ')}`) : null
       }
     });
 

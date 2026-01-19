@@ -126,7 +126,8 @@ router.get('/stats', authenticatePartnerToken, async (req, res) => {
     await initializeDatabase();
     const partner = req.partner;
 
-    const stats = await executeQuery(
+    // Get basic stats
+    const basicStats = await executeQuery(
       `SELECT 
         COUNT(*) as total_leads,
         SUM(CASE WHEN dedupe_status = 'fresh_lead' THEN 1 ELSE 0 END) as fresh_leads,
@@ -141,11 +142,55 @@ router.get('/stats', authenticatePartnerToken, async (req, res) => {
       [partner.id]
     );
 
+    // Get BRE-based approval/rejection stats
+    // Approved = users who passed BRE (is_eligible = 1 in credit_checks)
+    // Rejected = users who failed BRE (is_eligible = 0 OR status = 'on_hold' with Experian Hold reason)
+    const breStats = await executeQuery(
+      `SELECT 
+        COUNT(DISTINCT pl.id) as total_leads_with_credit_check,
+        SUM(CASE WHEN cc.is_eligible = 1 THEN 1 ELSE 0 END) as approved_leads,
+        SUM(CASE WHEN (cc.is_eligible = 0 OR (u.status = 'on_hold' AND u.application_hold_reason LIKE 'Experian Hold%')) THEN 1 ELSE 0 END) as rejected_leads,
+        SUM(CASE WHEN cc.id IS NULL THEN 1 ELSE 0 END) as pending_credit_check
+      FROM partner_leads pl
+      LEFT JOIN users u ON pl.user_id = u.id
+      LEFT JOIN credit_checks cc ON u.id = cc.user_id
+      WHERE pl.partner_id = ?`,
+      [partner.id]
+    );
+
+    const stats = basicStats[0] || {};
+    const breData = breStats[0] || {};
+    
+    // Calculate percentages
+    const totalLeads = parseInt(stats.total_leads) || 0;
+    const approvedLeads = parseInt(breData.approved_leads) || 0;
+    const rejectedLeads = parseInt(breData.rejected_leads) || 0;
+    const pendingCreditCheck = parseInt(breData.pending_credit_check) || 0;
+    const totalWithCreditCheck = parseInt(breData.total_leads_with_credit_check) || 0;
+    
+    const approvalRate = totalWithCreditCheck > 0 ? ((approvedLeads / totalWithCreditCheck) * 100).toFixed(2) : '0.00';
+    const rejectionRate = totalWithCreditCheck > 0 ? ((rejectedLeads / totalWithCreditCheck) * 100).toFixed(2) : '0.00';
+    
+    // Merge stats
+    const finalStats = {
+      ...stats,
+      // BRE-based stats
+      approved_leads: approvedLeads,
+      rejected_leads: rejectedLeads,
+      pending_credit_check: pendingCreditCheck,
+      total_leads_with_credit_check: totalWithCreditCheck,
+      approval_rate_percent: parseFloat(approvalRate),
+      rejection_rate_percent: parseFloat(rejectionRate),
+      // API cost tracking (assuming each credit check costs money)
+      total_credit_checks: totalWithCreditCheck,
+      wasted_credit_checks: rejectedLeads // Rejected leads = wasted API calls
+    };
+
     res.json({
       status: true,
       code: 2000,
       message: 'Success',
-      data: stats[0] || {}
+      data: finalStats
     });
   } catch (error) {
     console.error('Partner dashboard stats error:', error);

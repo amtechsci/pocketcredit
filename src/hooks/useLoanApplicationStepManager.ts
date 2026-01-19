@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 export type LoanApplicationStep = 
   | 'application'           // Loan application creation
   | 'kyc-verification'      // KYC verification
+  | 'credit-analytics'      // Credit analytics check
   | 'employment-details'    // Employment details
   | 'bank-statement'        // Bank statement upload
   | 'bank-details'          // Bank details
@@ -15,6 +16,7 @@ export type LoanApplicationStep =
 
 export interface StepPrerequisites {
   kycVerified: boolean;
+  creditAnalyticsCompleted: boolean;
   employmentCompleted: boolean;
   bankStatementCompleted: boolean;
   bankDetailsCompleted: boolean;
@@ -33,23 +35,25 @@ export interface StepStatus {
 /**
  * Step order for loan application flow
  * IMPORTANT: This order determines the sequence users must complete
- * - After KYC verification, users MUST complete employment-details before bank-statement
+ * - After KYC verification, users go to credit-analytics, then employment-details
  * - Employment details includes: company name, salary date, monthly income, etc.
  */
 const STEP_ORDER: LoanApplicationStep[] = [
   'application',           // Step 1: Create loan application
   'kyc-verification',      // Step 2: Complete KYC verification (Digilocker)
-  'employment-details',     // Step 3: Enter company details, salary, etc. (REQUIRED after KYC)
-  'bank-statement',         // Step 4: Upload bank statement
-  'bank-details',           // Step 5: Link salary bank account
-  'references',             // Step 6: Add references
-  'upload-documents',       // Step 7: Upload any additional documents
-  'steps'                   // Step 8: Final completion
+  'credit-analytics',      // Step 3: Credit analytics check (auto-fetches credit report)
+  'employment-details',     // Step 4: Enter company details, salary, etc. (REQUIRED after credit check)
+  'bank-statement',         // Step 5: Upload bank statement
+  'bank-details',           // Step 6: Link salary bank account
+  'references',             // Step 7: Add references
+  'upload-documents',       // Step 8: Upload any additional documents
+  'steps'                   // Step 9: Final completion
 ];
 
 export const STEP_ROUTES: Record<LoanApplicationStep, string> = {
   'application': '/application', // Application creation page
   'kyc-verification': '/loan-application/kyc-verification',
+  'credit-analytics': '/loan-application/credit-analytics',
   'employment-details': '/loan-application/employment-details',
   'bank-statement': '/loan-application/bank-statement',
   'bank-details': '/loan-application/bank-details',
@@ -71,6 +75,7 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
     applicationId: null,
     prerequisites: {
       kycVerified: false,
+      creditAnalyticsCompleted: false,
       employmentCompleted: false,
       bankStatementCompleted: false,
       bankDetailsCompleted: false,
@@ -98,12 +103,20 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
     try {
       const response = await apiService.getLoanApplications();
       if (response.success && response.data && response.data.applications && response.data.applications.length > 0) {
-        const latestApp = response.data.applications[0];
+        // Get the latest application - prioritize active ones, but accept any if needed
+        const activeApp = response.data.applications.find((app: any) => 
+          app.status === 'submitted' || app.status === 'pending' || app.status === 'under_review' || app.status === 'in_progress'
+        );
+        const latestApp = activeApp || response.data.applications[0];
+        console.log(`[StepGuard] Found latest application: ${latestApp.id} (status: ${latestApp.status})`);
         return latestApp.id;
+      } else {
+        console.log('[StepGuard] No applications in response:', response);
       }
     } catch (error) {
-      console.error('Error fetching applications:', error);
+      console.error('[StepGuard] Error fetching applications:', error);
     }
+    console.log('[StepGuard] No applications found');
     return null;
   }, []);
 
@@ -116,6 +129,26 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
       }
     } catch (error) {
       console.error('Error checking KYC status:', error);
+    }
+    return false;
+  }, []);
+
+  // Check credit analytics completion status
+  const checkCreditAnalyticsStatus = useCallback(async (_applicationId: number) => {
+    try {
+      const response = await apiService.getCreditAnalyticsData();
+      if (response.status === 'success' && response.data) {
+        // Credit analytics is completed if we have credit data and score > 580 (eligible)
+        const creditScore = response.data.credit_score;
+        const score = typeof creditScore === 'number' ? creditScore : parseInt(creditScore) || 0;
+        return score > 580; // Eligible means credit analytics is completed
+      }
+    } catch (error: any) {
+      // If 404 or no data, credit analytics is not completed
+      if (error?.response?.status === 404) {
+        return false;
+      }
+      console.error('Error checking credit analytics status:', error);
     }
     return false;
   }, []);
@@ -250,6 +283,11 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
     if (!prerequisites.kycVerified) {
       return 'kyc-verification';
     }
+    // After KYC, user must complete credit-analytics before employment-details
+    if (!prerequisites.creditAnalyticsCompleted) {
+      return 'credit-analytics';
+    }
+    // After credit analytics, user can proceed to employment-details
     if (!prerequisites.employmentCompleted) {
       return 'employment-details';
     }
@@ -283,6 +321,7 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
       // Check prerequisites for each step
       prerequisites = {
         kycVerified: await checkKYCStatus(applicationId),
+        creditAnalyticsCompleted: applicationId ? await checkCreditAnalyticsStatus(applicationId) : false,
         employmentCompleted: applicationId ? await checkEmploymentStatus(applicationId) : false,
         bankStatementCompleted: applicationId ? await checkBankStatementStatus(applicationId) : false,
         bankDetailsCompleted: applicationId ? await checkBankDetailsStatus(applicationId) : false,
@@ -297,7 +336,7 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
 
     // User can access current step or any previous step
     return stepIndex <= currentStepIndex;
-  }, [checkKYCStatus, checkEmploymentStatus, checkBankStatementStatus, checkBankDetailsStatus, checkReferencesStatus, checkDocumentRequest, determineCurrentStep]);
+  }, [checkKYCStatus, checkCreditAnalyticsStatus, checkEmploymentStatus, checkBankStatementStatus, checkBankDetailsStatus, checkReferencesStatus, checkDocumentRequest, determineCurrentStep]);
 
   // Load step status
   const loadStepStatus = useCallback(async (skipRedirect = false) => {
@@ -322,12 +361,17 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
       }
 
       if (!applicationId) {
-        // No application found - user should start from application creation
+        // No application found - but don't redirect if user is in the middle of loan flow
+        // Only redirect to application creation if we're explicitly on a loan application step
+        // and the step requires an application
+        const isLoanApplicationRoute = location.pathname.startsWith('/loan-application/') || location.pathname === '/application';
+        
         setStatus({
           currentStep: 'application',
           applicationId: null,
           prerequisites: {
             kycVerified: false,
+            creditAnalyticsCompleted: false,
             employmentCompleted: false,
             bankStatementCompleted: false,
             bankDetailsCompleted: false,
@@ -338,12 +382,26 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
           error: null
         });
         
-        // Redirect to application creation if not already there
-        if (!skipRedirect && requiredStep && requiredStep !== 'application' && location.pathname !== STEP_ROUTES['application']) {
+        // Only redirect to application creation if:
+        // 1. We're on a loan application route (not dashboard, etc.)
+        // 2. We have a required step that's not 'application'
+        // 3. We haven't already redirected
+        // 4. We're NOT on a step that's part of the normal flow (credit-analytics, employment-details, etc.)
+        // Don't redirect if user is in the middle of completing steps - let them continue
+        const isFlowStep = requiredStep === 'credit-analytics' || 
+                          requiredStep === 'employment-details' || 
+                          requiredStep === 'bank-statement' ||
+                          requiredStep === 'bank-details';
+        
+        if (!skipRedirect && isLoanApplicationRoute && requiredStep && requiredStep !== 'application' && 
+            location.pathname !== STEP_ROUTES['application'] && !isFlowStep) {
           if (!hasRedirectedRef.current) {
             hasRedirectedRef.current = true;
+            console.log(`[StepGuard] No application found, redirecting to ${STEP_ROUTES['application']}`);
             navigate(STEP_ROUTES['application'], { replace: true });
           }
+        } else if (isFlowStep) {
+          console.log(`[StepGuard] User on flow step ${requiredStep}, not redirecting to /application - allowing access`);
         }
         isValidatingRef.current = false;
         return;
@@ -381,12 +439,16 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
           // Continue with the flow using the latest application
           // Don't return, let it continue to check prerequisites
         } else {
-          // No application found at all - redirect to application creation
+          // No application found at all - but don't redirect if user is in the middle of loan flow
+          // Only redirect to application creation if we're explicitly on a loan application step
+          const isLoanApplicationRoute = location.pathname.startsWith('/loan-application/') || location.pathname === '/application';
+          
           setStatus({
             currentStep: 'application',
             applicationId: null,
             prerequisites: {
               kycVerified: false,
+              creditAnalyticsCompleted: false,
               employmentCompleted: false,
               bankStatementCompleted: false,
               bankDetailsCompleted: false,
@@ -397,17 +459,16 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
             error: null
           });
           
-          // Only redirect if we're not already on application creation page
+          // Only redirect if:
+          // 1. We're on a loan application route (not dashboard, etc.)
+          // 2. We have a required step that's not 'application'
+          // 3. We haven't already redirected
           const appRoute = STEP_ROUTES['application'];
-          const isValidAppRoute = appRoute && 
-                                 (appRoute.startsWith('/loan-application/') || appRoute === '/application') &&
-                                 Object.values(STEP_ROUTES).includes(appRoute);
-          
           if (!skipRedirect && 
+              isLoanApplicationRoute &&
               requiredStep && 
               requiredStep !== 'application' && 
-              location.pathname !== appRoute &&
-              isValidAppRoute) {
+              location.pathname !== appRoute) {
             if (!hasRedirectedRef.current) {
               hasRedirectedRef.current = true;
               console.log(`[StepGuard] No application found, redirecting to ${appRoute}`);
@@ -423,6 +484,7 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
       const docStatus = await checkDocumentRequest(applicationId);
       const prerequisites: StepPrerequisites = {
         kycVerified: await checkKYCStatus(applicationId),
+        creditAnalyticsCompleted: await checkCreditAnalyticsStatus(applicationId),
         employmentCompleted: await checkEmploymentStatus(applicationId),
         bankStatementCompleted: await checkBankStatementStatus(applicationId),
         bankDetailsCompleted: await checkBankDetailsStatus(applicationId),
@@ -439,6 +501,7 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
           prev.currentStep !== currentStep ||
           prev.applicationId !== applicationId ||
           prev.prerequisites.kycVerified !== prerequisites.kycVerified ||
+          prev.prerequisites.creditAnalyticsCompleted !== prerequisites.creditAnalyticsCompleted ||
           prev.prerequisites.employmentCompleted !== prerequisites.employmentCompleted ||
           prev.prerequisites.bankStatementCompleted !== prerequisites.bankStatementCompleted ||
           prev.prerequisites.bankDetailsCompleted !== prerequisites.bankDetailsCompleted ||

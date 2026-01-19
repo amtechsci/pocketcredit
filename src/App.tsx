@@ -27,6 +27,7 @@ import { EnhancedUserReferencesPage } from './components/pages/EnhancedUserRefer
 import { LoanApplicationStepsPage } from './components/pages/LoanApplicationStepsPage';
 import { DigilockerKYCPage } from './components/pages/DigilockerKYCPage';
 import { KYCCheckPage } from './components/pages/KYCCheckPage';
+import { CreditAnalyticsPage } from './components/pages/CreditAnalyticsPage';
 import { EmploymentDetailsPage } from './components/pages/EmploymentDetailsPage';
 import { CreditCheckPage } from './components/pages/CreditCheckPage';
 import { BankStatementUploadPage } from './components/pages/BankStatementUploadPage';
@@ -412,6 +413,18 @@ function AppContent() {
             <DashboardLayout>
               <StepGuard step="kyc-verification">
                 <DigilockerKYCPage />
+              </StepGuard>
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+
+        <Route path="/loan-application/credit-analytics" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <StepGuard step="credit-analytics">
+                <CreditAnalyticsPage />
               </StepGuard>
             </DashboardLayout>
           ) : (

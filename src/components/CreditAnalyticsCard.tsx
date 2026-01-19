@@ -166,9 +166,15 @@ export function CreditAnalyticsCard({ userKycCompleted }: CreditAnalyticsCardPro
   }
 
   // Get credit score from report if not in database
+  // Handle 0 as a valid score (not missing data)
   let displayScore = credit_score;
-  if (!displayScore || displayScore === 'N/A' || displayScore === null) {
-    displayScore = reportData.SCORE?.BureauScore || reportData?.BureauScore || 'N/A';
+  if (displayScore === null || displayScore === undefined || displayScore === 'N/A' || displayScore === '') {
+    const reportScore = reportData.SCORE?.BureauScore || reportData?.BureauScore;
+    displayScore = (reportScore !== null && reportScore !== undefined && reportScore !== '') ? reportScore : 'N/A';
+  }
+  // Ensure displayScore is never null/undefined - show 'N/A' if truly missing
+  if (displayScore === null || displayScore === undefined || displayScore === '') {
+    displayScore = 'N/A';
   }
 
   const accountSummary = reportData.CAIS_Account?.CAIS_Account_DETAILS || [];

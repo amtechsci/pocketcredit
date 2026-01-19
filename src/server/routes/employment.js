@@ -382,6 +382,38 @@ router.post('/details', requireAuth, async (req, res) => {
       );
     }
 
+    // Update loan application step to 'bank-statement' if user has an active application
+    // This marks employment-details step as complete and allows user to proceed
+    try {
+      const applications = await executeQuery(
+        `SELECT id, current_step, status FROM loan_applications 
+         WHERE user_id = ? AND status IN ('pending', 'under_review', 'in_progress', 'submitted')
+         ORDER BY created_at DESC LIMIT 1`,
+        [userId]
+      );
+
+      if (applications && applications.length > 0) {
+        const application = applications[0];
+        // Update to 'bank-statement' if we're at 'employment-details' or earlier
+        if (!application.current_step || 
+            application.current_step === 'employment-details' || 
+            application.current_step === 'credit-analytics' ||
+            application.current_step === 'kyc-verification' ||
+            application.current_step === 'application') {
+          await executeQuery(
+            `UPDATE loan_applications 
+             SET current_step = 'bank-statement', updated_at = NOW() 
+             WHERE id = ?`,
+            [application.id]
+          );
+          console.log(`✅ Updated loan application ${application.id} step from '${application.current_step}' to 'bank-statement'`);
+        }
+      }
+    } catch (stepUpdateError) {
+      // Don't fail the request if step update fails, but log it
+      console.warn('⚠️  Could not update loan application step after employment details:', stepUpdateError.message);
+    }
+
     res.json({
       success: true,
       message: 'Employment details saved successfully',

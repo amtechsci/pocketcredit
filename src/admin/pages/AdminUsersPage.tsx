@@ -304,6 +304,16 @@ export function AdminUsersPage() {
                   Hold
                 </button>
                 <button
+                  onClick={() => handleStatusFilter('experian_hold')}
+                  className={`px-3 py-1.5 text-sm rounded-full transition-colors ${statusFilter === 'experian_hold'
+                      ? 'bg-orange-100 text-orange-700 border border-orange-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  title="Users held due to BRE conditions failure (Experian Hold)"
+                >
+                  Experian Hold
+                </button>
+                <button
                   onClick={() => handleStatusFilter('deleted')}
                   className={`px-3 py-1.5 text-sm rounded-full transition-colors ${statusFilter === 'deleted'
                       ? 'bg-gray-800 text-white border border-gray-900'

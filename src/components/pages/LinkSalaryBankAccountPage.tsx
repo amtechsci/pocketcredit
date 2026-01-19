@@ -275,21 +275,35 @@ export const LinkSalaryBankAccountPage = () => {
           // Call the fetch-bank-report endpoint which will fetch report if status is completed
           const reportResponse = await apiService.fetchUserBankReport();
           if (reportResponse.success && reportResponse.data) {
-            toast.success('Bank statement report fetched! Extracting bank details...');
-            // Wait for bank details extraction
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            // Retry fetching bank details
-            const retryResponse = await apiService.getUserBankDetails(user.id);
-            if (retryResponse.success && retryResponse.data && retryResponse.data.length > 0) {
-              setBankDetails(retryResponse.data as BankDetail[]);
-              if (retryResponse.data.length === 1) {
-                setSelectedBankId(retryResponse.data[0].id);
+            // Check if it's a manual upload
+            const isManualUpload = (reportResponse.data as any).isManualUpload;
+            if (isManualUpload) {
+              console.log('Manual upload detected - bank details may need to be added manually');
+              // For manual uploads, don't show error - user can add bank details manually
+            } else {
+              toast.success('Bank statement report fetched! Extracting bank details...');
+              // Wait for bank details extraction
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              // Retry fetching bank details
+              const retryResponse = await apiService.getUserBankDetails(user.id);
+              if (retryResponse.success && retryResponse.data && retryResponse.data.length > 0) {
+                setBankDetails(retryResponse.data as BankDetail[]);
+                if (retryResponse.data.length === 1) {
+                  setSelectedBankId(retryResponse.data[0].id);
+                }
               }
             }
           }
-        } catch (reportError) {
+        } catch (reportError: any) {
           console.error('Error fetching report:', reportError);
-          // Continue - user can still add bank manually
+          // If it's a 400 or 500 error about manual upload, don't show error
+          const errorMessage = reportError?.response?.data?.message || '';
+          if (errorMessage.includes('Manual upload') || errorMessage.includes('No Digitap transaction')) {
+            console.log('Manual upload detected - user can add bank details manually');
+            // Don't show error toast for manual uploads
+          } else {
+            // For other errors, continue silently - user can still add bank manually
+          }
         }
       }
     } catch (error) {

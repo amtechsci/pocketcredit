@@ -852,7 +852,7 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
     const userId = req.userId;
 
     const statements = await executeQuery(
-      `SELECT client_ref_num, txn_id, status, report_data, transaction_data 
+      `SELECT client_ref_num, txn_id, status, report_data, transaction_data, user_status, s3_key, upload_method
        FROM user_bank_statements 
        WHERE user_id = ? 
        ORDER BY created_at DESC LIMIT 1`,
@@ -867,6 +867,44 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
     }
 
     const statement = statements[0];
+
+    // Check if this is a manual upload
+    // Manual uploads have: upload_method = 'manual' OR user_status = 'uploaded' OR no client_ref_num
+    const isManualUpload = statement.upload_method === 'manual' ||
+                          statement.user_status === 'uploaded' || 
+                          statement.user_status === 'under_review' ||
+                          statement.user_status === 'verified' ||
+                          (!statement.client_ref_num && !statement.txn_id);
+
+    // If it's a manual upload and we have report_data, return it
+    if (isManualUpload) {
+      if (statement.report_data) {
+        console.log('📊 Manual upload detected - returning existing report_data');
+        return res.json({
+          success: true,
+          data: {
+            status: statement.status || 'completed',
+            report: typeof statement.report_data === 'string' 
+              ? JSON.parse(statement.report_data) 
+              : statement.report_data,
+            cached: true,
+            isManualUpload: true
+          }
+        });
+      } else {
+        // Manual upload but no report_data - this shouldn't happen, but handle gracefully
+        console.log('⚠️  Manual upload detected but no report_data found');
+        return res.json({
+          success: true,
+          data: {
+            status: statement.status || 'completed',
+            report: null,
+            message: 'Manual upload - report processing may be in progress',
+            isManualUpload: true
+          }
+        });
+      }
+    }
 
     // Extract txn_id from transaction_data if not already in statement.txn_id
     let txnId = statement.txn_id;
@@ -904,9 +942,20 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
           success: true,
           data: {
             status: currentStatus,
-            report: JSON.parse(statement.report_data),
+            report: typeof statement.report_data === 'string'
+              ? JSON.parse(statement.report_data)
+              : statement.report_data,
             cached: true
           }
+        });
+      }
+
+      // Only fetch from Digitap if we have a client_ref_num or txn_id
+      if (!statement.client_ref_num && !txnId) {
+        console.log('⚠️  No client_ref_num or txn_id - cannot fetch from Digitap');
+        return res.status(400).json({
+          success: false,
+          message: 'No Digitap transaction found for this bank statement'
         });
       }
 
@@ -918,6 +967,21 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
         : await retrieveBankStatementReport(statement.client_ref_num, 'json');
 
       if (!reportResult.success) {
+        // If Digitap returns 403 (TxnNotFound), it means this is likely a manual upload
+        // that was incorrectly marked as having a client_ref_num
+        if (reportResult.error && reportResult.error.includes('TxnNotFound')) {
+          console.log('⚠️  Digitap transaction not found - likely manual upload');
+          return res.json({
+            success: true,
+            data: {
+              status: currentStatus,
+              report: statement.report_data ? (typeof statement.report_data === 'string' ? JSON.parse(statement.report_data) : statement.report_data) : null,
+              message: 'Manual upload - no Digitap transaction',
+              isManualUpload: true
+            }
+          });
+        }
+        
         return res.status(500).json({
           success: false,
           message: 'Failed to retrieve report from Digitap'

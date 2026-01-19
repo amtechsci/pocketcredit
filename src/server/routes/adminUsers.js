@@ -147,6 +147,10 @@ router.get('/', authenticateAdmin, async (req, res) => {
         // Approved: Users who completed 2nd page (employment quick check) and got approved
         // profile_completion_step >= 2, status = 'active', eligibility_status = 'eligible'
         whereConditions.push(`(u.profile_completion_step >= 2 AND u.status = 'active' AND u.eligibility_status = 'eligible')`);
+      } else if (status === 'experian_hold') {
+        // Experian Hold: Users held due to BRE conditions failure
+        // status = 'on_hold' AND application_hold_reason LIKE 'Experian Hold%'
+        whereConditions.push(`(u.status = 'on_hold' AND u.application_hold_reason LIKE 'Experian Hold%')`);
       } else {
         // Map 'hold' to 'on_hold' for backward compatibility
         const statusValue = status === 'hold' ? 'on_hold' : status;
@@ -850,7 +854,7 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
       console.log('⚠️ PDF URL not found in credit report response');
     }
 
-    // Save credit check to database
+    // Save credit check to database (update if exists, insert if new)
     try {
       await executeQuery(
         `INSERT INTO credit_checks (
@@ -859,7 +863,24 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
           is_eligible, rejection_reasons,
           has_settlements, has_writeoffs, has_suit_files, has_wilful_default,
           negative_indicators, full_report, pdf_url, checked_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        ON DUPLICATE KEY UPDATE
+          request_id = VALUES(request_id),
+          client_ref_num = VALUES(client_ref_num),
+          credit_score = VALUES(credit_score),
+          result_code = VALUES(result_code),
+          api_message = VALUES(api_message),
+          is_eligible = VALUES(is_eligible),
+          rejection_reasons = VALUES(rejection_reasons),
+          has_settlements = VALUES(has_settlements),
+          has_writeoffs = VALUES(has_writeoffs),
+          has_suit_files = VALUES(has_suit_files),
+          has_wilful_default = VALUES(has_wilful_default),
+          negative_indicators = VALUES(negative_indicators),
+          full_report = VALUES(full_report),
+          pdf_url = VALUES(pdf_url),
+          checked_at = NOW(),
+          updated_at = NOW()`,
         [
           userId,
           creditReportResponse.request_id || null,

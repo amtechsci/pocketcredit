@@ -351,10 +351,10 @@ export const EmploymentDetailsPage: React.FC = () => {
       if (response.success) {
         toast.success('Employment details saved successfully!');
         
-        // Navigate to bank statement (next step after employment)
-        navigate('/loan-application/bank-statement', {
-          state: { applicationId }
-        });
+        // Wait a moment for backend to update loan application step, then navigate
+        setTimeout(() => {
+          navigate('/loan-application/bank-statement', { replace: true });
+        }, 500);
       } else {
         toast.error(response.message || 'Failed to save employment details');
       }
