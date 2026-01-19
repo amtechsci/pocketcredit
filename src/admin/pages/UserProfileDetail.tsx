@@ -6695,6 +6695,53 @@ export function UserProfileDetail() {
     const capsApplications = reportData.CAPS?.CAPS_Application_Details || [];
     const currentApplication = reportData.Current_Application || {};
 
+    // Debug: Always log to help identify structure
+    console.log('🔍 Admin Credit Analytics Debug:', {
+      accountSummaryLength: accountSummary.length,
+      hasReportData: !!reportData,
+      hasCAISAccount: !!reportData.CAIS_Account,
+      reportDataKeys: reportData ? Object.keys(reportData) : [],
+      caisAccountKeys: reportData.CAIS_Account ? Object.keys(reportData.CAIS_Account) : []
+    });
+
+    // Debug: Log first account to see actual field names and values
+    if (accountSummary.length > 0) {
+      const firstAccount = accountSummary[0];
+      console.log('🔍 Admin Credit Analytics - First Account Structure:', {
+        allKeys: Object.keys(firstAccount),
+        sampleAccount: firstAccount,
+        overdueFields: {
+          Amount_Overdue: firstAccount.Amount_Overdue,
+          'Amount_Overdue (type)': typeof firstAccount.Amount_Overdue,
+          Overdue_Amount: firstAccount.Overdue_Amount,
+          AmountOverdue: firstAccount.AmountOverdue,
+          Current_Balance: firstAccount.Current_Balance,
+          'Current_Balance (type)': typeof firstAccount.Current_Balance,
+          Subscriber_Name: firstAccount.Subscriber_Name,
+          Account_Status: firstAccount.Account_Status
+        },
+        // Check all fields that might contain "overdue" or "due"
+        allOverdueRelatedFields: Object.keys(firstAccount).filter(key => 
+          key.toLowerCase().includes('overdue') || 
+          key.toLowerCase().includes('due') ||
+          key.toLowerCase().includes('outstanding') ||
+          key.toLowerCase().includes('dpd') ||
+          key.toLowerCase().includes('past')
+        ).reduce((acc, key) => {
+          acc[key] = firstAccount[key];
+          return acc;
+        }, {} as any),
+        // Also check all numeric fields that might be overdue amounts
+        allNumericFields: Object.keys(firstAccount).filter(key => {
+          const value = firstAccount[key];
+          return typeof value === 'number' || (typeof value === 'string' && !isNaN(parseFloat(value)) && parseFloat(value) > 0);
+        }).reduce((acc, key) => {
+          acc[key] = firstAccount[key];
+          return acc;
+        }, {} as any)
+      });
+    }
+
     // Get credit score from report if not in database
     // Check multiple sources for credit score
     let displayScore = credit_score;
