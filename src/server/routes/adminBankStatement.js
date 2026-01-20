@@ -407,7 +407,8 @@ router.post('/:userId/verify-with-file', authenticateAdmin, async (req, res) => 
         const txnId = digitapResult?.data?.txn_id || null;
 
         // Update status based on upload result
-        let verificationStatus = 'pending_manual_review';
+        // Note: verification_status ENUM values: 'api_verification_pending', 'api_verified', 'api_failed'
+        let verificationStatus = 'api_failed'; // Use api_failed when upload fails (instead of 'pending_manual_review' which doesn't exist in ENUM)
         let statusMessage = 'Bank statement file stored successfully. Ready for manual verification.';
         
         if (digitapUploadSuccess) {
