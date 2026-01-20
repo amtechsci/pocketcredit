@@ -339,7 +339,8 @@ async function getInstitutionList(type = 'Statement') {
 
     const response = await axios.post(ENDPOINTS.INSTITUTIONS, requestBody, {
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': getAuthHeader() // Add Basic Auth header
       },
       timeout: 15000
     });
@@ -428,6 +429,7 @@ async function startUploadAPI(params) {
     console.log('📤 Start Upload Request:', JSON.stringify({ ...requestBody, signature: '[REDACTED]' }, null, 2));
 
     // Try primary endpoint first, then fallback to alternative
+    // Note: Some Digitap APIs require both signature AND Basic Auth headers
     let response;
     let lastError;
     try {
@@ -436,7 +438,8 @@ async function startUploadAPI(params) {
         requestBody,
         {
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': getAuthHeader() // Add Basic Auth header as well
           },
           timeout: 30000
         }
@@ -452,7 +455,8 @@ async function startUploadAPI(params) {
             requestBody,
             {
               headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': getAuthHeader() // Add Basic Auth header as well
               },
               timeout: 30000
             }
@@ -492,11 +496,27 @@ async function startUploadAPI(params) {
     if (error.response) {
       console.error('❌ Response Status:', error.response.status);
       console.error('❌ Response Data:', error.response.data);
+      
+      const errorCode = error.response.data?.code;
+      let errorMessage = error.response.data?.msg || error.response.data?.message || `API error: ${error.response.status}`;
+      
+      // Provide helpful error messages for common issues
+      if (errorCode === 'NotSignedUp') {
+        errorMessage = 'Your Digitap account has not been enabled for the Bank Data PDF Upload Service. Please contact Digitap support to enable this service for your client account.';
+        console.error('⚠️  IMPORTANT: Your account needs to be enabled for Bank Data PDF Upload Service by Digitap.');
+        console.error('⚠️  Please contact Digitap support with your client_id:', DIGITAP_CLIENT_ID);
+      } else if (errorCode === 'RequiredClientName' || errorCode === 'ClientName') {
+        errorMessage = `Invalid client_name. Please check if DIGITAP_CLIENT_NAME environment variable is set correctly. Current value: ${DIGITAP_CLIENT_NAME}`;
+      } else if (errorCode === 'SignatureDoesNotMatch' || errorCode === 'InvalidEncryption') {
+        errorMessage = `Signature authentication failed. Please verify DIGITAP_ENCRYPTION_KEY is set correctly. Error: ${errorMessage}`;
+      }
+      
       return {
         success: false,
-        error: error.response.data?.msg || error.response.data?.message || `API error: ${error.response.status}`,
-        code: error.response.data?.code,
-        status: error.response.status
+        error: errorMessage,
+        code: errorCode,
+        status: error.response.status,
+        raw_response: error.response.data
       };
     }
     return {
@@ -645,7 +665,8 @@ async function completeUploadAPI(params) {
       requestBody,
       {
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': getAuthHeader() // Add Basic Auth header
         },
         timeout: 30000
       }

@@ -909,10 +909,17 @@ router.post('/:userId/start-upload', authenticateAdmin, async (req, res) => {
     });
 
     if (!startUploadResult.success) {
-      return res.status(500).json({
+      // Provide helpful error message for NotSignedUp error
+      let errorMessage = startUploadResult.error;
+      if (startUploadResult.code === 'NotSignedUp') {
+        errorMessage = 'Your Digitap account has not been enabled for the Bank Data PDF Upload Service. Please contact Digitap support to enable this service for your account.';
+      }
+      
+      return res.status(startUploadResult.status === 403 ? 403 : 500).json({
         success: false,
-        message: `Failed to start upload: ${startUploadResult.error}`,
-        code: startUploadResult.code
+        message: errorMessage,
+        code: startUploadResult.code,
+        errorDetails: startUploadResult.raw_response
       });
     }
 
