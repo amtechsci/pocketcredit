@@ -121,8 +121,8 @@ function AdminAccessPage() {
               href="/"
               className="w-full px-6 py-2 rounded-lg transition-colors touch-manipulation border border-gray-300 text-gray-700 hover:bg-gray-50 inline-block"
             >
-            Back to Home
-          </a>
+              Back to Home
+            </a>
           </div>
         </div>
       </div>
@@ -153,17 +153,17 @@ export default function App() {
   // Check if /stpl is accessed on wrong domain and redirect
   const location = useLocation();
   const navigate = useNavigate();
-  
+
   useEffect(() => {
     const hostname = window.location.hostname;
-    const isAdminSubdomain = hostname.includes('pkk.pocketcredit.in') || hostname === 'pkk.pocketcredit.in';
-    
+    const isAdminSubdomain = hostname.includes('pkk.pocketcredit.in') || hostname === 'pkk.pocketcredit.in' || hostname === 'localhost' || hostname.includes('127.0.0.1');
+
     // If on admin subdomain, only allow /stpl paths
     if (isAdminSubdomain && !location.pathname.startsWith('/stpl')) {
       window.location.href = `https://pocketcredit.in${location.pathname}${location.search}`;
       return;
     }
-    
+
     // If on main domain, redirect /stpl to home
     if (!isAdminSubdomain && location.pathname.startsWith('/stpl')) {
       navigate('/', { replace: true });
@@ -199,7 +199,7 @@ function AdminLoginPage() {
   useEffect(() => {
     const adminUser = localStorage.getItem('adminUser');
     const adminToken = localStorage.getItem('adminToken');
-    
+
     if (adminUser && adminToken) {
       // Already logged in, redirect to dashboard
       navigate('/stpl/dashboard', { replace: true });

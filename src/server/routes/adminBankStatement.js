@@ -324,9 +324,12 @@ router.post('/:userId/verify-with-file', authenticateAdmin, async (req, res) => 
         const mobileNumber = users[0].phone;
         const clientRefNum = generateClientRefNum(userId, 0);
 
+        // Get bank_name from request body or existing statement
+        let bankName = req.body.bank_name || null;
+        
         // Get or create bank statement record
         const statements = await executeQuery(
-          `SELECT id, client_ref_num FROM user_bank_statements WHERE user_id = ? ORDER BY created_at DESC LIMIT 1`,
+          `SELECT id, client_ref_num, bank_name FROM user_bank_statements WHERE user_id = ? ORDER BY created_at DESC LIMIT 1`,
           [userId]
         );
 
@@ -336,136 +339,105 @@ router.post('/:userId/verify-with-file', authenticateAdmin, async (req, res) => 
         if (statements.length > 0) {
           statementId = statements[0].id;
           finalClientRefNum = statements[0].client_ref_num;
+          // Use bank_name from existing statement if not provided in request
+          if (!bankName && statements[0].bank_name) {
+            bankName = statements[0].bank_name;
+          }
         } else {
           // Create new record (only if we're not using existing file)
           if (!useExistingFile) {
             const insertResult = await executeQuery(
               `INSERT INTO user_bank_statements 
                (user_id, client_ref_num, mobile_number, bank_name, status, user_status, verification_status, file_name, file_size, upload_method, created_at)
-               VALUES (?, ?, ?, NULL, 'pending', 'uploaded', 'api_verification_pending', ?, ?, 'manual', NOW())`,
-              [userId, finalClientRefNum, mobileNumber, fileName, fileBuffer.length]
+               VALUES (?, ?, ?, ?, 'pending', 'uploaded', 'api_verification_pending', ?, ?, 'manual', NOW())`,
+              [userId, finalClientRefNum, mobileNumber, bankName, fileName, fileBuffer.length]
             );
             statementId = insertResult.insertId;
           }
         }
 
-        // Generate Digitap upload URL and upload file to that URL
-        console.log(`📤 Generating Digitap upload URL for ${useExistingFile ? 'existing' : 'new'} file: ${fileName}`);
-        
-        // Step 1: Generate upload URL from Digitap
-        const generateUrlResult = await generateBankStatementURL({
-          client_ref_num: finalClientRefNum,
-          mobile_num: mobileNumber,
-          destination: 'statementupload',
-          return_url: process.env.APP_URL || 'http://localhost:3000/admin/dashboard',
-          txn_completed_cburl: process.env.APP_URL ? `${process.env.APP_URL}/api/bank-statement/bank-data/webhook` : 'http://localhost:3002/api/bank-statement/bank-data/webhook'
-        });
-
-        if (!generateUrlResult.success || !generateUrlResult.data?.url) {
-          console.error('❌ Failed to generate Digitap upload URL:', generateUrlResult.error);
-          await executeQuery(
-            `UPDATE user_bank_statements 
-             SET verification_status = 'api_failed',
-                 updated_at = NOW()
-             WHERE id = ?`,
-            [statementId]
+        // If using existing file, also try to get bank_name from the statement we fetched earlier
+        if (useExistingFile && !bankName) {
+          const existingStatements = await executeQuery(
+            `SELECT bank_name FROM user_bank_statements WHERE user_id = ? AND file_path IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
+            [userId]
           );
-
-          return res.status(500).json({
-            success: false,
-            message: generateUrlResult.error || 'Failed to generate Digitap upload URL',
-            error: generateUrlResult.error
-          });
+          if (existingStatements.length > 0 && existingStatements[0].bank_name) {
+            bankName = existingStatements[0].bank_name;
+          }
         }
 
-        const uploadUrl = generateUrlResult.data.url;
-        console.log(`✅ Generated Digitap upload URL: ${uploadUrl}`);
-
-        // Step 2: Upload file to the generated URL
-        const axios = require('axios');
+        // Try to upload file directly to Digitap using API endpoint
+        // Note: Digitap may not support direct programmatic uploads - if it fails, we'll store for manual processing
+        console.log(`📤 Attempting to upload ${useExistingFile ? 'existing' : 'new'} file to Digitap API: ${fileName}`);
+        
+        let digitapResult = null;
+        let digitapUploadSuccess = false;
+        
         try {
-          console.log(`📤 Uploading file to Digitap URL...`);
-          const uploadResponse = await axios.put(uploadUrl, fileBuffer, {
-            headers: {
-              'Content-Type': 'application/pdf',
-            },
-            timeout: 60000, // 60 seconds timeout
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity
+          // Use the proper API upload function
+          digitapResult = await uploadBankStatementPDF({
+            mobile_no: mobileNumber,
+            client_ref_num: finalClientRefNum,
+            file_buffer: fileBuffer,
+            file_name: fileName,
+            bank_name: bankName || null,
+            password: null
           });
-          
-          console.log('✅ File successfully uploaded to Digitap URL');
-          console.log('📊 Upload response status:', uploadResponse.status);
-          
-          // Store the request_id and txn_id if available from URL generation
-          const requestId = generateUrlResult.data.request_id || null;
-          const txnId = generateUrlResult.data.txn_id || null;
-          
-          // Update statement with request_id and txn_id
-          if (requestId || txnId) {
-            await executeQuery(
-              `UPDATE user_bank_statements 
-               SET request_id = ?,
-                   txn_id = ?,
-                   updated_at = NOW()
-               WHERE id = ?`,
-              [requestId, txnId, statementId]
-            );
+
+          if (digitapResult.success) {
+            digitapUploadSuccess = true;
+            console.log('✅ File successfully uploaded to Digitap API');
+            console.log('📊 Digitap upload result:', digitapResult.data);
+          } else {
+            // Check if it's a 404 (endpoint doesn't exist) - this means Digitap doesn't support direct uploads
+            if (digitapResult.status === 404 || (digitapResult.error && digitapResult.error.includes('404'))) {
+              console.warn('⚠️  Digitap direct upload API not available (404). File will be stored for manual processing.');
+            } else {
+              console.error('❌ Failed to upload file to Digitap:', digitapResult.error);
+            }
           }
         } catch (uploadError) {
-          console.error('❌ Error uploading file to Digitap URL:', uploadError.message);
-          if (uploadError.response) {
-            console.error('❌ Upload response status:', uploadError.response.status);
-            console.error('❌ Upload response data:', uploadError.response.data);
-          }
-          
-          await executeQuery(
-            `UPDATE user_bank_statements 
-             SET verification_status = 'api_failed',
-                 updated_at = NOW()
-             WHERE id = ?`,
-            [statementId]
-          );
-
-          return res.status(500).json({
-            success: false,
-            message: `Failed to upload file to Digitap: ${uploadError.message}`,
-            error: uploadError.message
-          });
+          console.warn('⚠️  Digitap upload attempt failed:', uploadError.message);
+          // Continue with file storage even if Digitap upload fails
         }
 
-        // Success - file uploaded to Digitap URL
-        const digitapResult = {
-          success: true,
-          data: {
-            status: 'processing',
-            request_id: generateUrlResult.data.request_id,
-            txn_id: generateUrlResult.data.txn_id,
-            url: uploadUrl
-          }
-        };
+        // Store request_id and txn_id if available from upload response
+        const requestId = digitapResult?.data?.request_id || null;
+        const txnId = digitapResult?.data?.txn_id || null;
 
-        // Update status to pending and record admin action
+        // Update status based on upload result
+        let verificationStatus = 'pending_manual_review';
+        let statusMessage = 'Bank statement file stored successfully. Ready for manual verification.';
+        
+        if (digitapUploadSuccess) {
+          verificationStatus = 'api_verification_pending';
+          statusMessage = 'Bank statement sent to Digitap for verification';
+        }
+
         await executeQuery(
           `UPDATE user_bank_statements 
-           SET verification_status = 'api_verification_pending',
+           SET verification_status = ?,
+               request_id = ?,
+               txn_id = ?,
                verified_by = ?,
                verified_at = NOW(),
                updated_at = NOW()
            WHERE id = ?`,
-          [adminId, statementId]
+          [verificationStatus, requestId, txnId, adminId, statementId]
         );
 
         // Log activity
         try {
           await logActivity({
             userId: userId,
-            action: 'bank_statement_verification_initiated',
+            action: digitapUploadSuccess ? 'bank_statement_verification_initiated' : 'bank_statement_uploaded_manual',
             details: {
               statementId: statementId,
               adminId: adminId,
               clientRefNum: finalClientRefNum,
-              digitapStatus: digitapResult.data?.status
+              digitapStatus: digitapResult?.data?.status || 'not_uploaded',
+              uploadMethod: digitapUploadSuccess ? 'api' : 'manual'
             },
             adminId: adminId
           });
@@ -475,12 +447,14 @@ router.post('/:userId/verify-with-file', authenticateAdmin, async (req, res) => 
 
         res.json({
           success: true,
-          message: 'Bank statement sent to Digitap for verification',
+          message: statusMessage,
           data: {
             statementId: statementId,
             clientRefNum: finalClientRefNum,
-            digitapStatus: digitapResult.data?.status || 'processing',
-            verificationStatus: 'api_verification_pending'
+            digitapStatus: digitapResult?.data?.status || 'not_uploaded',
+            verificationStatus: verificationStatus,
+            digitapUploadSuccess: digitapUploadSuccess,
+            note: digitapUploadSuccess ? null : 'Digitap direct upload not available. File stored for manual processing.'
           }
         });
       } catch (error) {

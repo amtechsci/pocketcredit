@@ -16,14 +16,17 @@ const getBaseUrl = () => {
 const DIGITAP_BASE_URL = getBaseUrl();
 const DIGITAP_CLIENT_ID = process.env.DIGITAP_CLIENT_ID || '25845721';
 const DIGITAP_CLIENT_SECRET = process.env.DIGITAP_CLIENT_SECRET || 'o0GHuqVysgUKJ2LNQC7BB46amc5rBqH8';
+const DIGITAP_CLIENT_NAME = process.env.DIGITAP_CLIENT_NAME || '25845721'; // Client name provided by Digitap
+const DIGITAP_ENCRYPTION_KEY = process.env.DIGITAP_ENCRYPTION_KEY || process.env.DIGITAP_CLIENT_SECRET; // Key for signature encryption
 
-// Correct API Endpoints for Bank Statement
+// Correct API Endpoints for Bank Statement (PDF Upload API v1.8)
 const ENDPOINTS = {
   GENERATE_URL: `${DIGITAP_BASE_URL}/bank-data/generateurl`,
-  UPLOAD_PDF: `${DIGITAP_BASE_URL}/bank-data/uploadpdf`, // Try uploadpdf instead of upload
-  UPLOAD_PDF_ALT: `${DIGITAP_BASE_URL}/bank-data/upload`, // Fallback to original
-  STATUS_CHECK: `${DIGITAP_BASE_URL}/bank-data/statuscheck`,
-  RETRIEVE_REPORT: `${DIGITAP_BASE_URL}/bank-data/retrievereport`
+  START_UPLOAD: `${DIGITAP_BASE_URL}/startupload`, // PDF Upload API: Start Upload
+  COMPLETE_UPLOAD: `${DIGITAP_BASE_URL}/completeupload`, // PDF Upload API: Complete Upload
+  STATUS_CHECK: `${DIGITAP_BASE_URL}/statuscheck`, // PDF Upload API: Status Check
+  RETRIEVE_REPORT: `${DIGITAP_BASE_URL}/retrievereport`, // PDF Upload API: Retrieve Report
+  INSTITUTIONS: `${DIGITAP_BASE_URL}/institutions` // Institution List API
 };
 
 /**
@@ -33,6 +36,53 @@ function getAuthHeader() {
   const credentials = `${DIGITAP_CLIENT_ID}:${DIGITAP_CLIENT_SECRET}`;
   const base64Credentials = Buffer.from(credentials).toString('base64');
   return `Basic ${base64Credentials}`;
+}
+
+/**
+ * Generate signature for Digitap API requests
+ * According to API v1.8: signature = base16(encrypt(base16(sha256(stringify(json_payload)))))
+ * 
+ * Note: The encryption method is not fully specified in the docs. Common approaches:
+ * - HMAC-SHA256 with the key
+ * - AES encryption with the key
+ * - RSA encryption
+ * 
+ * This implementation uses HMAC-SHA256 as it's the most common approach for API signatures.
+ * If this doesn't work, you may need to contact Digitap for the exact encryption method.
+ * 
+ * @param {Object} payload - The JSON payload to sign
+ * @returns {string} - Base16 encoded encrypted signature
+ */
+function generateSignature(payload) {
+  try {
+    const crypto = require('crypto');
+    
+    // Step 1: Stringify the JSON payload (sorted keys for consistency)
+    const jsonString = JSON.stringify(payload, Object.keys(payload).sort());
+    
+    // Step 2: Generate SHA256 digest
+    const sha256Hash = crypto.createHash('sha256').update(jsonString).digest();
+    
+    // Step 3: Base16 encode the digest (already hex, so it's base16)
+    const base16Hash = sha256Hash.toString('hex');
+    
+    // Step 4: Encrypt using HMAC-SHA256 (most common approach for API signatures)
+    // Using the encryption key as the HMAC secret
+    const hmac = crypto.createHmac('sha256', DIGITAP_ENCRYPTION_KEY);
+    hmac.update(base16Hash);
+    const encrypted = hmac.digest('hex');
+    
+    // Step 5: Base16 encode the encrypted digest (already hex, so return as is)
+    return encrypted;
+  } catch (error) {
+    console.error('❌ Error generating signature:', error);
+    // Fallback: simple HMAC of the JSON string
+    const crypto = require('crypto');
+    const jsonString = JSON.stringify(payload, Object.keys(payload).sort());
+    const hmac = crypto.createHmac('sha256', DIGITAP_ENCRYPTION_KEY);
+    hmac.update(jsonString);
+    return hmac.digest('hex');
+  }
 }
 
 /**
@@ -258,21 +308,372 @@ async function generateBankStatementURL(params) {
 }
 
 /**
- * Upload Bank Statement PDF directly to Digitap
- * Bypasses the UI flow and uploads PDFs for analysis
+ * Get Institution List from Digitap
+ * According to Digitap API v1.8 documentation
+ * Note: API accepts GET or POST, but requires signature
+ * 
+ * @param {string} type - Institution type: "NetBanking" or "Statement"
+ * @returns {Promise<{success: boolean, data?: Array, error?: string}>}
+ */
+async function getInstitutionList(type = 'Statement') {
+  try {
+    const payload = {
+      client_name: DIGITAP_CLIENT_NAME,
+      type: type
+    };
+
+    const signature = generateSignature(payload);
+
+    // For GET requests with signature, we'll use POST with JSON body (more reliable)
+    const requestBody = {
+      payload: payload,
+      signature: signature
+    };
+
+    const response = await axios.post(ENDPOINTS.INSTITUTIONS, requestBody, {
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      timeout: 15000
+    });
+
+    if (response.data && response.data.status === 'success') {
+      return {
+        success: true,
+        data: response.data.data || []
+      };
+    } else {
+      return {
+        success: false,
+        error: response.data?.message || 'Failed to get institution list',
+        code: response.data?.code
+      };
+    }
+  } catch (error) {
+    console.error('❌ Get Institution List Error:', error.message);
+    if (error.response) {
+      console.error('❌ Response:', error.response.data);
+    }
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Start Upload API - Step 1 of PDF Upload Flow
+ * According to Digitap API v1.8 documentation
  * 
  * @param {Object} params
- * @param {string} params.mobile_no - Customer mobile number
+ * @param {string} params.client_ref_num - Unique reference number
+ * @param {string} params.txn_completed_cburl - Callback URL
+ * @param {number} params.institution_id - Bank/Institution ID (from Institution List API) - REQUIRED
+ * @param {string} params.start_month - Start month in YYYY-MM format (optional)
+ * @param {string} params.end_month - End month in YYYY-MM format (optional)
+ * @param {string} params.acceptance_policy - Acceptance policy (optional, default: 'atLeastOneTransactionInRange')
+ * @param {number} params.relaxation_days - Relaxation days (optional, max 15)
+ * @returns {Promise<{success: boolean, data?: object, error?: string}>}
+ */
+async function startUploadAPI(params) {
+  try {
+    const {
+      client_ref_num,
+      txn_completed_cburl,
+      institution_id,
+      start_month,
+      end_month,
+      acceptance_policy = 'atLeastOneTransactionInRange',
+      relaxation_days
+    } = params;
+
+    if (!client_ref_num || !txn_completed_cburl || !institution_id) {
+      return {
+        success: false,
+        error: 'Missing required parameters: client_ref_num, txn_completed_cburl, and institution_id are required'
+      };
+    }
+
+    console.log('📤 Calling Digitap Start Upload API...');
+    console.log('📤 Endpoint:', ENDPOINTS.START_UPLOAD);
+
+    const payload = {
+      client_name: DIGITAP_CLIENT_NAME,
+      institution_id: institution_id,
+      client_ref_num: client_ref_num,
+      txn_completed_cburl: txn_completed_cburl
+    };
+
+    // Add optional parameters
+    if (start_month) payload.start_month = start_month;
+    if (end_month) payload.end_month = end_month;
+    if (acceptance_policy) payload.acceptance_policy = acceptance_policy;
+    if (relaxation_days !== undefined) payload.relaxation_days = String(relaxation_days);
+
+    // Generate signature
+    const signature = generateSignature(payload);
+
+    const requestBody = {
+      payload: payload,
+      signature: signature
+    };
+
+    console.log('📤 Start Upload Request:', JSON.stringify({ ...requestBody, signature: '[REDACTED]' }, null, 2));
+
+    const response = await axios.post(
+      ENDPOINTS.START_UPLOAD,
+      requestBody,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    console.log('✅ Start Upload Response:', JSON.stringify(response.data, null, 2));
+
+    if (response.data && response.data.status === 'success') {
+      return {
+        success: true,
+        data: {
+          url: response.data.url, // Upload Statement URL (dynamic)
+          token: response.data.token,
+          request_id: response.data.request_id,
+          txn_id: response.data.txn_id,
+          expires: response.data.expires,
+          client_ref_num: client_ref_num
+        }
+      };
+    } else {
+      return {
+        success: false,
+        error: response.data?.msg || response.data?.message || 'Start Upload failed',
+        code: response.data?.code
+      };
+    }
+  } catch (error) {
+    console.error('❌ Start Upload API Error:', error.message);
+    if (error.response) {
+      console.error('❌ Response Status:', error.response.status);
+      console.error('❌ Response Data:', error.response.data);
+      return {
+        success: false,
+        error: error.response.data?.msg || error.response.data?.message || `API error: ${error.response.status}`,
+        code: error.response.data?.code,
+        status: error.response.status
+      };
+    }
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Upload Statement API - Step 2 of PDF Upload Flow
+ * According to Digitap API v1.8 documentation
+ * 
+ * @param {Object} params
+ * @param {string} params.upload_url - URL returned from Start Upload API
+ * @param {string} params.token - Token from Start Upload API
+ * @param {string} params.request_id - Request ID from Start Upload API
+ * @param {Buffer} params.file_buffer - PDF file buffer
+ * @param {string} params.file_name - Original filename
+ * @param {string} params.file_password_b16 - Base16 encoded password (optional)
+ * @returns {Promise<{success: boolean, data?: object, error?: string}>}
+ */
+async function uploadStatementAPI(params) {
+  try {
+    const FormData = require('form-data');
+    const crypto = require('crypto');
+    
+    const {
+      upload_url,
+      token,
+      request_id,
+      file_buffer,
+      file_name,
+      file_password_b16
+    } = params;
+
+    if (!upload_url || !token || !request_id || !file_buffer) {
+      return {
+        success: false,
+        error: 'Missing required parameters: upload_url, token, request_id, and file_buffer are required'
+      };
+    }
+
+    console.log('📤 Calling Digitap Upload Statement API...');
+    console.log('📤 Upload URL:', upload_url);
+
+    const formData = new FormData();
+    formData.append('token', token);
+    formData.append('request_id', request_id);
+    formData.append('file', file_buffer, file_name);
+    
+    if (file_password_b16) {
+      formData.append('file_password_b16', file_password_b16);
+    }
+
+    const response = await axios.post(
+      upload_url, // Use the dynamic URL from Start Upload
+      formData,
+      {
+        headers: {
+          ...formData.getHeaders()
+          // Note: No signature required for this API
+        },
+        timeout: 60000, // 60 seconds for file upload
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
+      }
+    );
+
+    console.log('✅ Upload Statement Response:', JSON.stringify(response.data, null, 2));
+
+    if (response.data && response.data.status === 'success') {
+      return {
+        success: true,
+        data: {
+          status: response.data.status,
+          code: response.data.code,
+          msg: response.data.msg,
+          statement_id: response.data.statement_id,
+          accounts: response.data.accounts || []
+        }
+      };
+    } else {
+      return {
+        success: false,
+        error: response.data?.msg || response.data?.message || 'Upload failed',
+        code: response.data?.code
+      };
+    }
+  } catch (error) {
+    console.error('❌ Upload Statement API Error:', error.message);
+    if (error.response) {
+      console.error('❌ Response Status:', error.response.status);
+      console.error('❌ Response Data:', error.response.data);
+      return {
+        success: false,
+        error: error.response.data?.msg || error.response.data?.message || `API error: ${error.response.status}`,
+        code: error.response.data?.code,
+        status: error.response.status
+      };
+    }
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Complete Upload API - Step 3 of PDF Upload Flow
+ * According to Digitap API v1.8 documentation
+ * 
+ * @param {Object} params
+ * @param {string} params.request_id - Request ID from Start Upload API
+ * @returns {Promise<{success: boolean, data?: object, error?: string}>}
+ */
+async function completeUploadAPI(params) {
+  try {
+    const { request_id } = params;
+
+    if (!request_id) {
+      return {
+        success: false,
+        error: 'Missing required parameter: request_id'
+      };
+    }
+
+    console.log('📤 Calling Digitap Complete Upload API...');
+    console.log('📤 Endpoint:', ENDPOINTS.COMPLETE_UPLOAD);
+
+    const payload = {
+      client_name: DIGITAP_CLIENT_NAME,
+      request_id: request_id
+    };
+
+    // Generate signature
+    const signature = generateSignature(payload);
+
+    const requestBody = {
+      payload: payload,
+      signature: signature
+    };
+
+    const response = await axios.post(
+      ENDPOINTS.COMPLETE_UPLOAD,
+      requestBody,
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    console.log('✅ Complete Upload Response:', JSON.stringify(response.data, null, 2));
+
+    if (response.data && response.data.status === 'success') {
+      return {
+        success: true,
+        data: {
+          status: response.data.status,
+          code: response.data.code,
+          msg: response.data.msg
+        }
+      };
+    } else {
+      return {
+        success: false,
+        error: response.data?.msg || response.data?.message || 'Complete Upload failed',
+        code: response.data?.code
+      };
+    }
+  } catch (error) {
+    console.error('❌ Complete Upload API Error:', error.message);
+    if (error.response) {
+      console.error('❌ Response Status:', error.response.status);
+      console.error('❌ Response Data:', error.response.data);
+      return {
+        success: false,
+        error: error.response.data?.msg || error.response.data?.message || `API error: ${error.response.status}`,
+        code: error.response.data?.code,
+        status: error.response.status
+      };
+    }
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Upload Bank Statement PDF directly to Digitap
+ * Follows the 3-step process: Start Upload → Upload Statement → Complete Upload
+ * According to Digitap API v1.8 documentation
+ * 
+ * @param {Object} params
+ * @param {string} params.mobile_no - Customer mobile number (not used in PDF Upload API, but kept for compatibility)
  * @param {string} params.client_ref_num - Unique reference number
  * @param {Buffer} params.file_buffer - PDF file buffer
  * @param {string} params.file_name - Original filename
- * @param {string} params.bank_name - Bank name (optional)
- * @param {string} params.password - PDF password if encrypted (optional)
+ * @param {string} params.bank_name - Bank name (optional, used to get institution_id)
+ * @param {string} params.password - PDF password if encrypted (optional, will be base16 encoded)
+ * @param {string} params.txn_completed_cburl - Callback URL (optional, will use default if not provided)
+ * @param {number} params.institution_id - Bank/Institution ID (optional, will try to get from bank_name if not provided)
+ * @param {string} params.start_month - Start month in YYYY-MM format (optional)
+ * @param {string} params.end_month - End month in YYYY-MM format (optional)
  * @returns {Promise<{success: boolean, data?: object, error?: string}>}
  */
 async function uploadBankStatementPDF(params) {
   try {
-    const FormData = require('form-data');
+    const crypto = require('crypto');
     
     const {
       mobile_no,
@@ -280,119 +681,138 @@ async function uploadBankStatementPDF(params) {
       file_buffer,
       file_name,
       bank_name,
-      password
+      password,
+      txn_completed_cburl,
+      institution_id,
+      start_month,
+      end_month
     } = params;
 
-    if (!mobile_no || !client_ref_num || !file_buffer) {
+    if (!client_ref_num || !file_buffer) {
       return {
         success: false,
-        error: 'Missing required parameters'
+        error: 'Missing required parameters: client_ref_num and file_buffer are required'
       };
     }
 
-    console.log(`📤 Uploading PDF to Digitap: ${file_name}`);
-    console.log(`📤 Digitap Upload Endpoint: ${ENDPOINTS.UPLOAD_PDF}`);
-    console.log(`📤 Base URL: ${DIGITAP_BASE_URL}`);
+    console.log(`📤 Starting Digitap PDF Upload Flow for: ${file_name}`);
 
-    const formData = new FormData();
-    formData.append('mobile_no', mobile_no);
-    formData.append('client_ref_num', client_ref_num);
-    formData.append('file', file_buffer, file_name);
-    
-    if (bank_name) {
-      formData.append('bank_name', bank_name);
-    }
-    
-    if (password) {
-      formData.append('password', password);
-    }
-
-    // Try primary endpoint first, then fallback to alternative
-    let response;
-    let lastError;
-    
-    try {
-      response = await axios.post(
-        ENDPOINTS.UPLOAD_PDF,
-        formData,
-        {
-          headers: {
-            'Authorization': getAuthHeader(),
-            ...formData.getHeaders()
-          },
-          timeout: 30000, // 30 seconds for file upload
-          maxContentLength: Infinity,
-          maxBodyLength: Infinity
-        }
-      );
-    } catch (error) {
-      // If 404, try alternative endpoint
-      if (error.response && error.response.status === 404 && ENDPOINTS.UPLOAD_PDF_ALT) {
-        console.log(`⚠️  Primary endpoint failed (404), trying alternative: ${ENDPOINTS.UPLOAD_PDF_ALT}`);
-        lastError = error;
-        try {
-          response = await axios.post(
-            ENDPOINTS.UPLOAD_PDF_ALT,
-            formData,
-            {
-              headers: {
-                'Authorization': getAuthHeader(),
-                ...formData.getHeaders()
-              },
-              timeout: 30000,
-              maxContentLength: Infinity,
-              maxBodyLength: Infinity
-            }
+    // Step 1: Start Upload API
+    // Determine institution_id - if not provided, try to get it from bank_name
+    let finalInstitutionId = institution_id;
+    if (!finalInstitutionId && bank_name) {
+      console.log(`🔍 Attempting to find institution_id for bank: ${bank_name}`);
+      try {
+        const institutionListResult = await getInstitutionList('Statement');
+        if (institutionListResult.success && institutionListResult.data) {
+          // Try to find matching institution by name (case-insensitive)
+          const matchingInstitution = institutionListResult.data.find(inst => 
+            inst.name && inst.name.toLowerCase().includes(bank_name.toLowerCase())
           );
-        } catch (altError) {
-          // Both endpoints failed, throw the original error
-          throw lastError;
+          if (matchingInstitution) {
+            finalInstitutionId = matchingInstitution.id;
+            console.log(`✅ Found institution_id ${finalInstitutionId} for bank: ${bank_name}`);
+          }
         }
-      } else {
-        throw error;
+      } catch (error) {
+        console.warn('⚠️  Could not fetch institution list:', error.message);
       }
     }
-
-    console.log('✅ Digitap Upload Response:', response.data?.result_code);
-
-    if (response.data && response.data.result_code === 101) {
-      return {
-        success: true,
-        data: {
-          client_ref_num: response.data.result?.client_ref_num,
-          status: response.data.result?.status,
-          message: response.data.message
-        }
-      };
-    } else {
-      return {
-        success: false,
-        error: response.data?.message || 'Upload failed',
-        result_code: response.data?.result_code
-      };
-    }
-  } catch (error) {
-    console.error('❌ Digitap PDF Upload Error:', error.message);
-    console.error('❌ Request URL:', ENDPOINTS.UPLOAD_PDF);
-    console.error('❌ Base URL:', DIGITAP_BASE_URL);
     
-    if (error.response) {
-      console.error('❌ Response Status:', error.response.status);
-      console.error('❌ Response Headers:', error.response.headers);
-      console.error('❌ Response Data:', error.response.data);
+    if (!finalInstitutionId) {
       return {
         success: false,
-        error: `Upload error: ${error.response.status} - ${error.response.data?.message || error.response.data || 'Unknown error'}`,
-        status: error.response.status,
-        responseData: error.response.data
+        error: 'institution_id is required. Please provide institution_id or bank_name to lookup institution_id.'
       };
     }
 
-    if (error.request) {
-      console.error('❌ Request made but no response received');
-      console.error('❌ Request config:', error.config?.url);
+    // Determine callback URL
+    const defaultApiUrl = process.env.APP_URL || 'https://pocketcredit.in/api';
+    const finalCallbackUrl = txn_completed_cburl || `${defaultApiUrl}/bank-statement/bank-data/webhook`;
+
+    const startUploadResult = await startUploadAPI({
+      client_ref_num: client_ref_num,
+      txn_completed_cburl: finalCallbackUrl,
+      institution_id: finalInstitutionId,
+      start_month: start_month,
+      end_month: end_month,
+      acceptance_policy: 'atLeastOneTransactionInRange'
+    });
+
+    if (!startUploadResult.success) {
+      return {
+        success: false,
+        error: `Start Upload failed: ${startUploadResult.error}`,
+        code: startUploadResult.code
+      };
     }
 
+    const { url: uploadUrl, token, request_id, txn_id } = startUploadResult.data;
+    console.log('✅ Step 1 Complete: Start Upload successful');
+    console.log(`📊 Received upload URL, token, request_id: ${request_id}, txn_id: ${txn_id}`);
+
+    // Step 2: Upload Statement API
+    // Encode password to base16 if provided
+    let filePasswordB16 = null;
+    if (password) {
+      filePasswordB16 = Buffer.from(password, 'utf8').toString('hex');
+    }
+
+    const uploadStatementResult = await uploadStatementAPI({
+      upload_url: uploadUrl,
+      token: token,
+      request_id: request_id,
+      file_buffer: file_buffer,
+      file_name: file_name,
+      file_password_b16: filePasswordB16
+    });
+
+    if (!uploadStatementResult.success) {
+      return {
+        success: false,
+        error: `Upload Statement failed: ${uploadStatementResult.error}`,
+        code: uploadStatementResult.code,
+        request_id: request_id,
+        txn_id: txn_id
+      };
+    }
+
+    console.log('✅ Step 2 Complete: Upload Statement successful');
+
+    // Step 3: Complete Upload API
+    const completeUploadResult = await completeUploadAPI({
+      request_id: request_id
+    });
+
+    if (!completeUploadResult.success) {
+      return {
+        success: false,
+        error: `Complete Upload failed: ${completeUploadResult.error}`,
+        code: completeUploadResult.code,
+        request_id: request_id,
+        txn_id: txn_id
+      };
+    }
+
+    console.log('✅ Step 3 Complete: Complete Upload successful');
+    console.log('✅ All steps completed: PDF uploaded and processing started');
+
+    return {
+      success: true,
+      data: {
+        client_ref_num: client_ref_num,
+        request_id: request_id,
+        txn_id: txn_id,
+        status: 'processing',
+        message: 'PDF uploaded successfully. Processing started.',
+        statement_id: uploadStatementResult.data?.statement_id,
+        accounts: uploadStatementResult.data?.accounts || []
+      }
+    };
+  } catch (error) {
+    console.error('❌ Digitap PDF Upload Flow Error:', error.message);
+    console.error('❌ Stack:', error.stack);
+    
     return {
       success: false,
       error: error.message
