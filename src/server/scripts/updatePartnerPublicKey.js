@@ -6,8 +6,26 @@
  *   node src/server/scripts/updatePartnerPublicKey.js <partner_uuid> --content "<pem_content>"
  */
 
-const fs = require('fs');
+// Load environment variables first
+// Try multiple possible .env file locations
 const path = require('path');
+const dotenv = require('dotenv');
+const fs = require('fs');
+
+// Try server directory first (most common location)
+const serverEnvPath = path.join(__dirname, '../.env');
+const rootEnvPath = path.join(__dirname, '../../../.env');
+
+if (fs.existsSync(serverEnvPath)) {
+  dotenv.config({ path: serverEnvPath });
+} else if (fs.existsSync(rootEnvPath)) {
+  dotenv.config({ path: rootEnvPath });
+} else {
+  // Fallback to default dotenv behavior (looks for .env in current working directory)
+  dotenv.config();
+}
+
+// fs and path already required above
 const { findPartnerByUuid } = require('../models/partner');
 const { executeQuery, initializeDatabase } = require('../config/database');
 
