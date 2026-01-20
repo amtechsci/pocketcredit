@@ -98,18 +98,35 @@ const authenticatePartnerToken = async (req, res, next) => {
       });
     }
 
-    // Verify JWT token
+    // Verify JWT token with clock tolerance (60 seconds) to handle clock skew
     let decoded;
     try {
-      decoded = jwt.verify(token, PARTNER_JWT_SECRET);
+      decoded = jwt.verify(token, PARTNER_JWT_SECRET, {
+        clockTolerance: 60 // Allow 60 seconds clock skew to handle server/client time differences
+      });
     } catch (error) {
       if (error.name === 'TokenExpiredError') {
+        // Try to decode without verification to get expiration info for debugging
+        let tokenInfo = null;
+        try {
+          tokenInfo = jwt.decode(token);
+        } catch (e) {
+          // Ignore decode errors
+        }
+        
+        console.error('Token expired error:', {
+          tokenExp: tokenInfo?.exp,
+          currentTime: Math.floor(Date.now() / 1000),
+          timeDiff: tokenInfo?.exp ? Math.floor(Date.now() / 1000) - tokenInfo.exp : 'N/A',
+          error: error.message
+        });
         return res.status(401).json({
           status: false,
           code: 4117,
           message: 'Token expired'
         });
       }
+      console.error('Token verification error:', error.name, error.message);
       return res.status(401).json({
         status: false,
         code: 4118,
@@ -196,7 +213,9 @@ const generatePartnerRefreshToken = (partner) => {
  */
 const verifyRefreshToken = (token) => {
   try {
-    const decoded = jwt.verify(token, PARTNER_JWT_SECRET);
+    const decoded = jwt.verify(token, PARTNER_JWT_SECRET, {
+      clockTolerance: 60 // Allow 60 seconds clock skew to handle server/client time differences
+    });
     
     if (decoded.type !== 'refresh_token') {
       throw new Error('Invalid token type');
