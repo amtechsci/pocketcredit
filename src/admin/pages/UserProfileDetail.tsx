@@ -3324,17 +3324,43 @@ export function UserProfileDetail() {
 
       setVerifyingStatement(true);
       try {
-        // No file upload needed - backend will use existing file from S3 and generate Digitap URL
-        const response = await adminApiService.triggerBankStatementVerification(params.userId, null);
-        if (response.success) {
-          toast.success('Verification initiated successfully');
+        // Call Start Upload API to get upload URL
+        const response = await adminApiService.startBankStatementUpload(params.userId);
+        if (response.success && response.data?.uploadUrl) {
+          toast.success('Upload URL generated. Redirecting to Digitap...');
+          // Redirect admin to Digitap upload URL
+          window.open(response.data.uploadUrl, '_blank');
+          // Refresh statement data to get updated status
           await fetchBankStatement();
         } else {
-          toast.error(response.message || 'Failed to trigger verification');
+          toast.error(response.message || 'Failed to generate upload URL');
         }
       } catch (error: any) {
         console.error('Verification error:', error);
-        toast.error(error.message || 'Failed to trigger verification');
+        toast.error(error.message || 'Failed to generate upload URL');
+      } finally {
+        setVerifyingStatement(false);
+      }
+    };
+
+    const handleCompleteUpload = async () => {
+      if (!params.userId) {
+        toast.error('User ID not found');
+        return;
+      }
+
+      setVerifyingStatement(true);
+      try {
+        const response = await adminApiService.completeBankStatementUpload(params.userId);
+        if (response.success) {
+          toast.success('Upload completed. Processing has started.');
+          await fetchBankStatement();
+        } else {
+          toast.error(response.message || 'Failed to complete upload');
+        }
+      } catch (error: any) {
+        console.error('Complete upload error:', error);
+        toast.error(error.message || 'Failed to complete upload');
       } finally {
         setVerifyingStatement(false);
       }
@@ -3513,10 +3539,31 @@ export function UserProfileDetail() {
               <div className="space-y-4">
                 <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                   <p className="text-sm text-yellow-800 mb-2">
-                    Verification is in progress. You can check the status or fetch the report when ready.
+                    {statement.request_id ? 
+                      'After uploading the file on Digitap, click "Complete Upload" to finalize the upload process and start verification. Then check status to see the progress.' :
+                      'Verification is in progress. You can check the status or fetch the report when ready.'}
                   </p>
                 </div>
                 <div className="flex gap-3">
+                  {statement.request_id && (
+                    <Button
+                      onClick={handleCompleteUpload}
+                      disabled={verifyingStatement}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      {verifyingStatement ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Completing...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="w-4 h-4 mr-2" />
+                          Complete Upload
+                        </>
+                      )}
+                    </Button>
+                  )}
                   <Button
                     onClick={handleCheckStatus}
                     disabled={loadingStatement}

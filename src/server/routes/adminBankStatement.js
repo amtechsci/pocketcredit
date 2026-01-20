@@ -7,7 +7,10 @@ const {
   checkBankStatementStatus,
   retrieveBankStatementReport,
   generateClientRefNum,
-  generateBankStatementURL
+  generateBankStatementURL,
+  startUploadAPI,
+  getInstitutionList,
+  completeUploadAPI
 } = require('../services/digitapBankStatementService');
 const { getPresignedUrl, downloadFromS3 } = require('../services/s3Service');
 const { logActivity } = require('../middleware/activityLogger');
@@ -416,6 +419,50 @@ router.post('/:userId/verify-with-file', authenticateAdmin, async (req, res) => 
           statusMessage = 'Bank statement sent to Digitap for verification';
         }
 
+        // Handle verified_by column - admins table uses UUID (varchar(36)) but verified_by might be INT
+        // Check if verified_by column exists and modify it if needed to accept UUIDs
+        let verifiedByValue = adminId;
+        try {
+          // Check if column exists
+          const columns = await executeQuery(
+            `SHOW COLUMNS FROM user_bank_statements LIKE 'verified_by'`
+          );
+          
+          if (columns.length > 0) {
+            const columnType = columns[0].Type.toLowerCase();
+            // If column is INT but adminId is UUID (string), modify column to VARCHAR(36)
+            if (columnType.includes('int') && typeof adminId === 'string' && adminId.includes('-')) {
+              console.log(`⚠️  verified_by column is INT but admin.id is UUID. Modifying column to VARCHAR(36)...`);
+              try {
+                await executeQuery(
+                  `ALTER TABLE user_bank_statements MODIFY verified_by VARCHAR(36) NULL COMMENT 'Admin UUID who verified'`
+                );
+                console.log('✅ Modified verified_by column to accept UUIDs');
+              } catch (alterError) {
+                console.warn('⚠️  Could not modify verified_by column:', alterError.message);
+                // If modification fails, set to NULL
+                verifiedByValue = null;
+              }
+            }
+          } else {
+            // Column doesn't exist, create it as VARCHAR(36) to accept UUIDs
+            console.log('📝 Creating verified_by column as VARCHAR(36)...');
+            try {
+              await executeQuery(
+                `ALTER TABLE user_bank_statements ADD COLUMN verified_by VARCHAR(36) NULL COMMENT 'Admin UUID who verified' AFTER verification_status`
+              );
+              console.log('✅ Created verified_by column');
+            } catch (addError) {
+              console.warn('⚠️  Could not add verified_by column:', addError.message);
+              verifiedByValue = null;
+            }
+          }
+        } catch (colError) {
+          console.warn('⚠️  Could not check verified_by column:', colError.message);
+          // If we can't determine, set to NULL to avoid errors
+          verifiedByValue = null;
+        }
+
         await executeQuery(
           `UPDATE user_bank_statements 
            SET verification_status = ?,
@@ -425,7 +472,7 @@ router.post('/:userId/verify-with-file', authenticateAdmin, async (req, res) => 
                verified_at = NOW(),
                updated_at = NOW()
            WHERE id = ?`,
-          [verificationStatus, requestId, txnId, adminId, statementId]
+          [verificationStatus, requestId, txnId, verifiedByValue, statementId]
         );
 
         // Log activity
@@ -744,6 +791,285 @@ router.post('/:userId/update-decision', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to update verification decision'
+    });
+  }
+});
+
+/**
+ * POST /api/admin/bank-statement/:userId/start-upload
+ * Start Digitap upload process - returns upload URL for admin to redirect to
+ * This endpoint calls Digitap Start Upload API and returns the upload URL
+ */
+router.post('/:userId/start-upload', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+    const adminId = req.admin?.id;
+    const { institution_id, start_month, end_month } = req.body;
+
+    if (!adminId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Admin authentication required'
+      });
+    }
+
+    // Get the bank statement
+    const statements = await executeQuery(
+      `SELECT id, user_id, client_ref_num, file_path, file_name, mobile_number, bank_name, verification_status
+       FROM user_bank_statements 
+       WHERE user_id = ? 
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId]
+    );
+
+    if (statements.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No bank statement found for this user'
+      });
+    }
+
+    const statement = statements[0];
+
+    if (!statement.file_path) {
+      return res.status(400).json({
+        success: false,
+        message: 'Bank statement file not found'
+      });
+    }
+
+    // Check if verification is already in progress
+    if (statement.verification_status === 'api_verification_pending' || 
+        statement.verification_status === 'api_verified') {
+      return res.status(400).json({
+        success: false,
+        message: 'Verification already in progress or completed'
+      });
+    }
+
+    // Generate or get client_ref_num
+    let clientRefNum = statement.client_ref_num;
+    if (!clientRefNum) {
+      clientRefNum = generateClientRefNum(userId, 0);
+      // Update the statement with client_ref_num
+      await executeQuery(
+        `UPDATE user_bank_statements SET client_ref_num = ? WHERE id = ?`,
+        [clientRefNum, statement.id]
+      );
+    }
+
+    // Determine institution_id
+    let finalInstitutionId = institution_id;
+    
+    // If not provided, try to get from bank_name or institution list
+    if (!finalInstitutionId) {
+      if (statement.bank_name) {
+        try {
+          const institutionListResult = await getInstitutionList('Statement');
+          if (institutionListResult.success && institutionListResult.data && institutionListResult.data.length > 0) {
+            const bankNameLower = statement.bank_name.toLowerCase().trim();
+            const matchingInstitution = institutionListResult.data.find(inst => {
+              if (!inst.name) return false;
+              const instNameLower = inst.name.toLowerCase().trim();
+              return instNameLower.includes(bankNameLower) || bankNameLower.includes(instNameLower);
+            });
+            
+            if (matchingInstitution) {
+              finalInstitutionId = matchingInstitution.id;
+              console.log(`✅ Found institution_id ${finalInstitutionId} for bank: ${statement.bank_name}`);
+            }
+          }
+        } catch (error) {
+          console.warn('⚠️  Could not fetch institution list:', error.message);
+        }
+      }
+      
+      // If still no institution_id, use default
+      if (!finalInstitutionId) {
+        console.warn(`⚠️  No institution_id provided. Using default: 1`);
+        finalInstitutionId = 1; // Default fallback
+      }
+    }
+
+    // Determine callback URL
+    const defaultApiUrl = process.env.APP_URL || 'https://pocketcredit.in/api';
+    const txnCompletedCbUrl = `${defaultApiUrl}/bank-statement/bank-data/webhook`;
+
+    // Call Digitap Start Upload API
+    console.log(`📤 Calling Digitap Start Upload API for user ${userId}...`);
+    
+    const startUploadResult = await startUploadAPI({
+      client_ref_num: clientRefNum,
+      txn_completed_cburl: txnCompletedCbUrl,
+      institution_id: finalInstitutionId,
+      start_month: start_month,
+      end_month: end_month,
+      acceptance_policy: 'atLeastOneTransactionInRange'
+    });
+
+    if (!startUploadResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: `Failed to start upload: ${startUploadResult.error}`,
+        code: startUploadResult.code
+      });
+    }
+
+    const { url: uploadUrl, token, request_id, txn_id, expires } = startUploadResult.data;
+
+    // Update database with request_id, txn_id, and status
+    await executeQuery(
+      `UPDATE user_bank_statements 
+       SET verification_status = 'api_verification_pending',
+           request_id = ?,
+           txn_id = ?,
+           verified_by = ?,
+           verified_at = NOW(),
+           updated_at = NOW()
+       WHERE id = ?`,
+      [request_id, txn_id, adminId, statement.id]
+    );
+
+    // Log activity
+    try {
+      await logActivity({
+        userId: userId,
+        action: 'bank_statement_upload_url_generated',
+        details: {
+          statementId: statement.id,
+          adminId: adminId,
+          clientRefNum: clientRefNum,
+          requestId: request_id,
+          txnId: txn_id,
+          uploadUrl: uploadUrl
+        },
+        adminId: adminId
+      });
+    } catch (logError) {
+      console.warn('Failed to log activity:', logError);
+    }
+
+    console.log(`✅ Upload URL generated for user ${userId}, request_id: ${request_id}`);
+
+    res.json({
+      success: true,
+      message: 'Upload URL generated successfully',
+      data: {
+        uploadUrl: uploadUrl,
+        token: token,
+        requestId: request_id,
+        txnId: txn_id,
+        expires: expires,
+        clientRefNum: clientRefNum,
+        statementId: statement.id
+      }
+    });
+  } catch (error) {
+    console.error('Start upload error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to start upload process'
+    });
+  }
+});
+
+/**
+ * POST /api/admin/bank-statement/:userId/complete-upload
+ * Complete the Digitap upload process after admin has uploaded file
+ * This endpoint calls Digitap Complete Upload API
+ */
+router.post('/:userId/complete-upload', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+    const adminId = req.admin?.id;
+
+    if (!adminId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Admin authentication required'
+      });
+    }
+
+    // Get the bank statement with request_id
+    const statements = await executeQuery(
+      `SELECT id, user_id, request_id, verification_status
+       FROM user_bank_statements 
+       WHERE user_id = ? 
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId]
+    );
+
+    if (statements.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No bank statement found for this user'
+      });
+    }
+
+    const statement = statements[0];
+
+    if (!statement.request_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'No request_id found. Please start upload first.'
+      });
+    }
+
+    if (statement.verification_status !== 'api_verification_pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'Upload is not in pending status. Current status: ' + statement.verification_status
+      });
+    }
+
+    // Call Digitap Complete Upload API
+    console.log(`📤 Calling Digitap Complete Upload API for request_id: ${statement.request_id}...`);
+    
+    const completeUploadResult = await completeUploadAPI({
+      request_id: statement.request_id
+    });
+
+    if (!completeUploadResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: `Failed to complete upload: ${completeUploadResult.error}`,
+        code: completeUploadResult.code
+      });
+    }
+
+    // Log activity
+    try {
+      await logActivity({
+        userId: userId,
+        action: 'bank_statement_upload_completed',
+        details: {
+          statementId: statement.id,
+          adminId: adminId,
+          requestId: statement.request_id
+        },
+        adminId: adminId
+      });
+    } catch (logError) {
+      console.warn('Failed to log activity:', logError);
+    }
+
+    console.log(`✅ Upload completed for user ${userId}, request_id: ${statement.request_id}`);
+
+    res.json({
+      success: true,
+      message: 'Upload completed successfully. Processing has started.',
+      data: {
+        requestId: statement.request_id,
+        status: 'processing'
+      }
+    });
+  } catch (error) {
+    console.error('Complete upload error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to complete upload process'
     });
   }
 });

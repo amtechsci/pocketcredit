@@ -623,6 +623,14 @@ class AdminApiService {
     return this.request('POST', `/bank-statement/${userId}/update-decision`, { decision, notes });
   }
 
+  async startBankStatementUpload(userId: string, options?: { institution_id?: number; start_month?: string; end_month?: string }): Promise<ApiResponse<any>> {
+    return this.request('POST', `/bank-statement/${userId}/start-upload`, options || {});
+  }
+
+  async completeBankStatementUpload(userId: string): Promise<ApiResponse<any>> {
+    return this.request('POST', `/bank-statement/${userId}/complete-upload`);
+  }
+
   async updateUserContactInfo(userId: string, data: {
     email?: string;
     phone?: string;

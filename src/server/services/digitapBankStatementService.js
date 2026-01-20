@@ -20,13 +20,20 @@ const DIGITAP_CLIENT_NAME = process.env.DIGITAP_CLIENT_NAME || '25845721'; // Cl
 const DIGITAP_ENCRYPTION_KEY = process.env.DIGITAP_ENCRYPTION_KEY || process.env.DIGITAP_CLIENT_SECRET; // Key for signature encryption
 
 // Correct API Endpoints for Bank Statement (PDF Upload API v1.8)
+// Note: According to API docs, endpoints may be under /bank-data/ or root level
+// Try both patterns if one fails
 const ENDPOINTS = {
   GENERATE_URL: `${DIGITAP_BASE_URL}/bank-data/generateurl`,
-  START_UPLOAD: `${DIGITAP_BASE_URL}/startupload`, // PDF Upload API: Start Upload
-  COMPLETE_UPLOAD: `${DIGITAP_BASE_URL}/completeupload`, // PDF Upload API: Complete Upload
-  STATUS_CHECK: `${DIGITAP_BASE_URL}/statuscheck`, // PDF Upload API: Status Check
-  RETRIEVE_REPORT: `${DIGITAP_BASE_URL}/retrievereport`, // PDF Upload API: Retrieve Report
-  INSTITUTIONS: `${DIGITAP_BASE_URL}/institutions` // Institution List API
+  START_UPLOAD: `${DIGITAP_BASE_URL}/bank-data/startupload`, // Try /bank-data/startupload first
+  START_UPLOAD_ALT: `${DIGITAP_BASE_URL}/startupload`, // Fallback to root level
+  COMPLETE_UPLOAD: `${DIGITAP_BASE_URL}/bank-data/completeupload`,
+  COMPLETE_UPLOAD_ALT: `${DIGITAP_BASE_URL}/completeupload`,
+  STATUS_CHECK: `${DIGITAP_BASE_URL}/bank-data/statuscheck`,
+  STATUS_CHECK_ALT: `${DIGITAP_BASE_URL}/statuscheck`,
+  RETRIEVE_REPORT: `${DIGITAP_BASE_URL}/bank-data/retrievereport`,
+  RETRIEVE_REPORT_ALT: `${DIGITAP_BASE_URL}/retrievereport`,
+  INSTITUTIONS: `${DIGITAP_BASE_URL}/bank-data/institutions`,
+  INSTITUTIONS_ALT: `${DIGITAP_BASE_URL}/institutions`
 };
 
 /**
@@ -395,7 +402,7 @@ async function startUploadAPI(params) {
     }
 
     console.log('📤 Calling Digitap Start Upload API...');
-    console.log('📤 Endpoint:', ENDPOINTS.START_UPLOAD);
+    console.log('📤 Endpoint (primary):', ENDPOINTS.START_UPLOAD);
 
     const payload = {
       client_name: DIGITAP_CLIENT_NAME,
@@ -420,16 +427,44 @@ async function startUploadAPI(params) {
 
     console.log('📤 Start Upload Request:', JSON.stringify({ ...requestBody, signature: '[REDACTED]' }, null, 2));
 
-    const response = await axios.post(
-      ENDPOINTS.START_UPLOAD,
-      requestBody,
-      {
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
+    // Try primary endpoint first, then fallback to alternative
+    let response;
+    let lastError;
+    try {
+      response = await axios.post(
+        ENDPOINTS.START_UPLOAD,
+        requestBody,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          timeout: 30000
+        }
+      );
+    } catch (error) {
+      // If 404, try alternative endpoint
+      if (error.response && error.response.status === 404 && ENDPOINTS.START_UPLOAD_ALT) {
+        console.log(`⚠️  Primary endpoint failed (404), trying alternative: ${ENDPOINTS.START_UPLOAD_ALT}`);
+        lastError = error;
+        try {
+          response = await axios.post(
+            ENDPOINTS.START_UPLOAD_ALT,
+            requestBody,
+            {
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              timeout: 30000
+            }
+          );
+        } catch (altError) {
+          // Both endpoints failed, throw the original error
+          throw lastError;
+        }
+      } else {
+        throw error;
       }
-    );
+    }
 
     console.log('✅ Start Upload Response:', JSON.stringify(response.data, null, 2));
 
@@ -1232,6 +1267,9 @@ module.exports = {
   checkBankStatementStatus,
   retrieveBankStatementReport,
   initiateBankStatementCollection,
-  generateClientRefNum
+  generateClientRefNum,
+  startUploadAPI,
+  getInstitutionList,
+  completeUploadAPI
 };
 
