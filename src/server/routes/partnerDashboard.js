@@ -69,6 +69,18 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
 
     const leads = await executeQuery(query, params);
 
+    // Hide UTM links for registered users (2004) and active users (2006)
+    // Only show UTM links for fresh leads (2005) to match API response behavior
+    const processedLeads = (leads || []).map(lead => {
+      if (lead.dedupe_code === 2004 || lead.dedupe_code === 2006) {
+        return {
+          ...lead,
+          utm_link: null // Hide UTM link for registered/active users
+        };
+      }
+      return lead; // Keep UTM link for fresh leads (2005)
+    });
+
     // Get total count
     let countQuery = `
       SELECT COUNT(*) as total
@@ -100,7 +112,7 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
       code: 2000,
       message: 'Success',
       data: {
-        leads: leads || [],
+        leads: processedLeads,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
@@ -243,11 +255,18 @@ router.get('/lead/:leadId', authenticatePartnerToken, async (req, res) => {
       });
     }
 
+    // Hide UTM links for registered users (2004) and active users (2006)
+    // Only show UTM links for fresh leads (2005) to match API response behavior
+    const leadData = lead[0];
+    if (leadData.dedupe_code === 2004 || leadData.dedupe_code === 2006) {
+      leadData.utm_link = null; // Hide UTM link for registered/active users
+    }
+
     res.json({
       status: true,
       code: 2000,
       message: 'Success',
-      data: lead[0]
+      data: leadData
     });
   } catch (error) {
     console.error('Partner dashboard lead detail error:', error);
