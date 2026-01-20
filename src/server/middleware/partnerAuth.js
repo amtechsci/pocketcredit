@@ -126,11 +126,33 @@ const authenticatePartnerToken = async (req, res, next) => {
           message: 'Token expired'
         });
       }
-      console.error('Token verification error:', error.name, error.message);
+      // Enhanced error logging for debugging
+      let tokenInfo = null;
+      try {
+        tokenInfo = jwt.decode(token);
+      } catch (e) {
+        // Ignore decode errors
+      }
+      
+      console.error('Token verification error:', {
+        errorName: error.name,
+        errorMessage: error.message,
+        tokenInfo: tokenInfo ? {
+          partner_id: tokenInfo.partner_id,
+          client_id: tokenInfo.client_id,
+          type: tokenInfo.type,
+          iat: tokenInfo.iat,
+          exp: tokenInfo.exp,
+          currentTime: Math.floor(Date.now() / 1000),
+          timeDiff: tokenInfo.exp ? Math.floor(Date.now() / 1000) - tokenInfo.exp : 'N/A'
+        } : 'Could not decode token'
+      });
+      
       return res.status(401).json({
         status: false,
         code: 4118,
-        message: 'Invalid access or refresh token'
+        message: 'Invalid access or refresh token',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
 
