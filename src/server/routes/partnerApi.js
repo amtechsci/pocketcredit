@@ -45,8 +45,13 @@ router.post('/login', authenticatePartnerBasic, async (req, res) => {
                                (req.headers['origin'] && req.headers['origin'].includes('pocketcredit.in')) ||
                                (req.headers['referer'] && req.headers['referer'].includes('/partner/'));
 
-    // Only encrypt for API-to-API communication, not for dashboard
+    // Check if client explicitly requests unencrypted response (for testing/debugging)
+    const requestUnencrypted = req.headers['x-no-encryption'] === 'true' || 
+                                req.query.no_encryption === 'true';
+
+    // Only encrypt for API-to-API communication, not for dashboard or when explicitly requested
     const shouldEncrypt = !isDashboardRequest && 
+                         !requestUnencrypted &&
                          process.env.PARTNER_API_ENCRYPTION_ENABLED === 'true' && 
                          partner.public_key_path;
     
