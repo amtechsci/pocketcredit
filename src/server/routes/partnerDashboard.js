@@ -62,8 +62,10 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
       params.push(end_date);
     }
 
-    query += ` ORDER BY pl.lead_shared_at DESC LIMIT ? OFFSET ?`;
-    params.push(parseInt(limit), offset);
+    // Use string interpolation for LIMIT and OFFSET (MySQL doesn't accept them as parameters)
+    const limitValue = parseInt(limit);
+    const offsetValue = parseInt(offset);
+    query += ` ORDER BY pl.lead_shared_at DESC LIMIT ${limitValue} OFFSET ${offsetValue}`;
 
     const leads = await executeQuery(query, params);
 
@@ -143,6 +145,7 @@ router.get('/stats', authenticatePartnerToken, async (req, res) => {
     );
 
     // Get BRE-based approval/rejection stats
+    // Only count FRESH LEADS (2005) for credit checks - registered users are already Pocket Credit users
     // Approved = users who passed BRE (is_eligible = 1 in credit_checks)
     // Rejected = users who failed BRE (is_eligible = 0 OR status = 'on_hold' with Experian Hold reason)
     const breStats = await executeQuery(
@@ -154,7 +157,8 @@ router.get('/stats', authenticatePartnerToken, async (req, res) => {
       FROM partner_leads pl
       LEFT JOIN users u ON pl.user_id = u.id
       LEFT JOIN credit_checks cc ON u.id = cc.user_id
-      WHERE pl.partner_id = ?`,
+      WHERE pl.partner_id = ? 
+      AND pl.dedupe_status = 'fresh_lead'`,
       [partner.id]
     );
 
@@ -181,9 +185,10 @@ router.get('/stats', authenticatePartnerToken, async (req, res) => {
       total_leads_with_credit_check: totalWithCreditCheck,
       approval_rate_percent: parseFloat(approvalRate),
       rejection_rate_percent: parseFloat(rejectionRate),
-      // API cost tracking (assuming each credit check costs money)
-      total_credit_checks: totalWithCreditCheck,
-      wasted_credit_checks: rejectedLeads // Rejected leads = wasted API calls
+      // API cost tracking - only fresh leads count as payable credit checks
+      // Registered users are already Pocket Credit users, so they don't count as payable
+      total_credit_checks: totalWithCreditCheck, // Only fresh leads (2005)
+      wasted_credit_checks: rejectedLeads // Rejected fresh leads = wasted API calls
     };
 
     res.json({
