@@ -82,7 +82,8 @@ const createPartner = async (partnerData) => {
       client_secret,
       name,
       email = null,
-      public_key_path = null
+      public_key_path = null,
+      allowed_ips = null
     } = partnerData;
 
     // Hash the client secret
@@ -90,11 +91,11 @@ const createPartner = async (partnerData) => {
 
     const query = `
       INSERT INTO partners (
-        partner_uuid, client_id, client_secret, name, email, public_key_path, is_active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
+        partner_uuid, client_id, client_secret, name, email, public_key_path, allowed_ips, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
     `;
 
-    const values = [partner_uuid, client_id, hashedSecret, name, email, public_key_path];
+    const values = [partner_uuid, client_id, hashedSecret, name, email, public_key_path, allowed_ips];
     const result = await executeQuery(query, values);
 
     return {

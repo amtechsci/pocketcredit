@@ -44,8 +44,12 @@ async function createPartnerInteractive() {
     const name = await question('Partner Name: ');
     const email = await question('Partner Email (optional): ') || null;
     const publicKeyPath = await question('Public Key Path (optional, for encryption): ') || null;
+    const allowedIps = await question('Allowed IPs (optional, comma-separated, empty = allow all): ') || null;
 
     console.log('\nCreating partner...');
+
+    // Normalize IP whitelist (empty string = null = allow all)
+    const normalizedIps = allowedIps && allowedIps.trim() !== '' ? allowedIps.trim() : null;
 
     const partner = await createPartner({
       partner_uuid: partnerUuid,
@@ -53,7 +57,8 @@ async function createPartnerInteractive() {
       client_secret: clientSecret,
       name,
       email,
-      public_key_path: publicKeyPath
+      public_key_path: publicKeyPath,
+      allowed_ips: normalizedIps
     });
 
     console.log('\n✅ Partner created successfully!');
@@ -65,6 +70,7 @@ async function createPartnerInteractive() {
     console.log(`  Email: ${partner.email || 'N/A'}`);
     console.log(`  Active: ${partner.is_active ? 'Yes' : 'No'}`);
     console.log(`  Public Key Path: ${publicKeyPath || 'Not configured'}`);
+    console.log(`  Allowed IPs: ${normalizedIps || 'All IPs allowed'}`);
     
     console.log('\n📋 Credentials:');
     console.log(`  Client ID: ${clientId}`);
@@ -91,13 +97,18 @@ async function createPartnerFromArgs() {
     const name = process.argv[5];
     const email = process.argv[6] || null;
     const publicKeyPath = process.argv[7] || null;
+    const allowedIps = process.argv[8] || null;
 
     if (!partnerUuid || !clientId || !clientSecret || !name) {
-      console.log('Usage: node src/server/scripts/createPartner.js <partner_uuid> <client_id> <client_secret> <name> [email] [public_key_path]');
+      console.log('Usage: node src/server/scripts/createPartner.js <partner_uuid> <client_id> <client_secret> <name> [email] [public_key_path] [allowed_ips]');
       console.log('\nExample:');
       console.log('  node src/server/scripts/createPartner.js PC_ABC123 PC_9999 MySecret123 "Partner Name" partner@example.com');
+      console.log('  node src/server/scripts/createPartner.js PC_ABC123 PC_9999 MySecret123 "Partner Name" partner@example.com "" "192.168.1.1,10.0.0.1"');
       process.exit(1);
     }
+    
+    // Normalize IP whitelist (empty string = null = allow all)
+    const normalizedIps = allowedIps && allowedIps.trim() !== '' ? allowedIps.trim() : null;
 
     console.log('\n🔐 Creating new partner...\n');
 
@@ -107,7 +118,8 @@ async function createPartnerFromArgs() {
       client_secret: clientSecret,
       name,
       email,
-      public_key_path: publicKeyPath
+      public_key_path: publicKeyPath,
+      allowed_ips: normalizedIps
     });
 
     console.log('✅ Partner created successfully!\n');
@@ -119,6 +131,7 @@ async function createPartnerFromArgs() {
     console.log(`  Email: ${partner.email || 'N/A'}`);
     console.log(`  Active: ${partner.is_active ? 'Yes' : 'No'}`);
     console.log(`  Public Key Path: ${publicKeyPath || 'Not configured'}`);
+    console.log(`  Allowed IPs: ${normalizedIps || 'All IPs allowed'}`);
     
     console.log('\n📋 Credentials:');
     console.log(`  Client ID: ${clientId}`);

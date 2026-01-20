@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { findPartnerByUuid } = require('../models/partner');
+const { getIpAddress } = require('../utils/loginDataParser');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'pocket-credit-secret-key-2025';
 const PARTNER_JWT_SECRET = process.env.PARTNER_JWT_SECRET || JWT_SECRET;
@@ -57,6 +58,49 @@ const authenticatePartnerBasic = async (req, res, next) => {
         code: 4111,
         message: 'Invalid API credentials: Client Secret does not match'
       });
+    }
+
+    // Check IP whitelist (if configured)
+    if (partner.allowed_ips && partner.allowed_ips.trim() !== '') {
+      const clientIp = getIpAddress(req);
+      const allowedIps = partner.allowed_ips.split(',').map(ip => ip.trim()).filter(ip => ip);
+      
+      // Check if client IP is in whitelist
+      const isIpAllowed = allowedIps.some(allowedIp => {
+        // Support exact match and CIDR notation (basic support)
+        if (allowedIp === clientIp) {
+          return true;
+        }
+        // Support CIDR notation (e.g., 192.168.1.0/24)
+        if (allowedIp.includes('/')) {
+          const [network, prefixLength] = allowedIp.split('/');
+          const prefix = parseInt(prefixLength);
+          if (isNaN(prefix)) return false;
+          
+          // Simple CIDR check (for IPv4)
+          const ipToNumber = (ip) => {
+            return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0) >>> 0;
+          };
+          
+          const networkNum = ipToNumber(network);
+          const clientNum = ipToNumber(clientIp);
+          const mask = (0xFFFFFFFF << (32 - prefix)) >>> 0;
+          
+          return (networkNum & mask) === (clientNum & mask);
+        }
+        return false;
+      });
+      
+      if (!isIpAllowed) {
+        console.error(`Partner login failed: IP address '${clientIp}' not in whitelist for Client ID '${clientId}'`);
+        return res.status(403).json({
+          status: false,
+          code: 4112,
+          message: 'IP address not allowed. Please contact support to whitelist your IP address.'
+        });
+      }
+      
+      console.log(`✅ IP address '${clientIp}' verified for partner '${clientId}'`);
     }
 
     // Attach partner to request
@@ -174,6 +218,47 @@ const authenticatePartnerToken = async (req, res, next) => {
         code: 4116,
         message: 'Partner not found or inactive'
       });
+    }
+
+    // Check IP whitelist (if configured)
+    if (partner.allowed_ips && partner.allowed_ips.trim() !== '') {
+      const clientIp = getIpAddress(req);
+      const allowedIps = partner.allowed_ips.split(',').map(ip => ip.trim()).filter(ip => ip);
+      
+      // Check if client IP is in whitelist
+      const isIpAllowed = allowedIps.some(allowedIp => {
+        // Support exact match and CIDR notation (basic support)
+        if (allowedIp === clientIp) {
+          return true;
+        }
+        // Support CIDR notation (e.g., 192.168.1.0/24)
+        if (allowedIp.includes('/')) {
+          const [network, prefixLength] = allowedIp.split('/');
+          const prefix = parseInt(prefixLength);
+          if (isNaN(prefix)) return false;
+          
+          // Simple CIDR check (for IPv4)
+          const ipToNumber = (ip) => {
+            return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0) >>> 0;
+          };
+          
+          const networkNum = ipToNumber(network);
+          const clientNum = ipToNumber(clientIp);
+          const mask = (0xFFFFFFFF << (32 - prefix)) >>> 0;
+          
+          return (networkNum & mask) === (clientNum & mask);
+        }
+        return false;
+      });
+      
+      if (!isIpAllowed) {
+        console.error(`Partner API access denied: IP address '${clientIp}' not in whitelist for partner '${decoded.partner_id}'`);
+        return res.status(403).json({
+          status: false,
+          code: 4112,
+          message: 'IP address not allowed. Please contact support to whitelist your IP address.'
+        });
+      }
     }
 
     // Attach partner and decoded token to request
