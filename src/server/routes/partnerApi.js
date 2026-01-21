@@ -63,7 +63,7 @@ router.post('/login', authenticatePartnerBasic, async (req, res) => {
       try {
         // Load keys
         const partnerPublicKey = loadKeyFromFile(partner.public_key_path);
-        const ourPrivateKeyPath = process.env.PARTNER_PRIVATE_KEY_PATH || path.join(__dirname, '../../partnerKeys/private.pem');
+        const ourPrivateKeyPath = process.env.PARTNER_PRIVATE_KEY_PATH || path.join(__dirname, '../../partner_keys/pocketcredit_private.pem');
         const ourPrivateKey = loadKeyFromFile(ourPrivateKeyPath);
 
         // Encrypt response
@@ -211,7 +211,7 @@ router.post('/refresh-token', authenticatePartnerBasic, async (req, res) => {
       try {
         // Load keys
         const partnerPublicKey = loadKeyFromFile(partner.public_key_path);
-        const ourPrivateKeyPath = process.env.PARTNER_PRIVATE_KEY_PATH || path.join(__dirname, '../../partnerKeys/private.pem');
+        const ourPrivateKeyPath = process.env.PARTNER_PRIVATE_KEY_PATH || path.join(__dirname, '../../partner_keys/pocketcredit_private.pem');
         const ourPrivateKey = loadKeyFromFile(ourPrivateKeyPath);
 
         // Encrypt response
@@ -349,7 +349,7 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
 
     // Check if request is encrypted
     let requestData = req.body;
-    const isEncrypted = requestData.partnerId === partner.partner_uuid && 
+    const isEncrypted = (requestData.partnerId === partner.partner_uuid || requestData.partnerId === partner.client_id) && 
                         requestData.encryptedData && 
                         requestData.encryptedKey;
 
@@ -367,14 +367,12 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
         }
 
         const partnerPublicKey = loadKeyFromFile(partner.public_key_path);
-        const ourPrivateKeyPath = process.env.PARTNER_PRIVATE_KEY_PATH || path.join(__dirname, '../../partnerKeys/private.pem');
+        const ourPrivateKeyPath = process.env.PARTNER_PRIVATE_KEY_PATH || path.join(__dirname, '../../partner_keys/pocketcredit_private.pem');
         const ourPrivateKey = loadKeyFromFile(ourPrivateKeyPath);
 
         requestData = decryptFromPartner(requestData, partnerPublicKey, ourPrivateKey);
-        console.log('✅ Successfully decrypted encrypted request');
       } catch (decryptError) {
         console.error('Decryption error:', decryptError);
-        console.error('Decryption error details:', decryptError.message);
         return res.status(400).json({
           status: false,
           code: 2003,
@@ -555,23 +553,38 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
       responseData.redirect_url = utmLink;
     }
 
-    // Encrypt response if encryption is enabled
-    if (process.env.PARTNER_API_ENCRYPTION_ENABLED === 'true' && partner.public_key_path) {
-      try {
-        const partnerPublicKey = loadKeyFromFile(partner.public_key_path);
-        const ourPrivateKeyPath = process.env.PARTNER_PRIVATE_KEY_PATH || path.join(__dirname, '../../partnerKeys/private.pem');
-        const ourPrivateKey = loadKeyFromFile(ourPrivateKeyPath);
+    // Encrypt response if encryption is enabled AND request was encrypted
+    // Only encrypt response if the original request was encrypted (for consistency)
+    if (isEncrypted) {
+      const encryptionEnabled = process.env.PARTNER_API_ENCRYPTION_ENABLED === 'true';
+      const hasPublicKey = !!partner.public_key_path;
+      
+      console.log('🔍 Encryption check:', {
+        isEncrypted,
+        encryptionEnabled,
+        envValue: process.env.PARTNER_API_ENCRYPTION_ENABLED,
+        hasPublicKey,
+        publicKeyPath: partner.public_key_path
+      });
+      
+      if (encryptionEnabled && hasPublicKey) {
+        try {
+          const partnerPublicKey = loadKeyFromFile(partner.public_key_path);
+          const ourPrivateKeyPath = process.env.PARTNER_PRIVATE_KEY_PATH || path.join(__dirname, '../../partner_keys/pocketcredit_private.pem');
+          const ourPrivateKey = loadKeyFromFile(ourPrivateKeyPath);
 
-        const encryptedResponse = encryptForPartner(
-          partner.partner_uuid,
-          responseData,
-          partnerPublicKey,
-          ourPrivateKey
-        );
+          const encryptedResponse = encryptForPartner(
+            partner.partner_uuid,
+            responseData,
+            partnerPublicKey,
+            ourPrivateKey
+          );
 
-        return res.json(encryptedResponse);
-      } catch (encryptError) {
-        console.error('Encryption error:', encryptError);
+          return res.json(encryptedResponse);
+        } catch (encryptError) {
+          console.error('Encryption error:', encryptError);
+          // Fall back to unencrypted response
+        }
       }
     }
 

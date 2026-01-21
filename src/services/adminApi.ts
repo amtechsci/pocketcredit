@@ -158,13 +158,21 @@ class AdminApiService {
     if (error.response) {
       const status = error.response.status;
       const message = error.response.data?.message || '';
+      const code = error.response.data?.code || '';
       
-      // Check for auth-related errors
+      // Don't treat 403 as auth error if it's an external API error (e.g., Digitap)
+      // Check if it's a Digitap or external service error
+      const isExternalApiError = 
+        code === 'NotSignedUp' ||
+        message.toLowerCase().includes('digitap') ||
+        message.toLowerCase().includes('bank data service') ||
+        error.response.data?.errorDetails;
+      
+      // Check for auth-related errors (but not external API errors)
       if (
-        status === 401 || 
-        status === 403 || 
-        message.toLowerCase().includes('invalid') && message.toLowerCase().includes('token') ||
-        message.toLowerCase().includes('expired') && message.toLowerCase().includes('token') ||
+        (status === 401 || (status === 403 && !isExternalApiError)) || 
+        (message.toLowerCase().includes('invalid') && message.toLowerCase().includes('token')) ||
+        (message.toLowerCase().includes('expired') && message.toLowerCase().includes('token')) ||
         message.toLowerCase().includes('access token required') ||
         message.toLowerCase().includes('admin not found') ||
         message.toLowerCase().includes('admin access required')

@@ -146,6 +146,9 @@ const verifySignature = (data, signature, publicKeyPem) => {
  */
 const encryptForPartner = (partnerId, data, partnerPublicKeyPem, ourPrivateKeyPem) => {
   try {
+    // Generate timestamp once to ensure consistency between signing and payload
+    const timestamp = Date.now();
+    
     // Generate AES key
     const aesKey = generateAESKey();
     
@@ -160,7 +163,7 @@ const encryptForPartner = (partnerId, data, partnerPublicKeyPem, ourPrivateKeyPe
     const payloadToSign = JSON.stringify({
       version: '1.0',
       partnerId,
-      timestamp: Date.now(),
+      timestamp,
       encryptedKey,
       encryptedData,
       authTag,
@@ -175,7 +178,7 @@ const encryptForPartner = (partnerId, data, partnerPublicKeyPem, ourPrivateKeyPe
     return {
       version: '1.0',
       partnerId,
-      timestamp: Date.now(),
+      timestamp, // Use the same timestamp that was signed
       encryptedKey,
       encryptedData,
       authTag,
@@ -201,14 +204,14 @@ const decryptFromPartner = (encryptedPayload, partnerPublicKeyPem, ourPrivateKey
     const { encryptedKey, encryptedData, authTag, signature, partnerId, timestamp, iv } = encryptedPayload;
     
     // Verify signature (include IV if present)
+    // Note: The signature payload must match exactly what was signed during encryption
     const payloadToVerify = JSON.stringify({
       version: encryptedPayload.version,
       partnerId,
-      timestamp,
+      timestamp: encryptedPayload.timestamp, // Use timestamp from payload, not the destructured one
       encryptedKey,
       encryptedData,
-      authTag: encryptedPayload.authTag,
-      iv: iv || '', // Include IV in signature verification if present
+      authTag,
       algorithm: encryptedPayload.algorithm
     });
     
@@ -232,12 +235,34 @@ const decryptFromPartner = (encryptedPayload, partnerPublicKeyPem, ourPrivateKey
 
 /**
  * Load key from file
- * @param {string} keyPath - Path to key file
+ * @param {string} keyPath - Path to key file (can be absolute or relative)
  * @returns {string} Key content
  */
 const loadKeyFromFile = (keyPath) => {
   try {
-    const fullPath = path.resolve(keyPath);
+    let fullPath;
+    
+    // If path is absolute (starts with / or C:\), use it as-is
+    if (path.isAbsolute(keyPath)) {
+      fullPath = keyPath;
+    } else {
+      // If path starts with /, it's a Linux-style absolute path - convert to Windows if needed
+      if (keyPath.startsWith('/')) {
+        // Try to resolve relative to project root
+        const projectRoot = path.resolve(__dirname, '../..');
+        // Remove leading slash and resolve
+        const relativePath = keyPath.substring(1);
+        fullPath = path.join(projectRoot, relativePath);
+      } else {
+        // Relative path - resolve from project root
+        const projectRoot = path.resolve(__dirname, '../..');
+        fullPath = path.resolve(projectRoot, keyPath);
+      }
+    }
+    
+    // Normalize path separators for current OS
+    fullPath = path.normalize(fullPath);
+    
     if (!fs.existsSync(fullPath)) {
       throw new Error(`Key file not found: ${fullPath}`);
     }

@@ -915,7 +915,11 @@ router.post('/:userId/start-upload', authenticateAdmin, async (req, res) => {
         errorMessage = 'Your Digitap account has not been enabled for the Bank Data PDF Upload Service. Please contact Digitap support to enable this service for your account.';
       }
       
-      return res.status(startUploadResult.status === 403 ? 403 : 500).json({
+      // Return 502 (Bad Gateway) instead of 403 to avoid logout
+      // 403 from Digitap is an API service error, not an authentication error
+      const statusCode = startUploadResult.status === 403 ? 502 : (startUploadResult.status || 500);
+      
+      return res.status(statusCode).json({
         success: false,
         message: errorMessage,
         code: startUploadResult.code,

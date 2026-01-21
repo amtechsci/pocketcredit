@@ -156,16 +156,18 @@ export default function App() {
 
   useEffect(() => {
     const hostname = window.location.hostname;
-    const isAdminSubdomain = hostname.includes('pkk.pocketcredit.in') || hostname === 'pkk.pocketcredit.in' || hostname === 'localhost' || hostname.includes('127.0.0.1');
+    // Only treat pkk.pocketcredit.in as admin subdomain, not localhost (for development)
+    const isAdminSubdomain = hostname.includes('pkk.pocketcredit.in') || hostname === 'pkk.pocketcredit.in';
+    const isLocalhost = hostname === 'localhost' || hostname.includes('127.0.0.1');
 
-    // If on admin subdomain, only allow /stpl paths
-    if (isAdminSubdomain && !location.pathname.startsWith('/stpl')) {
+    // If on admin subdomain (not localhost), only allow /stpl paths
+    if (isAdminSubdomain && !isLocalhost && !location.pathname.startsWith('/stpl')) {
       window.location.href = `https://pocketcredit.in${location.pathname}${location.search}`;
       return;
     }
 
-    // If on main domain, redirect /stpl to home
-    if (!isAdminSubdomain && location.pathname.startsWith('/stpl')) {
+    // If on main domain (not admin subdomain and not localhost), redirect /stpl to home
+    if (!isAdminSubdomain && !isLocalhost && location.pathname.startsWith('/stpl')) {
       navigate('/', { replace: true });
     }
   }, [location.pathname, location.search, navigate]);
