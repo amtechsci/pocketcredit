@@ -135,10 +135,13 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
                 la.disbursal_amount, la.processing_fee, la.total_interest,
                 la.total_repayable, la.disbursed_at, la.processed_at,
                 la.processed_due_date, la.processed_penalty, la.status, la.plan_snapshot,
-                a.address_line1, a.address_line2, a.city, a.state, a.pincode
+                (SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line1,
+                (SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line2,
+                (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as city,
+                (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state,
+                (SELECT a.pincode FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as pincode
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
-            LEFT JOIN addresses a ON u.id = a.user_id AND a.is_primary = 1
             WHERE la.status = 'account_manager'
         `;
 
@@ -214,10 +217,13 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 la.total_repayable, la.disbursed_at, la.processed_at,
                 la.updated_at as cleared_at, la.exhausted_period_days,
                 la.processed_penalty, la.status, la.plan_snapshot,
-                a.address_line1, a.address_line2, a.city, a.state, a.pincode
+                (SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line1,
+                (SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line2,
+                (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as city,
+                (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state,
+                (SELECT a.pincode FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as pincode
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
-            LEFT JOIN addresses a ON u.id = a.user_id AND a.is_primary = 1
             WHERE la.status = 'cleared'
             AND NOT EXISTS (
                 SELECT 1 FROM loan_payments lp 
@@ -311,10 +317,13 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
                 la.updated_at as cleared_at, la.exhausted_period_days,
                 la.processed_penalty, la.status, la.plan_snapshot,
                 lp.amount as settlement_amount, lp.payment_date as settlement_date,
-                a.address_line1, a.address_line2, a.city, a.state, a.pincode
+                (SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line1,
+                (SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line2,
+                (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as city,
+                (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state,
+                (SELECT a.pincode FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as pincode
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
-            LEFT JOIN addresses a ON u.id = a.user_id AND a.is_primary = 1
             INNER JOIN loan_payments lp ON lp.loan_application_id = la.id AND lp.payment_type = 'settlement'
             WHERE la.status IN ('cleared', 'settled')
         `;
@@ -417,10 +426,13 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
                 la.total_repayable, la.disbursed_at, la.processed_at,
                 la.processed_due_date, la.exhausted_period_days,
                 la.processed_penalty, la.status, la.plan_snapshot,
-                a.address_line1, a.address_line2, a.city, a.state, a.pincode
+                (SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line1,
+                (SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line2,
+                (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as city,
+                (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state,
+                (SELECT a.pincode FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as pincode
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
-            LEFT JOIN addresses a ON u.id = a.user_id AND a.is_primary = 1
             WHERE la.status = 'account_manager'
             ORDER BY la.processed_at DESC
         `;
