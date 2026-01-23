@@ -676,12 +676,36 @@ class ApiService {
       body: formData
     });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || 'Upload failed');
+    const responseText = await response.text();
+    let responseData;
+
+    try {
+      responseData = JSON.parse(responseText);
+    } catch (e) {
+      if (responseText.trim().startsWith('<')) {
+        console.error('Server returned HTML error:', responseText);
+
+        // Extract error details for toaster display (mobile debugging)
+        let errorDetail = 'Unknown HTML Error';
+        const titleMatch = responseText.match(/<title>(.*?)<\/title>/i);
+
+        if (titleMatch && titleMatch[1]) {
+          errorDetail = titleMatch[1].trim();
+        } else {
+          // Strip HTML tags and shorten to show some context
+          errorDetail = responseText.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').substring(0, 100).trim();
+        }
+
+        throw new Error(`Server Error (${response.status}): ${errorDetail}`);
+      }
+      throw new Error(`Invalid server response (Status ${response.status})`);
     }
 
-    return response.json();
+    if (!response.ok) {
+      throw new Error(responseData.message || 'Upload failed');
+    }
+
+    return responseData;
   }
 
   async getLoanDocuments(loanApplicationId: number): Promise<ApiResponse<{
