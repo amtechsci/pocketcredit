@@ -2,174 +2,89 @@
  * Generate and upload KFS and Loan Agreement PDFs for processed loans
  * This is called when loan status changes to account_manager
  * 
- * Uses the existing pdfService.generateKFSPDF() which takes HTML content
- * and generates PDF using Puppeteer internally.
+ * Uses server-side HTML generators to avoid Puppeteer browser navigation issues.
+ * The HTML is generated directly from data, then converted to PDF.
  */
 
 const pdfService = require('../services/pdfService');
 const { uploadGeneratedPDF } = require('../services/s3Service');
 const { executeQuery } = require('../config/database');
 const axios = require('axios');
-const puppeteer = require('puppeteer');
+
+// Import server-side HTML generators
+const { generateKFSHTML } = require('./kfsHtmlGenerator');
+const { generateLoanAgreementHTML } = require('./loanAgreementHtmlGenerator');
 
 /**
- * Get KFS HTML by making internal API call to get KFS data,
- * then rendering it using Puppeteer (similar to how frontend does it)
+ * Get KFS data from internal API
+ * @param {number} loanId - Loan ID
+ * @param {string} baseUrl - Backend API base URL  
+ * @returns {Promise<Object>} KFS data object
  */
-async function getKFSHTML(loanId, baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`) {
+async function getKFSData(loanId, baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`) {
   try {
-    // Step 1: Get KFS data (JSON) via internal API call
     console.log(`📊 Fetching KFS data for loan #${loanId}...`);
     const kfsDataResponse = await axios.get(`${baseUrl}/api/kfs/${loanId}`, {
       headers: {
         'x-internal-call': 'true',
-        // Note: You may need to add admin token for authentication
-        // 'Authorization': `Bearer ${process.env.INTERNAL_API_TOKEN}`
-      }
-    });
-
-    if (!kfsDataResponse.data.success || !kfsDataResponse.data.data) {
-      throw new Error('Failed to get KFS data');
-    }
-
-    const kfsData = kfsDataResponse.data.data;
-
-    // Step 2: Render KFS data to HTML using Puppeteer
-    // We'll create a simple HTML page with the KFS data and render the React component
-    // For now, we'll use Puppeteer to navigate to a URL that renders it
-    // OR we can create an internal endpoint that returns HTML
-
-    // Alternative: Use Puppeteer to navigate to frontend URL (requires frontend running)
-    // IMPORTANT: /stpl/* routes are only accessible on the admin subdomain (pkk.pocketcredit.in)
-    // Using main domain (pocketcredit.in) will redirect to home page
-    const frontendUrl = process.env.ADMIN_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
-    const kfsUrl = `${frontendUrl}/stpl/kfs/${loanId}?internal=true&data=${encodeURIComponent(JSON.stringify(kfsData))}`;
-
-    console.log(`🌐 Rendering KFS HTML via Puppeteer...`);
-    console.log(`📍 KFS URL: ${kfsUrl}`);
-
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-
-    const page = await browser.newPage();
-
-    // Enable console logging from the page
-    page.on('console', msg => console.log('🖥️  PAGE LOG:', msg.text()));
-    page.on('pageerror', error => console.log('🖥️  PAGE ERROR:', error.message));
-
-    console.log(`🔄 Navigating to KFS page...`);
-    const response = await page.goto(kfsUrl, {
-      waitUntil: 'networkidle0',
+      },
       timeout: 30000
     });
 
-    console.log(`📊 Response status: ${response?.status()}`);
-    console.log(`📄 Page title: ${await page.title()}`);
-
-    // Take a screenshot for debugging
-    const screenshotPath = `kfs-debug-${loanId}-${Date.now()}.png`;
-    await page.screenshot({ path: screenshotPath, fullPage: true });
-    console.log(`📸 Screenshot saved: ${screenshotPath}`);
-
-    // Check what's on the page
-    const bodyHTML = await page.evaluate(() => document.body.innerHTML);
-    console.log(`📄 Page HTML length: ${bodyHTML.length} chars`);
-    console.log(`📄 Page HTML preview: ${bodyHTML.substring(0, 500)}...`);
-
-    // Wait for KFS content to render
-    console.log(`⏳ Waiting for .kfs-document-content selector...`);
-    await page.waitForSelector('.kfs-document-content', { timeout: 10000 });
-
-    // Extract HTML content
-    const htmlContent = await page.evaluate(() => {
-      const kfsElement = document.querySelector('.kfs-document-content');
-      return kfsElement ? kfsElement.outerHTML : null;
-    });
-
-    await browser.close();
-
-    if (!htmlContent) {
-      throw new Error('KFS content not found on page');
+    if (!kfsDataResponse.data.success || !kfsDataResponse.data.data) {
+      throw new Error('Failed to get KFS data from API');
     }
 
-    return htmlContent;
-
+    return kfsDataResponse.data.data;
   } catch (error) {
-    console.error('Error getting KFS HTML:', error);
-    throw new Error(`Failed to get KFS HTML: ${error.message}`);
+    console.error(`Error fetching KFS data for loan #${loanId}:`, error.message);
+    throw new Error(`Failed to fetch KFS data: ${error.message}`);
   }
 }
 
 /**
- * Get Loan Agreement HTML (similar to KFS)
+ * Get KFS HTML by generating it server-side (no Puppeteer browser navigation needed)
+ * @param {number} loanId - Loan ID
+ * @param {string} baseUrl - Backend API base URL
+ * @returns {Promise<string>} Complete HTML document
  */
-async function getLoanAgreementHTML(loanId, baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`) {
+async function getKFSHTMLServerSide(loanId, baseUrl) {
   try {
-    // Get KFS data (loan agreement uses same data structure)
-    console.log(`📊 Fetching Loan Agreement data for loan #${loanId}...`);
-    const kfsDataResponse = await axios.get(`${baseUrl}/api/kfs/${loanId}`, {
-      headers: {
-        'x-internal-call': 'true'
-      }
-    });
+    // Step 1: Get KFS data via internal API
+    const kfsData = await getKFSData(loanId, baseUrl);
 
-    if (!kfsDataResponse.data.success || !kfsDataResponse.data.data) {
-      throw new Error('Failed to get Loan Agreement data');
-    }
+    // Step 2: Generate HTML server-side (no browser needed!)
+    console.log(`📄 Generating KFS HTML server-side for loan #${loanId}...`);
+    const html = generateKFSHTML(kfsData);
 
-    const agreementData = kfsDataResponse.data.data;
-
-    // Render using Puppeteer
-    // IMPORTANT: /stpl/* routes are only accessible on the admin subdomain (pkk.pocketcredit.in)
-    const frontendUrl = process.env.ADMIN_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
-    const agreementUrl = `${frontendUrl}/stpl/loan-agreement/${loanId}?internal=true&data=${encodeURIComponent(JSON.stringify(agreementData))}`;
-
-    console.log(`🌐 Rendering Loan Agreement HTML via Puppeteer...`);
-    console.log(`📍 Agreement URL: ${agreementUrl}`);
-
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-
-    const page = await browser.newPage();
-
-    // Enable console logging from the page
-    page.on('console', msg => console.log('🖥️  PAGE LOG:', msg.text()));
-    page.on('pageerror', error => console.log('🖥️  PAGE ERROR:', error.message));
-
-    console.log(`🔄 Navigating to Agreement page...`);
-    const response = await page.goto(agreementUrl, {
-      waitUntil: 'networkidle0',
-      timeout: 30000
-    });
-
-    console.log(`📊 Response status: ${response?.status()}`);
-    console.log(`📄 Page title: ${await page.title()}`);
-
-    // Wait for agreement content
-    console.log(`⏳ Waiting for .loan-agreement-content selector...`);
-    await page.waitForSelector('.loan-agreement-content, .agreement-document', { timeout: 10000 });
-
-    const htmlContent = await page.evaluate(() => {
-      const agreementElement = document.querySelector('.loan-agreement-content') ||
-        document.querySelector('.agreement-document');
-      return agreementElement ? agreementElement.outerHTML : null;
-    });
-
-    await browser.close();
-
-    if (!htmlContent) {
-      throw new Error('Loan Agreement content not found on page');
-    }
-
-    return htmlContent;
-
+    console.log(`✅ KFS HTML generated successfully (${html.length} chars)`);
+    return html;
   } catch (error) {
-    console.error('Error getting Loan Agreement HTML:', error);
-    throw new Error(`Failed to get Loan Agreement HTML: ${error.message}`);
+    console.error('Error generating KFS HTML:', error);
+    throw new Error(`Failed to generate KFS HTML: ${error.message}`);
+  }
+}
+
+/**
+ * Get Loan Agreement HTML by generating it server-side
+ * @param {number} loanId - Loan ID
+ * @param {string} baseUrl - Backend API base URL
+ * @returns {Promise<string>} Complete HTML document
+ */
+async function getLoanAgreementHTMLServerSide(loanId, baseUrl) {
+  try {
+    // Step 1: Get KFS data (same data structure is used for agreement)
+    const agreementData = await getKFSData(loanId, baseUrl);
+
+    // Step 2: Generate HTML server-side (no browser needed!)
+    console.log(`📄 Generating Loan Agreement HTML server-side for loan #${loanId}...`);
+    const html = generateLoanAgreementHTML(agreementData);
+
+    console.log(`✅ Loan Agreement HTML generated successfully (${html.length} chars)`);
+    return html;
+  } catch (error) {
+    console.error('Error generating Loan Agreement HTML:', error);
+    throw new Error(`Failed to generate Loan Agreement HTML: ${error.message}`);
   }
 }
 
@@ -194,24 +109,23 @@ async function generateAndUploadLoanPDFs(loanId, userId) {
     }
 
     const applicationNumber = loans[0].application_number;
-
-    // Get HTML content - uses existing KFS API and Puppeteer to render
     const apiBaseUrl = process.env.BACKEND_URL || process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 3001}`;
 
-    console.log(`📄 Getting KFS HTML for loan #${loanId}...`);
-    const kfsHTML = await getKFSHTML(loanId, apiBaseUrl);
+    // Generate HTML content server-side (no Puppeteer browser navigation!)
+    console.log(`📄 Generating KFS HTML for loan #${loanId}...`);
+    const kfsHTML = await getKFSHTMLServerSide(loanId, apiBaseUrl);
 
-    console.log(`📄 Getting Loan Agreement HTML for loan #${loanId}...`);
-    const loanAgreementHTML = await getLoanAgreementHTML(loanId, apiBaseUrl);
+    console.log(`📄 Generating Loan Agreement HTML for loan #${loanId}...`);
+    const loanAgreementHTML = await getLoanAgreementHTMLServerSide(loanId, apiBaseUrl);
 
-    // Generate PDFs
+    // Generate PDFs using pdfService (uses Puppeteer internally just for HTML-to-PDF conversion)
     const kfsFilename = `KFS_${applicationNumber}.pdf`;
     const agreementFilename = `Loan_Agreement_${applicationNumber}.pdf`;
 
-    console.log(`📄 Generating KFS PDF: ${kfsFilename}`);
+    console.log(`📄 Converting KFS HTML to PDF: ${kfsFilename}`);
     const kfsPDF = await pdfService.generateKFSPDF(kfsHTML, kfsFilename);
 
-    console.log(`📄 Generating Loan Agreement PDF: ${agreementFilename}`);
+    console.log(`📄 Converting Loan Agreement HTML to PDF: ${agreementFilename}`);
     const agreementPDF = await pdfService.generateKFSPDF(loanAgreementHTML, agreementFilename);
 
     // Upload to S3
@@ -252,5 +166,8 @@ async function generateAndUploadLoanPDFs(loanId, userId) {
 }
 
 module.exports = {
-  generateAndUploadLoanPDFs
+  generateAndUploadLoanPDFs,
+  getKFSHTMLServerSide,
+  getLoanAgreementHTMLServerSide,
+  getKFSData
 };

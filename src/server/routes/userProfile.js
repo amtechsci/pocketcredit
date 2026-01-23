@@ -7,7 +7,11 @@ const { getLoanCalculation } = require('../utils/loanCalculations');
 const pdfService = require('../services/pdfService');
 const emailService = require('../services/emailService');
 const axios = require('axios');
-const puppeteer = require('puppeteer');
+
+// Import server-side HTML generators (no Puppeteer browser navigation needed!)
+const { generateKFSHTML } = require('../utils/kfsHtmlGenerator');
+const { generateLoanAgreementHTML } = require('../utils/loanAgreementHtmlGenerator');
+
 const router = express.Router();
 
 /**
@@ -30,147 +34,66 @@ function formatDateLocal(date) {
 }
 
 /**
- * Helper function to get KFS HTML using Puppeteer
+ * Helper function to get KFS data from internal API
  */
-async function getKFSHTML(loanId, baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`) {
-  let browser = null;
+async function getKFSData(loanId, baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`) {
   try {
     console.log(`📊 Fetching KFS data for loan #${loanId}...`);
     const kfsDataResponse = await axios.get(`${baseUrl}/api/kfs/${loanId}`, {
       headers: {
         'x-internal-call': 'true'
-      }
-    });
-
-    if (!kfsDataResponse.data.success || !kfsDataResponse.data.data) {
-      throw new Error('Failed to get KFS data');
-    }
-
-    const kfsData = kfsDataResponse.data.data;
-    // IMPORTANT: /stpl/* routes are only accessible on the admin subdomain (pkk.pocketcredit.in)
-    const frontendUrl = process.env.ADMIN_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
-    const kfsUrl = `${frontendUrl}/stpl/kfs/${loanId}?internal=true&data=${encodeURIComponent(JSON.stringify(kfsData))}`;
-
-    console.log(`🌐 Rendering KFS HTML via Puppeteer...`);
-    console.log(`📍 KFS URL: ${frontendUrl}/stpl/kfs/${loanId}?internal=true&data=...`);
-
-    browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-
-    const page = await browser.newPage();
-
-    // Enable console logging from the page
-    page.on('console', msg => console.log('🖥️  PAGE LOG:', msg.text()));
-    page.on('pageerror', error => console.log('🖥️  PAGE ERROR:', error.message));
-
-    console.log(`🔄 Navigating to KFS page...`);
-    const response = await page.goto(kfsUrl, {
-      waitUntil: 'networkidle0',
+      },
       timeout: 30000
     });
 
-    console.log(`📊 Response status: ${response?.status()}`);
-    console.log(`📄 Page title: ${await page.title()}`);
-
-    console.log(`⏳ Waiting for .kfs-document-content selector...`);
-    await page.waitForSelector('.kfs-document-content', { timeout: 10000 });
-
-    const htmlContent = await page.evaluate(() => {
-      const kfsElement = document.querySelector('.kfs-document-content');
-      return kfsElement ? kfsElement.outerHTML : null;
-    });
-
-    if (!htmlContent) {
-      throw new Error('KFS content not found on page');
+    if (!kfsDataResponse.data.success || !kfsDataResponse.data.data) {
+      throw new Error('Failed to get KFS data from API');
     }
 
-    return htmlContent;
+    return kfsDataResponse.data.data;
   } catch (error) {
-    console.error('Error getting KFS HTML:', error);
-    throw new Error(`Failed to get KFS HTML: ${error.message}`);
-  } finally {
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (closeError) {
-        console.error('Error closing browser:', closeError);
-      }
-    }
+    console.error(`Error fetching KFS data for loan #${loanId}:`, error.message);
+    throw new Error(`Failed to fetch KFS data: ${error.message}`);
   }
 }
 
 /**
- * Helper function to get Loan Agreement HTML using Puppeteer
+ * Helper function to get KFS HTML using server-side generation (no Puppeteer needed!)
+ */
+async function getKFSHTML(loanId, baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`) {
+  try {
+    // Step 1: Get KFS data via internal API
+    const kfsData = await getKFSData(loanId, baseUrl);
+
+    // Step 2: Generate HTML server-side (no browser needed!)
+    console.log(`📄 Generating KFS HTML server-side for loan #${loanId}...`);
+    const html = generateKFSHTML(kfsData);
+
+    console.log(`✅ KFS HTML generated successfully (${html.length} chars)`);
+    return html;
+  } catch (error) {
+    console.error('Error generating KFS HTML:', error);
+    throw new Error(`Failed to generate KFS HTML: ${error.message}`);
+  }
+}
+
+/**
+ * Helper function to get Loan Agreement HTML using server-side generation (no Puppeteer needed!)
  */
 async function getLoanAgreementHTML(loanId, baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`) {
-  let browser = null;
   try {
-    console.log(`📊 Fetching Loan Agreement data for loan #${loanId}...`);
-    const kfsDataResponse = await axios.get(`${baseUrl}/api/kfs/${loanId}`, {
-      headers: {
-        'x-internal-call': 'true'
-      }
-    });
+    // Step 1: Get data via internal API (same data as KFS)
+    const agreementData = await getKFSData(loanId, baseUrl);
 
-    if (!kfsDataResponse.data.success || !kfsDataResponse.data.data) {
-      throw new Error('Failed to get Loan Agreement data');
-    }
+    // Step 2: Generate HTML server-side (no browser needed!)
+    console.log(`📄 Generating Loan Agreement HTML server-side for loan #${loanId}...`);
+    const html = generateLoanAgreementHTML(agreementData);
 
-    const agreementData = kfsDataResponse.data.data;
-    // IMPORTANT: /stpl/* routes are only accessible on the admin subdomain (pkk.pocketcredit.in)
-    const frontendUrl = process.env.ADMIN_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
-    const agreementUrl = `${frontendUrl}/stpl/loan-agreement/${loanId}?internal=true&data=${encodeURIComponent(JSON.stringify(agreementData))}`;
-
-    console.log(`🌐 Rendering Loan Agreement HTML via Puppeteer...`);
-    console.log(`📍 Agreement URL: ${frontendUrl}/stpl/loan-agreement/${loanId}?internal=true&data=...`);
-
-    browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-
-    const page = await browser.newPage();
-
-    // Enable console logging from the page
-    page.on('console', msg => console.log('🖥️  PAGE LOG:', msg.text()));
-    page.on('pageerror', error => console.log('🖥️  PAGE ERROR:', error.message));
-
-    console.log(`🔄 Navigating to Agreement page...`);
-    const response = await page.goto(agreementUrl, {
-      waitUntil: 'networkidle0',
-      timeout: 30000
-    });
-
-    console.log(`📊 Response status: ${response?.status()}`);
-    console.log(`📄 Page title: ${await page.title()}`);
-
-    console.log(`⏳ Waiting for .loan-agreement-content selector...`);
-    await page.waitForSelector('.loan-agreement-content, .agreement-document', { timeout: 10000 });
-
-    const htmlContent = await page.evaluate(() => {
-      const agreementElement = document.querySelector('.loan-agreement-content') ||
-        document.querySelector('.agreement-document');
-      return agreementElement ? agreementElement.outerHTML : null;
-    });
-
-    if (!htmlContent) {
-      throw new Error('Loan Agreement content not found on page');
-    }
-
-    return htmlContent;
+    console.log(`✅ Loan Agreement HTML generated successfully (${html.length} chars)`);
+    return html;
   } catch (error) {
-    console.error('Error getting Loan Agreement HTML:', error);
-    throw new Error(`Failed to get Loan Agreement HTML: ${error.message}`);
-  } finally {
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (closeError) {
-        console.error('Error closing browser:', closeError);
-      }
-    }
+    console.error('Error generating Loan Agreement HTML:', error);
+    throw new Error(`Failed to generate Loan Agreement HTML: ${error.message}`);
   }
 }
 
