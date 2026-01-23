@@ -44,7 +44,16 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // Check if this is an internal call (for PDF generation)
+  const searchParams = new URLSearchParams(location.search);
+  const isInternalCall = searchParams.get('internal') === 'true';
+
   useEffect(() => {
+    // Skip authentication for internal calls
+    if (isInternalCall) {
+      return;
+    }
+
     // Check if user is authenticated
     const user = localStorage.getItem('adminUser');
     if (user) {
@@ -55,7 +64,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
         navigate(`${BASE_PATH}/login`);
       }
     }
-  }, [navigate, location.pathname]);
+  }, [navigate, location.pathname, isInternalCall]);
 
   const handleLogout = () => {
     localStorage.removeItem('adminUser');
@@ -74,12 +83,22 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
     return location.pathname === path || location.pathname.startsWith(path + '/');
   };
 
-  if (!currentUser) {
+  // Allow rendering for internal calls even without authentication
+  if (!currentUser && !isInternalCall) {
     return null; // Will redirect to login
   }
 
+  // For internal calls, render children without layout
+  if (isInternalCall) {
+    return (
+      <AdminProvider currentUser={currentUser || { id: 0, name: 'Internal', email: '', role: 'officer', permissions: [] }}>
+        {children}
+      </AdminProvider>
+    );
+  }
+
   return (
-    <AdminProvider currentUser={currentUser}>
+    <AdminProvider currentUser={currentUser || { id: 0, name: 'Internal', email: '', role: 'officer', permissions: [] }}>
       <div className="min-h-screen bg-gray-50">
         <div className="bg-white border-b border-gray-200 px-6 py-3">
           <div className="flex items-center justify-between">
@@ -227,7 +246,16 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Check if this is an internal call (for PDF generation)
+  const searchParams = new URLSearchParams(location.search);
+  const isInternalCall = searchParams.get('internal') === 'true';
+
   useEffect(() => {
+    // Skip authentication for internal calls
+    if (isInternalCall) {
+      return;
+    }
+
     const user = localStorage.getItem('adminUser');
     if (user) {
       setCurrentUser(JSON.parse(user));
@@ -237,9 +265,10 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
         navigate(`${BASE_PATH}/login`);
       }
     }
-  }, [navigate, location.pathname]);
+  }, [navigate, location.pathname, isInternalCall]);
 
-  if (!currentUser) {
+  // Allow rendering for internal calls even without authentication
+  if (!currentUser && !isInternalCall) {
     return null; // Will redirect to login
   }
 

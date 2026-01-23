@@ -67,10 +67,10 @@ router.get('/', authenticateAdmin, async (req, res) => {
         la.status,
         la.rejection_reason as rejectionReason,
         la.approved_by as approvedBy,
-        la.approved_at as approvedDate,
-        la.disbursed_at as disbursedDate,
-        la.created_at as applicationDate,
-        la.updated_at as updatedAt,
+        DATE_FORMAT(la.approved_at, '%Y-%m-%d') as approvedDate,
+        DATE_FORMAT(la.disbursed_at, '%Y-%m-%d') as disbursedDate,
+        DATE_FORMAT(la.created_at, '%Y-%m-%d') as applicationDate,
+        DATE_FORMAT(la.updated_at, '%Y-%m-%d') as updatedAt,
         la.loan_plan_id,
         la.plan_snapshot,
         la.processing_fee,
@@ -195,14 +195,14 @@ router.get('/', authenticateAdmin, async (req, res) => {
 
     // Add ORDER BY clause
     const validSortFields = {
-      'applicationDate': 'la.created_at',
+      'applicationDate': 'applicationDate',
       'applicantName': 'u.first_name',
       'loanAmount': 'la.loan_amount',
       'status': 'la.status',
       'cibilScore': 'la.loan_amount' // Use loan amount as proxy since credit_score doesn't exist
     };
     
-    const sortField = validSortFields[sortBy] || 'la.created_at';
+    const sortField = validSortFields[sortBy] || 'applicationDate';
     const sortDirection = sortOrder === 'asc' ? 'ASC' : 'DESC';
     baseQuery += ` ORDER BY ${sortField} ${sortDirection}`;
 
@@ -1547,8 +1547,8 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
       baseQuery += ' WHERE ' + whereConditions.join(' AND ');
     }
 
-    // Order by application date descending
-    baseQuery += ' ORDER BY la.created_at DESC';
+    // Order by application date descending (use alias since SELECT DISTINCT requires it)
+    baseQuery += ' ORDER BY applicationDate DESC';
 
     // Execute query
     const applications = await executeQuery(baseQuery, queryParams);

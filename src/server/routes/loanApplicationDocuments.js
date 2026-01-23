@@ -72,6 +72,15 @@ router.post('/upload', requireAuth, upload.single('document'), async (req, res) 
     }
 
     console.log(`📤 Uploading ${document_type} (${document_name}) for loan application ${loan_application_id}`);
+    console.log(`📄 Original filename: "${req.file.originalname}", Size: ${req.file.size} bytes, MIME: ${req.file.mimetype}`);
+
+    // Validate filename before upload
+    if (!req.file.originalname || req.file.originalname.trim().length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid filename. Please ensure the file has a valid name.'
+      });
+    }
 
     // Upload to S3
     const uploadResult = await uploadLoanDocument(

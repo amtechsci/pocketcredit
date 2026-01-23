@@ -106,17 +106,17 @@ app.use((req, res, next) => {
   if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
     return next();
   }
-  
+
   // Redirect /admin and /stpl paths to home page when accessed on main domain
   // Admin panel should only be accessible via pkk.pocketcredit.in/stpl
   const host = req.get('host') || req.headers.host || '';
   const isAdminSubdomain = host.includes('pkk.pocketcredit.in');
-  
+
   // If NOT on admin subdomain, block /admin and /stpl paths
   if (!isAdminSubdomain && (req.path.startsWith('/admin') || req.path.startsWith('/stpl'))) {
     return res.redirect('/');
   }
-  
+
   next();
 });
 
@@ -183,7 +183,7 @@ app.use(cors({
 
     // Allow production domain
     if (origin === 'https://pocketcredit.in') return callback(null, true);
-    
+
     // Allow admin subdomain
     if (origin === 'https://pkk.pocketcredit.in') return callback(null, true);
     if (origin === 'http://pkk.pocketcredit.in') return callback(null, true);
@@ -191,7 +191,7 @@ app.use(cors({
     // Allow Cashfree domains (for webhooks and callbacks)
     if (origin.includes('cashfree.com')) return callback(null, true);
     if (origin.includes('cashfree.net')) return callback(null, true);
-    
+
     // Allow NPCI eNACH domain (for authorization callbacks)
     if (origin.includes('enach.npci.org.in')) return callback(null, true);
     if (origin.includes('npci.org.in')) return callback(null, true);
@@ -268,6 +268,10 @@ app.use('/api/admin/bank-statement', adminBankStatementRoutes);
 app.use('/api/admin/team', adminTeamRoutes);
 app.use('/api/admin/activities', activityLogsRoutes);
 app.use('/api/admin/search', searchRoutes);
+
+// Admin CIBIL Reports routes
+const adminReportsRoutes = require('./routes/adminReports');
+app.use('/api/admin/reports', adminReportsRoutes);
 app.use('/api/eligibility', eligibilityRoutes);
 app.use('/api/employment-quick-check', employmentQuickCheckRoutes);
 app.use('/api/loan-plans', loanPlansRoutes);

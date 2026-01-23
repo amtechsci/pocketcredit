@@ -34,6 +34,34 @@ interface ActivityLog {
 }
 
 export function ActivityLogsPage() {
+  // Format date as DD/MM/YYYY without timezone conversion
+  const formatDate = (dateString: string | null | undefined) => {
+    if (!dateString || dateString === 'null' || dateString === 'undefined' || dateString === '') return 'N/A';
+
+    // Extract date part from datetime string (e.g., "2025-12-25 23:19:50" -> "2025-12-25")
+    let datePart = String(dateString);
+    if (typeof dateString === 'string' && dateString.includes(' ')) {
+      datePart = dateString.split(' ')[0];
+    }
+
+    // Handle ISO date format: "2025-12-25" or "2025-12-25T00:00:00.000Z"
+    if (datePart.includes('T')) {
+      datePart = datePart.split('T')[0];
+    }
+
+    // Format as DD/MM/YYYY (Indian format) - no timezone conversion, just string manipulation
+    const parts = datePart.split('-');
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      // Ensure day and month are zero-padded
+      const formattedDay = String(day).padStart(2, '0');
+      const formattedMonth = String(month).padStart(2, '0');
+      return `${formattedDay}/${formattedMonth}/${year}`;
+    }
+
+    return datePart; // Return as-is if format is unexpected
+  };
+
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -401,7 +429,7 @@ export function ActivityLogsPage() {
                       {activity.ipAddress}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-500">
-                      {new Date(activity.timestamp).toLocaleString()}
+                      {formatDate(activity.timestamp)}
                     </td>
                   </tr>
                 ))

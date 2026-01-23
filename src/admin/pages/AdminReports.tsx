@@ -1,147 +1,184 @@
-import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { useAdmin } from '../context/AdminContext';
-import { 
-  Download, 
-  FileText, 
-  Users, 
-  Building, 
-  IndianRupee, 
-  Star, 
-  AlertTriangle, 
+import { useState, useEffect } from 'react';
+import {
+  Download,
+  FileText,
   Calendar,
   Filter,
-  Search,
   RefreshCw,
-  ExternalLink,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
   TrendingUp,
-  TrendingDown,
-  Activity,
-  Shield,
-  Database,
-  BarChart3,
-  PieChart,
-  LineChart
+  FileSpreadsheet
 } from 'lucide-react';
 
-
-
+interface ReportStats {
+  total_loans: number;
+  active_loans: number;
+  cleared_loans: number;
+  settled_loans: number;
+  default_loans: number;
+  active_amount: number;
+  cleared_amount: number;
+}
 
 export function AdminReports() {
-    const navigate = useNavigate();
-  const params = useParams();
-  const [selectedDateRange, setSelectedDateRange] = useState('last-30-days');
-  const [selectedFormat, setSelectedFormat] = useState('excel');
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const { currentUser, canEditUsers } = useAdmin();
+  const [downloadingReport, setDownloadingReport] = useState<string | null>(null);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [stats, setStats] = useState<ReportStats | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleReportDownload = async (reportType: string, format: string = selectedFormat) => {
-    setIsGenerating(true);
-    
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const reportData = generateReportData(reportType);
-    const fileName = `${reportType}_${new Date().toISOString().split('T')[0]}.${format === 'excel' ? 'xlsx' : format}`;
-    
-    if (format === 'excel' || format === 'csv') {
-      downloadAsCSV(reportData, fileName);
-    } else if (format === 'pdf') {
-      downloadAsPDF(reportData, fileName);
+  // Get API base URL
+  const getApiBaseUrl = () => {
+    if (typeof window !== 'undefined') {
+      const hostname = window.location.hostname;
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return 'http://localhost:3002';
+      }
+      return '';
     }
-    
-    setIsGenerating(false);
+    return '';
   };
 
-  const generateReportData = (reportType: string) => {
-    const baseData = {
-      'cibil-loan-data': [
-        { 'Customer ID': 'CL250912', 'Name': 'Rajesh Kumar Singh', 'Loan Amount': '₹5,00,000', 'EMI': '₹17,094', 'CIBIL Score': '720', 'Status': 'Active', 'Tenure': '36 months', 'Interest Rate': '14%' },
-        { 'Customer ID': 'CL240815', 'Name': 'Priya Sharma', 'Loan Amount': '₹2,00,000', 'EMI': '₹9,578', 'CIBIL Score': '750', 'Status': 'Active', 'Tenure': '24 months', 'Interest Rate': '16%' },
-        { 'Customer ID': 'CL230521', 'Name': 'Amit Kumar', 'Loan Amount': '₹1,50,000', 'EMI': '₹9,167', 'CIBIL Score': '680', 'Status': 'Completed', 'Tenure': '18 months', 'Interest Rate': '15%' },
-        { 'Customer ID': 'CL231015', 'Name': 'Sunita Patel', 'Loan Amount': '₹3,00,000', 'EMI': '₹8,394', 'CIBIL Score': '700', 'Status': 'Cancelled', 'Tenure': '48 months', 'Interest Rate': '18%' },
-        { 'Customer ID': 'CL220812', 'Name': 'Vikram Singh', 'Loan Amount': '₹2,50,000', 'EMI': '₹9,532', 'CIBIL Score': '650', 'Status': 'Default', 'Tenure': '30 months', 'Interest Rate': '17%' },
-      ],
-      'user-data': [
-        { 'Customer ID': 'CL250912', 'Name': 'Rajesh Kumar Singh', 'Email': 'rajesh.kumar@email.com', 'Phone': '+91 98765 43210', 'City': 'Bangalore', 'State': 'Karnataka', 'KYC Status': 'Completed', 'Registration Date': '2025-01-09' },
-        { 'Customer ID': 'CL240815', 'Name': 'Priya Sharma', 'Email': 'priya.sharma@email.com', 'Phone': '+91 87654 32109', 'City': 'Mumbai', 'State': 'Maharashtra', 'KYC Status': 'Completed', 'Registration Date': '2024-08-15' },
-        { 'Customer ID': 'CL230521', 'Name': 'Amit Kumar', 'Email': 'amit.kumar@email.com', 'Phone': '+91 76543 21098', 'City': 'Delhi', 'State': 'Delhi', 'KYC Status': 'Completed', 'Registration Date': '2023-05-21' },
-        { 'Customer ID': 'CL231015', 'Name': 'Sunita Patel', 'Email': 'sunita.patel@email.com', 'Phone': '+91 65432 10987', 'City': 'Pune', 'State': 'Maharashtra', 'KYC Status': 'Pending', 'Registration Date': '2023-10-15' },
-        { 'Customer ID': 'CL220812', 'Name': 'Vikram Singh', 'Email': 'vikram.singh@email.com', 'Phone': '+91 54321 09876', 'City': 'Chennai', 'State': 'Tamil Nadu', 'KYC Status': 'Completed', 'Registration Date': '2022-08-12' },
-      ],
-      'transaction-data': [
-        { 'Transaction ID': 'TXN001', 'Customer ID': 'CL250912', 'Date': '2025-01-09', 'Type': 'Debit', 'Amount': '-₹999', 'Description': 'Application Processing Fee', 'Status': 'Completed' },
-        { 'Transaction ID': 'TXN002', 'Customer ID': 'CL240815', 'Date': '2024-12-05', 'Type': 'Debit', 'Amount': '-₹9,578', 'Description': 'EMI Payment #16', 'Status': 'Completed' },
-        { 'Transaction ID': 'TXN003', 'Customer ID': 'CL240815', 'Date': '2024-08-20', 'Type': 'Credit', 'Amount': '+₹2,00,000', 'Description': 'Loan Disbursement', 'Status': 'Completed' },
-        { 'Transaction ID': 'TXN004', 'Customer ID': 'CL230521', 'Date': '2024-11-05', 'Type': 'Debit', 'Amount': '-₹9,167', 'Description': 'Final EMI Payment', 'Status': 'Completed' },
-        { 'Transaction ID': 'TXN005', 'Customer ID': 'CL220812', 'Date': '2023-08-05', 'Type': 'Debit', 'Amount': '-₹9,532', 'Description': 'EMI Payment (Failed)', 'Status': 'Failed' },
-      ],
-      'risk-analysis': [
-        { 'Customer ID': 'CL250912', 'Name': 'Rajesh Kumar Singh', 'Risk Score': '15', 'Risk Category': 'Low', 'Income Stability': 'High', 'Employment Type': 'Salaried', 'Debt-to-Income': '25%', 'Previous Defaults': '0' },
-        { 'Customer ID': 'CL240815', 'Name': 'Priya Sharma', 'Risk Score': '12', 'Risk Category': 'Low', 'Income Stability': 'High', 'Employment Type': 'Salaried', 'Debt-to-Income': '20%', 'Previous Defaults': '0' },
-        { 'Customer ID': 'CL230521', 'Name': 'Amit Kumar', 'Risk Score': '22', 'Risk Category': 'Medium', 'Income Stability': 'Medium', 'Employment Type': 'Self-Employed', 'Debt-to-Income': '35%', 'Previous Defaults': '0' },
-        { 'Customer ID': 'CL231015', 'Name': 'Sunita Patel', 'Risk Score': '18', 'Risk Category': 'Low', 'Income Stability': 'High', 'Employment Type': 'Salaried', 'Debt-to-Income': '30%', 'Previous Defaults': '0' },
-        { 'Customer ID': 'CL220812', 'Name': 'Vikram Singh', 'Risk Score': '45', 'Risk Category': 'High', 'Income Stability': 'Low', 'Employment Type': 'Self-Employed', 'Debt-to-Income': '65%', 'Previous Defaults': '1' },
-      ]
-    };
+  // Fetch report statistics on mount
+  useEffect(() => {
+    fetchStats();
+  }, []);
 
-    return baseData[reportType as keyof typeof baseData] || [];
-  };
+  const fetchStats = async () => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await fetch(`${getApiBaseUrl()}/api/admin/reports/summary`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
 
-  const downloadAsCSV = (data: any[], fileName: string) => {
-    const csvContent = convertToCSV(data);
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', fileName);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const downloadAsPDF = (data: any[], fileName: string) => {
-    alert(`PDF generation would be implemented here for ${fileName}`);
-  };
-
-  const convertToCSV = (data: any[]) => {
-    if (data.length === 0) return '';
-    
-    const headers = Object.keys(data[0]);
-    const csvRows = [
-      headers.join(','),
-      ...data.map(row => headers.map(header => `"${row[header] || ''}"`).join(','))
-    ];
-    
-    return csvRows.join('\n');
-  };
-
-  const handleCustomReportGenerate = async () => {
-    if (selectedCategories.length === 0) {
-      alert('Please select at least one data category');
-      return;
+      if (response.ok) {
+        const data = await response.json();
+        setStats(data.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch report stats:', err);
     }
-
-    setIsGenerating(true);
-    
-    // Simulate custom report generation
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    const customData = selectedCategories.map(category => ({
-      'Category': category,
-      'Date Range': selectedDateRange,
-      'Generated By': currentUser.name,
-      'Generated On': new Date().toISOString(),
-      'Format': selectedFormat
-    }));
-
-    const fileName = `Custom_Report_${new Date().toISOString().split('T')[0]}.${selectedFormat === 'excel' ? 'xlsx' : selectedFormat}`;
-    downloadAsCSV(customData, fileName);
-    
-    setIsGenerating(false);
   };
+
+  const handleDownloadReport = async (reportType: 'disbursal' | 'cleared' | 'settled' | 'default') => {
+    setDownloadingReport(reportType);
+    setError(null);
+
+    try {
+      const token = localStorage.getItem('adminToken');
+      let url = `${getApiBaseUrl()}/api/admin/reports/cibil/${reportType}`;
+
+      // Add date parameters if provided
+      const params = new URLSearchParams();
+      if (fromDate) params.append('from_date', fromDate);
+      if (toDate) params.append('to_date', toDate);
+
+      if (params.toString()) {
+        url += `?${params.toString()}`;
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to download report');
+      }
+
+      // Get the CSV content
+      const csvContent = await response.text();
+
+      // Create download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const blobUrl = URL.createObjectURL(blob);
+
+      const dateStr = new Date().toISOString().split('T')[0];
+      link.href = blobUrl;
+      link.download = `cibil_${reportType}_${dateStr}.csv`;
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+
+    } catch (err: any) {
+      console.error('Download error:', err);
+      setError(err.message || 'Failed to download report');
+    } finally {
+      setDownloadingReport(null);
+    }
+  };
+
+  const formatCurrency = (amount: number) => {
+    if (amount >= 10000000) {
+      return `₹${(amount / 10000000).toFixed(2)} Cr`;
+    } else if (amount >= 100000) {
+      return `₹${(amount / 100000).toFixed(2)} L`;
+    } else if (amount >= 1000) {
+      return `₹${(amount / 1000).toFixed(1)} K`;
+    }
+    return `₹${amount}`;
+  };
+
+  const reportTypes = [
+    {
+      id: 'disbursal',
+      title: 'Disbursal Report',
+      description: 'Active loans (disbursed, currently running)',
+      icon: TrendingUp,
+      color: 'green',
+      bgColor: 'bg-green-50',
+      borderColor: 'border-green-200',
+      iconColor: 'text-green-600',
+      buttonColor: 'bg-green-600 hover:bg-green-700',
+      count: stats?.active_loans || 0
+    },
+    {
+      id: 'cleared',
+      title: 'Cleared Report',
+      description: 'Fully repaid loans closed successfully',
+      icon: CheckCircle,
+      color: 'blue',
+      bgColor: 'bg-blue-50',
+      borderColor: 'border-blue-200',
+      iconColor: 'text-blue-600',
+      buttonColor: 'bg-blue-600 hover:bg-blue-700',
+      count: stats?.cleared_loans || 0
+    },
+    {
+      id: 'settled',
+      title: 'Settled Report',
+      description: 'Loans closed via settlement agreement',
+      icon: FileText,
+      color: 'purple',
+      bgColor: 'bg-purple-50',
+      borderColor: 'border-purple-200',
+      iconColor: 'text-purple-600',
+      buttonColor: 'bg-purple-600 hover:bg-purple-700',
+      count: stats?.settled_loans || 0
+    },
+    {
+      id: 'default',
+      title: 'Default Report',
+      description: 'Overdue/defaulted loans for reporting',
+      icon: XCircle,
+      color: 'red',
+      bgColor: 'bg-red-50',
+      borderColor: 'border-red-200',
+      iconColor: 'text-red-600',
+      buttonColor: 'bg-red-600 hover:bg-red-700',
+      count: stats?.default_loans || 0
+    }
+  ];
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: '#F5F7FA' }}>
@@ -149,395 +186,220 @@ export function AdminReports() {
       <div className="bg-white border-b border-gray-200 px-6 py-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Reports & Analytics</h1>
-            <p className="text-sm text-gray-600 mt-1">Generate and download comprehensive reports for CIBIL, user data, and business analytics</p>
+            <h1 className="text-2xl font-bold text-gray-900">CIBIL Reports</h1>
+            <p className="text-sm text-gray-600 mt-1">
+              Download CIBIL-compliant CSV reports for credit bureau submissions
+            </p>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => window.location.reload()}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Refresh
-            </button>
-          </div>
+          <button
+            onClick={fetchStats}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </button>
         </div>
       </div>
 
-      <div className="p-6 space-y-8">
-        {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-          <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-4 rounded-lg">
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-10 h-10 bg-blue-200 rounded-full flex items-center justify-center">
-                <Users className="w-5 h-5 text-blue-600" />
-              </div>
-              <TrendingUp className="w-4 h-4 text-blue-600" />
-            </div>
-            <div className="text-xl font-bold text-blue-600 mb-1">2,543</div>
-            <div className="text-xs text-gray-600">Total Users</div>
-          </div>
-
-          <div className="bg-gradient-to-r from-green-50 to-green-100 p-4 rounded-lg">
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-10 h-10 bg-green-200 rounded-full flex items-center justify-center">
-                <Building className="w-5 h-5 text-green-600" />
-              </div>
-              <TrendingUp className="w-4 h-4 text-green-600" />
-            </div>
-            <div className="text-xl font-bold text-green-600 mb-1">1,234</div>
-            <div className="text-xs text-gray-600">Active Loans</div>
-          </div>
-
-          <div className="bg-gradient-to-r from-purple-50 to-purple-100 p-4 rounded-lg">
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-10 h-10 bg-purple-200 rounded-full flex items-center justify-center">
-                <IndianRupee className="w-5 h-5 text-purple-600" />
-              </div>
-              <TrendingUp className="w-4 h-4 text-purple-600" />
-            </div>
-            <div className="text-xl font-bold text-purple-600 mb-1">₹45.2Cr</div>
-            <div className="text-xs text-gray-600">Total Disbursed</div>
-          </div>
-
-          <div className="bg-gradient-to-r from-orange-50 to-orange-100 p-4 rounded-lg">
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-10 h-10 bg-orange-200 rounded-full flex items-center justify-center">
-                <Star className="w-5 h-5 text-orange-600" />
-              </div>
-              <TrendingUp className="w-4 h-4 text-orange-600" />
-            </div>
-            <div className="text-xl font-bold text-orange-600 mb-1">98.5%</div>
-            <div className="text-xs text-gray-600">Collection Rate</div>
-          </div>
-
-          <div className="bg-gradient-to-r from-red-50 to-red-100 p-4 rounded-lg">
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-10 h-10 bg-red-200 rounded-full flex items-center justify-center">
-                <AlertTriangle className="w-5 h-5 text-red-600" />
-              </div>
-              <TrendingDown className="w-4 h-4 text-red-600" />
-            </div>
-            <div className="text-xl font-bold text-red-600 mb-1">23</div>
-            <div className="text-xs text-gray-600">Pending Reviews</div>
-          </div>
-        </div>
-
-        {/* Main Report Categories */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* CIBIL & Credit Reports */}
-          <div className="bg-white border border-gray-200 rounded-lg p-6">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center">
-                <Star className="w-6 h-6 text-yellow-600" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">CIBIL & Credit Reports</h3>
-                <p className="text-sm text-gray-600">Credit bureau data and risk analysis reports</p>
-              </div>
-            </div>
-            
-            <div className="space-y-3">
-              <button
-                onClick={() => handleReportDownload('cibil-loan-data')}
-                disabled={isGenerating}
-                className="w-full flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-              >
-                <div className="flex items-center gap-3">
-                  <Building className="w-5 h-5 text-gray-600" />
-                  <div className="text-left">
-                    <div className="font-medium text-gray-900">CIBIL Loan Data Export</div>
-                    <div className="text-sm text-gray-500">Complete loan portfolio with CIBIL scores</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Excel</span>
-                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">CSV</span>
-                  <ExternalLink className="w-4 h-4 text-gray-400" />
-                </div>
-              </button>
-
-              <button
-                onClick={() => handleReportDownload('risk-analysis')}
-                disabled={isGenerating}
-                className="w-full flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-              >
-                <div className="flex items-center gap-3">
-                  <AlertTriangle className="w-5 h-5 text-gray-600" />
-                  <div className="text-left">
-                    <div className="font-medium text-gray-900">Risk Analysis Report</div>
-                    <div className="text-sm text-gray-500">Detailed risk scoring and categorization</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Excel</span>
-                  <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">PDF</span>
-                  <ExternalLink className="w-4 h-4 text-gray-400" />
-                </div>
-              </button>
-
-              <button
-                onClick={() => alert('CIBIL Bureau Integration Report - Available in Premium Version')}
-                className="w-full flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <Shield className="w-5 h-5 text-gray-600" />
-                  <div className="text-left">
-                    <div className="font-medium text-gray-900">CIBIL Bureau Integration</div>
-                    <div className="text-sm text-gray-500">Direct bureau data export for compliance</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">Premium</span>
-                  <ExternalLink className="w-4 h-4 text-gray-400" />
-                </div>
-              </button>
-            </div>
-          </div>
-
-          {/* User Data Reports */}
-          <div className="bg-white border border-gray-200 rounded-lg p-6">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                <Users className="w-6 h-6 text-blue-600" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">User Data Reports</h3>
-                <p className="text-sm text-gray-600">Customer information and demographics</p>
-              </div>
-            </div>
-            
-            <div className="space-y-3">
-              <button
-                onClick={() => handleReportDownload('user-data')}
-                disabled={isGenerating}
-                className="w-full flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-              >
-                <div className="flex items-center gap-3">
-                  <Database className="w-5 h-5 text-gray-600" />
-                  <div className="text-left">
-                    <div className="font-medium text-gray-900">Complete User Database</div>
-                    <div className="text-sm text-gray-500">All registered users with contact details</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Excel</span>
-                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">CSV</span>
-                  <ExternalLink className="w-4 h-4 text-gray-400" />
-                </div>
-              </button>
-
-              <button
-                onClick={() => alert('KYC Status Report - Available Soon')}
-                className="w-full flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <FileText className="w-5 h-5 text-gray-600" />
-                  <div className="text-left">
-                    <div className="font-medium text-gray-900">KYC Status Report</div>
-                    <div className="text-sm text-gray-500">Document verification and compliance status</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded">Coming Soon</span>
-                  <ExternalLink className="w-4 h-4 text-gray-400" />
-                </div>
-              </button>
-
-              <button
-                onClick={() => alert('Demographics Analysis - Available Soon')}
-                className="w-full flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <PieChart className="w-5 h-5 text-gray-600" />
-                  <div className="text-left">
-                    <div className="font-medium text-gray-900">Demographics Analysis</div>
-                    <div className="text-sm text-gray-500">Age, location, and income distribution</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded">Coming Soon</span>
-                  <ExternalLink className="w-4 h-4 text-gray-400" />
-                </div>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Financial Reports */}
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-              <IndianRupee className="w-6 h-6 text-green-600" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">Financial & Transaction Reports</h3>
-              <p className="text-sm text-gray-600">Loan performance, transactions, and financial analytics</p>
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="p-6 space-y-6">
+        {/* Error Alert */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-500" />
+            <span className="text-red-700">{error}</span>
             <button
-              onClick={() => handleReportDownload('transaction-data')}
-              disabled={isGenerating}
-              className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+              onClick={() => setError(null)}
+              className="ml-auto text-red-500 hover:text-red-700"
             >
-              <div className="flex items-center gap-3">
-                <Activity className="w-5 h-5 text-gray-600" />
-                <div className="text-left">
-                  <div className="font-medium text-gray-900">Transaction History</div>
-                  <div className="text-sm text-gray-500">All platform transactions</div>
-                </div>
-              </div>
-              <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Excel</span>
-            </button>
-
-            <button
-              onClick={() => alert('Loan Performance Report - Available Soon')}
-              className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <BarChart3 className="w-5 h-5 text-gray-600" />
-                <div className="text-left">
-                  <div className="font-medium text-gray-900">Loan Performance</div>
-                  <div className="text-sm text-gray-500">EMI collection rates</div>
-                </div>
-              </div>
-              <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded">Soon</span>
-            </button>
-
-            <button
-              onClick={() => alert('Revenue Analytics - Available Soon')}
-              className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <LineChart className="w-5 h-5 text-gray-600" />
-                <div className="text-left">
-                  <div className="font-medium text-gray-900">Revenue Analytics</div>
-                  <div className="text-sm text-gray-500">Income and profit analysis</div>
-                </div>
-              </div>
-              <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded">Soon</span>
+              ×
             </button>
           </div>
-        </div>
+        )}
 
-        {/* Custom Report Builder */}
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
-              <Filter className="w-6 h-6 text-purple-600" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">Custom Report Builder</h3>
-              <p className="text-sm text-gray-600">Create personalized reports with specific data categories and date ranges</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Data Categories */}
-            <div>
-              <h4 className="font-medium text-gray-900 mb-3">Select Data Categories</h4>
-              <div className="space-y-2">
-                {[
-                  'User Demographics',
-                  'Loan Applications',
-                  'Credit Scores',
-                  'Transaction Records', 
-                  'KYC Documents',
-                  'Risk Assessments',
-                  'Collection Data',
-                  'Revenue Metrics'
-                ].map((category) => (
-                  <label key={category} className="flex items-center gap-2">
-                    <input 
-                      type="checkbox" 
-                      className="rounded border-gray-300"
-                      checked={selectedCategories.includes(category)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedCategories([...selectedCategories, category]);
-                        } else {
-                          setSelectedCategories(selectedCategories.filter(c => c !== category));
-                        }
-                      }}
-                    />
-                    <span className="text-sm text-gray-700">{category}</span>
-                  </label>
-                ))}
+        {/* Stats Overview */}
+        {stats && (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
+                  <FileSpreadsheet className="w-5 h-5 text-gray-600" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-gray-900">{stats.total_loans}</p>
+                  <p className="text-sm text-gray-500">Total Loans</p>
+                </div>
               </div>
             </div>
-
-            {/* Date Range & Format */}
-            <div className="space-y-4">
-              <div>
-                <label className="block font-medium text-gray-900 mb-2">Date Range</label>
-                <select 
-                  value={selectedDateRange}
-                  onChange={(e) => setSelectedDateRange(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="last-7-days">Last 7 Days</option>
-                  <option value="last-30-days">Last 30 Days</option>
-                  <option value="last-90-days">Last 90 Days</option>
-                  <option value="last-6-months">Last 6 Months</option>
-                  <option value="last-year">Last Year</option>
-                  <option value="all-time">All Time</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-medium text-gray-900 mb-2">Export Format</label>
-                <select 
-                  value={selectedFormat}
-                  onChange={(e) => setSelectedFormat(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="excel">Excel (.xlsx)</option>
-                  <option value="csv">CSV (.csv)</option>
-                  <option value="pdf">PDF (.pdf)</option>
-                  <option value="json">JSON (.json)</option>
-                </select>
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                  <TrendingUp className="w-5 h-5 text-green-600" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-green-600">{formatCurrency(stats.active_amount || 0)}</p>
+                  <p className="text-sm text-gray-500">Active Portfolio</p>
+                </div>
               </div>
             </div>
-
-            {/* Generate Button */}
-            <div className="flex flex-col justify-end">
-              <button
-                onClick={handleCustomReportGenerate}
-                disabled={isGenerating || selectedCategories.length === 0}
-                className="w-full px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {isGenerating ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-4 h-4" />
-                    Generate Custom Report
-                  </>
-                )}
-              </button>
-              
-              <div className="mt-3 text-xs text-gray-500">
-                {selectedCategories.length} categories selected • {selectedDateRange} • {selectedFormat.toUpperCase()}
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                  <CheckCircle className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-blue-600">{formatCurrency(stats.cleared_amount || 0)}</p>
+                  <p className="text-sm text-gray-500">Cleared Amount</p>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-
-        {/* Loading Overlay */}
-        {isGenerating && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-8 text-center">
-              <RefreshCw className="w-12 h-12 text-blue-600 animate-spin mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">Generating Report</h3>
-              <p className="text-sm text-gray-600">Please wait while we compile your data...</p>
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5 text-red-600" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-red-600">{stats.default_loans}</p>
+                  <p className="text-sm text-gray-500">Default Cases</p>
+                </div>
+              </div>
             </div>
           </div>
         )}
+
+        {/* Date Filter */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="flex items-center gap-2 mb-4">
+            <Filter className="w-5 h-5 text-gray-600" />
+            <h3 className="font-medium text-gray-900">Date Range Filter</h3>
+            <span className="text-sm text-gray-500">(Optional - filters by disbursal/closure date)</span>
+          </div>
+          <div className="flex flex-wrap gap-4 items-end">
+            <div>
+              <label className="block text-sm text-gray-600 mb-1">From Date</label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm text-gray-600 mb-1">To Date</label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+            {(fromDate || toDate) && (
+              <button
+                onClick={() => { setFromDate(''); setToDate(''); }}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Clear Dates
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Report Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {reportTypes.map((report) => {
+            const Icon = report.icon;
+            const isDownloading = downloadingReport === report.id;
+
+            return (
+              <div
+                key={report.id}
+                className={`${report.bgColor} border ${report.borderColor} rounded-lg p-6 transition-all hover:shadow-md`}
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm`}>
+                      <Icon className={`w-6 h-6 ${report.iconColor}`} />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">{report.title}</h3>
+                      <p className="text-sm text-gray-600">{report.description}</p>
+                    </div>
+                  </div>
+                  <div className={`px-3 py-1 rounded-full bg-white shadow-sm`}>
+                    <span className={`text-lg font-bold ${report.iconColor}`}>{report.count}</span>
+                    <span className="text-xs text-gray-500 ml-1">records</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200/50">
+                  <div className="flex items-center gap-2 text-sm text-gray-600">
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>CIBIL Format CSV</span>
+                  </div>
+                  <button
+                    onClick={() => handleDownloadReport(report.id as any)}
+                    disabled={isDownloading}
+                    className={`flex items-center gap-2 px-4 py-2 text-white rounded-lg ${report.buttonColor} transition-all disabled:opacity-50 disabled:cursor-not-allowed`}
+                  >
+                    {isDownloading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Downloading...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-4 h-4" />
+                        Download CSV
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* CIBIL Format Info */}
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <h4 className="font-medium text-yellow-800 mb-2">📋 CIBIL Report Format Information</h4>
+          <p className="text-sm text-yellow-700 mb-3">
+            All reports are generated in CIBIL-compliant CSV format with the following fields:
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-yellow-700">
+            <div>
+              <strong>Consumer Info:</strong>
+              <ul className="list-disc list-inside mt-1">
+                <li>Consumer Name</li>
+                <li>Date of Birth (DDMMYYYY)</li>
+                <li>Gender Code</li>
+                <li>PAN (Income Tax ID)</li>
+              </ul>
+            </div>
+            <div>
+              <strong>Contact & Address:</strong>
+              <ul className="list-disc list-inside mt-1">
+                <li>Mobile Number</li>
+                <li>Email ID</li>
+                <li>Address with State Code</li>
+                <li>PIN Code</li>
+              </ul>
+            </div>
+            <div>
+              <strong>Account Details:</strong>
+              <ul className="list-disc list-inside mt-1">
+                <li>Account Number</li>
+                <li>Account Type (69 = Personal Loan)</li>
+                <li>Disbursement Date</li>
+                <li>Current Balance & Asset Classification</li>
+              </ul>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

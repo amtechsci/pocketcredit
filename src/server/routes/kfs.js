@@ -600,7 +600,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         name: `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'N/A',
         email: loan.personal_email || loan.official_email || loan.email || 'N/A',
         phone: loan.phone || 'N/A',
-        date_of_birth: loan.date_of_birth ? new Date(loan.date_of_birth).toLocaleDateString('en-IN') : 'N/A',
+        date_of_birth: loan.date_of_birth || 'N/A',  // Send raw date to avoid timezone issues
         gender: loan.gender || 'N/A',
         marital_status: loan.marital_status || 'N/A',
         pan_number: loan.pan_number || 'N/A',
@@ -1326,7 +1326,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       grievance: {
         name: 'Customer Service',
         phone: '+91 9876543211',
-        email: 'compliance@pocketcredit.in'
+        email: 'kiran@pocketcredit.in'
       },
       digital_loan: {
         cooling_off_period: '3 days',
@@ -3593,13 +3593,21 @@ async function generateAndSendNOCEmail(loanId) {
 /**
  * GET /api/kfs/:loanId
  * Admin endpoint to get KFS data for a loan
+ * Also allows internal calls (for PDF generation) without authentication
  */
-router.get('/:loanId', authenticateAdmin, async (req, res) => {
+router.get('/:loanId', async (req, res, next) => {
+  // Skip authentication for internal calls
+  if (isInternalCall(req)) {
+    return next();
+  }
+  // Otherwise, require admin authentication
+  return authenticateAdmin(req, res, next);
+}, async (req, res) => {
   try {
     await initializeDatabase();
     const { loanId } = req.params;
 
-    console.log('📄 Generating KFS for loan ID:', loanId);
+    console.log('📄 Generating KFS for loan ID:', loanId, '(internal call:', isInternalCall(req), ')');
 
     // Fetch loan application details including dynamic fees
     // Use DATE() function to extract date portion directly from MySQL (avoids timezone conversion)
@@ -4748,7 +4756,7 @@ router.get('/:loanId', authenticateAdmin, async (req, res) => {
           name: 'Ms. Priya Sharma',
           designation: 'Chief Compliance Officer',
           phone: '+91 9876543211',
-          email: 'compliance@pocketcredit.in'
+          email: 'kiran@pocketcredit.in'
         }
       },
 

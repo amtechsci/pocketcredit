@@ -30,8 +30,18 @@ export function LoanAgreementDocument() {
   const [downloading, setDownloading] = useState(false);
   const [emailing, setEmailing] = useState(false);
 
-  // Check authentication
+  // Check if this is an internal call (for PDF generation)
+  const searchParams = new URLSearchParams(window.location.search);
+  const isInternalCall = searchParams.get('internal') === 'true';
+  const dataParam = searchParams.get('data');
+
+  // Check authentication (skip for internal calls)
   useEffect(() => {
+    if (isInternalCall) {
+      // Internal call from backend - skip auth
+      return;
+    }
+
     const adminToken = localStorage.getItem('adminToken');
     const adminUser = localStorage.getItem('adminUser');
 
@@ -39,7 +49,7 @@ export function LoanAgreementDocument() {
       navigate('/stpl/login');
       return;
     }
-  }, [navigate]);
+  }, [navigate, isInternalCall]);
 
   useEffect(() => {
     if (loanId) {
@@ -50,6 +60,20 @@ export function LoanAgreementDocument() {
   const fetchAgreementData = async () => {
     try {
       setLoading(true);
+
+      // If internal call with data in query params, use that instead of API call
+      if (isInternalCall && dataParam) {
+        try {
+          const parsedData = JSON.parse(decodeURIComponent(dataParam));
+          setAgreementData(parsedData);
+          setLoading(false);
+          return;
+        } catch (parseError) {
+          console.error('Error parsing data from query params:', parseError);
+          // Fall through to API call
+        }
+      }
+
       const response = await adminApiService.getKFS(parseInt(loanId!));
       if (response.success && response.data) {
         setAgreementData(response.data);

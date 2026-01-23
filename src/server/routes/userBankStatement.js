@@ -425,6 +425,7 @@ router.post('/initiate-bank-statement', requireAuth, async (req, res) => {
        request_id = VALUES(request_id),
        digitap_url = VALUES(digitap_url),
        expires_at = VALUES(expires_at),
+       upload_method = 'online',
        status = 'pending',
        updated_at = NOW()`,
       [userId, clientRefNum, result.data.request_id, mobile_number, bank_name || null, result.data.url, expiresAt]
@@ -542,6 +543,7 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
        file_path = VALUES(file_path), 
        file_name = VALUES(file_name), 
        file_size = VALUES(file_size), 
+       upload_method = VALUES(upload_method),
        status = 'completed',
        user_status = 'uploaded',
        verification_status = 'not_started',

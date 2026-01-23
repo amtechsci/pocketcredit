@@ -610,7 +610,7 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
 
     // Get user details for credit check
     const user = await executeQuery(
-      'SELECT first_name, last_name, phone, email, pan_number, date_of_birth FROM users WHERE id = ?',
+      'SELECT first_name, last_name, phone, email, pan_number, DATE_FORMAT(date_of_birth, "%Y-%m-%d") as date_of_birth FROM users WHERE id = ?',
       [userId]
     );
 
@@ -698,7 +698,7 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
     // Priority 2: Get DOB from user_info (Aadhar from Digilocker)
     if (!userData.date_of_birth) {
       const aadharInfo = await executeQuery(
-        'SELECT dob FROM user_info WHERE user_id = ? AND source = ? ORDER BY created_at DESC LIMIT 1',
+        'SELECT DATE_FORMAT(dob, "%Y-%m-%d") as dob FROM user_info WHERE user_id = ? AND source = ? ORDER BY created_at DESC LIMIT 1',
         [userId, 'digilocker']
       );
 
@@ -1102,8 +1102,8 @@ router.get('/registered/list', authenticateAdmin, async (req, res) => {
         u.status,
         u.phone_verified,
         u.profile_completion_step,
-        u.created_at,
-        u.updated_at
+        DATE_FORMAT(u.created_at, '%Y-%m-%d') as created_at,
+        DATE_FORMAT(u.updated_at, '%Y-%m-%d') as updated_at
       FROM users u
       ${whereClause}
       ORDER BY u.created_at DESC
@@ -1180,9 +1180,9 @@ router.get('/approved/list', authenticateAdmin, async (req, res) => {
         u.profile_completion_step,
         u.employment_type,
         u.income_range,
-        u.date_of_birth,
-        u.created_at,
-        u.updated_at
+        DATE_FORMAT(u.date_of_birth, '%Y-%m-%d') as date_of_birth,
+        DATE_FORMAT(u.created_at, '%Y-%m-%d') as created_at,
+        DATE_FORMAT(u.updated_at, '%Y-%m-%d') as updated_at
       FROM users u
       ${whereClause}
       ORDER BY u.updated_at DESC

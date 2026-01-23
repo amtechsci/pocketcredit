@@ -3461,7 +3461,7 @@ export function UserProfileDetail() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Uploaded At</label>
                 <p className="text-gray-900">
-                  {statement.created_at ? new Date(statement.created_at).toLocaleString() : 'N/A'}
+                  {statement.created_at ? formatDate(statement.created_at) : 'N/A'}
                 </p>
               </div>
               {statement.request_id && (
@@ -3863,7 +3863,7 @@ export function UserProfileDetail() {
               <div>
                 <span className="font-medium text-gray-700">Verified At:</span>{' '}
                 <span className="text-gray-900">
-                  {statement.verified_at ? new Date(statement.verified_at).toLocaleString() : 'N/A'}
+                  {statement.verified_at ? formatDate(statement.verified_at) : 'N/A'}
                 </span>
               </div>
               {statement.verification_decision && (
@@ -4913,26 +4913,7 @@ export function UserProfileDetail() {
 
                             {/* Apply Date & Time */}
                             <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                              {loan.created_at ? (
-                                <div>
-                                  <div className="font-medium">
-                                    {new Date(loan.created_at).toLocaleDateString('en-IN', {
-                                      day: '2-digit',
-                                      month: 'short',
-                                      year: 'numeric'
-                                    })}
-                                  </div>
-                                  <div className="text-xs text-gray-500">
-                                    {new Date(loan.created_at).toLocaleTimeString('en-IN', {
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                      hour12: true
-                                    })}
-                                  </div>
-                                </div>
-                              ) : (
-                                <span className="text-gray-400">N/A</span>
-                              )}
+                              {loan.created_at ? formatDate(loan.created_at) : <span className="text-gray-400">N/A</span>}
                             </td>
 
                             {/* Principal Amount - Editable */}
@@ -5081,24 +5062,37 @@ export function UserProfileDetail() {
                             {/* Action Buttons */}
                             <td className="px-3 py-4 whitespace-nowrap text-sm font-medium">
                               <div className="flex flex-col gap-1">
-                                {loan.loan_agreement_pdf_url && (
-                                  <button
-                                    className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
-                                    onClick={() => window.open(loan.loan_agreement_pdf_url, '_blank')}
-                                    title="View Loan Agreement"
-                                  >
-                                    Agreement
-                                  </button>
-                                )}
-                                {loan.kfs_pdf_url && (
-                                  <button
-                                    className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
-                                    onClick={() => window.open(loan.kfs_pdf_url, '_blank')}
-                                    title="View Key Facts Statement"
-                                  >
-                                    View KFS
-                                  </button>
-                                )}
+                                {/* Loan Agreement Button - Always visible */}
+                                <button
+                                  className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                                  onClick={() => {
+                                    // If PDF URL exists, open it; otherwise open via /stpl route
+                                    const url = loan.loan_agreement_pdf_url 
+                                      ? loan.loan_agreement_pdf_url 
+                                      : `/stpl/loan-agreement/${loanId}`;
+                                    window.open(url, '_blank');
+                                  }}
+                                  title="View Loan Agreement"
+                                >
+                                  Agreement
+                                </button>
+                                
+                                {/* KFS Button - Always visible */}
+                                <button
+                                  className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
+                                  onClick={() => {
+                                    // If PDF URL exists, open it; otherwise open via /stpl route
+                                    const url = loan.kfs_pdf_url 
+                                      ? loan.kfs_pdf_url 
+                                      : `/stpl/kfs/${loanId}`;
+                                    window.open(url, '_blank');
+                                  }}
+                                  title="View Key Facts Statement"
+                                >
+                                  View KFS
+                                </button>
+                                
+                                {/* NOC Button - Only for cleared loans */}
                                 {loan.status === 'cleared' && (
                                   <button
                                     className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"

@@ -70,12 +70,13 @@ async function saveUserInfoFromDigilocker(userId, kycData, transactionId) {
       console.log(`✅ Updated user_info from Digilocker for user ${userId}`);
       
       // Update users table with first_name and last_name if they're null
+      // IMPORTANT: Use COALESCE to preserve existing values (prefer user-entered data over KYC data)
       if (name) {
         const nameParts = name.trim().split(/\s+/);
         const firstName = nameParts[0] || null;
         const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
         
-        // Update only if first_name or last_name is null
+        // Update only fields that are currently NULL (preserve existing user data)
         await executeQuery(
           `UPDATE users 
            SET first_name = COALESCE(first_name, ?),
@@ -83,10 +84,10 @@ async function saveUserInfoFromDigilocker(userId, kycData, transactionId) {
                date_of_birth = COALESCE(date_of_birth, ?),
                gender = COALESCE(gender, ?),
                updated_at = NOW()
-           WHERE id = ? AND (first_name IS NULL OR last_name IS NULL)`,
+           WHERE id = ?`,
           [firstName, lastName, dob, gender, userId]
         );
-        console.log(`✅ Updated users table with name from Digilocker for user ${userId}`);
+        console.log(`✅ Updated users table with data from Digilocker for user ${userId} (preserving existing values)`);
       }
       
       return { success: true, id: existing[0].id, action: 'updated' };
@@ -107,12 +108,13 @@ async function saveUserInfoFromDigilocker(userId, kycData, transactionId) {
       console.log(`✅ Saved user_info from Digilocker for user ${userId}`);
       
       // Update users table with first_name and last_name if they're null
+      // IMPORTANT: Use COALESCE to preserve existing values (prefer user-entered data over KYC data)
       if (name) {
         const nameParts = name.trim().split(/\s+/);
         const firstName = nameParts[0] || null;
         const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
         
-        // Update only if first_name or last_name is null
+        // Update only fields that are currently NULL (preserve existing user data)
         await executeQuery(
           `UPDATE users 
            SET first_name = COALESCE(first_name, ?),
@@ -120,10 +122,10 @@ async function saveUserInfoFromDigilocker(userId, kycData, transactionId) {
                date_of_birth = COALESCE(date_of_birth, ?),
                gender = COALESCE(gender, ?),
                updated_at = NOW()
-           WHERE id = ? AND (first_name IS NULL OR last_name IS NULL)`,
+           WHERE id = ?`,
           [firstName, lastName, dob, gender, userId]
         );
-        console.log(`✅ Updated users table with name from Digilocker for user ${userId}`);
+        console.log(`✅ Updated users table with data from Digilocker for user ${userId} (preserving existing values)`);
       }
       
       return { success: true, id: result.insertId, action: 'created' };

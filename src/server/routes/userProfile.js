@@ -32,7 +32,7 @@ function formatDateLocal(date) {
 /**
  * Helper function to get KFS HTML using Puppeteer
  */
-async function getKFSHTML(loanId, baseUrl = 'http://localhost:5000') {
+async function getKFSHTML(loanId, baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`) {
   let browser = null;
   try {
     console.log(`📊 Fetching KFS data for loan #${loanId}...`);
@@ -47,21 +47,34 @@ async function getKFSHTML(loanId, baseUrl = 'http://localhost:5000') {
     }
 
     const kfsData = kfsDataResponse.data.data;
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const kfsUrl = `${frontendUrl}/stpl/kfs/${loanId}?internal=true`;
+    // IMPORTANT: /stpl/* routes are only accessible on the admin subdomain (pkk.pocketcredit.in)
+    const frontendUrl = process.env.ADMIN_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
+    const kfsUrl = `${frontendUrl}/stpl/kfs/${loanId}?internal=true&data=${encodeURIComponent(JSON.stringify(kfsData))}`;
 
     console.log(`🌐 Rendering KFS HTML via Puppeteer...`);
+    console.log(`📍 KFS URL: ${frontendUrl}/stpl/kfs/${loanId}?internal=true&data=...`);
+
     browser = await puppeteer.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
 
     const page = await browser.newPage();
-    await page.goto(kfsUrl, {
+
+    // Enable console logging from the page
+    page.on('console', msg => console.log('🖥️  PAGE LOG:', msg.text()));
+    page.on('pageerror', error => console.log('🖥️  PAGE ERROR:', error.message));
+
+    console.log(`🔄 Navigating to KFS page...`);
+    const response = await page.goto(kfsUrl, {
       waitUntil: 'networkidle0',
       timeout: 30000
     });
 
+    console.log(`📊 Response status: ${response?.status()}`);
+    console.log(`📄 Page title: ${await page.title()}`);
+
+    console.log(`⏳ Waiting for .kfs-document-content selector...`);
     await page.waitForSelector('.kfs-document-content', { timeout: 10000 });
 
     const htmlContent = await page.evaluate(() => {
@@ -91,7 +104,7 @@ async function getKFSHTML(loanId, baseUrl = 'http://localhost:5000') {
 /**
  * Helper function to get Loan Agreement HTML using Puppeteer
  */
-async function getLoanAgreementHTML(loanId, baseUrl = 'http://localhost:5000') {
+async function getLoanAgreementHTML(loanId, baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`) {
   let browser = null;
   try {
     console.log(`📊 Fetching Loan Agreement data for loan #${loanId}...`);
@@ -106,21 +119,34 @@ async function getLoanAgreementHTML(loanId, baseUrl = 'http://localhost:5000') {
     }
 
     const agreementData = kfsDataResponse.data.data;
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const agreementUrl = `${frontendUrl}/stpl/loan-agreement/${loanId}?internal=true`;
+    // IMPORTANT: /stpl/* routes are only accessible on the admin subdomain (pkk.pocketcredit.in)
+    const frontendUrl = process.env.ADMIN_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
+    const agreementUrl = `${frontendUrl}/stpl/loan-agreement/${loanId}?internal=true&data=${encodeURIComponent(JSON.stringify(agreementData))}`;
 
     console.log(`🌐 Rendering Loan Agreement HTML via Puppeteer...`);
+    console.log(`📍 Agreement URL: ${frontendUrl}/stpl/loan-agreement/${loanId}?internal=true&data=...`);
+
     browser = await puppeteer.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
 
     const page = await browser.newPage();
-    await page.goto(agreementUrl, {
+
+    // Enable console logging from the page
+    page.on('console', msg => console.log('🖥️  PAGE LOG:', msg.text()));
+    page.on('pageerror', error => console.log('🖥️  PAGE ERROR:', error.message));
+
+    console.log(`🔄 Navigating to Agreement page...`);
+    const response = await page.goto(agreementUrl, {
       waitUntil: 'networkidle0',
       timeout: 30000
     });
 
+    console.log(`📊 Response status: ${response?.status()}`);
+    console.log(`📄 Page title: ${await page.title()}`);
+
+    console.log(`⏳ Waiting for .loan-agreement-content selector...`);
     await page.waitForSelector('.loan-agreement-content, .agreement-document', { timeout: 10000 });
 
     const htmlContent = await page.evaluate(() => {
@@ -154,6 +180,9 @@ async function getLoanAgreementHTML(loanId, baseUrl = 'http://localhost:5000') {
  */
 async function sendKFSAndAgreementEmails(loanId) {
   try {
+    console.log(`\n========================================`);
+    console.log(`📧 SENDING EMAILS FOR LOAN #${loanId}`);
+    console.log(`========================================`);
     console.log(`📧 Preparing to send KFS and Loan Agreement emails for loan #${loanId}...`);
 
     // Get loan and user details (including PDF URLs)
@@ -181,7 +210,7 @@ async function sendKFSAndAgreementEmails(loanId) {
       return;
     }
 
-    const apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:5000';
+    const apiBaseUrl = process.env.BACKEND_URL || process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 3001}`;
     const applicationNumber = loan.application_number || `LOAN_${loanId}`;
 
     const kfsFilename = `KFS_${applicationNumber}.pdf`;
@@ -241,6 +270,9 @@ async function sendKFSAndAgreementEmails(loanId) {
 
     // Send KFS email
     try {
+      console.log(`📧 Sending KFS email to: ${recipientEmail}`);
+      console.log(`📄 KFS PDF buffer size: ${kfsPDF.buffer.length} bytes`);
+
       await emailService.sendKFSEmail({
         loanId: loan.id,
         recipientEmail: recipientEmail,
@@ -257,12 +289,16 @@ async function sendKFSAndAgreementEmails(loanId) {
       });
       console.log(`✅ KFS email sent successfully to: ${recipientEmail}`);
     } catch (kfsEmailError) {
-      console.error('❌ Error sending KFS email (non-fatal):', kfsEmailError.message);
+      console.error('❌ Error sending KFS email (non-fatal):', kfsEmailError);
+      console.error('❌ KFS Email Error Stack:', kfsEmailError.stack);
     }
 
     // Send Loan Agreement email (using signed agreement email method)
     // Note: The subject will say "Signed Loan Agreement" but it's sent automatically when transaction is updated
     try {
+      console.log(`📧 Sending Loan Agreement email to: ${recipientEmail}`);
+      console.log(`📄 Agreement PDF buffer size: ${agreementPDF.buffer.length} bytes`);
+
       await emailService.sendSignedAgreementEmail({
         loanId: loan.id,
         recipientEmail: recipientEmail,
@@ -278,12 +314,16 @@ async function sendKFSAndAgreementEmails(loanId) {
       });
       console.log(`✅ Loan Agreement email sent successfully to: ${recipientEmail}`);
     } catch (agreementEmailError) {
-      console.error('❌ Error sending Loan Agreement email (non-fatal):', agreementEmailError.message);
+      console.error('❌ Error sending Loan Agreement email (non-fatal):', agreementEmailError);
+      console.error('❌ Agreement Email Error Stack:', agreementEmailError.stack);
     }
 
     console.log(`✅ KFS and Loan Agreement emails sent successfully for loan #${loanId}`);
+    console.log(`========================================\n`);
   } catch (error) {
     console.error(`❌ Error sending KFS and Loan Agreement emails for loan #${loanId}:`, error);
+    console.error(`❌ Error Stack:`, error.stack);
+    console.log(`========================================\n`);
     // Don't throw - this is a non-critical operation
   }
 }
@@ -298,10 +338,13 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     const users = await executeQuery(`
       SELECT 
         id, first_name, last_name, email, phone, 
-        date_of_birth, gender, marital_status, kyc_completed, 
+        DATE_FORMAT(date_of_birth, '%Y-%m-%d') as date_of_birth, gender, marital_status, kyc_completed, 
         email_verified, phone_verified, status, profile_completion_step, 
         profile_completed, eligibility_status, eligibility_reason, 
-        eligibility_retry_date, selected_loan_plan_id, created_at, updated_at, last_login_at,
+        eligibility_retry_date, selected_loan_plan_id, 
+        DATE_FORMAT(created_at, '%Y-%m-%d') as created_at, 
+        DATE_FORMAT(updated_at, '%Y-%m-%d') as updated_at, 
+        DATE_FORMAT(last_login_at, '%Y-%m-%d') as last_login_at,
         pan_number, alternate_mobile, company_name, company_email, salary_date,
         personal_email, official_email, loan_limit, credit_score, experian_score,
         monthly_net_income, work_experience_range, employment_type, income_range,
@@ -334,14 +377,20 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     }
 
     // Get loan applications for this user with e-nach status
+    // Use DATE_FORMAT to return date strings (not Date objects) to avoid timezone conversion
     const applications = await executeQuery(`
       SELECT 
         la.id, la.application_number, la.loan_amount, la.loan_purpose, 
         la.tenure_months, la.status, la.rejection_reason, 
-        la.approved_by, la.approved_at, la.disbursed_at, la.created_at, la.updated_at,
+        la.approved_by, 
+        DATE_FORMAT(la.approved_at, '%Y-%m-%d') as approved_at,
+        DATE_FORMAT(la.disbursed_at, '%Y-%m-%d') as disbursed_at,
+        DATE_FORMAT(la.created_at, '%Y-%m-%d') as created_at,
+        DATE_FORMAT(la.updated_at, '%Y-%m-%d') as updated_at,
         la.processing_fee_percent, la.interest_percent_per_day, 
         la.processing_fee, la.total_interest, la.total_repayable, la.plan_snapshot,
-        la.disbursal_amount, la.processed_at,
+        la.disbursal_amount, 
+        DATE_FORMAT(la.processed_at, '%Y-%m-%d') as processed_at,
         la.processed_amount, la.exhausted_period_days, la.processed_p_fee,
         la.processed_post_service_fee, la.processed_gst, la.processed_interest,
         la.processed_penalty, la.processed_due_date, la.emi_schedule,
@@ -606,7 +655,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     let userInfoRecords = [];
     try {
       const userInfoQuery = `
-        SELECT id, name, dob, source, additional_details, created_at
+        SELECT id, name, DATE_FORMAT(dob, '%Y-%m-%d') as dob, source, additional_details, created_at
         FROM user_info
         WHERE user_id = ?
         ORDER BY source, created_at DESC
@@ -627,7 +676,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         return {
           id: record.id,
           name: record.name,
-          dob: record.dob,
+          dob: record.dob,  // Now guaranteed to be string in YYYY-MM-DD format
           source: record.source,
           additionalDetails: additionalDetails,
           createdAt: record.created_at
@@ -987,7 +1036,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       personalEmail: user.personal_email || null,
       officialEmail: user.official_email || null,
       mobile: user.phone || 'N/A',
-      dateOfBirth: user.date_of_birth ? new Date(user.date_of_birth).toLocaleDateString('en-IN') : 'N/A',
+      dateOfBirth: user.date_of_birth || 'N/A',  // Send raw date (YYYY-MM-DD), frontend will format it
       panNumber: user.pan_number || 'N/A',
       alternateMobile: user.alternate_mobile || 'N/A',
       companyName: user.company_name || 'N/A',
@@ -2398,19 +2447,58 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
     }
 
     // Validate loan disbursement - cannot disburse if already in account_manager or cleared
+    let skipStatusUpdate = false;
     if (txType === 'loan_disbursement' && loan_application_id) {
       const loanCheck = await executeQuery(
-        'SELECT id, status FROM loan_applications WHERE id = ?',
+        'SELECT id, status, kfs_pdf_url, loan_agreement_pdf_url FROM loan_applications WHERE id = ?',
         [loan_application_id]
       );
 
       if (loanCheck.length > 0) {
         const loanStatus = loanCheck[0].status;
         if (loanStatus === 'account_manager' || loanStatus === 'cleared') {
-          return res.status(400).json({
-            status: 'error',
-            message: `Cannot disburse this loan. Loan is already in "${loanStatus}" status. The loan has already been disbursed.`
-          });
+          console.log(`⚠️ Loan #${loan_application_id} already in ${loanStatus} status. Skipping status update but will check PDFs and emails.`);
+          skipStatusUpdate = true;
+
+          // Check if PDFs exist and send emails if they do
+          const hasPDFs = loanCheck[0].kfs_pdf_url && loanCheck[0].loan_agreement_pdf_url;
+          if (hasPDFs) {
+            console.log(`📧 PDFs exist for loan #${loan_application_id}, sending emails...`);
+            try {
+              await sendKFSAndAgreementEmails(parseInt(loan_application_id));
+              console.log(`✅ Emails sent for already-disbursed loan #${loan_application_id}`);
+            } catch (emailError) {
+              console.error(`❌ Error sending emails for loan #${loan_application_id}:`, emailError.message);
+            }
+          } else {
+            console.log(`⚠️ PDFs missing for loan #${loan_application_id}. Regenerating...`);
+            // Regenerate PDFs and send emails
+            try {
+              const { generateAndUploadLoanPDFs } = require('../utils/generateLoanPDFs');
+              const pdfResult = await generateAndUploadLoanPDFs(parseInt(loan_application_id), userId);
+
+              if (pdfResult.success) {
+                // Update loan with PDF URLs
+                await executeQuery(
+                  'UPDATE loan_applications SET kfs_pdf_url = ?, loan_agreement_pdf_url = ?, updated_at = NOW() WHERE id = ?',
+                  [pdfResult.kfs.s3Key, pdfResult.agreement.s3Key, loan_application_id]
+                );
+                console.log(`✅ PDFs regenerated for loan #${loan_application_id}`);
+
+                // Send emails
+                await sendKFSAndAgreementEmails(parseInt(loan_application_id));
+                console.log(`✅ Emails sent after PDF regeneration for loan #${loan_application_id}`);
+              }
+            } catch (pdfError) {
+              console.error(`❌ Error regenerating PDFs for loan #${loan_application_id}:`, pdfError.message);
+            }
+          }
+
+          // Don't return error - allow transaction to be recorded
+          // return res.status(400).json({
+          //   status: 'error',
+          //   message: `Cannot disburse this loan. Loan is already in "${loanStatus}" status. The loan has already been disbursed.`
+          // });
         }
       }
     }
@@ -2451,7 +2539,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
     let newStatus = null;
 
     // If this is a loan disbursement, update the loan application status
-    if (txType === 'loan_disbursement' && loan_application_id) {
+    if (txType === 'loan_disbursement' && loan_application_id && !skipStatusUpdate) {
       const loanIdInt = parseInt(loan_application_id);
       const userIdInt = parseInt(userId);
 
@@ -2791,10 +2879,11 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             console.log(`Attempting to update loan status to account_manager with calculated values...`);
 
             // Build UPDATE query with emi_schedule if available
+            // Use CURRENT_TIMESTAMP for datetime columns to store in server's local timezone
             let updateQueryParts = [
               `status = 'account_manager'`,
-              `disbursed_at = NOW()`,
-              `processed_at = NOW()`,
+              `disbursed_at = CURRENT_TIMESTAMP`,
+              `processed_at = CURRENT_TIMESTAMP`,
               `processed_amount = ?`,
               `exhausted_period_days = ?`,
               `processed_p_fee = ?`,
@@ -2860,7 +2949,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
           loanStatusUpdated = true;
           newStatus = 'account_manager';
-          
+
           // Send KFS and Loan Agreement emails after loan moves to account_manager
           // This is when admin adds transaction (loan_disbursement)
           console.log(`📧 Triggering email send for loan #${loanIdInt} (moved to account_manager)`);
@@ -3101,7 +3190,16 @@ router.get('/:userId/transactions', authenticateAdmin, async (req, res) => {
     const { userId } = req.params;
 
     const transactions = await executeQuery(`
-      SELECT t.*, a.name as created_by_name, la.application_number
+      SELECT 
+        t.id, t.user_id, t.loan_application_id, t.transaction_type, 
+        t.amount, 
+        DATE_FORMAT(t.transaction_date, '%Y-%m-%d') as transaction_date, 
+        t.reference_number, t.payment_method,
+        t.status, t.created_by,
+        DATE_FORMAT(t.created_at, '%Y-%m-%d') as created_at,
+        DATE_FORMAT(t.updated_at, '%Y-%m-%d') as updated_at,
+        a.name as created_by_name, 
+        la.application_number
       FROM transactions t
       LEFT JOIN admins a ON t.created_by = a.id
       LEFT JOIN loan_applications la ON t.loan_application_id = la.id

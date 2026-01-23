@@ -25,7 +25,7 @@ function toDecimal2(value) {
  */
 function parseDateToString(dateValue) {
   if (!dateValue) return null;
-  
+
   // If already a string, extract date portion directly (no timezone conversion)
   if (typeof dateValue === 'string') {
     // Handle MySQL datetime format: "2025-12-15 15:00:00"
@@ -41,7 +41,7 @@ function parseDateToString(dateValue) {
       return dateValue;
     }
   }
-  
+
   // If Date object, extract date components
   // Since server is in IST and MySQL stores dates in IST, use local date components
   // This matches the calendar date as stored in MySQL
@@ -50,7 +50,7 @@ function parseDateToString(dateValue) {
     if (isNaN(dateValue.getTime())) {
       return null;
     }
-    
+
     // Use local date components (server is in IST, so this matches MySQL calendar date)
     // This is correct because:
     // 1. MySQL stores "2026-01-01 15:00:00" in IST
@@ -62,7 +62,7 @@ function parseDateToString(dateValue) {
     const day = String(dateValue.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   }
-  
+
   return null;
 }
 
@@ -86,19 +86,19 @@ function getTodayString() {
  */
 function calculateDaysBetween(startDateStr, endDateStr) {
   if (!startDateStr || !endDateStr) return 0;
-  
+
   // Parse date strings to components
   const [startYear, startMonth, startDay] = startDateStr.split('-').map(Number);
   const [endYear, endMonth, endDay] = endDateStr.split('-').map(Number);
-  
+
   // Create Date objects from components (no timezone conversion)
   const startDate = new Date(startYear, startMonth - 1, startDay);
   const endDate = new Date(endYear, endMonth - 1, endDay);
-  
+
   // Calculate difference in milliseconds
   const diffInMs = endDate - startDate;
   const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
-  
+
   // Add 1 for inclusive counting (both start and end dates count)
   return diffInDays + 1;
 }
@@ -110,10 +110,10 @@ function calculateDaysBetween(startDateStr, endDateStr) {
  */
 function parseDateComponents(dateStr) {
   if (!dateStr || typeof dateStr !== 'string') return null;
-  
+
   const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return null;
-  
+
   return {
     year: parseInt(match[1], 10),
     month: parseInt(match[2], 10) - 1, // JavaScript months are 0-indexed
@@ -173,7 +173,7 @@ function getNextSalaryDate(startDate, targetDay) {
   } else {
     startDateStr = getTodayString();
   }
-  
+
   const startComponents = parseDateComponents(startDateStr);
   if (!startComponents) {
     // Fallback to today if parsing fails
@@ -191,7 +191,7 @@ function getNextSalaryDate(startDate, targetDay) {
       startComponents = todayComponents;
     }
   }
-  
+
   let year = startComponents.year;
   let month = startComponents.month; // Already 0-indexed
   let day = targetDay;
@@ -236,7 +236,7 @@ function getSalaryDateForMonth(startDate, targetDay, monthOffset = 0) {
   } else {
     startDateStr = getTodayString();
   }
-  
+
   const startComponents = parseDateComponents(startDateStr);
   if (!startComponents) {
     // Fallback to today if parsing fails
@@ -254,10 +254,10 @@ function getSalaryDateForMonth(startDate, targetDay, monthOffset = 0) {
       startComponents = todayComponents;
     }
   }
-  
+
   let year = startComponents.year;
   let month = startComponents.month + monthOffset; // Already 0-indexed
-  
+
   // Handle year rollover
   while (month > 11) {
     month -= 12;
@@ -296,7 +296,7 @@ function calculateInterestDays(planData, userData, calculationDate = null) {
   if (!todayStr) {
     todayStr = getTodayString();
   }
-  
+
   // Convert to Date object for calendar arithmetic (using parsed components)
   const todayComponents = parseDateComponents(todayStr);
   if (!todayComponents) {
@@ -306,7 +306,7 @@ function calculateInterestDays(planData, userData, calculationDate = null) {
     return calculateInterestDays(planData, userData, formatDateToString(today));
   }
   const today = new Date(todayComponents.year, todayComponents.month, todayComponents.day);
-  
+
   let days = planData.repayment_days || planData.total_duration_days || 15;
   let calculationMethod = 'fixed';
   let repaymentDate = null;
@@ -338,7 +338,7 @@ function calculateInterestDays(planData, userData, calculationDate = null) {
             const targetMonth = targetSalaryDate.getMonth() + 1;
             const nextMonthStart = new Date(targetYear, targetMonth, 1);
             const nextMonthStartStr = formatDateToString(nextMonthStart);
-            
+
             targetSalaryDate = getNextSalaryDate(nextMonthStartStr, salaryDate);
             const targetSalaryDateStr = formatDateToString(targetSalaryDate);
             daysToTarget = calculateDaysBetween(todayStr, targetSalaryDateStr);
@@ -355,7 +355,7 @@ function calculateInterestDays(planData, userData, calculationDate = null) {
       } else if (planData.plan_type === 'multi_emi' && planData.emi_frequency === 'monthly') {
         // Multi-EMI plan with monthly frequency: calculate first EMI date
         let nextSalaryDate = getNextSalaryDate(todayStr, salaryDate);
-        
+
         // Calculate days from today to next salary date (INCLUSIVE)
         const nextSalaryDateStr = formatDateToString(nextSalaryDate);
         let daysToNextSalary = calculateDaysBetween(todayStr, nextSalaryDateStr);
@@ -376,13 +376,13 @@ function calculateInterestDays(planData, userData, calculationDate = null) {
           const targetYear = nextSalaryDate.getFullYear();
           const targetMonth = nextSalaryDate.getMonth();
           nextSalaryDate = new Date(targetYear, targetMonth, salaryDate);
-          
+
           // Handle edge case: if day doesn't exist in month (e.g., Feb 31), use last day
           if (nextSalaryDate.getDate() !== salaryDate) {
             const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
             nextSalaryDate = new Date(targetYear, targetMonth, Math.min(salaryDate, lastDay));
           }
-          
+
           // Recalculate days after correction
           const nextSalaryDateStr3 = formatDateToString(nextSalaryDate);
           daysToNextSalary = calculateDaysBetween(todayStr, nextSalaryDateStr3);
@@ -458,15 +458,31 @@ function calculateLoanValues(loanData, days) {
 
 /**
  * Get loan calculation by loan ID
- * @param {Object} db - Database connection
- * @param {number} loanId - Loan application ID
- * @param {number} customDays - Optional: Custom days for calculation (if not provided, uses plan days or actual days)
+ * @param {number|Object} loanIdOrDb - Loan application ID (number) OR legacy db connection (for backward compatibility)
+ * @param {number} [loanIdParam] - Loan application ID (only if first param is db)
+ * @param {number} [customDays] - Optional: Custom days for calculation (if not provided, uses plan days or actual days)
  * @returns {Promise<Object>} Calculated loan values
  */
-async function getLoanCalculation(db, loanId, customDays = null) {
+async function getLoanCalculation(loanIdOrDb, loanIdParam, customDays = null) {
+  // Import executeQuery for database access
+  const { executeQuery } = require('../config/database');
+
+  // Handle both new signature (loanId) and legacy signature (db, loanId)
+  let loanId;
+  let days = customDays;
+
+  if (typeof loanIdOrDb === 'number') {
+    // New signature: getLoanCalculation(loanId, customDays)
+    loanId = loanIdOrDb;
+    days = loanIdParam !== undefined ? loanIdParam : null;
+  } else {
+    // Legacy signature: getLoanCalculation(db, loanId, customDays)
+    loanId = loanIdParam;
+  }
+
   try {
-    // Fetch loan data from database
-    const [loans] = await db.execute(
+    // Fetch loan data from database using executeQuery
+    const loans = await executeQuery(
       `SELECT 
         id,
         loan_amount,
@@ -487,8 +503,6 @@ async function getLoanCalculation(db, loanId, customDays = null) {
     const loan = loans[0];
 
     // Determine days for calculation
-    let days = customDays;
-
     if (days === null) {
       // If loan is running (disbursed), calculate actual days
       if (loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)) {
@@ -528,14 +542,31 @@ async function getLoanCalculation(db, loanId, customDays = null) {
 
 /**
  * Update loan calculation fields in database
- * @param {Object} db - Database connection
- * @param {number} loanId - Loan application ID
- * @param {Object} updates - Fields to update
- * @param {number} updates.processing_fee_percent - Processing fee percentage
- * @param {number} updates.interest_percent_per_day - Daily interest percentage
+ * @param {number|Object} loanIdOrDb - Loan application ID (number) OR legacy db connection (for backward compatibility)
+ * @param {number|Object} loanIdOrUpdates - Loan application ID (if first param is db) OR updates object
+ * @param {Object} [updatesParam] - Fields to update (only if first param is db)
+ * @param {number} updatesParam.processing_fee_percent - Processing fee percentage
+ * @param {number} updatesParam.interest_percent_per_day - Daily interest percentage
  * @returns {Promise<Object>} Updated calculation
  */
-async function updateLoanCalculation(db, loanId, updates) {
+async function updateLoanCalculation(loanIdOrDb, loanIdOrUpdates, updatesParam) {
+  // Import executeQuery for database access
+  const { executeQuery } = require('../config/database');
+
+  // Handle both new signature (loanId, updates) and legacy signature (db, loanId, updates)
+  let loanId;
+  let updates;
+
+  if (typeof loanIdOrDb === 'number') {
+    // New signature: updateLoanCalculation(loanId, updates)
+    loanId = loanIdOrDb;
+    updates = loanIdOrUpdates;
+  } else {
+    // Legacy signature: updateLoanCalculation(db, loanId, updates)
+    loanId = loanIdOrUpdates;
+    updates = updatesParam;
+  }
+
   try {
     // Validate inputs
     if (updates.processing_fee_percent !== undefined) {
@@ -573,19 +604,19 @@ async function updateLoanCalculation(db, loanId, updates) {
     updateFields.push('updated_at = NOW()');
     updateValues.push(loanId);
 
-    // Update database
-    await db.execute(
+    // Update database using executeQuery
+    await executeQuery(
       `UPDATE loan_applications 
        SET ${updateFields.join(', ')} 
        WHERE id = ?`,
       updateValues
     );
 
-    // Recalculate and update derived fields
-    const calculation = await getLoanCalculation(db, loanId);
+    // Recalculate and update derived fields (now using new signature)
+    const calculation = await getLoanCalculation(loanId);
 
     // Update calculated fields
-    await db.execute(
+    await executeQuery(
       `UPDATE loan_applications 
        SET 
          processing_fee = ?,
@@ -698,7 +729,7 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
       const multipliedFeeAmount = feeAmount * multiplier;
       const multipliedGstAmount = gstAmount * multiplier;
       const multipliedTotalWithGST = totalWithGST * multiplier;
-      
+
       addToTotal.push({
         ...feeDetail,
         fee_amount: multipliedFeeAmount,
@@ -739,7 +770,7 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
   }
 
   const { days, calculationMethod, repaymentDate } = daysResult;
-  
+
   // Calculate interest on principal
   const interest = Math.round(principal * interestPercentPerDay * days * 100) / 100;
 
@@ -752,7 +783,7 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
 
   // Format calculation date (no timezone conversion)
   const calculationDateStr = options.calculationDate ? parseDateToString(options.calculationDate) : getTodayString();
-  
+
   // Format repayment date (no timezone conversion)
   const repaymentDateStr = repaymentDate ? formatDateToString(repaymentDate) : null;
 

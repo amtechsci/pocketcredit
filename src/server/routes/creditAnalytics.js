@@ -35,7 +35,7 @@ router.post('/check', requireAuth, async (req, res) => {
 
     // Get user details for credit check
     const user = await executeQuery(
-      'SELECT first_name, last_name, phone, email, pan_number, date_of_birth FROM users WHERE id = ?',
+      'SELECT first_name, last_name, phone, email, pan_number, DATE_FORMAT(date_of_birth, "%Y-%m-%d") as date_of_birth FROM users WHERE id = ?',
       [userId]
     );
 
@@ -175,7 +175,7 @@ router.post('/check', requireAuth, async (req, res) => {
     // Priority 2: Get DOB from user_info (Aadhar from Digilocker)
     if (!userData.date_of_birth) {
       const aadharInfo = await executeQuery(
-        'SELECT dob FROM user_info WHERE user_id = ? AND source = ? ORDER BY created_at DESC LIMIT 1',
+        'SELECT DATE_FORMAT(dob, "%Y-%m-%d") as dob FROM user_info WHERE user_id = ? AND source = ? ORDER BY created_at DESC LIMIT 1',
         [userId, 'digilocker']
       );
 

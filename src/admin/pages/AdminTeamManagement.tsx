@@ -59,6 +59,35 @@ interface ActivityLog {
 export function AdminTeamManagement() {
   const navigate = useNavigate();
   const params = useParams();
+
+  // Format date as DD/MM/YYYY without timezone conversion
+  const formatDate = (dateString: string | null | undefined) => {
+    if (!dateString || dateString === 'null' || dateString === 'undefined' || dateString === '') return 'N/A';
+
+    // Extract date part from datetime string (e.g., "2025-12-25 23:19:50" -> "2025-12-25")
+    let datePart = String(dateString);
+    if (typeof dateString === 'string' && dateString.includes(' ')) {
+      datePart = dateString.split(' ')[0];
+    }
+
+    // Handle ISO date format: "2025-12-25" or "2025-12-25T00:00:00.000Z"
+    if (datePart.includes('T')) {
+      datePart = datePart.split('T')[0];
+    }
+
+    // Format as DD/MM/YYYY (Indian format) - no timezone conversion, just string manipulation
+    const parts = datePart.split('-');
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      // Ensure day and month are zero-padded
+      const formattedDay = String(day).padStart(2, '0');
+      const formattedMonth = String(month).padStart(2, '0');
+      return `${formattedDay}/${formattedMonth}/${year}`;
+    }
+
+    return datePart; // Return as-is if format is unexpected
+  };
+
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -407,7 +436,7 @@ export function AdminTeamManagement() {
     if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
     if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
     if (diffDays < 30) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-    return date.toLocaleDateString();
+    return formatDate(timestamp);
   };
 
   const getActivityType = (action: string) => {
@@ -932,13 +961,13 @@ export function AdminTeamManagement() {
                 <div>
                   <label className="text-sm font-medium text-gray-500">Last Login</label>
                   <p className="text-gray-900">
-                    {viewingUser.lastLogin || viewingUser.last_login ? new Date(viewingUser.lastLogin || viewingUser.last_login!).toLocaleString() : 'Never'}
+                    {viewingUser.lastLogin || viewingUser.last_login ? formatDate(viewingUser.lastLogin || viewingUser.last_login!) : 'Never'}
                   </p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-500">Created</label>
                   <p className="text-gray-900">
-                    {viewingUser.createdAt || viewingUser.created_at ? new Date(viewingUser.createdAt || viewingUser.created_at!).toLocaleDateString() : 'Unknown'}
+                    {viewingUser.createdAt || viewingUser.created_at ? formatDate(viewingUser.createdAt || viewingUser.created_at!) : 'Unknown'}
                   </p>
                 </div>
                 <div>

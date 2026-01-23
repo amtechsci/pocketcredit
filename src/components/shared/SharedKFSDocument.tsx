@@ -70,103 +70,14 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
     const calculateAPR = () => {
         if (!kfsData) return '0.00';
         
-        // Use backend-calculated APR if available (already uses correct days for Multi-EMI)
+        // Use backend-calculated APR (all calculations are done in backend)
         if (kfsData.calculations?.apr !== undefined && kfsData.calculations.apr !== null) {
             return kfsData.calculations.apr.toFixed(2);
         }
         
-        // Fallback: Calculate APR on frontend
-        const processingFee = kfsData.fees.processing_fee || 0;
-        const gst = kfsData.fees.gst || 0;
-        const postServiceFee = kfsData.fees.total_add_to_total || 0;
-        const principal = kfsData.loan.sanctioned_amount;
-        const emiCount = kfsData.loan.emi_count || 1;
-        const interestCalculationDays = kfsData.interest?.calculation_days || kfsData.calculations?.interest?.days || 0;
-        const interestRatePerDay = kfsData.interest?.rate_per_day || (kfsData.calculations.interest || 0) / (principal * interestCalculationDays || 1);
-        
-        // For Multi-EMI loans, calculate total interest by summing interest for each EMI period
-        // Each EMI period has interest calculated on the outstanding principal for that period
-        let totalInterest = kfsData.calculations.interest || 0;
-        
-        if (emiCount > 1 && kfsData.repayment?.all_emi_dates && Array.isArray(kfsData.repayment.all_emi_dates) && kfsData.repayment.all_emi_dates.length > 1) {
-            // Calculate interest for each EMI period
-            const disbursedDate = kfsData.loan.disbursed_at ? new Date(kfsData.loan.disbursed_at) : new Date();
-            disbursedDate.setHours(0, 0, 0, 0);
-            
-            // Calculate principal distribution (handle cases where it doesn't divide evenly)
-            // For 3 EMIs: 33.33%, 33.33%, 33.34% (or ₹3,333.33, ₹3,333.33, ₹3,333.34)
-            // For 4 EMIs: 25%, 25%, 25%, 25% (or ₹2,500 each)
-            const principalPerEmi = Math.floor(principal / emiCount * 100) / 100; // Round to 2 decimals
-            const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
-            
-            let outstandingPrincipal = principal;
-            totalInterest = 0;
-            
-            for (let i = 0; i < emiCount; i++) {
-                const emiDate = new Date(kfsData.repayment.all_emi_dates[i]);
-                emiDate.setHours(0, 0, 0, 0);
-                
-                // Calculate days for this EMI period
-                // First period (disbursement to first EMI): inclusive, add +1
-                // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
-                let previousDate;
-                if (i === 0) {
-                    previousDate = disbursedDate;
-                } else {
-                    // Start from day AFTER previous EMI date
-                    previousDate = new Date(kfsData.repayment.all_emi_dates[i - 1]);
-                    previousDate.setDate(previousDate.getDate() + 1);
-                }
-                previousDate.setHours(0, 0, 0, 0);
-                const daysForPeriod = Math.ceil((emiDate.getTime() - previousDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                
-                // Calculate principal for this EMI (add remainder to last EMI)
-                const principalForThisEmi = i === emiCount - 1 
-                    ? Math.round((principalPerEmi + remainder) * 100) / 100
-                    : principalPerEmi;
-                
-                // Calculate interest for this period on outstanding principal
-                const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
-                totalInterest += interestForPeriod;
-                
-                // Reduce outstanding principal for next period
-                outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
-            }
-        }
-        
-        const totalCharges = processingFee + gst + postServiceFee + totalInterest;
-        
-        // Calculate actual loan term days for APR
-        // For Multi-EMI loans, calculate from disbursement date to last EMI date
-        // For single payment loans, use actual interest calculation days
-        let days = interestCalculationDays || kfsData.loan.loan_term_days || 165;
-        
-        if (emiCount > 1 && kfsData.repayment?.all_emi_dates && Array.isArray(kfsData.repayment.all_emi_dates) && kfsData.repayment.all_emi_dates.length > 0) {
-            // Use actual last EMI date to calculate loan term
-            const lastEmiDate = new Date(kfsData.repayment.all_emi_dates[kfsData.repayment.all_emi_dates.length - 1]);
-            const disbursedDate = kfsData.loan.disbursed_at ? new Date(kfsData.loan.disbursed_at) : new Date();
-            disbursedDate.setHours(0, 0, 0, 0);
-            lastEmiDate.setHours(0, 0, 0, 0);
-            days = Math.ceil((lastEmiDate.getTime() - disbursedDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-        }
-        
-        // Debug: Log calculation details
-        console.log('APR Calculation Debug:', {
-            processingFee,
-            gst,
-            postServiceFee,
-            interest: totalInterest,
-            totalCharges,
-            principal,
-            days,
-            emiCount,
-            calculation_days: kfsData.interest?.calculation_days,
-            interest_days: kfsData.calculations?.interest?.days,
-            loan_term_days: kfsData.loan.loan_term_days,
-            apr: ((totalCharges / principal) / days * 36500).toFixed(2)
-        });
-        
-        return ((totalCharges / principal) / days * 36500).toFixed(2);
+        // If backend didn't provide APR, return 0 (should not happen)
+        console.warn('⚠️ APR not provided by backend');
+        return '0.00';
     };
 
     // Get fees grouped by application method
@@ -758,7 +669,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                                         <td className="border border-black p-2">{formatCurrency(emi.outstanding_principal || 0)}</td>
                                         <td className="border border-black p-2">{formatCurrency(emi.principal || 0)}</td>
                                         <td className="border border-black p-2">
-                                            {Math.round(emi.interest || 0)}+{Math.round((emi.post_service_fee || 0) + (emi.gst_on_post_service_fee || 0))}
+                                            {(emi.interest || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}+{((emi.post_service_fee || 0) + (emi.gst_on_post_service_fee || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </td>
                                         <td className="border border-black p-2">{formatCurrency(emi.instalment_amount || 0)}</td>
                                     </tr>
@@ -769,7 +680,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             const principal = kfsData.loan.sanctioned_amount || kfsData.calculations.principal || 0;
                             const totalInterest = kfsData.calculations.interest || 0;
                             const postServiceFee = kfsData.fees.total_add_to_total || 0;
-                            const postServiceFeeGST = Math.round(postServiceFee * 0.18);
+                            const postServiceFeeGST = Math.round(postServiceFee * 0.18 * 100) / 100;
                             const postServiceFeeWithGST = postServiceFee + postServiceFeeGST;
                             const instalmentAmount = principal + totalInterest + postServiceFee + postServiceFeeGST;
                             
@@ -779,7 +690,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                                     <td className="border border-black p-2">{formatCurrency(principal)}</td>
                                     <td className="border border-black p-2">{formatCurrency(principal)}</td>
                                     <td className="border border-black p-2">
-                                        {Math.round(totalInterest)}+{Math.round(postServiceFeeWithGST)}
+                                        {totalInterest.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}+{postServiceFeeWithGST.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </td>
                                     <td className="border border-black p-2">{formatCurrency(instalmentAmount)}</td>
                                 </tr>

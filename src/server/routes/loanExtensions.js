@@ -67,7 +67,7 @@ router.get('/eligibility/:loanId', requireAuth, async (req, res) => {
 
     // Check for pending extension request (both 'pending' and 'pending_payment')
     const pendingExtension = await executeQuery(`
-      SELECT id, extension_number, created_at, status
+      SELECT id, extension_number, DATE_FORMAT(created_at, '%Y-%m-%d') as created_at, status
       FROM loan_extensions
       WHERE loan_application_id = ? AND (status = 'pending' OR status = 'pending_payment')
       ORDER BY created_at DESC
@@ -85,7 +85,9 @@ router.get('/eligibility/:loanId', requireAuth, async (req, res) => {
       let paymentOrder = null;
       if (extension.status === 'pending_payment') {
         const paymentOrders = await executeQuery(`
-          SELECT id, order_id, status, amount, created_at, updated_at
+          SELECT id, order_id, status, amount, 
+          DATE_FORMAT(created_at, '%Y-%m-%d') as created_at, 
+          DATE_FORMAT(updated_at, '%Y-%m-%d') as updated_at
           FROM payment_orders
           WHERE loan_id = ? AND payment_type = 'extension_fee' AND extension_id = ?
           ORDER BY created_at DESC
@@ -1088,7 +1090,9 @@ router.post('/:extensionId/check-payment', requireAuth, async (req, res) => {
 
     // Find payment order for this extension
     const paymentOrders = await executeQuery(`
-      SELECT id, order_id, status, amount, payment_session_id, cashfree_response, created_at, updated_at
+      SELECT id, order_id, status, amount, payment_session_id, cashfree_response, 
+      DATE_FORMAT(created_at, '%Y-%m-%d') as created_at, 
+      DATE_FORMAT(updated_at, '%Y-%m-%d') as updated_at
       FROM payment_orders
       WHERE loan_id = ? AND payment_type = 'extension_fee' AND extension_id = ?
       ORDER BY created_at DESC

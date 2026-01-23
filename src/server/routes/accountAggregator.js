@@ -334,6 +334,7 @@ router.post('/upload-statement', requireAuth, upload.single('statement'), async 
        file_path = VALUES(file_path), 
        file_name = VALUES(file_name), 
        file_size = VALUES(file_size), 
+       upload_method = VALUES(upload_method),
        status = 'processing', 
        updated_at = NOW()`,
       [userId, application_id, clientRefNum, mobileNumber, bank_name || null, fileUrl, req.file.originalname, req.file.size]

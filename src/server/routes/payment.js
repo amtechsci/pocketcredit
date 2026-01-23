@@ -485,7 +485,8 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         // This prevents reusing order IDs for different payment types (e.g., emi_1st vs emi_2nd)
         const orderPaymentType = finalPaymentType || 'loan_repayment';
         const existingOrders = await executeQuery(
-            `SELECT order_id, status, amount, payment_session_id, payment_type, created_at 
+            `SELECT order_id, status, amount, payment_session_id, payment_type, 
+             DATE_FORMAT(created_at, '%Y-%m-%d') as created_at 
              FROM payment_orders 
              WHERE loan_id = ? AND user_id = ? AND payment_type = ? AND status IN ('PENDING', 'PAID')
              ORDER BY created_at DESC 

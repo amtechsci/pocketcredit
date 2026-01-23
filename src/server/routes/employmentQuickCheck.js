@@ -138,8 +138,9 @@ router.post('/', requireAuth, async (req, res) => {
 
       if (age > 45) {
         // Hold application permanently due to age
+        // Use COALESCE to preserve existing date_of_birth if it exists
         await executeQuery(
-          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, date_of_birth = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
+          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, date_of_birth = COALESCE(date_of_birth, ?), profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
           ['on_hold', 'not_eligible', `Application held: Age (${age} years) exceeds maximum limit of 45 years`, date_of_birth, userId]
         );
 
@@ -252,8 +253,9 @@ router.post('/', requireAuth, async (req, res) => {
 
         // User is eligible - update profile step, set loan limit, income range, date of birth, and save employment info
         // NEW: Mark profile_completed = 1 to skip remaining steps as per user request
+        // Use COALESCE to preserve existing date_of_birth if it exists (prefer user-entered value over form value)
         await executeQuery(
-          'UPDATE users SET profile_completion_step = 2, profile_completed = 1, status = ?, eligibility_status = ?, loan_limit = ?, income_range = ?, date_of_birth = ?, updated_at = NOW() WHERE id = ?',
+          'UPDATE users SET profile_completion_step = 2, profile_completed = 1, status = ?, eligibility_status = ?, loan_limit = ?, income_range = ?, date_of_birth = COALESCE(date_of_birth, ?), updated_at = NOW() WHERE id = ?',
           ['active', 'eligible', loanLimit, income_range, date_of_birth, userId]
         );
 

@@ -88,7 +88,43 @@ async function uploadToS3(fileBuffer, fileName, mimeType, options = {}) {
     if (documentType) s3Path += `/${documentType}`;
 
     const timestamp = Date.now();
-    const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+    
+    // Enhanced filename sanitization to handle all edge cases
+    // 1. Remove any path separators to prevent directory traversal
+    let sanitizedFileName = fileName.replace(/[\/\\]/g, '_');
+    
+    // 2. Convert to ASCII-compatible format (remove Unicode, emoji, etc.)
+    sanitizedFileName = sanitizedFileName
+      .normalize('NFD') // Normalize Unicode characters
+      .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
+      .replace(/[^\x00-\x7F]/g, '') // Remove non-ASCII characters
+      .replace(/\s+/g, '_') // Replace whitespace with underscores
+      .replace(/[^a-zA-Z0-9._-]/g, '_') // Keep only alphanumeric, dots, hyphens, underscores
+      .replace(/_+/g, '_') // Replace multiple underscores with single
+      .replace(/^[._-]+|[._-]+$/g, '') // Remove leading/trailing special chars
+      .trim();
+    
+    // 3. Ensure filename is not empty after sanitization
+    if (!sanitizedFileName || sanitizedFileName.length === 0) {
+      sanitizedFileName = 'document';
+    }
+    
+    // 4. Handle file extension
+    const lastDotIndex = sanitizedFileName.lastIndexOf('.');
+    if (lastDotIndex > 0 && lastDotIndex < sanitizedFileName.length - 1) {
+      const name = sanitizedFileName.substring(0, lastDotIndex);
+      const ext = sanitizedFileName.substring(lastDotIndex + 1).toLowerCase();
+      sanitizedFileName = `${name}.${ext}`;
+    }
+    
+    // 5. Truncate if filename is too long (S3 key limit is 1024 chars, but keep it reasonable)
+    const maxFileNameLength = 200;
+    if (sanitizedFileName.length > maxFileNameLength) {
+      const ext = sanitizedFileName.substring(sanitizedFileName.lastIndexOf('.'));
+      const nameWithoutExt = sanitizedFileName.substring(0, sanitizedFileName.lastIndexOf('.'));
+      sanitizedFileName = nameWithoutExt.substring(0, maxFileNameLength - ext.length) + ext;
+    }
+    
     const uniqueFileName = `${s3Path}/${timestamp}-${sanitizedFileName}`;
 
     const BUCKET_NAME = process.env.AWS_S3_BUCKET;
@@ -141,8 +177,30 @@ async function uploadToS3(fileBuffer, fileName, mimeType, options = {}) {
       mimeType: mimeType,
     };
   } catch (error) {
-    console.error('❌ S3 Upload Error:', error);
-    throw new Error(`Failed to upload file to S3: ${error.message}`);
+    console.error('❌ S3 Upload Error:', {
+      error: error.message,
+      code: error.code,
+      fileName: fileName,
+      sanitizedFileName: sanitizedFileName,
+      uniqueFileName: uniqueFileName,
+      bucket: BUCKET_NAME,
+      mimeType: mimeType,
+      fileSize: fileBuffer?.length
+    });
+    
+    // Provide more specific error messages
+    let errorMessage = 'Failed to upload file to S3';
+    if (error.message.includes('pattern')) {
+      errorMessage += ': Invalid filename format. Please try renaming your file to use only letters, numbers, and basic punctuation.';
+    } else if (error.code === 'AccessDenied') {
+      errorMessage += ': Access denied. Please check S3 bucket permissions.';
+    } else if (error.code === 'NoSuchBucket') {
+      errorMessage += ': S3 bucket not found. Please check configuration.';
+    } else {
+      errorMessage += `: ${error.message}`;
+    }
+    
+    throw new Error(errorMessage);
   }
 }
 

@@ -93,7 +93,8 @@ router.get('/:applicationId', requireAuth, async (req, res) => {
 
     // Get loan application details - simplified query to avoid timeout
     const applications = await executeQuery(
-      `SELECT id, application_number, loan_amount, loan_purpose, status, created_at
+      `SELECT id, application_number, loan_amount, loan_purpose, status, 
+       DATE_FORMAT(created_at, '%Y-%m-%d') as created_at
        FROM loan_applications 
        WHERE id = ? AND user_id = ?`,
       [applicationId, userId]
