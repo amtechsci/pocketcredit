@@ -38,7 +38,7 @@ export function HoldStatusPage() {
 
         // Fetch dashboard data to get hold information
         const response = await apiService.getDashboardSummary();
-        
+
         if (response.status === 'success' && response.data?.hold_info) {
           setHoldInfo(response.data.hold_info);
         } else {
@@ -115,13 +115,7 @@ export function HoldStatusPage() {
                     <p className="text-sm text-gray-700 mb-4">
                       We will update you if it is unlocked.
                     </p>
-                    
-                    {holdInfo.hold_reason && (
-                      <div className="bg-white rounded-md border border-blue-200 p-4">
-                        <p className="text-sm font-medium text-gray-700 mb-1.5">Reason:</p>
-                        <p className="text-sm text-gray-800">{holdInfo.hold_reason}</p>
-                      </div>
-                    )}
+
                   </div>
                 </div>
               </div>
@@ -139,7 +133,7 @@ export function HoldStatusPage() {
                     <p className="text-sm text-gray-700 mb-4">
                       We will let you know once you are eligible.
                     </p>
-                    
+
                     {holdInfo.hold_until_formatted && (
                       <div className="bg-white rounded-md border border-orange-200 p-4 mb-4">
                         <div className="flex items-center justify-between">
@@ -160,7 +154,7 @@ export function HoldStatusPage() {
                         </div>
                       </div>
                     )}
-                    
+
                     {holdInfo.hold_reason && (
                       <div className="bg-white rounded-md border border-orange-200 p-4">
                         <p className="text-sm font-medium text-gray-700 mb-1.5">Reason:</p>

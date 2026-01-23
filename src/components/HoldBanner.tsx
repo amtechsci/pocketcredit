@@ -20,7 +20,7 @@ interface HoldBannerProps {
 export function HoldBanner({ holdInfo }: HoldBannerProps) {
   // Check if user is deleted
   const isDeleted = holdInfo?.status === 'deleted';
-  
+
   if (isDeleted) {
     return (
       <div className="mb-6">
@@ -55,12 +55,7 @@ export function HoldBanner({ holdInfo }: HoldBannerProps) {
             <p className="text-sm">
               We will update you if it is unlocked.
             </p>
-            {holdInfo.hold_reason && (
-              <div className="bg-white/50 p-3 rounded border border-red-200">
-                <p className="text-sm font-medium">Reason:</p>
-                <p className="text-sm">{holdInfo.hold_reason}</p>
-              </div>
-            )}
+
           </AlertDescription>
         </Alert>
       ) : isCoolingPeriod && !isExpired ? (
