@@ -188,6 +188,19 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       }
     }
 
+    // Ensure loan_applications status enum includes qa_verification
+    try {
+      await executeQuery(
+        `ALTER TABLE loan_applications MODIFY COLUMN status ENUM('draft', 'submitted', 'under_review', 'follow_up', 'approved', 'rejected', 'disbursal', 'ready_for_disbursement', 'repeat_ready_for_disbursement', 'repeat_disbursal', 'account_manager', 'cleared', 'cancelled', 'defaulted', 'qa_verification') DEFAULT 'draft'`
+      );
+      console.log('✅ Updated loan_applications.status enum to include qa_verification');
+    } catch (enumError) {
+      // Ignore error if enum already has these values
+      if (!enumError.message.includes('Duplicate value') && !enumError.message.includes('already exists')) {
+        console.log('ℹ️ Loan status enum update note:', enumError.message);
+      }
+    }
+
     // For cancel action, validate loan before saving history
     let loanToUpdate = null;
     let actualLoanId = loanApplicationId;
@@ -310,6 +323,9 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
         case 'cancel':
         case 're_process':
           newStatus = 'cancelled';
+          break;
+        case 'qa_verification':
+          newStatus = 'qa_verification';
           break;
       }
 

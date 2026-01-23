@@ -25,7 +25,7 @@ function extractPANFromText(text) {
   // Look for patterns like "Permanent Account Number FPFPM8829N" or just the PAN itself
   const panPattern = /\b([A-Z]{5}[0-9]{4}[A-Z]{1})\b/g;
   const matches = text.match(panPattern);
-  
+
   if (matches && matches.length > 0) {
     // Return the first valid PAN found
     const pan = matches[0].toUpperCase();
@@ -57,18 +57,18 @@ async function extractPANFromPDF(pdfBuffer) {
     if (!Buffer.isBuffer(pdfBuffer)) {
       pdfBuffer = Buffer.from(pdfBuffer);
     }
-    
+
     console.log('   🔍 Attempting to parse PDF, buffer size:', pdfBuffer.length);
-    
+
     // pdf-parse v2.4.5 uses PDFParse class
     const { PDFParse } = require('pdf-parse');
-    
+
     // Create parser instance with the PDF buffer
     parser = new PDFParse({ data: pdfBuffer });
-    
+
     // Extract text from PDF
     const result = await parser.getText();
-    
+
     const text = result.text || '';
     console.log('   ✅ PDF parsed successfully, text length:', text.length);
     return extractPANFromText(text);
@@ -759,7 +759,7 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
     const normalizedEmail = userData.email && !placeholderEmails.includes(userData.email.trim().toUpperCase())
       ? userData.email
       : null;
-    
+
     // Use default email if normalized email is null/empty
     const emailForRequest = normalizedEmail || `user${userId}@pocketcredit.in`;
 
@@ -775,14 +775,14 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
         pan: userData.pan_number,
         device_ip: req.ip || '192.168.1.1'
       });
-      
+
       console.log('✅ Credit report received:', {
         result_code: creditReportResponse?.result_code,
         request_id: creditReportResponse?.request_id
       });
     } catch (apiError) {
       console.error('❌ Credit report API error:', apiError.message);
-      
+
       // Check if it's a service unavailable error
       if (apiError.isServiceUnavailable || apiError.status === 503 || apiError.response?.status === 503) {
         const serviceError = new Error('Credit Analytics service is temporarily unavailable. The external credit check service is down or overloaded. Please try again in a few minutes.');
@@ -790,7 +790,7 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
         serviceError.isServiceUnavailable = true;
         throw serviceError;
       }
-      
+
       throw new Error(`Failed to request credit report: ${apiError.message}`);
     }
 
@@ -814,10 +814,10 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
     // Extract PDF URL from response and download to S3
     let s3PdfKey = null;
     const experianPdfUrl = creditAnalyticsService.extractPdfUrl(creditReportResponse);
-    
+
     if (experianPdfUrl) {
       console.log('📄 PDF URL extracted from response:', experianPdfUrl);
-      
+
       try {
         // Download PDF from Experian URL
         const axios = require('axios');
@@ -829,15 +829,15 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
             'Accept': 'application/pdf'
           }
         });
-        
+
         const pdfBuffer = Buffer.from(pdfResponse.data);
         console.log(`✅ Downloaded PDF from Experian, size: ${pdfBuffer.length} bytes`);
-        
+
         // Validate it's a PDF
         if (pdfBuffer.length < 100 || !pdfBuffer.toString('ascii', 0, 4).startsWith('%PDF')) {
           throw new Error('Downloaded file does not appear to be a valid PDF');
         }
-        
+
         // Upload to S3
         const { uploadGeneratedPDF } = require('../services/s3Service');
         const fileName = `Credit_Report_${clientRefNum}.pdf`;
@@ -943,10 +943,10 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
       code: error.code,
       isServiceUnavailable: error.isServiceUnavailable
     });
-    
+
     // Determine HTTP status code
     const httpStatus = error.isServiceUnavailable || error.status === 503 ? 503 : 500;
-    
+
     // Provide more detailed error message
     let errorMessage = 'Failed to perform credit check';
     if (error.message) {
@@ -954,7 +954,7 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
     } else if (error.response?.data?.message) {
       errorMessage += `: ${error.response.data.message}`;
     }
-    
+
     res.status(httpStatus).json({
       status: 'error',
       message: errorMessage,
@@ -1206,6 +1206,91 @@ router.get('/approved/list', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch approved users'
+    });
+  }
+});
+
+// GET /api/admin/users/qa-verification/list
+// Get users with loan applications in QA Verification status
+router.get('/qa-verification/list', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const search = req.query.search || '';
+    const offset = (page - 1) * limit;
+
+    let whereConditions = [];
+    let queryParams = [];
+
+    // QA Verification users: loan_applications.status = 'qa_verification'
+    whereConditions.push(`la.status = 'qa_verification'`);
+
+    // Search filter
+    if (search) {
+      whereConditions.push(`(
+        u.first_name LIKE ? OR 
+        u.last_name LIKE ? OR 
+        u.email LIKE ? OR 
+        u.phone LIKE ? OR
+        la.application_number LIKE ?
+      )`);
+      const searchTerm = `%${search}%`;
+      queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+    }
+
+    const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+
+    // Get total count
+    const countQuery = `
+      SELECT COUNT(*) as total 
+      FROM loan_applications la
+      INNER JOIN users u ON la.user_id = u.id
+      ${whereClause}
+    `;
+    const countResult = await executeQuery(countQuery, queryParams);
+    const total = countResult && countResult.length > 0 ? countResult[0].total : 0;
+
+    // Get users with loan application details
+    const usersQuery = `
+      SELECT 
+        u.id,
+        u.first_name,
+        u.last_name,
+        u.email,
+        u.phone,
+        u.status,
+        u.loan_limit,
+        la.id as loan_application_id,
+        la.application_number,
+        la.loan_amount,
+        la.status as loan_status,
+        DATE_FORMAT(la.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+        DATE_FORMAT(la.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
+      FROM loan_applications la
+      INNER JOIN users u ON la.user_id = u.id
+      ${whereClause}
+      ORDER BY la.updated_at DESC
+      LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
+    `;
+    const users = await executeQuery(usersQuery, queryParams);
+
+    res.json({
+      status: 'success',
+      data: {
+        users: users || [],
+        total: total,
+        page: page,
+        limit: limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get QA Verification users error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch QA Verification users'
     });
   }
 });

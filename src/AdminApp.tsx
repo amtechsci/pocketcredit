@@ -21,6 +21,7 @@ import { PoliciesManagement } from './admin/pages/PoliciesManagement';
 import { CoolingPeriodPage } from './admin/pages/CoolingPeriodPage';
 import { RegisteredPage } from './admin/pages/RegisteredPage';
 import { ApprovedPage } from './admin/pages/ApprovedPage';
+import { QAVerificationPage } from './admin/pages/QAVerificationPage';
 import { AdminProvider } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
 import { useAdminAutoLogout } from './admin/hooks/useAdminAutoLogout';
@@ -110,8 +111,8 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                 <button
                   onClick={() => navigate(`${BASE_PATH}/dashboard`)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/dashboard`)
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-gray-600 hover:text-gray-900'
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'text-gray-600 hover:text-gray-900'
                     }`}
                 >
                   Dashboard
@@ -119,8 +120,8 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                 <button
                   onClick={() => navigate(`${BASE_PATH}/applications`)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/applications`)
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-gray-600 hover:text-gray-900'
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'text-gray-600 hover:text-gray-900'
                     }`}
                 >
                   Applications
@@ -128,8 +129,8 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                 <button
                   onClick={() => navigate(`${BASE_PATH}/users`)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/users`)
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-gray-600 hover:text-gray-900'
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'text-gray-600 hover:text-gray-900'
                     }`}
                 >
                   Users
@@ -137,8 +138,8 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                 <button
                   onClick={() => navigate(`${BASE_PATH}/registered`)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/registered`)
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-gray-600 hover:text-gray-900'
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'text-gray-600 hover:text-gray-900'
                     }`}
                 >
                   Registered
@@ -146,8 +147,8 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                 <button
                   onClick={() => navigate(`${BASE_PATH}/approved`)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/approved`)
-                      ? 'bg-green-100 text-green-700'
-                      : 'text-gray-600 hover:text-gray-900'
+                    ? 'bg-green-100 text-green-700'
+                    : 'text-gray-600 hover:text-gray-900'
                     }`}
                 >
                   Approved
@@ -155,17 +156,26 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                 <button
                   onClick={() => navigate(`${BASE_PATH}/cooling-period`)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/cooling-period`)
-                      ? 'bg-orange-100 text-orange-700'
-                      : 'text-gray-600 hover:text-gray-900'
+                    ? 'bg-orange-100 text-orange-700'
+                    : 'text-gray-600 hover:text-gray-900'
                     }`}
                 >
                   Cooling Period
                 </button>
                 <button
+                  onClick={() => navigate(`${BASE_PATH}/qa-verification`)}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/qa-verification`)
+                    ? 'bg-cyan-100 text-cyan-700'
+                    : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                >
+                  QA Verification
+                </button>
+                <button
                   onClick={() => navigate(`${BASE_PATH}/reports`)}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/reports`)
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-gray-600 hover:text-gray-900'
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'text-gray-600 hover:text-gray-900'
                     }`}
                 >
                   Reports
@@ -174,8 +184,8 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                   <button
                     onClick={() => navigate(`${BASE_PATH}/team-management`)}
                     className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/team-management`)
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'text-gray-600 hover:text-gray-900'
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'text-gray-600 hover:text-gray-900'
                       }`}
                   >
                     Team Management
@@ -185,8 +195,8 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                   <button
                     onClick={() => navigate(`${BASE_PATH}/settings`)}
                     className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive(`${BASE_PATH}/settings`)
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'text-gray-600 hover:text-gray-900'
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'text-gray-600 hover:text-gray-900'
                       }`}
                   >
                     Settings
@@ -323,6 +333,11 @@ export default function AdminApp() {
       <Route path="approved" element={
         <ProtectedRoute>
           <ApprovedPage />
+        </ProtectedRoute>
+      } />
+      <Route path="qa-verification" element={
+        <ProtectedRoute>
+          <QAVerificationPage />
         </ProtectedRoute>
       } />
       <Route path="activity-logs" element={
