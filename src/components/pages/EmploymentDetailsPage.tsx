@@ -146,7 +146,7 @@ export const EmploymentDetailsPage: React.FC = () => {
       try {
         // Check if employment details already exist (user-specific, no longer requires applicationId)
         const response = await apiService.getEmploymentDetailsStatus();
-        
+
         if (response.status === 'success' && response.data?.completed) {
           // Employment details already completed - redirect to next step
           toast.success('Employment details already submitted! Proceeding to next step...');
@@ -203,7 +203,7 @@ export const EmploymentDetailsPage: React.FC = () => {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (suggestionRef.current && !suggestionRef.current.contains(event.target as Node) &&
-          companyInputRef.current && !companyInputRef.current.contains(event.target as Node)) {
+        companyInputRef.current && !companyInputRef.current.contains(event.target as Node)) {
         setShowSuggestions(false);
       }
     };
@@ -234,7 +234,7 @@ export const EmploymentDetailsPage: React.FC = () => {
           setLoadingSuggestions(false);
         }
       }, 200);
-      
+
       setSearchTimeout(timeout);
       return;
     }
@@ -260,7 +260,7 @@ export const EmploymentDetailsPage: React.FC = () => {
 
   const handleInputChange = (field: keyof EmploymentData, value: string | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value as any }));
-    
+
     // Trigger company search when company_name changes
     if (field === 'company_name') {
       searchCompanies(value as string);
@@ -268,8 +268,8 @@ export const EmploymentDetailsPage: React.FC = () => {
   };
 
   const handleSelectCompany = (company: CompanySuggestion) => {
-    setFormData(prev => ({ 
-      ...prev, 
+    setFormData(prev => ({
+      ...prev,
       company_name: company.company_name,
       // Auto-fill industry if available
       industry: company.industry || prev.industry
@@ -349,12 +349,44 @@ export const EmploymentDetailsPage: React.FC = () => {
       });
 
       if (response.success) {
-        toast.success('Employment details saved successfully!');
-        
-        // Wait a moment for backend to update loan application step, then navigate
-        setTimeout(() => {
-          navigate('/loan-application/bank-statement', { replace: true });
-        }, 500);
+        // toast.success('Employment details saved successfully!');
+
+        // Trigger Credit Check (BRE Engine)
+        toast.info('Verifying eligibility...', { duration: 3000 });
+
+        try {
+          // Pass applicationId if available from location state
+          const creditCheckResponse = await apiService.checkCreditEligibility(applicationId);
+
+          if (creditCheckResponse.status === 'success' && creditCheckResponse.data?.eligible) {
+            toast.success('Eligibility verified! Proceeding to next step...');
+
+            // Wait a moment before navigating
+            setTimeout(() => {
+              navigate('/loan-application/bank-statement', {
+                state: { applicationId },
+                replace: true
+              });
+            }, 1000);
+          } else {
+            // Failed BRE or other checks
+            const reasons = creditCheckResponse.data?.rejection_reasons || [];
+            const displayReason = reasons.length > 0 ? reasons[0] : 'Credit criteria not met';
+
+            toast.error(`Application placed on hold: ${displayReason}`, { duration: 5000 });
+
+            // Redirect to dashboard where they will see the On Hold status
+            setTimeout(() => {
+              navigate('/dashboard', { replace: true });
+            }, 3000);
+          }
+        } catch (checkError) {
+          console.error('Credit check error:', checkError);
+          // If technical error, still let them know something went wrong but maybe don't block hard if it's just a network blip?
+          // Requirement says "take to next step ONLY if below conditions are passed". So we must block.
+          toast.error('Unable to verify eligibility. Please contact support or try again later.');
+        }
+
       } else {
         toast.error(response.message || 'Failed to save employment details');
       }
@@ -427,10 +459,10 @@ export const EmploymentDetailsPage: React.FC = () => {
                     disabled={loading}
                   />
                   <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                  
+
                   {/* Autocomplete Suggestions Dropdown */}
                   {showSuggestions && (companySuggestions.length > 0 || loadingSuggestions) && (
-                    <div 
+                    <div
                       ref={suggestionRef}
                       className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto"
                     >
@@ -466,7 +498,7 @@ export const EmploymentDetailsPage: React.FC = () => {
                           ))}
                           <div className="p-3 bg-gray-50 border-t border-gray-200">
                             <p className="text-xs text-gray-600 text-center">
-                              {formData.company_name.trim() 
+                              {formData.company_name.trim()
                                 ? "Don't see your company? You can still type and submit"
                                 : "Showing popular companies. Type to search or enter manually"
                               }

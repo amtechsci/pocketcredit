@@ -197,7 +197,7 @@ class ApiService {
   async verifyOTP(mobile: string, otp: string): Promise<ApiResponse<LoginResponse & { token?: string }>> {
     // Get stored UTM parameters
     const utmParams = this.getStoredUTMParams();
-    
+
     // Include UTM parameters in request if present
     const requestBody: any = { mobile, otp };
     if (utmParams.utm_source) {
@@ -205,7 +205,7 @@ class ApiService {
       requestBody.utm_medium = utmParams.utm_medium || 'partner_api';
       requestBody.utm_campaign = utmParams.utm_campaign;
     }
-    
+
     const response = await this.request<LoginResponse & { token?: string }>('POST', '/auth/verify-otp', requestBody);
 
     // Store JWT token if provided
@@ -327,18 +327,18 @@ class ApiService {
 
   // NOTE: Old createLoanApplication method removed - use applyForLoan() instead
   // which calls /loan-applications/apply
-  
+
   // createLoanApplication - for new loan application flow
   async createLoanApplication(loanData: any): Promise<ApiResponse<any>> {
     // Get stored UTM parameters
     const utmParams = this.getStoredUTMParams();
-    
+
     // Include UTM parameters in request if present
     const requestData: any = { ...loanData };
     if (utmParams.utm_source) {
       requestData.utm_source = utmParams.utm_source;
     }
-    
+
     return this.request('POST', '/loan-applications/apply', requestData);
   }
 
@@ -731,13 +731,13 @@ class ApiService {
   }): Promise<ApiResponse<{ application: LoanApplication; next_steps: string[] }>> {
     // Get stored UTM parameters
     const utmParams = this.getStoredUTMParams();
-    
+
     // Include UTM parameters in request if present
     const requestData: any = { ...loanData };
     if (utmParams.utm_source) {
       requestData.utm_source = utmParams.utm_source;
     }
-    
+
     return this.request('POST', '/loan-applications/apply', requestData);
   }
 
@@ -755,6 +755,17 @@ class ApiService {
 
   async getLoanApplicationStats(): Promise<ApiResponse<{ statistics: LoanApplicationStats }>> {
     return this.request('GET', '/loan-applications/stats/summary');
+  }
+
+  // Credit Analytics APIs
+  async checkCreditEligibility(applicationId?: number): Promise<ApiResponse<{
+    eligible: boolean;
+    credit_score?: number;
+    rejection_reasons?: string[];
+    hold_until?: string;
+  }>> {
+    const data = applicationId ? { application_id: applicationId } : {};
+    return this.request('POST', '/credit-analytics/check', data);
   }
 
   // Dashboard APIs
@@ -1377,7 +1388,7 @@ class ApiService {
     authorization_url: string;
     subscription_status: string;
   }>> {
-    return this.request('POST', '/enach/create-subscription', { 
+    return this.request('POST', '/enach/create-subscription', {
       applicationId,
       authMode: authMode || 'net_banking'
     });
@@ -1414,9 +1425,9 @@ class ApiService {
   }>> {
     // Always include paymentType in the request body
     // Use null instead of undefined so it's included in JSON serialization
-    const requestBody = { 
-      loanId, 
-      amount, 
+    const requestBody = {
+      loanId,
+      amount,
       paymentType: paymentType || null  // Use null instead of undefined so it's sent in JSON
     };
     console.log('[API] createPaymentOrder called with:', { loanId, amount, paymentType, requestBody });

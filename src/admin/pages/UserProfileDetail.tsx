@@ -7055,6 +7055,7 @@ export function UserProfileDetail() {
                     <th className="border border-gray-300 px-2 py-2 text-left">Sanction Amt</th>
                     <th className="border border-gray-300 px-2 py-2 text-left">Current Balance</th>
                     <th className="border border-gray-300 px-2 py-2 text-left">Amount Overdue</th>
+                    <th className="border border-gray-300 px-2 py-2 text-left">DPD</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -7104,6 +7105,16 @@ export function UserProfileDetail() {
                         {account.Amount_Past_Due && parseInt(account.Amount_Past_Due) > 0 ?
                           `₹${parseInt(account.Amount_Past_Due).toLocaleString('en-IN')}` :
                           '₹0'}
+                      </td>
+                      <td className={`border border-gray-300 px-2 py-2 text-right font-semibold ${account.CAIS_Account_History &&
+                          account.CAIS_Account_History.length > 0 &&
+                          parseInt(account.CAIS_Account_History[0]?.Days_Past_Due) > 0
+                          ? 'text-red-600'
+                          : 'text-gray-600'
+                        }`}>
+                        {account.CAIS_Account_History && account.CAIS_Account_History.length > 0
+                          ? parseInt(account.CAIS_Account_History[0]?.Days_Past_Due || 0)
+                          : '0'}
                       </td>
                     </tr>
                   ))}

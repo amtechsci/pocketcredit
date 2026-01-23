@@ -52,7 +52,7 @@ router.post('/check', requireAuth, async (req, res) => {
     if (!userData.pan_number) {
       try {
         const { downloadFromS3 } = require('../services/s3Service');
-        
+
         // Import OCR function from adminUsers (same robust OCR implementation)
         const extractPANFromText = (text) => {
           if (!text || typeof text !== 'string') {
@@ -227,16 +227,16 @@ router.post('/check', requireAuth, async (req, res) => {
 
     // Request credit report from Experian
     const clientRefNum = `PC${userId}_${Date.now()}`;
-    
+
     // Normalize email - treat placeholder values as empty
     const placeholderEmails = ['N/A', 'NA', 'n/a', 'na', 'NONE', 'none', 'NULL', 'null', ''];
     const normalizedEmail = userData.email && !placeholderEmails.includes(userData.email.trim().toUpperCase())
       ? userData.email
       : null;
-    
+
     // Use default email if normalized email is null/empty
     const emailForRequest = normalizedEmail || `user${userId}@pocketcredit.in`;
-    
+
     const creditReportResponse = await creditAnalyticsService.requestCreditReport({
       client_ref_num: clientRefNum,
       mobile_no: userData.phone,
@@ -254,10 +254,10 @@ router.post('/check', requireAuth, async (req, res) => {
     // Extract PDF URL from response and download to S3
     let s3PdfKey = null;
     const experianPdfUrl = creditAnalyticsService.extractPdfUrl(creditReportResponse);
-    
+
     if (experianPdfUrl) {
       console.log('📄 PDF URL extracted from response:', experianPdfUrl);
-      
+
       try {
         // Download PDF from Experian URL
         const axios = require('axios');
@@ -269,15 +269,15 @@ router.post('/check', requireAuth, async (req, res) => {
             'Accept': 'application/pdf'
           }
         });
-        
+
         const pdfBuffer = Buffer.from(pdfResponse.data);
         console.log(`✅ Downloaded PDF from Experian, size: ${pdfBuffer.length} bytes`);
-        
+
         // Validate it's a PDF
         if (pdfBuffer.length < 100 || !pdfBuffer.toString('ascii', 0, 4).startsWith('%PDF')) {
           throw new Error('Downloaded file does not appear to be a valid PDF');
         }
-        
+
         // Upload to S3
         const { uploadGeneratedPDF } = require('../services/s3Service');
         const fileName = `Credit_Report_${clientRefNum}.pdf`;
@@ -298,10 +298,10 @@ router.post('/check', requireAuth, async (req, res) => {
     let breEvaluationResult = null;
     let finalEligibility = validation.isEligible;
     let allRejectionReasons = [...validation.reasons];
-    
+
     try {
       const breEngineService = require('../services/breEngineService');
-      
+
       // Evaluate BRE conditions
       breEvaluationResult = breEngineService.evaluateBREConditions(creditReportResponse);
       console.log('📊 BRE Evaluation Result:', {
@@ -314,14 +314,14 @@ router.post('/check', requireAuth, async (req, res) => {
       if (!breEvaluationResult.passed) {
         finalEligibility = false;
         allRejectionReasons = [...validation.reasons, ...breEvaluationResult.reasons];
-        
+
         // Store BRE evaluation results
         const breRejectionData = {
           bre_reasons: breEvaluationResult.reasons,
           bre_results: breEvaluationResult.breResults,
           evaluated_at: new Date().toISOString()
         };
-        
+
         // Merge BRE data into negative_indicators
         const updatedNegativeIndicators = {
           ...validation.negativeIndicators,
@@ -397,7 +397,7 @@ router.post('/check', requireAuth, async (req, res) => {
     if (!finalEligibility) {
       const holdUntil = new Date();
       holdUntil.setDate(holdUntil.getDate() + 45);
-      
+
       // Determine hold reason based on what failed
       let holdReason;
       if (breEvaluationResult && !breEvaluationResult.passed) {
@@ -418,7 +418,7 @@ router.post('/check', requireAuth, async (req, res) => {
       );
 
       console.log(`🚫 User ${userId} held for 45 days. Reason: ${holdReason}`);
-      
+
       // Update credit check with BRE data if available
       if (breEvaluationResult && !breEvaluationResult.passed && creditCheckId) {
         const breRejectionData = {
@@ -426,7 +426,7 @@ router.post('/check', requireAuth, async (req, res) => {
           bre_results: breEvaluationResult.breResults,
           evaluated_at: new Date().toISOString()
         };
-        
+
         await executeQuery(
           `UPDATE credit_checks 
            SET negative_indicators = JSON_SET(COALESCE(negative_indicators, '{}'), '$.bre_evaluation', ?),
@@ -449,10 +449,10 @@ router.post('/check', requireAuth, async (req, res) => {
         if (applications && applications.length > 0) {
           const application = applications[0];
           // Update to 'employment-details' if we're at 'credit-analytics' or earlier
-          if (!application.current_step || 
-              application.current_step === 'credit-analytics' || 
-              application.current_step === 'kyc-verification' ||
-              application.current_step === 'application') {
+          if (!application.current_step ||
+            application.current_step === 'credit-analytics' ||
+            application.current_step === 'kyc-verification' ||
+            application.current_step === 'application') {
             await executeQuery(
               `UPDATE loan_applications 
                SET current_step = 'employment-details', updated_at = NOW() 
@@ -482,7 +482,7 @@ router.post('/check', requireAuth, async (req, res) => {
           results: breEvaluationResult.breResults
         } : null,
         on_hold: !finalEligibility,
-        hold_reason: !finalEligibility ? (breEvaluationResult && !breEvaluationResult.passed 
+        hold_reason: !finalEligibility ? (breEvaluationResult && !breEvaluationResult.passed
           ? `Experian Hold: ${breEvaluationResult.reasons.join('; ')}`
           : `Credit check failed: ${validation.reasons.join(', ')}`) : null
       }
@@ -644,5 +644,316 @@ router.get('/data', requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * GET /api/credit-analytics/parsed-data
+ * Get parsed credit report with categorized accounts
+ * - Active accounts with days_past_due
+ * - Closed accounts (latest 30 from current year) with days_past_due  
+ * - Written-off accounts (status 00-17)
+ * - Suit filed accounts (status 00-03)
+ */
+router.get('/parsed-data', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+
+    // Fetch credit check data
+    const creditCheck = await executeQuery(
+      'SELECT id, credit_score, full_report, checked_at FROM credit_checks WHERE user_id = ? ORDER BY checked_at DESC LIMIT 1',
+      [userId]
+    );
+
+    if (creditCheck.length === 0) {
+      return res.json({
+        status: 'success',
+        message: 'No credit report found for this user',
+        data: null
+      });
+    }
+
+    const creditData = creditCheck[0];
+    let fullReport = creditData.full_report;
+
+    // Parse JSON if string
+    if (typeof fullReport === 'string') {
+      try {
+        fullReport = JSON.parse(fullReport);
+      } catch (e) {
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to parse credit report data'
+        });
+      }
+    }
+
+    // Import parser
+    const { parseCreditReport, getWrittenOffStatusDescription, getSuitFiledDescription } = require('../utils/creditReportParser');
+
+    // Parse the credit report
+    const parsedData = parseCreditReport(fullReport);
+
+    // Add descriptions to written-off accounts
+    parsedData.written_off_accounts = parsedData.written_off_accounts.map(acc => ({
+      ...acc,
+      written_off_status_description: getWrittenOffStatusDescription(acc.written_off_settled_status)
+    }));
+
+    // Add descriptions to suit-filed accounts
+    parsedData.suit_filed_accounts = parsedData.suit_filed_accounts.map(acc => ({
+      ...acc,
+      suit_filed_description: getSuitFiledDescription(acc.suit_filed_wilful_default)
+    }));
+
+    res.json({
+      status: 'success',
+      message: 'Parsed credit report data retrieved successfully',
+      data: {
+        credit_check_id: creditData.id,
+        credit_score: parsedData.credit_score || creditData.credit_score,
+        report_date: parsedData.report_date,
+        checked_at: creditData.checked_at,
+
+        // Summary
+        summary: {
+          total_accounts: parsedData.total_accounts,
+          active_accounts_count: parsedData.active_accounts.length,
+          closed_accounts_count: parsedData.closed_accounts.length,
+          total_outstanding: parsedData.total_outstanding,
+          written_off_count: parsedData.written_off_accounts.length,
+          suit_filed_count: parsedData.suit_filed_accounts.length
+        },
+
+        // CAPS Summary
+        caps_summary: parsedData.caps_summary,
+
+        // Categorized accounts
+        active_accounts: parsedData.active_accounts,
+        closed_accounts_latest_30: parsedData.closed_accounts_latest_30,
+        closed_accounts_all: parsedData.closed_accounts,
+
+        // Flagged accounts
+        written_off_accounts: parsedData.written_off_accounts,
+        suit_filed_accounts: parsedData.suit_filed_accounts,
+
+        // Contact details extracted
+        contact_details: parsedData.contact_details
+      }
+    });
+
+  } catch (error) {
+    console.error('Get parsed credit data error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to parse credit report data',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/credit-analytics/contacts
+ * Get extracted contact details (mobile numbers and emails) from credit report
+ */
+router.get('/contacts', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+
+    // First check if contacts are already stored
+    const storedContacts = await executeQuery(
+      'SELECT contact_type, contact_value, is_primary, created_at FROM credit_report_contacts WHERE user_id = ? ORDER BY contact_type, is_primary DESC',
+      [userId]
+    );
+
+    if (storedContacts.length > 0) {
+      // Return stored contacts
+      const mobileNumbers = storedContacts
+        .filter(c => c.contact_type === 'mobile')
+        .map(c => ({ value: c.contact_value, is_primary: c.is_primary }));
+      const emails = storedContacts
+        .filter(c => c.contact_type === 'email')
+        .map(c => ({ value: c.contact_value, is_primary: c.is_primary }));
+
+      return res.json({
+        status: 'success',
+        message: 'Contact details retrieved from database',
+        data: {
+          mobile_numbers: mobileNumbers,
+          emails: emails,
+          source: 'database'
+        }
+      });
+    }
+
+    // If not stored, extract from credit report
+    const creditCheck = await executeQuery(
+      'SELECT id, full_report FROM credit_checks WHERE user_id = ? ORDER BY checked_at DESC LIMIT 1',
+      [userId]
+    );
+
+    if (creditCheck.length === 0) {
+      return res.json({
+        status: 'success',
+        message: 'No credit report found for this user',
+        data: {
+          mobile_numbers: [],
+          emails: [],
+          source: 'none'
+        }
+      });
+    }
+
+    let fullReport = creditCheck[0].full_report;
+    if (typeof fullReport === 'string') {
+      try {
+        fullReport = JSON.parse(fullReport);
+      } catch (e) {
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to parse credit report data'
+        });
+      }
+    }
+
+    // Extract contacts
+    const { extractContactDetails } = require('../utils/creditReportParser');
+    const contacts = extractContactDetails(fullReport);
+
+    res.json({
+      status: 'success',
+      message: 'Contact details extracted from credit report',
+      data: {
+        mobile_numbers: contacts.mobileNumbers.map(m => ({ value: m, is_primary: false })),
+        emails: contacts.emails.map(e => ({ value: e, is_primary: false })),
+        source: 'credit_report'
+      }
+    });
+
+  } catch (error) {
+    console.error('Get contacts error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to retrieve contact details',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/credit-analytics/save-contacts
+ * Extract and save contact details from credit report to database
+ */
+router.post('/save-contacts', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+
+    // Get credit report
+    const creditCheck = await executeQuery(
+      'SELECT id, full_report FROM credit_checks WHERE user_id = ? ORDER BY checked_at DESC LIMIT 1',
+      [userId]
+    );
+
+    if (creditCheck.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'No credit report found for this user'
+      });
+    }
+
+    let fullReport = creditCheck[0].full_report;
+    const creditCheckId = creditCheck[0].id;
+
+    if (typeof fullReport === 'string') {
+      try {
+        fullReport = JSON.parse(fullReport);
+      } catch (e) {
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to parse credit report data'
+        });
+      }
+    }
+
+    // Extract contacts
+    const { extractContactDetails } = require('../utils/creditReportParser');
+    const contacts = extractContactDetails(fullReport);
+
+    let savedCount = 0;
+
+    // Check if table exists first
+    try {
+      // Save mobile numbers
+      for (const mobile of contacts.mobileNumbers) {
+        try {
+          await executeQuery(
+            `INSERT INTO credit_report_contacts (user_id, credit_check_id, contact_type, contact_value, source)
+             VALUES (?, ?, 'mobile', ?, 'experian')
+             ON DUPLICATE KEY UPDATE updated_at = NOW()`,
+            [userId, creditCheckId, mobile]
+          );
+          savedCount++;
+        } catch (insertError) {
+          // Ignore duplicate key errors
+          if (!insertError.message.includes('Duplicate')) {
+            console.error('Error saving mobile:', insertError.message);
+          }
+        }
+      }
+
+      // Save emails
+      for (const email of contacts.emails) {
+        try {
+          await executeQuery(
+            `INSERT INTO credit_report_contacts (user_id, credit_check_id, contact_type, contact_value, source)
+             VALUES (?, ?, 'email', ?, 'experian')
+             ON DUPLICATE KEY UPDATE updated_at = NOW()`,
+            [userId, creditCheckId, email]
+          );
+          savedCount++;
+        } catch (insertError) {
+          // Ignore duplicate key errors
+          if (!insertError.message.includes('Duplicate')) {
+            console.error('Error saving email:', insertError.message);
+          }
+        }
+      }
+    } catch (tableError) {
+      console.warn('credit_report_contacts table may not exist:', tableError.message);
+      // Return contacts even if table doesn't exist
+      return res.json({
+        status: 'success',
+        message: 'Contacts extracted (table not yet created)',
+        data: {
+          mobile_numbers: contacts.mobileNumbers,
+          emails: contacts.emails,
+          saved_count: 0,
+          table_exists: false
+        }
+      });
+    }
+
+    res.json({
+      status: 'success',
+      message: `Saved ${savedCount} contact details`,
+      data: {
+        mobile_numbers: contacts.mobileNumbers,
+        emails: contacts.emails,
+        saved_count: savedCount,
+        table_exists: true
+      }
+    });
+
+  } catch (error) {
+    console.error('Save contacts error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to save contact details',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
+
 
