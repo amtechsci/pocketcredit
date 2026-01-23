@@ -69,12 +69,12 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
 
     const calculateAPR = () => {
         if (!kfsData) return '0.00';
-        
+
         // Use backend-calculated APR (all calculations are done in backend)
         if (kfsData.calculations?.apr !== undefined && kfsData.calculations.apr !== null) {
             return kfsData.calculations.apr.toFixed(2);
         }
-        
+
         // If backend didn't provide APR, return 0 (should not happen)
         console.warn('⚠️ APR not provided by backend');
         return '0.00';
@@ -117,8 +117,8 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             <td className="border border-black p-2" style={{ width: '5%' }}>1</td>
                             <td className="border border-black p-2" style={{ width: '40%' }}>Loan proposal/account No.</td>
                             <td className="border border-black p-2" style={{ width: '20%' }}>
-                                {kfsData.loan.application_number 
-                                    ? `PLL${kfsData.loan.application_number.slice(-4)}` 
+                                {kfsData.loan.application_number
+                                    ? `PLL${kfsData.loan.application_number.slice(-4)}`
                                     : kfsData.loan.application_number}
                             </td>
                             <td className="border border-black p-2" style={{ width: '15%' }}>Type of Loan</td>
@@ -144,18 +144,18 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             <td className="border border-black p-2">4</td>
                             <td className="border border-black p-2">Loan term (year/months/days)</td>
                             <td className="border border-black p-2" colSpan={3}>
-                              {(() => {
-                                const emiCount = kfsData.loan.emi_count;
-                                if (emiCount && emiCount > 1) {
-                                  // EMI loan: calculate days based on EMI count
-                                  // Formula: 165 + (emi_count - 1) * 30
-                                  // 1 EMI: 165 days, 2 EMI: 195 days, 3 EMI: 225 days, 4 EMI: 255 days, etc.
-                                  const days = 165 + (emiCount - 1) * 30;
-                                  return `Up to ${days} days`;
-                                }
-                                // Single payment loan: always show 165 days (base + 4 extensions possible)
-                                return `Up to 165 days`;
-                              })()}
+                                {(() => {
+                                    const emiCount = kfsData.loan.emi_count;
+                                    if (emiCount && emiCount > 1) {
+                                        // EMI loan: calculate days based on EMI count
+                                        // Formula: 165 + (emi_count - 1) * 30
+                                        // 1 EMI: 165 days, 2 EMI: 195 days, 3 EMI: 225 days, 4 EMI: 255 days, etc.
+                                        const days = 165 + (emiCount - 1) * 30;
+                                        return `Up to ${days} days`;
+                                    }
+                                    // Single payment loan: always show 165 days (base + 4 extensions possible)
+                                    return `Up to 165 days`;
+                                })()}
                             </td>
                         </tr>
                         <tr>
@@ -176,13 +176,13 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             <td className="border border-black p-2">N/A</td>
                             <td className="border border-black p-2">N/A</td>
                             <td className="border border-black p-2">
-                              {(() => {
-                                // For Multi-EMI plans, show all EMI dates comma-separated
-                                if (kfsData.repayment.all_emi_dates && kfsData.repayment.all_emi_dates.length > 1) {
-                                  return kfsData.repayment.all_emi_dates.map((date: string) => formatDate(date)).join(', ');
-                                }
-                                return formatDate(kfsData.repayment.first_due_date);
-                              })()}
+                                {(() => {
+                                    // For Multi-EMI plans, show all EMI dates comma-separated
+                                    if (kfsData.repayment.all_emi_dates && kfsData.repayment.all_emi_dates.length > 1) {
+                                        return kfsData.repayment.all_emi_dates.map((date: string) => formatDate(date)).join(', ');
+                                    }
+                                    return formatDate(kfsData.repayment.first_due_date);
+                                })()}
                             </td>
                         </tr>
                         <tr>
@@ -426,7 +426,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             <td className="border border-black p-2">
                                 Name: Mr.Kiran<br />
                                 Number: +91 9573794121<br />
-                                Mail ID: {kfsData?.grievance?.email || 'amproapk@gmail.com'}
+                                Mail ID: {kfsData?.grievance?.email}
                             </td>
                         </tr>
                         <tr>
@@ -511,25 +511,25 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             <td className="border border-black p-2">2</td>
                             <td className="border border-black p-2">Loan Term (in years/ months/ days)</td>
                             <td className="border border-black p-2">
-                              {(() => {
-                                const emiCount = kfsData.loan.emi_count;
-                                if (emiCount && emiCount > 1) {
-                                  // EMI loan: calculate days based on EMI count
-                                  // Formula: 165 + (emi_count - 1) * 30
-                                  // 1 EMI: 165 days, 2 EMI: 195 days, 3 EMI: 225 days, 4 EMI: 255 days, etc.
-                                  const days = 165 + (emiCount - 1) * 30;
-                                  return `Up to ${days} days`;
-                                }
-                                // Single payment loan: always show 165 days (base + 4 extensions possible)
-                                return `Up to 165 days`;
-                              })()}
+                                {(() => {
+                                    const emiCount = kfsData.loan.emi_count;
+                                    if (emiCount && emiCount > 1) {
+                                        // EMI loan: calculate days based on EMI count
+                                        // Formula: 165 + (emi_count - 1) * 30
+                                        // 1 EMI: 165 days, 2 EMI: 195 days, 3 EMI: 225 days, 4 EMI: 255 days, etc.
+                                        const days = 165 + (emiCount - 1) * 30;
+                                        return `Up to ${days} days`;
+                                    }
+                                    // Single payment loan: always show 165 days (base + 4 extensions possible)
+                                    return `Up to 165 days`;
+                                })()}
                             </td>
                         </tr>
                         <tr>
                             <td className="border border-black p-2"></td>
                             <td className="border border-black p-2">a) No. of instalments for payment of principal, in case of non- equated periodic loans</td>
                             <td className="border border-black p-2">
-                              {kfsData.loan.emi_count || kfsData.repayment?.number_of_instalments || (kfsData.repayment?.all_emi_dates?.length || 1)}
+                                {kfsData.loan.emi_count || kfsData.repayment?.number_of_instalments || (kfsData.repayment?.all_emi_dates?.length || 1)}
                             </td>
                         </tr>
                         <tr>
@@ -546,13 +546,13 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             <td className="border border-black p-2"></td>
                             <td className="border border-black p-2">d) Commencement of repayment, post sanction</td>
                             <td className="border border-black p-2">
-                              {(() => {
-                                // For Multi-EMI plans, show all EMI dates comma-separated
-                                if (kfsData.repayment.all_emi_dates && kfsData.repayment.all_emi_dates.length > 1) {
-                                  return kfsData.repayment.all_emi_dates.map((date: string) => formatDate(date)).join(', ');
-                                }
-                                return formatDate(kfsData.repayment.first_due_date);
-                              })()}
+                                {(() => {
+                                    // For Multi-EMI plans, show all EMI dates comma-separated
+                                    if (kfsData.repayment.all_emi_dates && kfsData.repayment.all_emi_dates.length > 1) {
+                                        return kfsData.repayment.all_emi_dates.map((date: string) => formatDate(date)).join(', ');
+                                    }
+                                    return formatDate(kfsData.repayment.first_due_date);
+                                })()}
                             </td>
                         </tr>
                         <tr>
@@ -621,13 +621,13 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             <td className="border border-black p-2">11</td>
                             <td className="border border-black p-2">Due date of payment of instalment and interest</td>
                             <td className="border border-black p-2">
-                              {(() => {
-                                // For Multi-EMI plans, show all EMI dates comma-separated
-                                if (kfsData.repayment.all_emi_dates && kfsData.repayment.all_emi_dates.length > 1) {
-                                  return kfsData.repayment.all_emi_dates.map((date: string) => formatDate(date)).join(', ');
-                                }
-                                return formatDate(kfsData.repayment.first_due_date);
-                              })()}
+                                {(() => {
+                                    // For Multi-EMI plans, show all EMI dates comma-separated
+                                    if (kfsData.repayment.all_emi_dates && kfsData.repayment.all_emi_dates.length > 1) {
+                                        return kfsData.repayment.all_emi_dates.map((date: string) => formatDate(date)).join(', ');
+                                    }
+                                    return formatDate(kfsData.repayment.first_due_date);
+                                })()}
                             </td>
                         </tr>
                     </tbody>
@@ -675,7 +675,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                                     </tr>
                                 ));
                             }
-                            
+
                             // Fallback: Single payment loan using backend values
                             const principal = kfsData.loan.sanctioned_amount || kfsData.calculations.principal || 0;
                             const totalInterest = kfsData.calculations.interest || 0;
@@ -683,7 +683,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             const postServiceFeeGST = Math.round(postServiceFee * 0.18 * 100) / 100;
                             const postServiceFeeWithGST = postServiceFee + postServiceFeeGST;
                             const instalmentAmount = principal + totalInterest + postServiceFee + postServiceFeeGST;
-                            
+
                             return (
                                 <tr>
                                     <td className="border border-black p-2 text-center">1</td>

@@ -8,80 +8,80 @@
  * Format currency in INR format
  */
 function formatCurrency(amount) {
-    if (amount === null || amount === undefined || isNaN(amount)) {
-        return '₹0.00';
-    }
-    return new Intl.NumberFormat('en-IN', {
-        style: 'currency',
-        currency: 'INR',
-        minimumFractionDigits: 2
-    }).format(amount);
+  if (amount === null || amount === undefined || isNaN(amount)) {
+    return '₹0.00';
+  }
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: 2
+  }).format(amount);
 }
 
 /**
  * Format date to DD/MM/YYYY format
  */
 function formatDate(dateString) {
-    if (!dateString || dateString === 'N/A') return 'N/A';
-    try {
-        // Handle YYYY-MM-DD format
-        if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
-            const [year, month, day] = dateString.split('-');
-            return `${day}/${month}/${year}`;
-        }
-        // Handle ISO datetime strings
-        if (typeof dateString === 'string' && dateString.includes('T')) {
-            const datePart = dateString.split('T')[0];
-            if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-                const [year, month, day] = datePart.split('-');
-                return `${day}/${month}/${year}`;
-            }
-        }
-        // Handle MySQL datetime format
-        if (typeof dateString === 'string' && dateString.includes(' ')) {
-            const datePart = dateString.split(' ')[0];
-            if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-                const [year, month, day] = datePart.split('-');
-                return `${day}/${month}/${year}`;
-            }
-        }
-        // Fallback
-        const date = new Date(dateString);
-        const day = String(date.getDate()).padStart(2, '0');
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const year = date.getFullYear();
-        return `${day}/${month}/${year}`;
-    } catch {
-        return dateString;
+  if (!dateString || dateString === 'N/A') return 'N/A';
+  try {
+    // Handle YYYY-MM-DD format
+    if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      const [year, month, day] = dateString.split('-');
+      return `${day}/${month}/${year}`;
     }
+    // Handle ISO datetime strings
+    if (typeof dateString === 'string' && dateString.includes('T')) {
+      const datePart = dateString.split('T')[0];
+      if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+        const [year, month, day] = datePart.split('-');
+        return `${day}/${month}/${year}`;
+      }
+    }
+    // Handle MySQL datetime format
+    if (typeof dateString === 'string' && dateString.includes(' ')) {
+      const datePart = dateString.split(' ')[0];
+      if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+        const [year, month, day] = datePart.split('-');
+        return `${day}/${month}/${year}`;
+      }
+    }
+    // Fallback
+    const date = new Date(dateString);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  } catch {
+    return dateString;
+  }
 }
 
 /**
  * Get fees grouped by application method
  */
 function getFeesByMethod(kfsData, method) {
-    if (!kfsData?.fees?.fees_breakdown || !Array.isArray(kfsData.fees.fees_breakdown)) {
-        return [];
-    }
-    return kfsData.fees.fees_breakdown.filter(fee => fee.application_method === method);
+  if (!kfsData?.fees?.fees_breakdown || !Array.isArray(kfsData.fees.fees_breakdown)) {
+    return [];
+  }
+  return kfsData.fees.fees_breakdown.filter(fee => fee.application_method === method);
 }
 
 /**
  * Calculate APR
  */
 function calculateAPR(kfsData) {
-    if (!kfsData) return '0.00';
-    if (kfsData.calculations?.apr !== undefined && kfsData.calculations.apr !== null) {
-        return kfsData.calculations.apr.toFixed(2);
-    }
-    return '0.00';
+  if (!kfsData) return '0.00';
+  if (kfsData.calculations?.apr !== undefined && kfsData.calculations.apr !== null) {
+    return kfsData.calculations.apr.toFixed(2);
+  }
+  return '0.00';
 }
 
 /**
  * Generate the base CSS styles for the KFS document
  */
 function getBaseStyles() {
-    return `
+  return `
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body { font-family: Arial, sans-serif; font-size: 9pt; line-height: 1.4; }
@@ -118,33 +118,33 @@ function getBaseStyles() {
  * @returns {string} Complete HTML document
  */
 function generateKFSHTML(kfsData) {
-    const deductFromDisbursalFees = getFeesByMethod(kfsData, 'deduct_from_disbursal');
-    const addToTotalFees = getFeesByMethod(kfsData, 'add_to_total');
-    const apr = calculateAPR(kfsData);
-    const interestRatePercent = ((kfsData.interest?.rate_per_day || 0) * 100).toFixed(2);
+  const deductFromDisbursalFees = getFeesByMethod(kfsData, 'deduct_from_disbursal');
+  const addToTotalFees = getFeesByMethod(kfsData, 'add_to_total');
+  const apr = calculateAPR(kfsData);
+  const interestRatePercent = ((kfsData.interest?.rate_per_day || 0) * 100).toFixed(2);
 
-    // Calculate loan term display
-    const getLoanTermDisplay = () => {
-        const emiCount = kfsData.loan?.emi_count;
-        if (emiCount && emiCount > 1) {
-            const days = 165 + (emiCount - 1) * 30;
-            return `Up to ${days} days`;
-        }
-        return 'Up to 165 days';
-    };
+  // Calculate loan term display
+  const getLoanTermDisplay = () => {
+    const emiCount = kfsData.loan?.emi_count;
+    if (emiCount && emiCount > 1) {
+      const days = 165 + (emiCount - 1) * 30;
+      return `Up to ${days} days`;
+    }
+    return 'Up to 165 days';
+  };
 
-    // Format all EMI dates
-    const formatAllEmiDates = () => {
-        if (kfsData.repayment?.all_emi_dates && kfsData.repayment.all_emi_dates.length > 1) {
-            return kfsData.repayment.all_emi_dates.map(date => formatDate(date)).join(', ');
-        }
-        return formatDate(kfsData.repayment?.first_due_date);
-    };
+  // Format all EMI dates
+  const formatAllEmiDates = () => {
+    if (kfsData.repayment?.all_emi_dates && kfsData.repayment.all_emi_dates.length > 1) {
+      return kfsData.repayment.all_emi_dates.map(date => formatDate(date)).join(', ');
+    }
+    return formatDate(kfsData.repayment?.first_due_date);
+  };
 
-    // Generate deduct from disbursal fees rows
-    const generateDeductFeesRows = () => {
-        if (deductFromDisbursalFees.length > 0) {
-            return deductFromDisbursalFees.map((fee, index) => `
+  // Generate deduct from disbursal fees rows
+  const generateDeductFeesRows = () => {
+    if (deductFromDisbursalFees.length > 0) {
+      return deductFromDisbursalFees.map((fee, index) => `
         <tr>
           <td></td>
           <td>(${index + 1}) ${fee.fee_name || 'Processing fees'}</td>
@@ -154,8 +154,8 @@ function generateKFSHTML(kfsData) {
           <td>N/A</td>
         </tr>
       `).join('');
-        }
-        return `
+    }
+    return `
       <tr>
         <td></td>
         <td>(i) Processing fees</td>
@@ -165,12 +165,12 @@ function generateKFSHTML(kfsData) {
         <td>N/A</td>
       </tr>
     `;
-    };
+  };
 
-    // Generate add to total fees rows
-    const generateAddFeesRows = () => {
-        if (addToTotalFees.length > 0) {
-            return addToTotalFees.map((fee, index) => `
+  // Generate add to total fees rows
+  const generateAddFeesRows = () => {
+    if (addToTotalFees.length > 0) {
+      return addToTotalFees.map((fee, index) => `
         <tr>
           <td></td>
           <td>(${deductFromDisbursalFees.length + index + 1}) ${fee.fee_name || 'Service fees'}</td>
@@ -180,18 +180,18 @@ function generateKFSHTML(kfsData) {
           <td>N/A</td>
         </tr>
       `).join('');
-        }
-        return '';
-    };
+    }
+    return '';
+  };
 
-    // Generate GST row
-    const gstAmount = (kfsData.fees?.gst_on_deduct_from_disbursal || 0) +
-        (kfsData.fees?.gst_on_add_to_total || 0) ||
-        kfsData.fees?.gst || 0;
-    const generateGSTRow = () => {
-        if (gstAmount > 0) {
-            const feeIndex = deductFromDisbursalFees.length + addToTotalFees.length + 1;
-            return `
+  // Generate GST row
+  const gstAmount = (kfsData.fees?.gst_on_deduct_from_disbursal || 0) +
+    (kfsData.fees?.gst_on_add_to_total || 0) ||
+    kfsData.fees?.gst || 0;
+  const generateGSTRow = () => {
+    if (gstAmount > 0) {
+      const feeIndex = deductFromDisbursalFees.length + addToTotalFees.length + 1;
+      return `
         <tr>
           <td></td>
           <td>(${feeIndex}) GST (18%)</td>
@@ -201,14 +201,14 @@ function generateKFSHTML(kfsData) {
           <td>N/A</td>
         </tr>
       `;
-        }
-        return '';
-    };
+    }
+    return '';
+  };
 
-    // Generate repayment schedule rows
-    const generateRepaymentScheduleRows = () => {
-        if (kfsData.repayment?.schedule && Array.isArray(kfsData.repayment.schedule) && kfsData.repayment.schedule.length > 0) {
-            return kfsData.repayment.schedule.map((emi, index) => `
+  // Generate repayment schedule rows
+  const generateRepaymentScheduleRows = () => {
+    if (kfsData.repayment?.schedule && Array.isArray(kfsData.repayment.schedule) && kfsData.repayment.schedule.length > 0) {
+      return kfsData.repayment.schedule.map((emi, index) => `
         <tr>
           <td style="text-align: center;">${emi.instalment_no || (index + 1)}</td>
           <td>${formatCurrency(emi.outstanding_principal || 0)}</td>
@@ -217,17 +217,17 @@ function generateKFSHTML(kfsData) {
           <td>${formatCurrency(emi.instalment_amount || 0)}</td>
         </tr>
       `).join('');
-        }
+    }
 
-        // Fallback for single payment
-        const principal = kfsData.loan?.sanctioned_amount || kfsData.calculations?.principal || 0;
-        const totalInterest = kfsData.calculations?.interest || 0;
-        const postServiceFee = kfsData.fees?.total_add_to_total || 0;
-        const postServiceFeeGST = Math.round(postServiceFee * 0.18 * 100) / 100;
-        const postServiceFeeWithGST = postServiceFee + postServiceFeeGST;
-        const instalmentAmount = principal + totalInterest + postServiceFee + postServiceFeeGST;
+    // Fallback for single payment
+    const principal = kfsData.loan?.sanctioned_amount || kfsData.calculations?.principal || 0;
+    const totalInterest = kfsData.calculations?.interest || 0;
+    const postServiceFee = kfsData.fees?.total_add_to_total || 0;
+    const postServiceFeeGST = Math.round(postServiceFee * 0.18 * 100) / 100;
+    const postServiceFeeWithGST = postServiceFee + postServiceFeeGST;
+    const instalmentAmount = principal + totalInterest + postServiceFee + postServiceFeeGST;
 
-        return `
+    return `
       <tr>
         <td style="text-align: center;">1</td>
         <td>${formatCurrency(principal)}</td>
@@ -236,9 +236,9 @@ function generateKFSHTML(kfsData) {
         <td>${formatCurrency(instalmentAmount)}</td>
       </tr>
     `;
-    };
+  };
 
-    const html = `
+  const html = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -497,7 +497,7 @@ function generateKFSHTML(kfsData) {
             <td>
               Name: Mr.Kiran<br />
               Number: +91 9573794121<br />
-              Mail ID: ${kfsData?.grievance?.email || 'amproapk@gmail.com'}
+              Mail ID: ${kfsData?.grievance?.email}
             </td>
           </tr>
           <tr>
@@ -741,11 +741,11 @@ function generateKFSHTML(kfsData) {
 </html>
   `;
 
-    return html;
+  return html;
 }
 
 module.exports = {
-    generateKFSHTML,
-    formatCurrency,
-    formatDate
+  generateKFSHTML,
+  formatCurrency,
+  formatDate
 };
