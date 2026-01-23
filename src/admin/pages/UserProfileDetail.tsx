@@ -7032,102 +7032,130 @@ export function UserProfileDetail() {
         )}
 
         {/* Credit Account Information */}
-        {accountSummary && accountSummary.length > 0 && (
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <CheckCircle className="w-6 h-6 text-green-600" />
-              <h3 className="text-lg font-semibold text-gray-900">Summary: Credit Account Information</h3>
-            </div>
-            <p className="text-sm text-orange-600 italic mb-4">This section displays summary of all your reported credit accounts found in the Experian Credit Bureau database.</p>
+        {accountSummary && accountSummary.length > 0 && (() => {
+          // Helper: Check if account is closed (Status 13-17)
+          const isClosed = (status: any) => ['13', '14', '15', '16', '17'].includes(String(status));
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs border-collapse">
-                <thead>
-                  <tr className="bg-blue-600 text-white">
-                    <th className="border border-gray-300 px-2 py-2 text-left">#</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left">Lender</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left">Account type</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left">Account No</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left">Ownership</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left">Date Reported</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left">Account Status</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left">Date Opened</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left">Sanction Amt</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left">Current Balance</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left">Amount Overdue</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left">DPD</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {accountSummary.slice(0, 20).map((account, index) => (
-                    <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className="border border-gray-300 px-2 py-2 text-blue-600 font-semibold">
-                        Acct {index + 1}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2 text-blue-600">
-                        {account.Subscriber_Name || 'N/A'}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2">
-                        {account.Account_Type || 'N/A'}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2 font-mono">
-                        {account.Account_Number ? account.Account_Number.replace(/\d(?=\d{4})/g, 'X') : 'N/A'}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2">
-                        {account.Ownership_Indicator || 'Individual'}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2">
-                        {account.Date_Reported || '-'}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2">
-                        <span className={`px-2 py-1 rounded text-xs font-semibold ${account.Account_Status === 'CLOSED' ? 'bg-gray-200 text-gray-700' :
-                          account.Account_Status === 'ACTIVE' ? 'bg-green-200 text-green-700' :
-                            'bg-yellow-200 text-yellow-700'
-                          }`}>
-                          {account.Account_Status || 'N/A'}
-                        </span>
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2">
-                        {account.Open_Date || '-'}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2 text-right">
-                        {account.Highest_Credit_or_Original_Loan_Amount ?
-                          `₹${parseInt(account.Highest_Credit_or_Original_Loan_Amount).toLocaleString('en-IN')}` :
-                          '-'}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2 text-right">
-                        {account.Current_Balance ?
-                          `₹${parseInt(account.Current_Balance).toLocaleString('en-IN')}` :
-                          '₹0'}
-                      </td>
-                      <td className={`border border-gray-300 px-2 py-2 text-right font-semibold ${account.Amount_Past_Due && parseInt(account.Amount_Past_Due) > 0 ? 'text-red-600' : 'text-gray-600'
-                        }`}>
-                        {account.Amount_Past_Due && parseInt(account.Amount_Past_Due) > 0 ?
-                          `₹${parseInt(account.Amount_Past_Due).toLocaleString('en-IN')}` :
-                          '₹0'}
-                      </td>
-                      <td className={`border border-gray-300 px-2 py-2 text-right font-semibold ${account.CAIS_Account_History &&
-                          account.CAIS_Account_History.length > 0 &&
-                          parseInt(account.CAIS_Account_History[0]?.Days_Past_Due) > 0
-                          ? 'text-red-600'
-                          : 'text-gray-600'
-                        }`}>
-                        {account.CAIS_Account_History && account.CAIS_Account_History.length > 0
-                          ? parseInt(account.CAIS_Account_History[0]?.Days_Past_Due || 0)
-                          : '0'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          // Helper: Parse Date (YYYYMMDD)
+          const parseDate = (dStr: string) => {
+            if (!dStr || dStr.length !== 8) return null;
+            return new Date(parseInt(dStr.substring(0, 4)), parseInt(dStr.substring(4, 6)) - 1, parseInt(dStr.substring(6, 8)));
+          };
+
+          // Filter Active Accounts
+          const activeAccounts = accountSummary.filter((acc: any) => !isClosed(acc.Account_Status));
+
+          // Filter Closed Accounts active in last 2 years
+          const twoYearsAgo = new Date();
+          twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+
+          const closedAccounts = accountSummary.filter((acc: any) => {
+            if (!isClosed(acc.Account_Status)) return false;
+            // Check if closed/reported date is within last 2 years
+            const date = parseDate(acc.Date_Closed) || parseDate(acc.Date_Reported);
+            return date ? date >= twoYearsAgo : true; // default include if no date
+          });
+
+          // Helper to Render Table
+          const renderAccountTable = (accounts: any[], title: string, isGreen: boolean) => (
+            <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+              <div className="flex items-center gap-2 mb-4">
+                <CheckCircle className={`w-6 h-6 ${isGreen ? 'text-green-600' : 'text-gray-600'}`} />
+                <h3 className="text-lg font-semibold text-gray-900">{title} ({accounts.length})</h3>
+              </div>
+
+              {accounts.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className={`${isGreen ? 'bg-green-600' : 'bg-gray-600'} text-white`}>
+                        <th className="border border-gray-300 px-2 py-2 text-left">#</th>
+                        <th className="border border-gray-300 px-2 py-2 text-left">Lender</th>
+                        <th className="border border-gray-300 px-2 py-2 text-left">Account type</th>
+                        <th className="border border-gray-300 px-2 py-2 text-left">Account No</th>
+                        <th className="border border-gray-300 px-2 py-2 text-left">Ownership</th>
+                        <th className="border border-gray-300 px-2 py-2 text-left">Date Reported</th>
+                        <th className="border border-gray-300 px-2 py-2 text-left">Status</th>
+                        <th className="border border-gray-300 px-2 py-2 text-left">{isGreen ? 'Date Opened' : 'Date Closed'}</th>
+                        <th className="border border-gray-300 px-2 py-2 text-left">Sanction Amt</th>
+                        <th className="border border-gray-300 px-2 py-2 text-left">Current Balance</th>
+                        <th className="border border-gray-300 px-2 py-2 text-left">Amount Overdue</th>
+                        <th className="border border-gray-300 px-2 py-2 text-left">DPD</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {accounts.map((account, index) => (
+                        <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                          <td className="border border-gray-300 px-2 py-2 font-semibold">
+                            {index + 1}
+                          </td>
+                          <td className="border border-gray-300 px-2 py-2 text-blue-600">
+                            {account.Subscriber_Name || 'N/A'}
+                          </td>
+                          <td className="border border-gray-300 px-2 py-2">
+                            {account.Account_Type || 'N/A'}
+                          </td>
+                          <td className="border border-gray-300 px-2 py-2 font-mono">
+                            {account.Account_Number ? account.Account_Number.replace(/\d(?=\d{4})/g, 'X') : 'N/A'}
+                          </td>
+                          <td className="border border-gray-300 px-2 py-2">
+                            {account.Ownership_Indicator || 'Individual'}
+                          </td>
+                          <td className="border border-gray-300 px-2 py-2">
+                            {account.Date_Reported || '-'}
+                          </td>
+                          <td className="border border-gray-300 px-2 py-2">
+                            <span className={`px-2 py-1 rounded text-xs font-semibold ${isClosed(account.Account_Status) ? 'bg-gray-200 text-gray-700' : 'bg-green-100 text-green-800'
+                              }`}>
+                              {account.Account_Status || 'N/A'}
+                            </span>
+                          </td>
+                          <td className="border border-gray-300 px-2 py-2">
+                            {isGreen ? (account.Open_Date || '-') : (account.Date_Closed || account.Date_Reported || '-')}
+                          </td>
+                          <td className="border border-gray-300 px-2 py-2 text-right">
+                            {account.Highest_Credit_or_Original_Loan_Amount ?
+                              `₹${parseInt(account.Highest_Credit_or_Original_Loan_Amount).toLocaleString('en-IN')}` :
+                              '-'}
+                          </td>
+                          <td className="border border-gray-300 px-2 py-2 text-right">
+                            {account.Current_Balance ?
+                              `₹${parseInt(account.Current_Balance).toLocaleString('en-IN')}` :
+                              '₹0'}
+                          </td>
+                          <td className={`border border-gray-300 px-2 py-2 text-right font-semibold ${account.Amount_Past_Due && parseInt(account.Amount_Past_Due) > 0 ? 'text-red-600' : 'text-gray-600'
+                            }`}>
+                            {account.Amount_Past_Due && parseInt(account.Amount_Past_Due) > 0 ?
+                              `₹${parseInt(account.Amount_Past_Due).toLocaleString('en-IN')}` :
+                              '₹0'}
+                          </td>
+                          <td className={`border border-gray-300 px-2 py-2 text-right font-semibold ${account.CAIS_Account_History &&
+                            account.CAIS_Account_History.length > 0 &&
+                            parseInt(account.CAIS_Account_History[0]?.Days_Past_Due) > 0
+                            ? 'text-red-600'
+                            : 'text-gray-600'
+                            }`}>
+                            {account.CAIS_Account_History && account.CAIS_Account_History.length > 0
+                              ? parseInt(account.CAIS_Account_History[0]?.Days_Past_Due || 0)
+                              : '0'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : <p className="text-gray-500 italic p-4">No accounts found in this category.</p>}
             </div>
-            {accountSummary.length > 20 && (
-              <p className="text-sm text-gray-500 mt-3 text-center">
-                Showing 20 of {accountSummary.length} accounts
-              </p>
-            )}
-          </div>
-        )}
+          );
+
+          return (
+            <div>
+              <p className="text-sm text-orange-600 italic mb-4">This section displays summary of your credit accounts.</p>
+              {renderAccountTable(activeAccounts, "Active Credit Accounts", true)}
+              {renderAccountTable(closedAccounts, "Closed Credit Accounts (Last 2 Years)", false)}
+            </div>
+          );
+        })()}
 
         {/* Credit Utilization Chart */}
         {accountSummary && accountSummary.length > 0 && (
