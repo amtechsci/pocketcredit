@@ -3539,7 +3539,7 @@ export function UserProfileDetail() {
               <div className="space-y-4">
                 <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                   <p className="text-sm text-yellow-800 mb-2">
-                    {statement.request_id ? 
+                    {statement.request_id ?
                       'After uploading the file on Digitap, click "Complete Upload" to finalize the upload process and start verification. Then check status to see the progress.' :
                       'Verification is in progress. You can check the status or fetch the report when ready.'}
                   </p>
@@ -5067,8 +5067,8 @@ export function UserProfileDetail() {
                                   className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
                                   onClick={() => {
                                     // If PDF URL exists, open it; otherwise open via /stpl route
-                                    const url = loan.loan_agreement_pdf_url 
-                                      ? loan.loan_agreement_pdf_url 
+                                    const url = loan.loan_agreement_pdf_url
+                                      ? loan.loan_agreement_pdf_url
                                       : `/stpl/loan-agreement/${loanId}`;
                                     window.open(url, '_blank');
                                   }}
@@ -5076,14 +5076,14 @@ export function UserProfileDetail() {
                                 >
                                   Agreement
                                 </button>
-                                
+
                                 {/* KFS Button - Always visible */}
                                 <button
                                   className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
                                   onClick={() => {
                                     // If PDF URL exists, open it; otherwise open via /stpl route
-                                    const url = loan.kfs_pdf_url 
-                                      ? loan.kfs_pdf_url 
+                                    const url = loan.kfs_pdf_url
+                                      ? loan.kfs_pdf_url
                                       : `/stpl/kfs/${loanId}`;
                                     window.open(url, '_blank');
                                   }}
@@ -5091,7 +5091,7 @@ export function UserProfileDetail() {
                                 >
                                   View KFS
                                 </button>
-                                
+
                                 {/* NOC Button - Only for cleared loans */}
                                 {loan.status === 'cleared' && (
                                   <button
@@ -5544,8 +5544,9 @@ export function UserProfileDetail() {
 
                         const principal = calculation?.principal || loan.principalAmount || loan.amount || loan.loan_amount || 0;
 
-                        // Use processed values if available (frozen at processing time), otherwise calculate
-                        const processedAmount = loan.processed_amount || calculation?.disbursal?.amount || loan.disbursal_amount || loan.disbursalAmount || principal;
+                        // Processed Amount = Amount actually disbursed to borrower (after deducting fees)
+                        // Priority: loan.disbursal_amount (actual disbursed) > calculation?.disbursal?.amount > loan.processed_amount
+                        const processedAmount = loan.disbursal_amount || loan.disbursalAmount || calculation?.disbursal?.amount || loan.processed_amount || principal;
                         const disbursedDate = loan.disbursedDate || loan.disbursed_at;
 
                         // Use processed values if available (frozen at processing time), otherwise calculate
@@ -5629,8 +5630,9 @@ export function UserProfileDetail() {
 
                         // Check if loan is EMI (has schedule with length > 1)
                         const isEmiLoan = calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 1;
-                        
-                         // Processing fee - for EMI loans, get from calculation.fees.deductFromDisbursal or fees_breakdown
+
+                        // Processing fee - for EMI loans, get from calculation.fees.deductFromDisbursal or fees_breakdown
+                        // NOTE: Use base fee amount (not total_with_gst) since GST is shown separately
                         let processingFee = 0;
                         let processingFeeGST = 0;
                         if (isEmiLoan) {
@@ -5641,11 +5643,12 @@ export function UserProfileDetail() {
                               return feeName.includes('processing fee');
                             });
                             if (processingFeeItem) {
-                              processingFee = parseFloat(processingFeeItem.total_with_gst) || 0;
+                              // Use base fee amount (not total_with_gst) since GST is shown separately
+                              processingFee = parseFloat(processingFeeItem.amount) || parseFloat(processingFeeItem.fee_amount) || 0;
                               processingFeeGST = parseFloat(processingFeeItem.gst_amount) || 0;
                             }
                           }
-                          
+
                           // Second try: Get from loan.fees_breakdown if calculation doesn't have it
                           if (processingFee === 0 && loan.fees_breakdown) {
                             try {
@@ -5658,7 +5661,8 @@ export function UserProfileDetail() {
                                   return feeName.includes('processing fee');
                                 });
                                 if (processingFeeItem) {
-                                  processingFee = parseFloat(processingFeeItem.total_with_gst) || 0;
+                                  // Use base fee amount (not total_with_gst) since GST is shown separately
+                                  processingFee = parseFloat(processingFeeItem.amount) || parseFloat(processingFeeItem.fee_amount) || 0;
                                   processingFeeGST = parseFloat(processingFeeItem.gst_amount) || 0;
                                 }
                               }
@@ -5667,7 +5671,7 @@ export function UserProfileDetail() {
                             }
                           }
                         }
-                        
+
                         // Fallback to existing logic if not EMI or fees not found in breakdown
                         if (processingFee === 0) {
                           processingFee = isProcessed && loan.processed_p_fee !== null
@@ -5687,11 +5691,12 @@ export function UserProfileDetail() {
                               return feeName.includes('post service fee');
                             });
                             if (postServiceFeeItem) {
-                              postServiceFee = parseFloat(postServiceFeeItem.total_with_gst) || 0;
+                              // Use base fee amount (not total_with_gst) since GST is shown separately
+                              postServiceFee = parseFloat(postServiceFeeItem.amount) || parseFloat(postServiceFeeItem.fee_amount) || 0;
                               postServiceFeeGST = parseFloat(postServiceFeeItem.gst_amount) || 0;
                             }
                           }
-                          
+
                           // Second try: Get from loan.fees_breakdown if calculation doesn't have it
                           if (postServiceFee === 0 && loan.fees_breakdown) {
                             try {
@@ -5704,7 +5709,8 @@ export function UserProfileDetail() {
                                   return feeName.includes('post service fee');
                                 });
                                 if (postServiceFeeItem) {
-                                  postServiceFee = parseFloat(postServiceFeeItem.total_with_gst) || 0;
+                                  // Use base fee amount (not total_with_gst) since GST is shown separately
+                                  postServiceFee = parseFloat(postServiceFeeItem.amount) || parseFloat(postServiceFeeItem.fee_amount) || 0;
                                   postServiceFeeGST = parseFloat(postServiceFeeItem.gst_amount) || 0;
                                 }
                               }
@@ -5713,7 +5719,7 @@ export function UserProfileDetail() {
                             }
                           }
                         }
-                        
+
                         // Fallback to existing logic if not EMI or fees not found in breakdown
                         if (postServiceFee === 0) {
                           postServiceFee = isProcessed && loan.processed_post_service_fee !== null
@@ -5730,7 +5736,7 @@ export function UserProfileDetail() {
                         // Total interest for full tenure - prioritize most reliable sources first
                         // For multi-EMI, prioritize backend-calculated total_interest to avoid timezone issues
                         let totalInterestFullTenure = 0;
-                        
+
                         // Priority 1: Processed interest (frozen at processing time, most reliable)
                         if (isProcessed && loan.processed_interest !== null && loan.processed_interest !== undefined) {
                           totalInterestFullTenure = parseFloat(loan.processed_interest) || 0;
@@ -6762,8 +6768,8 @@ export function UserProfileDetail() {
           Account_Status: firstAccount.Account_Status
         },
         // Check all fields that might contain "overdue" or "due"
-        allOverdueRelatedFields: Object.keys(firstAccount).filter(key => 
-          key.toLowerCase().includes('overdue') || 
+        allOverdueRelatedFields: Object.keys(firstAccount).filter(key =>
+          key.toLowerCase().includes('overdue') ||
           key.toLowerCase().includes('due') ||
           key.toLowerCase().includes('outstanding') ||
           key.toLowerCase().includes('dpd') ||
@@ -7093,9 +7099,8 @@ export function UserProfileDetail() {
                           `₹${parseInt(account.Current_Balance).toLocaleString('en-IN')}` :
                           '₹0'}
                       </td>
-                      <td className={`border border-gray-300 px-2 py-2 text-right font-semibold ${
-                        account.Amount_Past_Due && parseInt(account.Amount_Past_Due) > 0 ? 'text-red-600' : 'text-gray-600'
-                      }`}>
+                      <td className={`border border-gray-300 px-2 py-2 text-right font-semibold ${account.Amount_Past_Due && parseInt(account.Amount_Past_Due) > 0 ? 'text-red-600' : 'text-gray-600'
+                        }`}>
                         {account.Amount_Past_Due && parseInt(account.Amount_Past_Due) > 0 ?
                           `₹${parseInt(account.Amount_Past_Due).toLocaleString('en-IN')}` :
                           '₹0'}
@@ -9605,776 +9610,776 @@ export function UserProfileDetail() {
       )}
 
 
-  {/* Add Note Modal */ }
-  {
-    showAddNoteModal && (
-      <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
-        <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <h4 className="text-lg font-semibold text-gray-900">Add Note</h4>
-            <button
-              onClick={() => setShowAddNoteModal(false)}
-              className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <form className="space-y-4">
-            {/* Note Category and Priority */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Category *</label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
+      {/* Add Note Modal */}
+      {
+        showAddNoteModal && (
+          <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-lg font-semibold text-gray-900">Add Note</h4>
+                <button
+                  onClick={() => setShowAddNoteModal(false)}
+                  className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
                 >
-                  <option value="">Select Category</option>
-                  <option value="general">General</option>
-                  <option value="credit">Credit Related</option>
-                  <option value="verification">Verification</option>
-                  <option value="risk">Risk Assessment</option>
-                  <option value="payment">Payment Related</option>
-                  <option value="document">Document Related</option>
-                  <option value="follow_up">Follow Up</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Priority *</label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="">Select Priority</option>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                  <option value="urgent">Urgent</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Subject and Note Content */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Subject *</label>
-              <input
-                type="text"
-                placeholder="Enter note subject"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Note Content *</label>
-              <textarea
-                placeholder="Enter detailed note content"
-                rows={6}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
-
-            {/* Visibility and Status */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Visibility</label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="private">Private</option>
-                  <option value="team">Team Only</option>
-                  <option value="public">Public</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="active">Active</option>
-                  <option value="archived">Archived</option>
-                  <option value="flagged">Flagged</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-3 pt-4">
-              <button
-                type="submit"
-                onClick={(e) => {
-                  e.preventDefault();
-                  alert('Note added successfully!');
-                  setShowAddNoteModal(false);
-                }}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-              >
-                Add Note
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowAddNoteModal(false)}
-                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    )
-  }
-
-  {/* Send SMS Modal */ }
-  {
-    showSendSmsModal && (
-      <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
-        <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <h4 className="text-lg font-semibold text-gray-900">Send SMS</h4>
-            <button
-              onClick={() => setShowSendSmsModal(false)}
-              className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <form className="space-y-4">
-            {/* Recipient and SMS Type */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Recipient *</label>
-                <input
-                  type="tel"
-                  placeholder="Enter mobile number"
-                  defaultValue={getUserData('mobile')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">SMS Type *</label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="">Select SMS Type</option>
-                  <option value="notification">Notification</option>
-                  <option value="reminder">Reminder</option>
-                  <option value="alert">Alert</option>
-                  <option value="promotional">Promotional</option>
-                  <option value="verification">Verification</option>
-                  <option value="custom">Custom</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Template Selection */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Template (Optional)</label>
-              <select
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">Select Template</option>
-                <option value="loan_approved">Loan Approved</option>
-                <option value="payment_reminder">Payment Reminder</option>
-                <option value="document_required">Document Required</option>
-                <option value="verification_pending">Verification Pending</option>
-                <option value="custom">Custom Message</option>
-              </select>
-            </div>
-
-            {/* Message Content */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Message *</label>
-              <textarea
-                placeholder="Enter your SMS message (160 characters max)"
-                rows={4}
-                maxLength={160}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-              <div className="text-right text-xs text-gray-500 mt-1">
-                <span id="char-count">0</span>/160 characters
-              </div>
-            </div>
-
-            {/* Scheduling */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Send Now or Schedule</label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="now">Send Now</option>
-                  <option value="schedule">Schedule</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Scheduled Date & Time</label>
-                <input
-                  type="datetime-local"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-3 pt-4">
-              <button
-                type="submit"
-                onClick={(e) => {
-                  e.preventDefault();
-                  alert('SMS sent successfully!');
-                  setShowSendSmsModal(false);
-                }}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-              >
-                Send SMS
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowSendSmsModal(false)}
-                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    )
-  }
-
-  {/* Templates Modal */ }
-  {
-    showTemplatesModal && (
-      <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
-        <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-4xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <h4 className="text-lg font-semibold text-gray-900">SMS Templates</h4>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowAddTemplateModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Add Template
-              </button>
-              <button
-                onClick={() => setShowTemplatesModal(false)}
-                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-
-          {/* Templates List */}
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Template 1 */}
-              <div className="border border-gray-200 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h5 className="font-medium text-gray-900">Loan Approved</h5>
-                  <div className="flex items-center gap-2">
-                    <button className="text-blue-600 hover:text-blue-800">
-                      <Edit className="w-4 h-4" />
-                    </button>
-                    <button className="text-red-600 hover:text-red-800">
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-                <p className="text-sm text-gray-600 mb-2">Type: Notification</p>
-                <p className="text-sm text-gray-700">"Dear {getUserData('name')}, your loan application has been approved for ₹{getUserData('loans')?.[0]?.amount || 'X'}. Please check your email for further details."</p>
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
-              {/* Template 2 */}
-              <div className="border border-gray-200 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h5 className="font-medium text-gray-900">Payment Reminder</h5>
-                  <div className="flex items-center gap-2">
-                    <button className="text-blue-600 hover:text-blue-800">
-                      <Edit className="w-4 h-4" />
-                    </button>
-                    <button className="text-red-600 hover:text-red-800">
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-                <p className="text-sm text-gray-600 mb-2">Type: Reminder</p>
-                <p className="text-sm text-gray-700">"Dear {getUserData('name')}, your EMI payment of ₹X is due on [DATE]. Please make the payment to avoid late fees."</p>
-              </div>
-
-              {/* Template 3 */}
-              <div className="border border-gray-200 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h5 className="font-medium text-gray-900">Document Required</h5>
-                  <div className="flex items-center gap-2">
-                    <button className="text-blue-600 hover:text-blue-800">
-                      <Edit className="w-4 h-4" />
-                    </button>
-                    <button className="text-red-600 hover:text-red-800">
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-                <p className="text-sm text-gray-600 mb-2">Type: Alert</p>
-                <p className="text-sm text-gray-700">"Dear {getUserData('name')}, additional documents are required for your loan application. Please upload them in your dashboard."</p>
-              </div>
-
-              {/* Template 4 */}
-              <div className="border border-gray-200 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h5 className="font-medium text-gray-900">Verification Pending</h5>
-                  <div className="flex items-center gap-2">
-                    <button className="text-blue-600 hover:text-blue-800">
-                      <Edit className="w-4 h-4" />
-                    </button>
-                    <button className="text-red-600 hover:text-red-800">
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-                <p className="text-sm text-gray-600 mb-2">Type: Verification</p>
-                <p className="text-sm text-gray-700">"Dear {getUserData('name')}, your KYC verification is pending. Please complete the verification process to proceed."</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  {/* Add Template Modal */ }
-  {
-    showAddTemplateModal && (
-      <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
-        <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <h4 className="text-lg font-semibold text-gray-900">Add SMS Template</h4>
-            <button
-              onClick={() => setShowAddTemplateModal(false)}
-              className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <form className="space-y-4">
-            {/* Template Name and Type */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Template Name *</label>
-                <input
-                  type="text"
-                  placeholder="Enter template name"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Template Type *</label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="">Select Type</option>
-                  <option value="notification">Notification</option>
-                  <option value="reminder">Reminder</option>
-                  <option value="alert">Alert</option>
-                  <option value="promotional">Promotional</option>
-                  <option value="verification">Verification</option>
-                  <option value="custom">Custom</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Template Content */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Template Content *</label>
-              <textarea
-                placeholder="Enter template message. Use {name}, {amount}, {date} for variables"
-                rows={6}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-              <div className="text-xs text-gray-500 mt-1">
-                Available variables: {'{name}'}, {'{amount}'}, {'{date}'}, {'{loan_id}'}, {'{mobile}'}
-              </div>
-            </div>
-
-            {/* Category and Status */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="loan">Loan Related</option>
-                  <option value="payment">Payment Related</option>
-                  <option value="verification">Verification</option>
-                  <option value="general">General</option>
-                  <option value="promotional">Promotional</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                  <option value="draft">Draft</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-3 pt-4">
-              <button
-                type="submit"
-                onClick={(e) => {
-                  e.preventDefault();
-                  alert('Template added successfully!');
-                  setShowAddTemplateModal(false);
-                }}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-              >
-                Add Template
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowAddTemplateModal(false)}
-                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    )
-  }
-
-  {/* Plan Details Modal */ }
-  {
-    showPlanDetailsModal && selectedPlanDetails && (
-      <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
-        <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-3xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <h4 className="text-lg font-semibold text-gray-900">Loan Plan Details</h4>
-            <button
-              onClick={() => {
-                setShowPlanDetailsModal(false);
-                setSelectedPlanDetails(null);
-              }}
-              className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-500">Plan Name</label>
-                <p className="text-gray-900 font-semibold">{selectedPlanDetails.plan_name}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">Plan Code</label>
-                <p className="text-gray-900">{selectedPlanDetails.plan_code}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">Plan Type</label>
-                <p className="text-gray-900">{selectedPlanDetails.plan_type === 'single' ? 'Single Payment' : 'Multi-EMI'}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">Interest Rate</label>
-                <p className="text-gray-900">{selectedPlanDetails.interest_percent_per_day ? (parseFloat(selectedPlanDetails.interest_percent_per_day) * 100).toFixed(4) : 'N/A'}% per day</p>
-              </div>
-              {selectedPlanDetails.plan_type === 'single' ? (
-                <div>
-                  <label className="text-sm font-medium text-gray-500">Duration</label>
-                  <p className="text-gray-900">{selectedPlanDetails.repayment_days || 'N/A'} days</p>
-                </div>
-              ) : (
-                <>
+              <form className="space-y-4">
+                {/* Note Category and Priority */}
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-sm font-medium text-gray-500">EMI Frequency</label>
-                    <p className="text-gray-900 capitalize">{selectedPlanDetails.emi_frequency || 'N/A'}</p>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Category *</label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    >
+                      <option value="">Select Category</option>
+                      <option value="general">General</option>
+                      <option value="credit">Credit Related</option>
+                      <option value="verification">Verification</option>
+                      <option value="risk">Risk Assessment</option>
+                      <option value="payment">Payment Related</option>
+                      <option value="document">Document Related</option>
+                      <option value="follow_up">Follow Up</option>
+                      <option value="other">Other</option>
+                    </select>
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-gray-500">EMI Count</label>
-                    <p className="text-gray-900">{selectedPlanDetails.emi_count || 'N/A'}</p>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Priority *</label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    >
+                      <option value="">Select Priority</option>
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="urgent">Urgent</option>
+                    </select>
                   </div>
-                </>
-              )}
-              <div>
-                <label className="text-sm font-medium text-gray-500">Calculate by Salary Date</label>
-                <p className="text-gray-900">{selectedPlanDetails.calculate_by_salary_date ? 'Yes' : 'No'}</p>
-              </div>
-              {selectedPlanDetails.allow_extension && (
+                </div>
+
+                {/* Subject and Note Content */}
                 <div>
-                  <label className="text-sm font-medium text-gray-500">Loan Extension</label>
-                  <p className="text-gray-900">
-                    {selectedPlanDetails.extension_show_from_days && selectedPlanDetails.extension_show_till_days
-                      ? `D${selectedPlanDetails.extension_show_from_days} to D+${selectedPlanDetails.extension_show_till_days}`
-                      : 'Enabled'}
-                  </p>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Subject *</label>
+                  <input
+                    type="text"
+                    placeholder="Enter note subject"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
                 </div>
-              )}
-            </div>
 
-            {/* Fees Section */}
-            <div className="mt-6">
-              <h5 className="text-md font-semibold text-gray-900 mb-3">Fees</h5>
-              {selectedPlanDetails.fees && selectedPlanDetails.fees.length > 0 ? (
-                <div className="space-y-2">
-                  {selectedPlanDetails.fees.map((fee: any, idx: number) => (
-                    <div key={idx} className="p-3 bg-gray-50 rounded-lg">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="font-medium text-gray-900">{fee.fee_name}</p>
-                          <p className="text-sm text-gray-600">{fee.fee_percent}%</p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {fee.application_method === 'deduct_from_disbursal'
-                              ? 'Deduct from Disbursal'
-                              : 'Add to Total Repayable'}
-                          </p>
-                        </div>
-                        <span className="text-xs text-gray-500">18% GST applies</span>
-                      </div>
-                    </div>
-                  ))}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Note Content *</label>
+                  <textarea
+                    placeholder="Enter detailed note content"
+                    rows={6}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
                 </div>
-              ) : (
-                <p className="text-gray-500 text-sm">No fees assigned to this plan</p>
-              )}
-            </div>
 
-            {selectedPlanDetails.description && (
-              <div className="mt-4">
-                <label className="text-sm font-medium text-gray-500">Description</label>
-                <p className="text-gray-900 text-sm">{selectedPlanDetails.description}</p>
-              </div>
-            )}
-          </div>
+                {/* Visibility and Status */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Visibility</label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="private">Private</option>
+                      <option value="team">Team Only</option>
+                      <option value="public">Public</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="active">Active</option>
+                      <option value="archived">Archived</option>
+                      <option value="flagged">Flagged</option>
+                    </select>
+                  </div>
+                </div>
 
-          <div className="mt-6 flex justify-end">
-            <button
-              onClick={() => {
-                setShowPlanDetailsModal(false);
-                setSelectedPlanDetails(null);
-              }}
-              className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  {/* Loan Plan Selection Modal */ }
-  {
-    showLoanPlanModal && (
-      <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
-        <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <h4 className="text-lg font-semibold text-gray-900">
-              {editingLoanPlanId ? 'Assign Loan Plan to Loan' : 'Select Loan Plan'}
-            </h4>
-            <button
-              onClick={() => {
-                setShowLoanPlanModal(false);
-                setEditingLoanPlanId(null);
-                setSelectedLoanPlanId(null);
-              }}
-              className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="space-y-4">
-            {loanPlans.length > 0 ? (
-              <div className="space-y-2">
-                {loanPlans.map((plan: any) => (
-                  <div
-                    key={plan.id}
-                    onClick={() => setSelectedLoanPlanId(plan.id)}
-                    className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${selectedLoanPlanId === plan.id
-                      ? 'border-blue-600 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                      }`}
+                {/* Action Buttons */}
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="submit"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      alert('Note added successfully!');
+                      setShowAddNoteModal(false);
+                    }}
+                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
                   >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h5 className="font-semibold text-gray-900">{plan.plan_name}</h5>
-                        <p className="text-sm text-gray-600 mt-1">Code: {plan.plan_code}</p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Type: {plan.plan_type === 'single' ? 'Single Payment' : `Multi-EMI (${plan.emi_count || 'N/A'} EMIs)`}
-                        </p>
-                        {plan.is_default && (
-                          <span className="inline-block mt-2 px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
-                            Default Plan
-                          </span>
-                        )}
-                      </div>
-                      {selectedLoanPlanId === plan.id && (
-                        <CheckCircle className="w-5 h-5 text-blue-600" />
-                      )}
-                    </div>
+                    Add Note
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddNoteModal(false)}
+                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Send SMS Modal */}
+      {
+        showSendSmsModal && (
+          <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-lg font-semibold text-gray-900">Send SMS</h4>
+                <button
+                  onClick={() => setShowSendSmsModal(false)}
+                  className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form className="space-y-4">
+                {/* Recipient and SMS Type */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Recipient *</label>
+                    <input
+                      type="tel"
+                      placeholder="Enter mobile number"
+                      defaultValue={getUserData('mobile')}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
                   </div>
-                ))}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">SMS Type *</label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    >
+                      <option value="">Select SMS Type</option>
+                      <option value="notification">Notification</option>
+                      <option value="reminder">Reminder</option>
+                      <option value="alert">Alert</option>
+                      <option value="promotional">Promotional</option>
+                      <option value="verification">Verification</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Template Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Template (Optional)</label>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select Template</option>
+                    <option value="loan_approved">Loan Approved</option>
+                    <option value="payment_reminder">Payment Reminder</option>
+                    <option value="document_required">Document Required</option>
+                    <option value="verification_pending">Verification Pending</option>
+                    <option value="custom">Custom Message</option>
+                  </select>
+                </div>
+
+                {/* Message Content */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Message *</label>
+                  <textarea
+                    placeholder="Enter your SMS message (160 characters max)"
+                    rows={4}
+                    maxLength={160}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                  <div className="text-right text-xs text-gray-500 mt-1">
+                    <span id="char-count">0</span>/160 characters
+                  </div>
+                </div>
+
+                {/* Scheduling */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Send Now or Schedule</label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="now">Send Now</option>
+                      <option value="schedule">Schedule</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Scheduled Date & Time</label>
+                    <input
+                      type="datetime-local"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="submit"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      alert('SMS sent successfully!');
+                      setShowSendSmsModal(false);
+                    }}
+                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                  >
+                    Send SMS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowSendSmsModal(false)}
+                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Templates Modal */}
+      {
+        showTemplatesModal && (
+          <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-4xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-lg font-semibold text-gray-900">SMS Templates</h4>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowAddTemplateModal(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Template
+                  </button>
+                  <button
+                    onClick={() => setShowTemplatesModal(false)}
+                    className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Templates List */}
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Template 1 */}
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <h5 className="font-medium text-gray-900">Loan Approved</h5>
+                      <div className="flex items-center gap-2">
+                        <button className="text-blue-600 hover:text-blue-800">
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button className="text-red-600 hover:text-red-800">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-2">Type: Notification</p>
+                    <p className="text-sm text-gray-700">"Dear {getUserData('name')}, your loan application has been approved for ₹{getUserData('loans')?.[0]?.amount || 'X'}. Please check your email for further details."</p>
+                  </div>
+
+                  {/* Template 2 */}
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <h5 className="font-medium text-gray-900">Payment Reminder</h5>
+                      <div className="flex items-center gap-2">
+                        <button className="text-blue-600 hover:text-blue-800">
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button className="text-red-600 hover:text-red-800">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-2">Type: Reminder</p>
+                    <p className="text-sm text-gray-700">"Dear {getUserData('name')}, your EMI payment of ₹X is due on [DATE]. Please make the payment to avoid late fees."</p>
+                  </div>
+
+                  {/* Template 3 */}
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <h5 className="font-medium text-gray-900">Document Required</h5>
+                      <div className="flex items-center gap-2">
+                        <button className="text-blue-600 hover:text-blue-800">
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button className="text-red-600 hover:text-red-800">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-2">Type: Alert</p>
+                    <p className="text-sm text-gray-700">"Dear {getUserData('name')}, additional documents are required for your loan application. Please upload them in your dashboard."</p>
+                  </div>
+
+                  {/* Template 4 */}
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <h5 className="font-medium text-gray-900">Verification Pending</h5>
+                      <div className="flex items-center gap-2">
+                        <button className="text-blue-600 hover:text-blue-800">
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button className="text-red-600 hover:text-red-800">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-2">Type: Verification</p>
+                    <p className="text-sm text-gray-700">"Dear {getUserData('name')}, your KYC verification is pending. Please complete the verification process to proceed."</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Add Template Modal */}
+      {
+        showAddTemplateModal && (
+          <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-lg font-semibold text-gray-900">Add SMS Template</h4>
+                <button
+                  onClick={() => setShowAddTemplateModal(false)}
+                  className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form className="space-y-4">
+                {/* Template Name and Type */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Template Name *</label>
+                    <input
+                      type="text"
+                      placeholder="Enter template name"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Template Type *</label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    >
+                      <option value="">Select Type</option>
+                      <option value="notification">Notification</option>
+                      <option value="reminder">Reminder</option>
+                      <option value="alert">Alert</option>
+                      <option value="promotional">Promotional</option>
+                      <option value="verification">Verification</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Template Content */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Template Content *</label>
+                  <textarea
+                    placeholder="Enter template message. Use {name}, {amount}, {date} for variables"
+                    rows={6}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                  <div className="text-xs text-gray-500 mt-1">
+                    Available variables: {'{name}'}, {'{amount}'}, {'{date}'}, {'{loan_id}'}, {'{mobile}'}
+                  </div>
+                </div>
+
+                {/* Category and Status */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="loan">Loan Related</option>
+                      <option value="payment">Payment Related</option>
+                      <option value="verification">Verification</option>
+                      <option value="general">General</option>
+                      <option value="promotional">Promotional</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                    <select
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="draft">Draft</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="submit"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      alert('Template added successfully!');
+                      setShowAddTemplateModal(false);
+                    }}
+                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                  >
+                    Add Template
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddTemplateModal(false)}
+                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Plan Details Modal */}
+      {
+        showPlanDetailsModal && selectedPlanDetails && (
+          <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-3xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-lg font-semibold text-gray-900">Loan Plan Details</h4>
+                <button
+                  onClick={() => {
+                    setShowPlanDetailsModal(false);
+                    setSelectedPlanDetails(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Plan Name</label>
+                    <p className="text-gray-900 font-semibold">{selectedPlanDetails.plan_name}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Plan Code</label>
+                    <p className="text-gray-900">{selectedPlanDetails.plan_code}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Plan Type</label>
+                    <p className="text-gray-900">{selectedPlanDetails.plan_type === 'single' ? 'Single Payment' : 'Multi-EMI'}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Interest Rate</label>
+                    <p className="text-gray-900">{selectedPlanDetails.interest_percent_per_day ? (parseFloat(selectedPlanDetails.interest_percent_per_day) * 100).toFixed(4) : 'N/A'}% per day</p>
+                  </div>
+                  {selectedPlanDetails.plan_type === 'single' ? (
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Duration</label>
+                      <p className="text-gray-900">{selectedPlanDetails.repayment_days || 'N/A'} days</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="text-sm font-medium text-gray-500">EMI Frequency</label>
+                        <p className="text-gray-900 capitalize">{selectedPlanDetails.emi_frequency || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-500">EMI Count</label>
+                        <p className="text-gray-900">{selectedPlanDetails.emi_count || 'N/A'}</p>
+                      </div>
+                    </>
+                  )}
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Calculate by Salary Date</label>
+                    <p className="text-gray-900">{selectedPlanDetails.calculate_by_salary_date ? 'Yes' : 'No'}</p>
+                  </div>
+                  {selectedPlanDetails.allow_extension && (
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">Loan Extension</label>
+                      <p className="text-gray-900">
+                        {selectedPlanDetails.extension_show_from_days && selectedPlanDetails.extension_show_till_days
+                          ? `D${selectedPlanDetails.extension_show_from_days} to D+${selectedPlanDetails.extension_show_till_days}`
+                          : 'Enabled'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Fees Section */}
+                <div className="mt-6">
+                  <h5 className="text-md font-semibold text-gray-900 mb-3">Fees</h5>
+                  {selectedPlanDetails.fees && selectedPlanDetails.fees.length > 0 ? (
+                    <div className="space-y-2">
+                      {selectedPlanDetails.fees.map((fee: any, idx: number) => (
+                        <div key={idx} className="p-3 bg-gray-50 rounded-lg">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="font-medium text-gray-900">{fee.fee_name}</p>
+                              <p className="text-sm text-gray-600">{fee.fee_percent}%</p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                {fee.application_method === 'deduct_from_disbursal'
+                                  ? 'Deduct from Disbursal'
+                                  : 'Add to Total Repayable'}
+                              </p>
+                            </div>
+                            <span className="text-xs text-gray-500">18% GST applies</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 text-sm">No fees assigned to this plan</p>
+                  )}
+                </div>
+
+                {selectedPlanDetails.description && (
+                  <div className="mt-4">
+                    <label className="text-sm font-medium text-gray-500">Description</label>
+                    <p className="text-gray-900 text-sm">{selectedPlanDetails.description}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => {
+                    setShowPlanDetailsModal(false);
+                    setSelectedPlanDetails(null);
+                  }}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Loan Plan Selection Modal */}
+      {
+        showLoanPlanModal && (
+          <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-lg font-semibold text-gray-900">
+                  {editingLoanPlanId ? 'Assign Loan Plan to Loan' : 'Select Loan Plan'}
+                </h4>
+                <button
+                  onClick={() => {
+                    setShowLoanPlanModal(false);
+                    setEditingLoanPlanId(null);
+                    setSelectedLoanPlanId(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {loanPlans.length > 0 ? (
+                  <div className="space-y-2">
+                    {loanPlans.map((plan: any) => (
+                      <div
+                        key={plan.id}
+                        onClick={() => setSelectedLoanPlanId(plan.id)}
+                        className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${selectedLoanPlanId === plan.id
+                          ? 'border-blue-600 bg-blue-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h5 className="font-semibold text-gray-900">{plan.plan_name}</h5>
+                            <p className="text-sm text-gray-600 mt-1">Code: {plan.plan_code}</p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              Type: {plan.plan_type === 'single' ? 'Single Payment' : `Multi-EMI (${plan.emi_count || 'N/A'} EMIs)`}
+                            </p>
+                            {plan.is_default && (
+                              <span className="inline-block mt-2 px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
+                                Default Plan
+                              </span>
+                            )}
+                          </div>
+                          {selectedLoanPlanId === plan.id && (
+                            <CheckCircle className="w-5 h-5 text-blue-600" />
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-gray-500 text-center py-4">No active loan plans available</p>
+                )}
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={handleUpdateLoanPlan}
+                    disabled={!selectedLoanPlanId}
+                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {editingLoanPlanId ? 'Assign Plan' : 'Update Plan'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowLoanPlanModal(false);
+                      setEditingLoanPlanId(null);
+                      setSelectedLoanPlanId(null);
+                    }}
+                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* EMI Details Modal */}
+      <Dialog open={showEmiDetailsModal} onOpenChange={setShowEmiDetailsModal}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>EMI Details - {selectedLoanIdForEmi}</DialogTitle>
+            <DialogDescription>
+              View all EMI schedule details with dates and amounts
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4">
+            {selectedLoanEmiSchedule.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        EMI #
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Date
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Amount (₹)
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {selectedLoanEmiSchedule.map((emi: any, index: number) => {
+                      // Get data from calculated schedule (includes penalty) or stored emi_schedule
+                      const emiNumber = emi.emi_number || emi.instalment_no || (index + 1);
+                      const emiDate = emi.due_date || 'N/A';
+                      // Use instalment_amount if available (includes penalty), otherwise use emi_amount
+                      const emiAmount = parseFloat(emi.instalment_amount || emi.emi_amount || 0);
+                      const emiStatus = emi.status || 'pending';
+
+                      // Check if EMI is overdue and has penalty
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const dueDate = emiDate !== 'N/A' ? new Date(emiDate) : null;
+                      const isOverdue = dueDate && dueDate < today;
+                      const hasPenalty = emi.penalty_total > 0 || emi.penalty_base > 0;
+
+                      return (
+                        <tr key={index} className={`hover:bg-gray-50 ${isOverdue ? 'bg-red-50' : ''}`}>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {emiNumber}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                            {emiDate !== 'N/A' ? formatDate(emiDate) : 'N/A'}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="text-sm font-semibold text-gray-900">
+                              {formatCurrencyWithDecimals(emiAmount)}
+                            </div>
+                            {hasPenalty && (
+                              <div className="text-xs text-red-600 mt-1">
+                                <div>Penalty: ₹{(emi.penalty_base || 0).toFixed(2)}</div>
+                                <div>GST: ₹{(emi.penalty_gst || 0).toFixed(2)}</div>
+                                <div className="font-semibold">Total Penalty: ₹{(emi.penalty_total || 0).toFixed(2)}</div>
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm">
+                            <span
+                              className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${emiStatus === 'paid' || emiStatus === 'completed'
+                                ? 'bg-green-100 text-green-800'
+                                : emiStatus === 'overdue' || emiStatus === 'defaulted' || isOverdue
+                                  ? 'bg-red-100 text-red-800'
+                                  : emiStatus === 'pending' || emiStatus === 'due'
+                                    ? 'bg-yellow-100 text-yellow-800'
+                                    : 'bg-gray-100 text-gray-800'
+                                }`}
+                            >
+                              {isOverdue ? 'Overdue' : (emiStatus.charAt(0).toUpperCase() + emiStatus.slice(1))}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  {selectedLoanEmiSchedule.length > 0 && (
+                    <tfoot className="bg-gray-50">
+                      <tr>
+                        <td colSpan={2} className="px-4 py-3 text-right text-sm font-semibold text-gray-900">
+                          Total:
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-900">
+                          {formatCurrencyWithDecimals(
+                            selectedLoanEmiSchedule.reduce((sum: number, emi: any) => {
+                              // Use instalment_amount (includes penalty) if available, otherwise emi_amount
+                              return sum + parseFloat(emi.instalment_amount || emi.emi_amount || 0);
+                            }, 0)
+                          )}
+                        </td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
               </div>
             ) : (
-              <p className="text-gray-500 text-center py-4">No active loan plans available</p>
+              <div className="text-center py-8 text-gray-500">
+                <FileText className="w-12 h-12 mx-auto mb-2 text-gray-400" />
+                <p>No EMI schedule data available</p>
+              </div>
             )}
-
-            <div className="flex gap-3 pt-4">
-              <button
-                onClick={handleUpdateLoanPlan}
-                disabled={!selectedLoanPlanId}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {editingLoanPlanId ? 'Assign Plan' : 'Update Plan'}
-              </button>
-              <button
-                onClick={() => {
-                  setShowLoanPlanModal(false);
-                  setEditingLoanPlanId(null);
-                  setSelectedLoanPlanId(null);
-                }}
-                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
           </div>
-        </div>
-      </div>
-    )
-  }
-
-  {/* EMI Details Modal */ }
-  <Dialog open={showEmiDetailsModal} onOpenChange={setShowEmiDetailsModal}>
-    <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-      <DialogHeader>
-        <DialogTitle>EMI Details - {selectedLoanIdForEmi}</DialogTitle>
-        <DialogDescription>
-          View all EMI schedule details with dates and amounts
-        </DialogDescription>
-      </DialogHeader>
-      <div className="mt-4">
-        {selectedLoanEmiSchedule.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    EMI #
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Date
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Amount (₹)
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {selectedLoanEmiSchedule.map((emi: any, index: number) => {
-                  // Get data from calculated schedule (includes penalty) or stored emi_schedule
-                  const emiNumber = emi.emi_number || emi.instalment_no || (index + 1);
-                  const emiDate = emi.due_date || 'N/A';
-                  // Use instalment_amount if available (includes penalty), otherwise use emi_amount
-                  const emiAmount = parseFloat(emi.instalment_amount || emi.emi_amount || 0);
-                  const emiStatus = emi.status || 'pending';
-
-                  // Check if EMI is overdue and has penalty
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0);
-                  const dueDate = emiDate !== 'N/A' ? new Date(emiDate) : null;
-                  const isOverdue = dueDate && dueDate < today;
-                  const hasPenalty = emi.penalty_total > 0 || emi.penalty_base > 0;
-
-                  return (
-                    <tr key={index} className={`hover:bg-gray-50 ${isOverdue ? 'bg-red-50' : ''}`}>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {emiNumber}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                        {emiDate !== 'N/A' ? formatDate(emiDate) : 'N/A'}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="text-sm font-semibold text-gray-900">
-                          {formatCurrencyWithDecimals(emiAmount)}
-                        </div>
-                        {hasPenalty && (
-                          <div className="text-xs text-red-600 mt-1">
-                            <div>Penalty: ₹{(emi.penalty_base || 0).toFixed(2)}</div>
-                            <div>GST: ₹{(emi.penalty_gst || 0).toFixed(2)}</div>
-                            <div className="font-semibold">Total Penalty: ₹{(emi.penalty_total || 0).toFixed(2)}</div>
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm">
-                        <span
-                          className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${emiStatus === 'paid' || emiStatus === 'completed'
-                            ? 'bg-green-100 text-green-800'
-                            : emiStatus === 'overdue' || emiStatus === 'defaulted' || isOverdue
-                              ? 'bg-red-100 text-red-800'
-                              : emiStatus === 'pending' || emiStatus === 'due'
-                                ? 'bg-yellow-100 text-yellow-800'
-                                : 'bg-gray-100 text-gray-800'
-                            }`}
-                        >
-                          {isOverdue ? 'Overdue' : (emiStatus.charAt(0).toUpperCase() + emiStatus.slice(1))}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              {selectedLoanEmiSchedule.length > 0 && (
-                <tfoot className="bg-gray-50">
-                  <tr>
-                    <td colSpan={2} className="px-4 py-3 text-right text-sm font-semibold text-gray-900">
-                      Total:
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-900">
-                      {formatCurrencyWithDecimals(
-                        selectedLoanEmiSchedule.reduce((sum: number, emi: any) => {
-                          // Use instalment_amount (includes penalty) if available, otherwise emi_amount
-                          return sum + parseFloat(emi.instalment_amount || emi.emi_amount || 0);
-                        }, 0)
-                      )}
-                    </td>
-                    <td></td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-        ) : (
-          <div className="text-center py-8 text-gray-500">
-            <FileText className="w-12 h-12 mx-auto mb-2 text-gray-400" />
-            <p>No EMI schedule data available</p>
-          </div>
-        )}
-      </div>
-    </DialogContent>
-  </Dialog>
+        </DialogContent>
+      </Dialog>
     </>
   );
 

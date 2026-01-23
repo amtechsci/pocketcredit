@@ -41,8 +41,8 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
     if (currentLimit === null) {
       const userLimitQuery = `SELECT loan_limit FROM users WHERE id = ?`;
       const userLimitResult = await executeQuery(userLimitQuery, [userId]);
-      currentLimit = userLimitResult && userLimitResult.length > 0 
-        ? parseFloat(userLimitResult[0].loan_limit) || 0 
+      currentLimit = userLimitResult && userLimitResult.length > 0
+        ? parseFloat(userLimitResult[0].loan_limit) || 0
         : 0;
     }
 
@@ -58,7 +58,7 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
         LIMIT 1
       `;
       const users = await executeQuery(userQuery, [userId]);
-      
+
       if (users && users.length > 0) {
         const user = users[0];
         // Try to get from employment_details first, then from income_range
@@ -92,15 +92,15 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
     `;
 
     const loanCountResult = await executeQuery(loanCountQuery, [userId]);
-    const loanCount = loanCountResult && loanCountResult.length > 0 
-      ? parseInt(loanCountResult[0].count) || 0 
+    const loanCount = loanCountResult && loanCountResult.length > 0
+      ? parseInt(loanCountResult[0].count) || 0
       : 0;
 
     // Define percentage multipliers for each loan number
     // After 1st loan: 11%, After 2nd loan: 15.2%, After 3rd loan: 20.9%, 
     // After 4th loan: 28%, After 5th loan: 32.1%, After 6th loan: Premium (₹1,50,000)
     const percentageMultipliers = [8, 11, 15.2, 20.9, 28, 32.1];
-    
+
     // loanCount = number of 2 EMI loans already disbursed (including current one being disbursed)
     // After 1st loan disbursed (loanCount = 1), next limit is 11% (index 1)
     // After 2nd loan disbursed (loanCount = 2), next limit is 15.2% (index 2)
@@ -111,22 +111,22 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
 
     // Calculate next limit based on next percentage tier
     const calculatedLimitByPercentage = Math.round((salary * nextPercentage) / 100);
-    
+
     // Next limit should be based on current limit AND next percentage calculation
     // Use whichever is higher: current limit or calculated next limit
     const calculatedLimit = Math.max(currentLimit, calculatedLimitByPercentage);
-    
+
     // Check if max percentage (32.1%) is reached for NEXT limit
     const isMaxPercentageReached = nextPercentage >= 32.1;
-    
+
     // Check if next limit (based on percentage calculation) would cross ₹45,600
     // This check should be based on the calculated percentage limit, not the max of current and calculated
     // because premium limit should trigger when the progression-based limit crosses ₹45,600
     const wouldCrossMaxLimit = calculatedLimitByPercentage > 45600;
-    
+
     // If max percentage reached OR would cross ₹45,600, show premium limit of ₹1,50,000
     const showPremiumLimit = isMaxPercentageReached || wouldCrossMaxLimit;
-    
+
     let newLimit;
     if (showPremiumLimit) {
       newLimit = 150000; // Premium limit
@@ -211,7 +211,7 @@ async function storePendingCreditLimit(userId, newLimit, limitData = {}) {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `;
-    
+
     await executeQuery(createTableQuery);
 
     // Delete any existing pending limit for this user
@@ -275,7 +275,7 @@ async function getPendingCreditLimit(userId) {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `;
-    
+
     await executeQuery(createTableQuery);
 
     const query = `
@@ -306,7 +306,7 @@ async function acceptPendingCreditLimit(userId, pendingLimitId) {
     // Get pending limit
     const pendingQuery = `SELECT * FROM pending_credit_limits WHERE id = ? AND user_id = ? AND status = 'pending'`;
     const pending = await executeQuery(pendingQuery, [pendingLimitId, userId]);
-    
+
     if (!pending || pending.length === 0) {
       throw new Error('Pending credit limit not found');
     }
@@ -382,8 +382,8 @@ async function adjustFirstTimeLoanAmount(userId, monthlySalary) {
         AND JSON_EXTRACT(plan_snapshot, '$.plan_type') = 'multi_emi'
     `, [userId]);
 
-    const hasDisbursed2EMILoans = disbursed2EMILoans && disbursed2EMILoans.length > 0 
-      ? parseInt(disbursed2EMILoans[0].count) > 0 
+    const hasDisbursed2EMILoans = disbursed2EMILoans && disbursed2EMILoans.length > 0
+      ? parseInt(disbursed2EMILoans[0].count) > 0
       : false;
 
     // If user already has disbursed 2 EMI loans, don't adjust
@@ -415,7 +415,7 @@ async function adjustFirstTimeLoanAmount(userId, monthlySalary) {
 
     // Calculate 8% of salary
     const eightPercentOfSalary = Math.round((monthlySalary * 8) / 100);
-    
+
     // Apply maximum cap of ₹45,600
     const newLoanAmount = Math.min(eightPercentOfSalary, 45600);
 
@@ -425,7 +425,7 @@ async function adjustFirstTimeLoanAmount(userId, monthlySalary) {
       return { adjusted: false, loanId: pendingLoan.id, oldAmount: currentLoanAmount, newAmount: newLoanAmount };
     }
 
-    // Update loan amount
+    // Update loan amount in loan_applications
     await executeQuery(
       `UPDATE loan_applications 
        SET loan_amount = ?, updated_at = NOW() 
@@ -433,13 +433,24 @@ async function adjustFirstTimeLoanAmount(userId, monthlySalary) {
       [newLoanAmount, pendingLoan.id]
     );
 
+    // ALSO update user's loan_limit in users table
+    // This is the credit limit that determines how much the user can borrow
+    await executeQuery(
+      `UPDATE users 
+       SET loan_limit = ?, updated_at = NOW() 
+       WHERE id = ?`,
+      [newLoanAmount, userId]
+    );
+
     console.log(`[CreditLimit] Adjusted first-time loan amount for user ${userId}: ₹${currentLoanAmount} → ₹${newLoanAmount} (8% of ₹${monthlySalary} salary)`);
+    console.log(`[CreditLimit] Also updated user ${userId} loan_limit to ₹${newLoanAmount}`);
 
     return {
       adjusted: true,
       loanId: pendingLoan.id,
       oldAmount: currentLoanAmount,
-      newAmount: newLoanAmount
+      newAmount: newLoanAmount,
+      limitUpdated: true
     };
 
   } catch (error) {
@@ -464,26 +475,26 @@ async function checkAndMarkCoolingPeriod(userId, loanId) {
       WHERE id = ? AND user_id = ? AND status = 'cleared'
     `;
     const loans = await executeQuery(loanQuery, [loanId, userId]);
-    
+
     if (!loans || loans.length === 0) {
       return false;
     }
-    
+
     const loan = loans[0];
     const loanAmount = parseFloat(loan.loan_amount) || 0;
-    
+
     // Check if this is a premium loan (₹1,50,000) with 24 EMIs
     let isPremiumLoan = false;
     if (loanAmount === 150000) {
       // Check if it's a 2 EMI product with premium tenure (24 EMIs)
       try {
-        const planSnapshot = typeof loan.plan_snapshot === 'string' 
-          ? JSON.parse(loan.plan_snapshot) 
+        const planSnapshot = typeof loan.plan_snapshot === 'string'
+          ? JSON.parse(loan.plan_snapshot)
           : loan.plan_snapshot;
-        
+
         const emiCount = planSnapshot?.emi_count || 0;
         const planType = planSnapshot?.plan_type || '';
-        
+
         // Premium loan: ₹1,50,000 with 24 EMIs
         if (emiCount === 24 || (planType === 'multi_emi' && emiCount >= 24)) {
           isPremiumLoan = true;
@@ -494,7 +505,7 @@ async function checkAndMarkCoolingPeriod(userId, loanId) {
         isPremiumLoan = true;
       }
     }
-    
+
     if (isPremiumLoan) {
       // Mark user in cooling period
       await executeQuery(
@@ -506,11 +517,11 @@ async function checkAndMarkCoolingPeriod(userId, loanId) {
          WHERE id = ?`,
         [userId]
       );
-      
+
       console.log(`[CreditLimit] User ${userId} marked in cooling period after clearing premium loan (₹1,50,000)`);
       return true;
     }
-    
+
     return false;
   } catch (error) {
     console.error(`[CreditLimit] Error checking cooling period for user ${userId}:`, error);
