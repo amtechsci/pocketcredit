@@ -106,16 +106,16 @@ class AdminApiService {
       },
       (error) => {
         console.error('Admin API Response Error:', error.response?.data || error.message);
-        
+
         // Handle authentication errors
         if (error.response) {
           const status = error.response.status;
           const message = error.response.data?.message || '';
-          
+
           // Check for auth-related errors
           if (
-            status === 401 || 
-            status === 403 || 
+            status === 401 ||
+            status === 403 ||
             message.toLowerCase().includes('invalid') && message.toLowerCase().includes('token') ||
             message.toLowerCase().includes('expired') && message.toLowerCase().includes('token') ||
             message.toLowerCase().includes('access token required') ||
@@ -123,13 +123,13 @@ class AdminApiService {
             message.toLowerCase().includes('admin access required')
           ) {
             console.log('Authentication error detected, clearing credentials and redirecting to login');
-            
+
             // Clear authentication data
             this.token = null;
             this.clearAuthHeader();
             localStorage.removeItem('adminToken');
             localStorage.removeItem('adminUser');
-            
+
             // Redirect to admin login page
             // Use setTimeout to avoid blocking the error handling
             setTimeout(() => {
@@ -137,7 +137,7 @@ class AdminApiService {
             }, 100);
           }
         }
-        
+
         return Promise.reject(error);
       }
     );
@@ -159,18 +159,18 @@ class AdminApiService {
       const status = error.response.status;
       const message = error.response.data?.message || '';
       const code = error.response.data?.code || '';
-      
+
       // Don't treat 403 as auth error if it's an external API error (e.g., Digitap)
       // Check if it's a Digitap or external service error
-      const isExternalApiError = 
+      const isExternalApiError =
         code === 'NotSignedUp' ||
         message.toLowerCase().includes('digitap') ||
         message.toLowerCase().includes('bank data service') ||
         error.response.data?.errorDetails;
-      
+
       // Check for auth-related errors (but not external API errors)
       if (
-        (status === 401 || (status === 403 && !isExternalApiError)) || 
+        (status === 401 || (status === 403 && !isExternalApiError)) ||
         (message.toLowerCase().includes('invalid') && message.toLowerCase().includes('token')) ||
         (message.toLowerCase().includes('expired') && message.toLowerCase().includes('token')) ||
         message.toLowerCase().includes('access token required') ||
@@ -178,13 +178,13 @@ class AdminApiService {
         message.toLowerCase().includes('admin access required')
       ) {
         console.log('Authentication error detected in direct axios call, clearing credentials and redirecting to login');
-        
+
         // Clear authentication data
         this.token = null;
         this.clearAuthHeader();
         localStorage.removeItem('adminToken');
         localStorage.removeItem('adminUser');
-        
+
         // Redirect to admin login page
         setTimeout(() => {
           window.location.href = '/stpl/login';
@@ -346,10 +346,16 @@ class AdminApiService {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'multipart/form-data'
-        }
+        },
+        responseType: 'json'
       });
       return response.data;
-    } catch (error) {
+    } catch (error: any) {
+      // Check if response is HTML string (server error page)
+      if (error.response && error.response.data && typeof error.response.data === 'string' && error.response.data.trim().startsWith('<')) {
+        console.error('Server returned HTML error:', error.response.data);
+        throw new Error('Server returned an HTML error instead of JSON. It might be a 404, 500, or file size limit error.');
+      }
       this.handleAuthError(error);
       throw error;
     }
@@ -484,7 +490,7 @@ class AdminApiService {
         params.append(key, filters[key]);
       }
     });
-    
+
     const response = await fetch(`${this.api.defaults.baseURL}/applications/export/excel?${params.toString()}`, {
       method: 'GET',
       headers: {
@@ -606,11 +612,11 @@ class AdminApiService {
     const headers: HeadersInit = {
       'Authorization': token ? `Bearer ${token}` : '',
     };
-    
+
     // If formData is provided, include it (for backward compatibility)
     // Otherwise, send empty body (backend will use existing file)
     const body = formData || undefined;
-    
+
     const response = await fetch(`/api/admin/bank-statement/${userId}/verify-with-file`, {
       method: 'POST',
       headers,
@@ -1328,19 +1334,19 @@ class AdminApiService {
         },
         responseType: 'blob'
       });
-      
+
       // Check if response is actually a PDF (blob with PDF content type)
       if (response.headers['content-type']?.includes('application/pdf')) {
         return response.data;
       }
-      
+
       // If not PDF, might be an error message - try to parse it
       if (response.headers['content-type']?.includes('application/json')) {
         const text = await response.data.text();
         const errorData = JSON.parse(text);
         throw new Error(errorData.message || errorData.error || 'Failed to generate PDF');
       }
-      
+
       return response.data;
     } catch (error: any) {
       // If error response is a blob (JSON error sent as blob), try to parse it
@@ -1354,7 +1360,7 @@ class AdminApiService {
           console.error('Error parsing error response:', parseError);
         }
       }
-      
+
       this.handleAuthError(error);
       throw error;
     }
@@ -1391,10 +1397,10 @@ class AdminApiService {
       const params = new URLSearchParams();
       if (transactionId) params.append('transactionId', transactionId.toString());
       if (extensionNumber) params.append('extensionNumber', extensionNumber.toString());
-      
+
       const queryString = params.toString();
       const url = `/api/kfs/${loanId}/extension-letter${queryString ? `?${queryString}` : ''}`;
-      
+
       const response = await axios.get(url, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
@@ -1470,19 +1476,19 @@ class AdminApiService {
         },
         responseType: 'blob'
       });
-      
+
       // Check if response is actually a PDF (blob with PDF content type)
       if (response.headers['content-type']?.includes('application/pdf')) {
         return response.data;
       }
-      
+
       // If not PDF, might be an error message - try to parse it
       if (response.headers['content-type']?.includes('application/json')) {
         const text = await response.data.text();
         const errorData = JSON.parse(text);
         throw new Error(errorData.message || errorData.error || 'Failed to generate PDF');
       }
-      
+
       return response.data;
     } catch (error: any) {
       // If error response is a blob (JSON error sent as blob), try to parse it
@@ -1496,7 +1502,7 @@ class AdminApiService {
           console.error('Error parsing error response:', parseError);
         }
       }
-      
+
       this.handleAuthError(error);
       throw error;
     }
@@ -1515,19 +1521,19 @@ class AdminApiService {
         },
         responseType: 'blob'
       });
-      
+
       // Check if response is actually a PDF (blob with PDF content type)
       if (response.headers['content-type']?.includes('application/pdf')) {
         return response.data;
       }
-      
+
       // If not PDF, might be an error message - try to parse it
       if (response.headers['content-type']?.includes('application/json')) {
         const text = await response.data.text();
         const errorData = JSON.parse(text);
         throw new Error(errorData.message || errorData.error || 'Failed to generate PDF');
       }
-      
+
       return response.data;
     } catch (error: any) {
       // If error response is a blob (JSON error sent as blob), try to parse it
@@ -1541,7 +1547,7 @@ class AdminApiService {
           console.error('Error parsing error response:', parseError);
         }
       }
-      
+
       this.handleAuthError(error);
       throw error;
     }

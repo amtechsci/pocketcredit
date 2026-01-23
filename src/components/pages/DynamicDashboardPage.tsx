@@ -178,13 +178,13 @@ export function DynamicDashboardPage() {
     try {
       setLoading(true);
       setError(null);
-      
+
       // If user is deleted, redirect to deleted status page
       if (user?.status === 'deleted') {
         navigate('/deleted-status', { replace: true });
         return;
       }
-      
+
       // If user is on hold, redirect to hold status page
       if (user?.status === 'on_hold') {
         navigate('/hold-status', { replace: true });
@@ -207,28 +207,28 @@ export function DynamicDashboardPage() {
                 const documentActions = validationResponse.data.filter(
                   (action: any) => action.action_type === 'need_document' && action.loan_application_id === app.id
                 );
-                
+
                 if (documentActions.length > 0) {
                   const latestAction = documentActions[0];
                   const documents = latestAction.action_details?.documents || [];
-                  
+
                   // Check if all documents are uploaded
                   if (documents.length > 0) {
                     const docsResponse = await apiService.getLoanDocuments(app.id);
                     if (docsResponse.success || docsResponse.status === 'success') {
                       const uploadedDocs = docsResponse.data?.documents || [];
                       const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
-                      
+
                       const allUploaded = documents.every((doc: string) => {
                         const normalizedDoc = normalize(doc);
                         return uploadedDocs.some((uploaded: any) => {
                           const normalizedUploaded = normalize(uploaded.document_name || '');
                           return normalizedDoc === normalizedUploaded ||
-                                 normalizedDoc.includes(normalizedUploaded) ||
-                                 normalizedUploaded.includes(normalizedDoc);
+                            normalizedDoc.includes(normalizedUploaded) ||
+                            normalizedUploaded.includes(normalizedDoc);
                         });
                       });
-                      
+
                       if (!allUploaded) {
                         console.log('📄 Found pending documents, redirecting to upload page');
                         navigate(`/loan-application/upload-documents?applicationId=${app.id}`);
@@ -271,8 +271,8 @@ export function DynamicDashboardPage() {
                         return uploadedDocs.some((uploaded: any) => {
                           const normalizedUploaded = normalize(uploaded.document_name || '');
                           return normalizedDoc === normalizedUploaded ||
-                                 normalizedDoc.includes(normalizedUploaded) ||
-                                 normalizedUploaded.includes(normalizedDoc);
+                            normalizedDoc.includes(normalizedUploaded) ||
+                            normalizedUploaded.includes(normalizedDoc);
                         });
                       });
                       if (!allUploaded) {
@@ -339,7 +339,7 @@ export function DynamicDashboardPage() {
           navigate('/deleted-status', { replace: true });
           return;
         }
-        
+
         setDashboardData(response.data);
 
         // Check if user can apply for new loan
@@ -485,27 +485,27 @@ export function DynamicDashboardPage() {
                 const documentActions = validationResponse.data.filter(
                   (action: any) => action.action_type === 'need_document' && action.loan_application_id === app.id
                 );
-                
+
                 if (documentActions.length > 0) {
                   const latestAction = documentActions[0];
                   const documents = latestAction.action_details?.documents || [];
-                  
+
                   if (documents.length > 0) {
                     const docsResponse = await apiService.getLoanDocuments(app.id);
                     if (docsResponse.success || docsResponse.status === 'success') {
                       const uploadedDocs = docsResponse.data?.documents || [];
                       const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
-                      
+
                       const allUploaded = documents.every((doc: string) => {
                         const normalizedDoc = normalize(doc);
                         return uploadedDocs.some((uploaded: any) => {
                           const normalizedUploaded = normalize(uploaded.document_name || '');
                           return normalizedDoc === normalizedUploaded ||
-                                 normalizedDoc.includes(normalizedUploaded) ||
-                                 normalizedUploaded.includes(normalizedDoc);
+                            normalizedDoc.includes(normalizedUploaded) ||
+                            normalizedUploaded.includes(normalizedDoc);
                         });
                       });
-                      
+
                       setLoanDocumentStatus(prev => ({
                         ...prev,
                         [app.id]: { allUploaded, hasPending: true }
@@ -518,7 +518,7 @@ export function DynamicDashboardPage() {
               console.error(`Error checking document status for loan ${app.id}:`, error);
             }
           });
-        
+
         // Run document status checks in parallel (don't await - let it run in background)
         Promise.all(documentStatusChecks).catch(err => console.error('Error checking document statuses:', err));
 
@@ -663,7 +663,7 @@ export function DynamicDashboardPage() {
     );
   }
 
-  const { user: userData, summary, active_loans,  alerts } = dashboardData;
+  const { user: userData, summary, active_loans, alerts } = dashboardData;
 
   // Check if user has any active or pending loans
   const hasActiveOrPendingLoans = () => {
@@ -671,7 +671,7 @@ export function DynamicDashboardPage() {
     // Filter out cleared loans from pendingApplications when checking if user can apply
     const activePendingApps = pendingApplications?.filter((app: any) => app.status !== 'cleared') || [];
     const hasPendingApplications = activePendingApps.length > 0;
-    
+
 
     return hasActiveLoans || hasPendingApplications;
   };
@@ -857,7 +857,7 @@ export function DynamicDashboardPage() {
         ))}
       </div>
 
-     
+
 
       {/* Desktop Enhanced Layout */}
       <div className="hidden lg:block">
@@ -885,21 +885,20 @@ export function DynamicDashboardPage() {
                         </div>
                         <Badge
                           variant="secondary"
-                          className={`text-[10px] px-1.5 py-0.5 ${
-                            loan.status === 'submitted' ? 'bg-blue-100 text-blue-800' :
-                            loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
-                            loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
-                            loan.status === 'ready_for_disbursement' ? 'bg-green-100 text-green-800' :
-                            loan.status === 'ready_to_repeat_disbursal' ? 'bg-green-100 text-green-800' :
-                            loan.status === 'repeat_disbursal' ? 'bg-orange-100 text-orange-800' :
-                            loan.status === 'account_manager' ? 'bg-emerald-100 text-emerald-800' :
-                            'bg-gray-100 text-gray-800'
-                          }`}
+                          className={`text-[10px] px-1.5 py-0.5 ${loan.status === 'submitted' ? 'bg-blue-100 text-blue-800' :
+                              loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
+                                loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
+                                  loan.status === 'ready_for_disbursement' ? 'bg-green-100 text-green-800' :
+                                    loan.status === 'ready_to_repeat_disbursal' ? 'bg-green-100 text-green-800' :
+                                      loan.status === 'repeat_disbursal' ? 'bg-orange-100 text-orange-800' :
+                                        loan.status === 'account_manager' ? 'bg-emerald-100 text-emerald-800' :
+                                          'bg-gray-100 text-gray-800'
+                            }`}
                         >
-                          {loan.status === 'account_manager' ? 'Active' : 
-                           loan.status === 'repeat_disbursal' ? 'Repeat Disbursal' :
-                           loan.status === 'ready_to_repeat_disbursal' ? 'Ready for Repeat Disbursal' :
-                           loan.status.replace('_', ' ')}
+                          {loan.status === 'account_manager' ? 'Active' :
+                            loan.status === 'repeat_disbursal' ? 'Repeat Disbursal' :
+                              loan.status === 'ready_to_repeat_disbursal' ? 'Ready for Repeat Disbursal' :
+                                loan.status.replace('_', ' ')}
                         </Badge>
                       </div>
 
@@ -940,7 +939,7 @@ export function DynamicDashboardPage() {
                                   const appResponse = await apiService.getLoanApplicationById(loan.id);
                                   if (appResponse.success && appResponse.data?.application) {
                                     const currentStep = (appResponse.data.application as any).current_step;
-                                    
+
                                     // If current_step is 'steps', navigate to first step and let StepGuard redirect to correct step
                                     // This handles cases where step was updated prematurely
                                     if (currentStep === 'steps') {
@@ -948,7 +947,7 @@ export function DynamicDashboardPage() {
                                       navigate(`/loan-application/kyc-verification?applicationId=${loan.id}`);
                                       return;
                                     }
-                                    
+
                                     // Map current_step to route
                                     const stepRoutes: { [key: string]: string } = {
                                       'kyc-verification': `/loan-application/kyc-verification?applicationId=${loan.id}`,
@@ -986,13 +985,13 @@ export function DynamicDashboardPage() {
                           size="sm"
                           className="text-xs whitespace-nowrap w-full"
                         >
-                          {loan.status === 'account_manager' 
-                            ? 'View Loan' 
+                          {loan.status === 'account_manager'
+                            ? 'View Loan'
                             : loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal'
                               ? 'Continue'
-                            : loan.status === 'follow_up' 
-                              ? (loanDocumentStatus[loan.id]?.allUploaded ? 'View' : 'Upload Documents')
-                              : 'View'}
+                              : loan.status === 'follow_up'
+                                ? (loanDocumentStatus[loan.id]?.allUploaded ? 'View' : 'Upload Documents')
+                                : 'View'}
                         </Button>
                       </div>
                     </Card>
@@ -1056,21 +1055,20 @@ export function DynamicDashboardPage() {
                     </div>
                     <Badge
                       variant="secondary"
-                      className={`text-[10px] px-1.5 py-0.5 ${
-                        loan.status === 'submitted' ? 'bg-blue-100 text-blue-800' :
-                        loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
-                        loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
-                        loan.status === 'ready_for_disbursement' ? 'bg-green-100 text-green-800' :
-                        loan.status === 'ready_to_repeat_disbursal' ? 'bg-green-100 text-green-800' :
-                        loan.status === 'repeat_disbursal' ? 'bg-orange-100 text-orange-800' :
-                        loan.status === 'account_manager' ? 'bg-emerald-100 text-emerald-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}
+                      className={`text-[10px] px-1.5 py-0.5 ${loan.status === 'submitted' ? 'bg-blue-100 text-blue-800' :
+                          loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
+                            loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
+                              loan.status === 'ready_for_disbursement' ? 'bg-green-100 text-green-800' :
+                                loan.status === 'ready_to_repeat_disbursal' ? 'bg-green-100 text-green-800' :
+                                  loan.status === 'repeat_disbursal' ? 'bg-orange-100 text-orange-800' :
+                                    loan.status === 'account_manager' ? 'bg-emerald-100 text-emerald-800' :
+                                      'bg-gray-100 text-gray-800'
+                        }`}
                     >
-                      {loan.status === 'account_manager' ? 'Active' : 
-                       loan.status === 'repeat_disbursal' ? 'Repeat Disbursal' :
-                       loan.status === 'ready_to_repeat_disbursal' ? 'Ready for Repeat Disbursal' :
-                       loan.status.replace('_', ' ')}
+                      {loan.status === 'account_manager' ? 'Active' :
+                        loan.status === 'repeat_disbursal' ? 'Repeat Disbursal' :
+                          loan.status === 'ready_to_repeat_disbursal' ? 'Ready for Repeat Disbursal' :
+                            loan.status.replace('_', ' ')}
                     </Badge>
                   </div>
 
@@ -1116,9 +1114,9 @@ export function DynamicDashboardPage() {
                       size="sm"
                       className="text-xs whitespace-nowrap w-full"
                     >
-                      {loan.status === 'account_manager' ? 'View Loan' : 
-                       loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal' ? 'Continue' :
-                       loan.status === 'follow_up' ? 'Upload Documents' : 'View'}
+                      {loan.status === 'account_manager' ? 'View Loan' :
+                        loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal' ? 'Continue' :
+                          loan.status === 'follow_up' ? 'Upload Documents' : 'View'}
                     </Button>
                   </div>
                 </Card>
@@ -1256,13 +1254,12 @@ export function DynamicDashboardPage() {
                         const isCleared = loan.status === 'cleared';
                         const isActive = loan.status === 'account_manager';
                         const isApplied = ['submitted', 'under_review', 'follow_up'].includes(loan.status);
-                        
+
                         return (
-                          <Card key={loan.id} className={`p-4 hover:shadow-md transition-shadow ${
-                            isCleared ? 'border-l-4 border-l-green-500 bg-green-50' : 
-                            isActive ? 'border-l-4 border-l-blue-500' : 
-                            'border-l-4 border-l-yellow-500'
-                          }`}>
+                          <Card key={loan.id} className={`p-4 hover:shadow-md transition-shadow ${isCleared ? 'border-l-4 border-l-green-500 bg-green-50' :
+                              isActive ? 'border-l-4 border-l-blue-500' :
+                                'border-l-4 border-l-yellow-500'
+                            }`}>
                             <div className="space-y-3">
                               {/* Header */}
                               <div className="flex justify-between items-start">
@@ -1274,12 +1271,12 @@ export function DynamicDashboardPage() {
                                     App: {formatAppNumber(loan.application_number)}
                                   </p>
                                 </div>
-                                <Badge 
-                                  variant="secondary" 
+                                <Badge
+                                  variant="secondary"
                                   className={
-                                    isCleared ? 'bg-green-100 text-green-800' : 
-                                    isActive ? 'bg-blue-100 text-blue-800' : 
-                                    'bg-yellow-100 text-yellow-800'
+                                    isCleared ? 'bg-green-100 text-green-800' :
+                                      isActive ? 'bg-blue-100 text-blue-800' :
+                                        'bg-yellow-100 text-yellow-800'
                                   }
                                 >
                                   {loan.status.replace('_', ' ').toUpperCase()}
@@ -1361,7 +1358,7 @@ export function DynamicDashboardPage() {
                       <p className="text-gray-600 mb-4">You haven't applied for any loans yet.</p>
                       {canApplyForLoan && (
                         <Button
-                          onClick={() => navigate('/loan-application')}
+                          onClick={() => navigate('/application')}
                           style={{ backgroundColor: '#0052FF' }}
                           className="text-white hover:opacity-90"
                         >
@@ -1617,12 +1614,11 @@ export function DynamicDashboardPage() {
             <div className="p-6 space-y-6">
               {/* Status Badge */}
               <div className="flex justify-center">
-                <Badge 
-                  className={`text-base px-6 py-2 ${
-                    selectedLoanDetails.status === 'cleared' ? 'bg-green-500 text-white' : 
-                    selectedLoanDetails.status === 'account_manager' ? 'bg-blue-500 text-white' : 
-                    'bg-yellow-500 text-white'
-                  }`}
+                <Badge
+                  className={`text-base px-6 py-2 ${selectedLoanDetails.status === 'cleared' ? 'bg-green-500 text-white' :
+                      selectedLoanDetails.status === 'account_manager' ? 'bg-blue-500 text-white' :
+                        'bg-yellow-500 text-white'
+                    }`}
                 >
                   {selectedLoanDetails.status.replace('_', ' ').toUpperCase()}
                 </Badge>
