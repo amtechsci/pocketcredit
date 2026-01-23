@@ -163,8 +163,8 @@ router.post('/:userId/verify', authenticateAdmin, async (req, res) => {
     }
 
     // Check if verification is already in progress
-    if (statement.verification_status === 'api_verification_pending' || 
-        statement.verification_status === 'api_verified') {
+    if (statement.verification_status === 'api_verification_pending' ||
+      statement.verification_status === 'api_verified') {
       return res.status(400).json({
         success: false,
         message: 'Verification already in progress or completed'
@@ -329,7 +329,7 @@ router.post('/:userId/verify-with-file', authenticateAdmin, async (req, res) => 
 
         // Get bank_name from request body or existing statement
         let bankName = req.body.bank_name || null;
-        
+
         // Get or create bank statement record
         const statements = await executeQuery(
           `SELECT id, client_ref_num, bank_name FROM user_bank_statements WHERE user_id = ? ORDER BY created_at DESC LIMIT 1`,
@@ -373,10 +373,10 @@ router.post('/:userId/verify-with-file', authenticateAdmin, async (req, res) => 
         // Try to upload file directly to Digitap using API endpoint
         // Note: Digitap may not support direct programmatic uploads - if it fails, we'll store for manual processing
         console.log(`📤 Attempting to upload ${useExistingFile ? 'existing' : 'new'} file to Digitap API: ${fileName}`);
-        
+
         let digitapResult = null;
         let digitapUploadSuccess = false;
-        
+
         try {
           // Use the proper API upload function
           digitapResult = await uploadBankStatementPDF({
@@ -413,7 +413,7 @@ router.post('/:userId/verify-with-file', authenticateAdmin, async (req, res) => 
         // Note: verification_status ENUM values: 'api_verification_pending', 'api_verified', 'api_failed'
         let verificationStatus = 'api_failed'; // Use api_failed when upload fails (instead of 'pending_manual_review' which doesn't exist in ENUM)
         let statusMessage = 'Bank statement file stored successfully. Ready for manual verification.';
-        
+
         if (digitapUploadSuccess) {
           verificationStatus = 'api_verification_pending';
           statusMessage = 'Bank statement sent to Digitap for verification';
@@ -427,7 +427,7 @@ router.post('/:userId/verify-with-file', authenticateAdmin, async (req, res) => 
           const columns = await executeQuery(
             `SHOW COLUMNS FROM user_bank_statements LIKE 'verified_by'`
           );
-          
+
           if (columns.length > 0) {
             const columnType = columns[0].Type.toLowerCase();
             // If column is INT but adminId is UUID (string), modify column to VARCHAR(36)
@@ -840,8 +840,8 @@ router.post('/:userId/start-upload', authenticateAdmin, async (req, res) => {
     }
 
     // Check if verification is already in progress
-    if (statement.verification_status === 'api_verification_pending' || 
-        statement.verification_status === 'api_verified') {
+    if (statement.verification_status === 'api_verification_pending' ||
+      statement.verification_status === 'api_verified') {
       return res.status(400).json({
         success: false,
         message: 'Verification already in progress or completed'
@@ -861,7 +861,7 @@ router.post('/:userId/start-upload', authenticateAdmin, async (req, res) => {
 
     // Determine institution_id
     let finalInstitutionId = institution_id;
-    
+
     // If not provided, try to get from bank_name or institution list
     if (!finalInstitutionId) {
       if (statement.bank_name) {
@@ -874,7 +874,7 @@ router.post('/:userId/start-upload', authenticateAdmin, async (req, res) => {
               const instNameLower = inst.name.toLowerCase().trim();
               return instNameLower.includes(bankNameLower) || bankNameLower.includes(instNameLower);
             });
-            
+
             if (matchingInstitution) {
               finalInstitutionId = matchingInstitution.id;
               console.log(`✅ Found institution_id ${finalInstitutionId} for bank: ${statement.bank_name}`);
@@ -884,7 +884,7 @@ router.post('/:userId/start-upload', authenticateAdmin, async (req, res) => {
           console.warn('⚠️  Could not fetch institution list:', error.message);
         }
       }
-      
+
       // If still no institution_id, use default
       if (!finalInstitutionId) {
         console.warn(`⚠️  No institution_id provided. Using default: 1`);
@@ -898,7 +898,7 @@ router.post('/:userId/start-upload', authenticateAdmin, async (req, res) => {
 
     // Call Digitap Start Upload API
     console.log(`📤 Calling Digitap Start Upload API for user ${userId}...`);
-    
+
     const startUploadResult = await startUploadAPI({
       client_ref_num: clientRefNum,
       txn_completed_cburl: txnCompletedCbUrl,
@@ -914,11 +914,11 @@ router.post('/:userId/start-upload', authenticateAdmin, async (req, res) => {
       if (startUploadResult.code === 'NotSignedUp') {
         errorMessage = 'Your Digitap account has not been enabled for the Bank Data PDF Upload Service. Please contact Digitap support to enable this service for your account.';
       }
-      
+
       // Return 502 (Bad Gateway) instead of 403 to avoid logout
       // 403 from Digitap is an API service error, not an authentication error
       const statusCode = startUploadResult.status === 403 ? 502 : (startUploadResult.status || 500);
-      
+
       return res.status(statusCode).json({
         success: false,
         message: errorMessage,
@@ -1037,7 +1037,7 @@ router.post('/:userId/complete-upload', authenticateAdmin, async (req, res) => {
 
     // Call Digitap Complete Upload API
     console.log(`📤 Calling Digitap Complete Upload API for request_id: ${statement.request_id}...`);
-    
+
     const completeUploadResult = await completeUploadAPI({
       request_id: statement.request_id
     });
@@ -1081,6 +1081,122 @@ router.post('/:userId/complete-upload', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to complete upload process'
+    });
+  }
+});
+
+/**
+ * POST /api/admin/bank-statement/:userId/approve-manual
+ * Quick approval for manual bank statement uploads (no Digitap verification needed)
+ * This is for cases where user uploaded manually and admin wants to approve without API verification
+ */
+router.post('/:userId/approve-manual', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+    const adminId = req.admin?.id;
+    const { notes } = req.body;
+
+    if (!adminId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Admin authentication required'
+      });
+    }
+
+    // Get the bank statement
+    const statements = await executeQuery(
+      `SELECT id, user_id, upload_method, user_status, verification_status
+       FROM user_bank_statements 
+       WHERE user_id = ? 
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId]
+    );
+
+    if (statements.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No bank statement found for this user'
+      });
+    }
+
+    const statement = statements[0];
+
+    // Check if this is a manual upload
+    const isManualUpload = statement.upload_method === 'manual' ||
+      statement.user_status === 'uploaded' ||
+      statement.user_status === 'under_review';
+
+    if (!isManualUpload) {
+      return res.status(400).json({
+        success: false,
+        message: 'This is not a manual upload. Use the verify endpoint for Digitap verification.'
+      });
+    }
+
+    // Update to verified status
+    await executeQuery(
+      `UPDATE user_bank_statements 
+       SET user_status = 'verified',
+           verification_status = 'api_verified',
+           verification_decision = 'approved',
+           verification_notes = ?,
+           verified_by = ?,
+           verified_at = NOW(),
+           status = 'completed',
+           updated_at = NOW()
+       WHERE id = ?`,
+      [notes || 'Manual upload approved by admin', adminId, statement.id]
+    );
+
+    // Also update the user's loan application step if applicable
+    // This allows user to proceed to the next step
+    try {
+      await executeQuery(
+        `UPDATE loan_applications 
+         SET current_step = 'bank-details', updated_at = NOW() 
+         WHERE user_id = ? AND status IN ('pending', 'under_review', 'in_progress', 'submitted')
+         AND (current_step IS NULL OR current_step = 'bank-statement')`,
+        [userId]
+      );
+      console.log(`✅ Updated loan application step to 'bank-details' for user ${userId}`);
+    } catch (stepError) {
+      console.warn('Could not update loan application step:', stepError.message);
+    }
+
+    // Log activity
+    try {
+      await logActivity({
+        userId: userId,
+        action: 'bank_statement_manual_approved',
+        details: {
+          statementId: statement.id,
+          adminId: adminId,
+          notes: notes
+        },
+        adminId: adminId
+      });
+    } catch (logError) {
+      console.warn('Failed to log activity:', logError);
+    }
+
+    console.log(`✅ Manual bank statement approved for user ${userId} by admin ${adminId}`);
+
+    res.json({
+      success: true,
+      message: 'Manual bank statement upload approved successfully',
+      data: {
+        statementId: statement.id,
+        userStatus: 'verified',
+        verificationStatus: 'api_verified',
+        verificationDecision: 'approved'
+      }
+    });
+  } catch (error) {
+    console.error('Manual approval error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to approve manual upload'
     });
   }
 });

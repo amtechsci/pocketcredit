@@ -506,9 +506,9 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
     // uploadToS3 signature: (fileBuffer, fileName, mimeType, options)
     // Options: { folder, userId, documentType, isPublic }
     const s3Result = await uploadToS3(
-      req.file.buffer, 
-      req.file.originalname, 
-      req.file.mimetype, 
+      req.file.buffer,
+      req.file.originalname,
+      req.file.mimetype,
       {
         folder: 'user-bank-statements',
         userId: userId,
@@ -566,11 +566,11 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
         const application = applications[0];
         // Always update to 'bank-details' if we're at 'bank-statement' or earlier
         // This matches the Account Aggregator flow behavior
-        if (!application.current_step || 
-            application.current_step === 'bank-statement' || 
-            application.current_step === 'employment-details' ||
-            application.current_step === 'kyc-verification' ||
-            application.current_step === 'application') {
+        if (!application.current_step ||
+          application.current_step === 'bank-statement' ||
+          application.current_step === 'employment-details' ||
+          application.current_step === 'kyc-verification' ||
+          application.current_step === 'application') {
           await executeQuery(
             `UPDATE loan_applications 
              SET current_step = 'bank-details', updated_at = NOW() 
@@ -578,7 +578,7 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
             [application.id]
           );
           console.log(`✅ Updated loan application ${application.id} step from '${application.current_step}' to 'bank-details'`);
-          
+
           // Step updated successfully - continue to send response
         } else {
           console.log(`ℹ️  Loan application ${application.id} already at step '${application.current_step}', no update needed`);
@@ -653,7 +653,7 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     }
 
     const statements = await executeQuery(
-      `SELECT client_ref_num, request_id, txn_id, status, user_status, verification_status, file_name, report_data, digitap_url, expires_at, transaction_data, created_at, updated_at 
+      `SELECT client_ref_num, request_id, txn_id, status, user_status, verification_status, file_name, report_data, digitap_url, expires_at, transaction_data, upload_method, created_at, updated_at 
        FROM user_bank_statements 
        WHERE user_id = ? 
        ORDER BY created_at DESC LIMIT 1`,
@@ -695,10 +695,10 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     // Bank statement is considered "has statement" if:
     // 1. status === 'completed' (online mode - Digitap verified)
     // 2. user_status === 'uploaded' or 'under_review' or 'verified' (manual upload)
-    const hasStatement = statement.status === 'completed' || 
-                        statement.user_status === 'uploaded' || 
-                        statement.user_status === 'under_review' || 
-                        statement.user_status === 'verified';
+    const hasStatement = statement.status === 'completed' ||
+      statement.user_status === 'uploaded' ||
+      statement.user_status === 'under_review' ||
+      statement.user_status === 'verified';
     let reportJustFetched = false;
 
     // Extract txn_id from transaction_data if not already in statement.txn_id
@@ -718,12 +718,18 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
       }
     }
 
-    // If status is completed but report_data is empty, fetch it
-    // Added retry logic - if status is completed for a long time but no report, try refetching
-    // But limit retries? For now, we rely on the check below.
-    if ((hasStatement && !statement.report_data && (txnId || statement.client_ref_num)) ||
-      (statement.status === 'completed' && !statement.report_data)) {
-      console.log('📊 Status is completed but report_data is empty, fetching report...');
+    // Check if this is a manual upload - skip Digitap API calls for manual uploads
+    const isManualUpload = statement.upload_method === 'manual' ||
+      statement.user_status === 'uploaded' ||
+      statement.user_status === 'under_review' ||
+      statement.user_status === 'verified';
+
+    // If status is completed but report_data is empty, fetch it from Digitap
+    // BUT skip this for manual uploads - they don't have Digitap transactions
+    if (!isManualUpload &&
+      ((hasStatement && !statement.report_data && (txnId || statement.client_ref_num)) ||
+        (statement.status === 'completed' && !statement.report_data))) {
+      console.log('📊 Status is completed but report_data is empty, fetching report from Digitap...');
       console.log(`📊 Using ${txnId ? `txn_id=${txnId}` : `client_ref_num=${statement.client_ref_num}`} to fetch report`);
 
       try {
@@ -787,6 +793,10 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
         console.error('❌ Error fetching report:', fetchError);
         // Continue with response even if fetch fails
       }
+    } else if (isManualUpload) {
+      // Manual upload - skip Digitap API call
+      console.log('📊 Manual upload detected - skipping Digitap report fetch');
+      console.log(`   Upload method: ${statement.upload_method}, User status: ${statement.user_status}`);
     }
 
     // Parse transaction_data safely (might be string or object)
@@ -814,6 +824,8 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
         fileName: statement.file_name,
         hasReport: !!statement.report_data,
         reportJustFetched: reportJustFetched, // Flag to indicate report was just fetched
+        isManualUpload: isManualUpload, // Flag to indicate manual upload (skip Digitap)
+        uploadMethod: statement.upload_method || (isManualUpload ? 'manual' : 'online'),
         digitapUrl: statement.digitap_url,
         expiresAt: statement.expires_at,
         transactionData: transactionData,
@@ -873,10 +885,10 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
     // Check if this is a manual upload
     // Manual uploads have: upload_method = 'manual' OR user_status = 'uploaded' OR no client_ref_num
     const isManualUpload = statement.upload_method === 'manual' ||
-                          statement.user_status === 'uploaded' || 
-                          statement.user_status === 'under_review' ||
-                          statement.user_status === 'verified' ||
-                          (!statement.client_ref_num && !statement.txn_id);
+      statement.user_status === 'uploaded' ||
+      statement.user_status === 'under_review' ||
+      statement.user_status === 'verified' ||
+      (!statement.client_ref_num && !statement.txn_id);
 
     // If it's a manual upload and we have report_data, return it
     if (isManualUpload) {
@@ -886,8 +898,8 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
           success: true,
           data: {
             status: statement.status || 'completed',
-            report: typeof statement.report_data === 'string' 
-              ? JSON.parse(statement.report_data) 
+            report: typeof statement.report_data === 'string'
+              ? JSON.parse(statement.report_data)
               : statement.report_data,
             cached: true,
             isManualUpload: true
@@ -983,7 +995,7 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
             }
           });
         }
-        
+
         return res.status(500).json({
           success: false,
           message: 'Failed to retrieve report from Digitap'
@@ -1466,9 +1478,9 @@ router.get('/bank-data/success', async (req, res) => {
     const { request_id, client_ref_num, status, txnId, success } = req.query;
 
     // Check if this is a cancellation (not an actual failure)
-    const isCancellation = status === 'cancelled' || status === 'Cancelled' || 
-                          success === 'false' || req.query.error === 'true' ||
-                          req.query.cancelled === 'true';
+    const isCancellation = status === 'cancelled' || status === 'Cancelled' ||
+      success === 'false' || req.query.error === 'true' ||
+      req.query.cancelled === 'true';
 
     // If we have request_id or client_ref_num, try to update the bank statement record
     if (request_id || client_ref_num) {
@@ -1689,11 +1701,11 @@ router.post('/download-excel', authenticateAdmin, async (req, res) => {
     // Check if we got binary data (Excel file)
     if (result.data && result.data.report) {
       const excelData = result.data.report;
-      
+
       // If it's a Buffer or binary data, send it directly
       if (Buffer.isBuffer(excelData) || typeof excelData === 'string') {
         const buffer = Buffer.isBuffer(excelData) ? excelData : Buffer.from(excelData, 'base64');
-        
+
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="bank_statement_${txn_id}.xlsx"`);
         res.send(buffer);

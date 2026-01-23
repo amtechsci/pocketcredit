@@ -4,6 +4,9 @@
  * 
  * Uses server-side HTML generators to avoid Puppeteer browser navigation issues.
  * The HTML is generated directly from data, then converted to PDF.
+ * 
+ * NOTE: If loan_agreement_pdf_url already exists (from ClickWrap signing),
+ * the agreement PDF is NOT regenerated - the signed version is used.
  */
 
 const pdfService = require('../services/pdfService');
@@ -89,7 +92,9 @@ async function getLoanAgreementHTMLServerSide(loanId, baseUrl) {
 }
 
 /**
- * Generate and upload KFS and Loan Agreement PDFs for a loan
+ * Generate and upload KFS PDF for a loan (always generated)
+ * Loan Agreement is NOT generated if it already exists (from ClickWrap signing)
+ * 
  * @param {number} loanId - Loan application ID
  * @param {number} userId - User ID
  * @returns {Promise<Object>} S3 keys of uploaded PDFs
@@ -98,9 +103,9 @@ async function generateAndUploadLoanPDFs(loanId, userId) {
   try {
     console.log(`📄 Generating PDFs for loan #${loanId}`);
 
-    // Get loan data for filenames
+    // Get loan data including existing agreement PDF URL (from ClickWrap signing)
     const loans = await executeQuery(
-      'SELECT application_number FROM loan_applications WHERE id = ?',
+      'SELECT application_number, loan_agreement_pdf_url, agreement_signed FROM loan_applications WHERE id = ?',
       [loanId]
     );
 
@@ -108,27 +113,22 @@ async function generateAndUploadLoanPDFs(loanId, userId) {
       throw new Error(`Loan ${loanId} not found`);
     }
 
-    const applicationNumber = loans[0].application_number;
+    const loan = loans[0];
+    const applicationNumber = loan.application_number;
+    const existingAgreementUrl = loan.loan_agreement_pdf_url;
+    const agreementSigned = loan.agreement_signed;
     const apiBaseUrl = process.env.BACKEND_URL || process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 3001}`;
 
-    // Generate HTML content server-side (no Puppeteer browser navigation!)
+    // ==============================
+    // ALWAYS Generate KFS PDF
+    // ==============================
     console.log(`📄 Generating KFS HTML for loan #${loanId}...`);
     const kfsHTML = await getKFSHTMLServerSide(loanId, apiBaseUrl);
 
-    console.log(`📄 Generating Loan Agreement HTML for loan #${loanId}...`);
-    const loanAgreementHTML = await getLoanAgreementHTMLServerSide(loanId, apiBaseUrl);
-
-    // Generate PDFs using pdfService (uses Puppeteer internally just for HTML-to-PDF conversion)
     const kfsFilename = `KFS_${applicationNumber}.pdf`;
-    const agreementFilename = `Loan_Agreement_${applicationNumber}.pdf`;
-
     console.log(`📄 Converting KFS HTML to PDF: ${kfsFilename}`);
     const kfsPDF = await pdfService.generateKFSPDF(kfsHTML, kfsFilename);
 
-    console.log(`📄 Converting Loan Agreement HTML to PDF: ${agreementFilename}`);
-    const agreementPDF = await pdfService.generateKFSPDF(loanAgreementHTML, agreementFilename);
-
-    // Upload to S3
     console.log(`📤 Uploading KFS PDF to S3...`);
     const kfsUpload = await uploadGeneratedPDF(
       kfsPDF.buffer,
@@ -136,18 +136,40 @@ async function generateAndUploadLoanPDFs(loanId, userId) {
       userId,
       'kfs'
     );
+    console.log(`✅ KFS PDF uploaded: ${kfsUpload.key}`);
 
-    console.log(`📤 Uploading Loan Agreement PDF to S3...`);
-    const agreementUpload = await uploadGeneratedPDF(
-      agreementPDF.buffer,
-      agreementFilename,
-      userId,
-      'loan-agreement'
-    );
+    // ==============================
+    // Loan Agreement: Use existing signed version OR generate new
+    // ==============================
+    let agreementS3Key = existingAgreementUrl;
+
+    if (existingAgreementUrl && agreementSigned) {
+      // Agreement already exists from ClickWrap signing - DO NOT regenerate
+      console.log(`✅ Loan Agreement already exists (signed via ClickWrap): ${existingAgreementUrl}`);
+      console.log(`📝 Skipping agreement PDF generation - using signed version`);
+    } else {
+      // No signed agreement exists - generate new one
+      console.log(`📄 No signed agreement found. Generating Loan Agreement HTML for loan #${loanId}...`);
+      const loanAgreementHTML = await getLoanAgreementHTMLServerSide(loanId, apiBaseUrl);
+
+      const agreementFilename = `Loan_Agreement_${applicationNumber}.pdf`;
+      console.log(`📄 Converting Loan Agreement HTML to PDF: ${agreementFilename}`);
+      const agreementPDF = await pdfService.generateKFSPDF(loanAgreementHTML, agreementFilename);
+
+      console.log(`📤 Uploading Loan Agreement PDF to S3...`);
+      const agreementUpload = await uploadGeneratedPDF(
+        agreementPDF.buffer,
+        agreementFilename,
+        userId,
+        'loan-agreement'
+      );
+      agreementS3Key = agreementUpload.key;
+      console.log(`✅ Loan Agreement PDF uploaded: ${agreementS3Key}`);
+    }
 
     console.log(`✅ PDFs generated and uploaded successfully`);
     console.log(`   KFS S3 Key: ${kfsUpload.key}`);
-    console.log(`   Agreement S3 Key: ${agreementUpload.key}`);
+    console.log(`   Agreement S3 Key: ${agreementS3Key}`);
 
     return {
       success: true,
@@ -155,7 +177,8 @@ async function generateAndUploadLoanPDFs(loanId, userId) {
         s3Key: kfsUpload.key
       },
       agreement: {
-        s3Key: agreementUpload.key
+        s3Key: agreementS3Key,
+        wasSignedViaClickWrap: !!(existingAgreementUrl && agreementSigned)
       }
     };
 

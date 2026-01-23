@@ -35,7 +35,7 @@ router.post('/initiate', requireAuth, async (req, res) => {
     console.log('✅ ClickWrap initiate route reached, userId:', req.userId);
     await initializeDatabase();
     const userId = req.userId;
-    
+
     if (!userId) {
       console.error('❌ userId is missing after requireAuth middleware');
       return res.status(401).json({
@@ -83,7 +83,7 @@ router.post('/initiate', requireAuth, async (req, res) => {
     if (application.clickwrap_ent_transaction_id || application.clickwrap_doc_transaction_id) {
       console.log('ℹ️ ClickWrap transaction already exists for application:', applicationId);
       console.log('   Returning existing transaction IDs');
-      
+
       // Get preview URL if available
       const [appWithPreview] = await executeQuery(
         'SELECT clickwrap_preview_url FROM loan_applications WHERE id = ?',
@@ -322,11 +322,11 @@ router.post('/get-signed-doc', requireAuth, async (req, res) => {
 router.get('/callback', async (req, res) => {
   try {
     await initializeDatabase();
-    
+
     // Extract and normalize query parameters
     // Digitap may append query params to our URL, causing parsing issues
     let { success, transactionId, error_code, errorMsg, applicationId } = req.query;
-    
+
     // Normalize transactionId - handle array case (Digitap sometimes sends duplicates)
     if (Array.isArray(transactionId)) {
       transactionId = transactionId[0]; // Take first value
@@ -334,7 +334,7 @@ router.get('/callback', async (req, res) => {
     if (typeof transactionId !== 'string' || !transactionId) {
       transactionId = String(transactionId || '').split('?')[0].split('&')[0]; // Extract clean value
     }
-    
+
     // Normalize applicationId - remove any query params that got attached
     if (typeof applicationId === 'string' && applicationId.includes('?')) {
       applicationId = applicationId.split('?')[0]; // Take only the ID part before any ?
@@ -342,27 +342,27 @@ router.get('/callback', async (req, res) => {
     if (typeof applicationId === 'string' && applicationId.includes('&')) {
       applicationId = applicationId.split('&')[0]; // Take only the ID part before any &
     }
-    
+
     // Normalize success - handle array case
     if (Array.isArray(success)) {
       success = success[0];
     }
     success = String(success || '').toLowerCase();
-    
+
     // Determine frontend URL
     const isDevelopment = process.env.NODE_ENV === 'development';
     const frontendUrl = process.env.FRONTEND_URL || (isDevelopment ? 'http://localhost:3000' : 'https://pocketcredit.in');
-    
-    console.log('✅ ClickWrap callback received (normalized):', { 
-      success, 
-      transactionId, 
+
+    console.log('✅ ClickWrap callback received (normalized):', {
+      success,
+      transactionId,
       applicationId,
-      error_code, 
-      errorMsg 
+      error_code,
+      errorMsg
     });
-    
+
     console.log('ℹ️ User completed signing on Digitap. Using stored preview URL to download signed document.');
-    
+
     // Handle error case - redirect to frontend with error
     // Digitap sends error_code and errorMsg in error_url callback
     if (success === 'false' || error_code || (success !== 'true' && errorMsg)) {
@@ -378,7 +378,7 @@ router.get('/callback', async (req, res) => {
       const errorRedirect = `${frontendUrl}/post-disbursal?applicationId=${applicationId || ''}&clickwrap=error&error_code=missing_params&errorMsg=${encodeURIComponent('Missing required parameters')}`;
       return res.redirect(errorRedirect);
     }
-    
+
     // Ensure transactionId is a clean string (remove any trailing query params)
     transactionId = String(transactionId).trim().split('?')[0].split('&')[0];
     applicationId = String(applicationId).trim().split('?')[0].split('&')[0];
@@ -412,19 +412,19 @@ router.get('/callback', async (req, res) => {
       transactionId = transactionId[0];
     }
     transactionId = String(transactionId || '').trim().split('?')[0].split('&')[0];
-    
+
     // We already have the preview URL stored from initiation
     // After signing, Digitap updates this URL to point to the signed document
     // We don't need to call get-doc-url API - just use the stored preview URL
     const signedPdfUrl = application.clickwrap_preview_url;
-    
+
     if (!signedPdfUrl) {
       console.error('❌ No preview URL stored in database');
       // If no preview URL, redirect to frontend and let webhook handle it
       console.log('ℹ️ No preview URL available - redirecting to frontend. Webhook will update status if signing was successful');
       return res.redirect(`${frontendUrl}/post-disbursal?applicationId=${applicationId}&clickwrap=pending&transactionId=${transactionId}&message=${encodeURIComponent('Signing completed. Please wait while we process...')}`);
     }
-    
+
     console.log('✅ Using stored preview URL for signed document');
     console.log('📥 Downloading signed PDF from stored preview URL');
     console.log('📋 URL preview:', signedPdfUrl.substring(0, 100) + '...');
@@ -436,7 +436,7 @@ router.get('/callback', async (req, res) => {
       // Add a small delay to allow Digitap to update the preview URL after signing
       console.log('⏳ Waiting 2 seconds for Digitap to update preview URL after signing...');
       await new Promise(resolve => setTimeout(resolve, 2000));
-      
+
       const pdfResponse = await axios.get(signedPdfUrl, {
         responseType: 'arraybuffer',
         timeout: 30000,
@@ -446,7 +446,7 @@ router.get('/callback', async (req, res) => {
       });
       pdfBuffer = Buffer.from(pdfResponse.data);
       console.log('✅ Downloaded signed PDF, size:', pdfBuffer.length, 'bytes');
-      
+
       // Validate it's a PDF
       if (pdfBuffer.length < 100 || !pdfBuffer.toString('ascii', 0, 4).startsWith('%PDF')) {
         throw new Error('Downloaded file does not appear to be a valid PDF');
@@ -485,22 +485,24 @@ router.get('/callback', async (req, res) => {
     // Regular loans: disbursal -> ready_for_disbursement
     const isRepeatLoan = application.status === 'repeat_disbursal';
     const newStatus = isRepeatLoan ? 'ready_to_repeat_disbursal' : 'ready_for_disbursement';
-    
+
     // Update database: mark as signed and store signed PDF S3 key
-    // loan_agreement_pdf_url will be set when admin generates PDF during transaction addition
+    // Save to BOTH clickwrap_signed_pdf_s3_key (tracks signed doc) AND loan_agreement_pdf_url (used in emails)
+    console.log(`💾 Saving signed PDF S3 key to database: ${s3Key}`);
     await executeQuery(
       `UPDATE loan_applications 
        SET agreement_signed = 1,
            status = ?,
            clickwrap_signed_at = NOW(),
            clickwrap_signed_pdf_s3_key = ?,
+           loan_agreement_pdf_url = ?,
            updated_at = NOW()
        WHERE id = ?`,
-      [newStatus, s3Key, applicationId]
+      [newStatus, s3Key, s3Key, applicationId]
     );
-    
-    console.log(`✅ Agreement marked as signed - status updated from ${application.status} to ${newStatus}`);
 
+    console.log(`✅ Agreement marked as signed - status updated from ${application.status} to ${newStatus}`);
+    console.log(`✅ Signed PDF path saved to loan_agreement_pdf_url: ${s3Key}`);
     console.log('✅ Agreement marked as signed in database for application:', applicationId);
 
     // Redirect to frontend with success

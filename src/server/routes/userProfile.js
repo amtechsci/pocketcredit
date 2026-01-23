@@ -168,23 +168,24 @@ async function sendKFSAndAgreementEmails(loanId) {
       kfsPDF = await pdfService.generateKFSPDF(kfsHTML, kfsFilename);
     }
 
-    // Get Loan Agreement PDF from S3 (should be available since it was just generated)
+    // Get Loan Agreement PDF from S3 (prioritize signed version from ClickWrap)
     if (loan.loan_agreement_pdf_url) {
       try {
-        console.log(`📥 Downloading Loan Agreement PDF from S3: ${loan.loan_agreement_pdf_url}`);
+        console.log(`📥 Downloading Loan Agreement PDF from S3 (signed via ClickWrap): ${loan.loan_agreement_pdf_url}`);
         const agreementBuffer = await downloadFromS3(loan.loan_agreement_pdf_url);
         agreementPDF = { buffer: agreementBuffer };
-        console.log(`✅ Loan Agreement PDF downloaded from S3, size: ${agreementBuffer.length} bytes`);
+        console.log(`✅ Signed Loan Agreement PDF downloaded from S3, size: ${agreementBuffer.length} bytes`);
       } catch (s3Error) {
         console.error(`❌ Failed to download Loan Agreement PDF from S3:`, s3Error.message);
         // Fallback: generate new one if download fails
-        console.log(`📄 Getting Loan Agreement HTML for loan #${loanId}...`);
+        console.log(`📄 Fallback: Generating Loan Agreement HTML for loan #${loanId}...`);
         const loanAgreementHTML = await getLoanAgreementHTML(loanId, apiBaseUrl);
         console.log(`📄 Generating Loan Agreement PDF: ${agreementFilename}`);
         agreementPDF = await pdfService.generateKFSPDF(loanAgreementHTML, agreementFilename);
       }
     } else {
-      // If URL not available, generate new one
+      // No signed agreement exists - generate new one
+      console.log(`⚠️ No loan_agreement_pdf_url found - generating unsigned agreement`);
       console.log(`📄 Getting Loan Agreement HTML for loan #${loanId}...`);
       const loanAgreementHTML = await getLoanAgreementHTML(loanId, apiBaseUrl);
       console.log(`📄 Generating Loan Agreement PDF: ${agreementFilename}`);
