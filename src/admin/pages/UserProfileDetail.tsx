@@ -10536,7 +10536,7 @@ export function UserProfileDetail() {
                   )}
                 </h1>
                 <div className="flex items-center gap-2">
-                  {getUserData('profileStatus') && (
+                  {getUserData('profileStatus') && !(getUserData('status') === 'on_hold' || getUserData('status') === 'hold') && (
                     <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getUserData('profileStatus') === 'submitted' ? 'bg-blue-100 text-blue-800' :
                       getUserData('profileStatus') === 'under_review' ? 'bg-yellow-100 text-yellow-800' :
                         getUserData('profileStatus') === 'follow_up' ? 'bg-orange-100 text-orange-800' :

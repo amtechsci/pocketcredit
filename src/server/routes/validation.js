@@ -308,6 +308,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
           newStatus = 'rejected';
           break;
         case 'cancel':
+        case 're_process':
           newStatus = 'cancelled';
           break;
       }
