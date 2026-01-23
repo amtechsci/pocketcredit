@@ -93,13 +93,13 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       if (kycVerifications && kycVerifications.length > 0) {
         const verificationData = kycVerifications[0].verification_data;
         let kycData = typeof verificationData === 'string' ? JSON.parse(verificationData) : verificationData;
-        
+
         // Try to get masked Aadhar from various possible locations in the JSON structure
-        maskedAadharNumber = kycData?.kycData?.maskedAdharNumber || 
-                             kycData?.maskedAdharNumber || 
-                             kycData?.masked_adhar_number ||
-                             kycData?.uid ||
-                             'N/A';
+        maskedAadharNumber = kycData?.kycData?.maskedAdharNumber ||
+          kycData?.maskedAdharNumber ||
+          kycData?.masked_adhar_number ||
+          kycData?.uid ||
+          'N/A';
       }
     } catch (kycError) {
       console.error('Error fetching KYC verification for Aadhar:', kycError);
@@ -131,14 +131,14 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     let bankDetails = null;
     try {
       if (loan.user_bank_id) {
-    const bankDetailsQuery = await executeQuery(`
+        const bankDetailsQuery = await executeQuery(`
       SELECT bd.* FROM bank_details bd
           WHERE bd.id = ?
       LIMIT 1
         `, [loan.user_bank_id]);
         bankDetails = bankDetailsQuery && bankDetailsQuery.length > 0 ? bankDetailsQuery[0] : null;
       }
-      
+
       // If no bank details from user_bank_id, try to get primary bank details
       if (!bankDetails) {
         const primaryBankQuery = await executeQuery(`
@@ -238,7 +238,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             ORDER BY ft.fee_name ASC`,
             [loan.loan_plan_id]
           );
-          
+
           if (planFees && planFees.length > 0) {
             fees = planFees.map(pf => ({
               fee_name: pf.fee_name || 'Fee',
@@ -256,7 +256,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       if (feesNeedFixing) {
         if (userFeesBreakdown && userFeesBreakdown.length > 0) {
           fees = fees.map(fee => {
-            const matchingFee = userFeesBreakdown.find(bf => 
+            const matchingFee = userFeesBreakdown.find(bf =>
               (bf.fee_name === fee.fee_name || bf.name === fee.fee_name)
             );
             let feePercent = fee.fee_percent;
@@ -282,7 +282,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               ORDER BY ft.fee_name ASC`,
               [loan.loan_plan_id]
             );
-            
+
             if (planFees && planFees.length > 0) {
               fees = fees.map(fee => {
                 const matchingFee = planFees.find(pf => pf.fee_name === fee.fee_name);
@@ -297,12 +297,12 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           }
         }
       }
-      
+
       // Validate and correct application_method based on fee name
       fees = fees.map(fee => {
         const feeNameLower = fee.fee_name?.toLowerCase() || '';
         let correctMethod = fee.application_method;
-        
+
         if (feeNameLower.includes('post service')) {
           if (fee.application_method !== 'add_to_total') {
             correctMethod = 'add_to_total';
@@ -312,7 +312,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             correctMethod = 'deduct_from_disbursal';
           }
         }
-        
+
         return {
           ...fee,
           application_method: correctMethod
@@ -354,7 +354,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
 
     // Check if we should use actual exhausted days (for repayment schedule) or planned days (for KFS/Agreement)
     const useActualDays = req.query.useActualDays === 'true' || req.query.useActualDays === true;
-    
+
     // Calculate actual exhausted days from processed_at (for processed loans) or disbursed_at to today (only if requested)
     // Per rulebook: For processed loans, use processed_at as base date
     // Use string-based date calculation to avoid timezone conversion
@@ -367,8 +367,8 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         actualExhaustedDays = calculateDaysBetween(processedDateStr, currentDateStr);
         // Ensure at least 1 day
         if (actualExhaustedDays < 1) {
-        actualExhaustedDays = 1;
-      }
+          actualExhaustedDays = 1;
+        }
       }
     } else if (useActualDays && loan.disbursed_at && ['account_manager', 'cleared', 'active', 'disbursal'].includes(loan.status)) {
       // Fallback to disbursed_at if processed_at not available (shouldn't happen for processed loans)
@@ -432,14 +432,14 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     if (loan.processed_at && useActualDays) {
       // Use processed data for processed loans
       const processedPrincipal = parseFloat(loan.processed_amount || loanData.loan_amount || 0);
-      const processedInterest = loan.processed_interest !== null && loan.processed_interest !== undefined 
-        ? parseFloat(loan.processed_interest) 
+      const processedInterest = loan.processed_interest !== null && loan.processed_interest !== undefined
+        ? parseFloat(loan.processed_interest)
         : null; // Don't default to 0, use null to indicate it should be calculated
       const processedPenalty = parseFloat(loan.processed_penalty || 0);
-      
+
       // Calculate loan values (this will calculate interest correctly with fixed date handling)
       loanValues = calculateCompleteLoanValues(loanData, planData, userData, calculationOptions);
-      
+
       // IMPORTANT: For "Pay on Due Date" total amount, we MUST keep planned term days (41 days)
       // Don't override interest.days with exhausted days - that would cause wrong total amount
       // Exhausted days are only for display, not for total amount calculation
@@ -448,10 +448,10 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         const processedDateStr = parseDateToString(loan.processed_at);
         const todayStr = getTodayString();
         const daysFromProcessed = processedDateStr ? calculateDaysBetween(processedDateStr, todayStr) : 1;
-        
+
         // Store exhausted days for display, but DON'T override interest.days (keep planned term days)
         loanValues.interest.exhaustedDays = daysFromProcessed;
-        
+
         // Only use processed_interest if it exists and is valid, but keep planned term days
         if (processedInterest !== null && processedInterest > 0) {
           // For display: show processed_interest, but total amount should still use planned term interest
@@ -461,7 +461,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         // CRITICAL: Don't override loanValues.interest.days - keep planned term days for total amount calculation
       }
     } else {
-    // Calculate loan values using actual exhausted days (not plan days) for interest calculation
+      // Calculate loan values using actual exhausted days (not plan days) for interest calculation
       loanValues = calculateCompleteLoanValues(loanData, planData, userData, calculationOptions);
     }
 
@@ -478,16 +478,16 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           const feeName = (fee.fee_name || fee.name || '').toLowerCase();
           // Use fee_amount (new) or amount (old) - database stores fee_amount
           const feeAmount = fee.fee_amount || fee.amount || 0;
-          
+
           // Determine application_method from stored value or infer from fee name
           let applicationMethod = fee.application_method;
           if (!applicationMethod) {
             // Infer from fee name: "post service fee" is add_to_total, others are deduct_from_disbursal
-            applicationMethod = feeName.includes('post service') || feeName.includes('post_service') 
-              ? 'add_to_total' 
+            applicationMethod = feeName.includes('post service') || feeName.includes('post_service')
+              ? 'add_to_total'
               : 'deduct_from_disbursal';
           }
-          
+
           return {
             fee_name: fee.fee_name || fee.name || 'Fee',
             fee_amount: feeAmount,  // Use fee_amount for frontend compatibility
@@ -541,7 +541,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         baseDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
       }
     }
-    
+
     const kfsData = {
       company: {
         name: 'Pocket Credit',
@@ -588,10 +588,10 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           return 165;
         })(),
         loan_term_months: Math.ceil((plannedTermDays || loan.loan_term_days || loanPlan.tenure_days || loanPlan.repayment_days || loanPlan.total_duration_days || 0) / 30),
-        interest_rate: planData.interest_percent_per_day 
-          ? parseFloat((planData.interest_percent_per_day * 365 * 100).toFixed(2)) 
-          : (loanPlan.interest_percent_per_day 
-            ? parseFloat((loanPlan.interest_percent_per_day * 365 * 100).toFixed(2)) 
+        interest_rate: planData.interest_percent_per_day
+          ? parseFloat((planData.interest_percent_per_day * 365 * 100).toFixed(2))
+          : (loanPlan.interest_percent_per_day
+            ? parseFloat((loanPlan.interest_percent_per_day * 365 * 100).toFixed(2))
             : 0),
         repayment_frequency: loanPlan.repayment_frequency || 'Monthly',
         emi_count: planData.emi_count || null
@@ -624,18 +624,18 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         // For multi-EMI loans, calculate total interest from schedule sum (already generated below)
         // This will be updated after schedule is generated
         return {
-          rate: planData.interest_percent_per_day 
-            ? parseFloat((planData.interest_percent_per_day * 365 * 100).toFixed(2)) 
-            : (loanPlan.interest_percent_per_day 
-              ? parseFloat((loanPlan.interest_percent_per_day * 365 * 100).toFixed(2)) 
+          rate: planData.interest_percent_per_day
+            ? parseFloat((planData.interest_percent_per_day * 365 * 100).toFixed(2))
+            : (loanPlan.interest_percent_per_day
+              ? parseFloat((loanPlan.interest_percent_per_day * 365 * 100).toFixed(2))
               : 0),
-        rate_per_day: planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001,
-        type: 'Reducing Balance',
-        calculation_method: 'Daily',
-        annual_rate: ((planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001) * 365 * 100).toFixed(2),
-        days: loanValues.interest?.days || 0,
+          rate_per_day: planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001,
+          type: 'Reducing Balance',
+          calculation_method: 'Daily',
+          annual_rate: ((planData.interest_percent_per_day || loanPlan.interest_percent_per_day || 0.001) * 365 * 100).toFixed(2),
+          days: loanValues.interest?.days || 0,
           amount: loanValues.interest?.amount || 0, // Will be updated below for multi-EMI
-        calculation_days: loanValues.interest?.days || 0  // Actual days used for interest calculation
+          calculation_days: loanValues.interest?.days || 0  // Actual days used for interest calculation
         };
       })(),
       fees: {
@@ -675,15 +675,15 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         const interest = loanValues.interest?.amount || loanValues.totalInterest || 0;
         const days = loanValues.interest?.days || 0;
         const emiCount = planData.emi_count || 1;
-        
+
         // Totals are already calculated with EMI multiplication in loanCalculations.js
         const disbursalGST = loanValues.totals?.disbursalFeeGST || 0;
         const repayableGST = loanValues.totals?.repayableFeeGST || 0;
         const gst = disbursalGST + repayableGST;
-        
+
         // Repayable fee is already multiplied by EMI count in loanCalculations.js
         const repayableFee = loanValues.totals?.repayableFee || 0;
-        
+
         // Calculate first due date for Multi-EMI loan term calculation
         let firstDueDate;
         if (plannedTermResult.repaymentDate) {
@@ -698,7 +698,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           firstDueDate.setHours(0, 0, 0, 0);
         }
         firstDueDate.setHours(0, 0, 0, 0);
-        
+
         // For salary-based Multi-EMI loans, ensure firstDueDate matches the salary date
         if (emiCount > 1 && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
           const salaryDate = parseInt(userData.salary_date);
@@ -706,17 +706,17 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             firstDueDate = getSalaryDateForMonth(firstDueDate, salaryDate, 0);
           }
         }
-        
+
         // Calculate actual loan term days for APR calculation
         // For Multi-EMI loans, calculate from disbursement date to last EMI date
         // For single payment loans, use actual interest calculation days
         let loanTermDaysForAPR = days;  // Default: use interest calculation days
-        
+
         if (emiCount > 1) {
           // Generate last EMI date to calculate actual loan term
           const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
           baseDate.setHours(0, 0, 0, 0);
-          
+
           let lastEmiDate;
           if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
             const salaryDate = parseInt(userData.salary_date);
@@ -746,13 +746,13 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             }
             lastEmiDate.setHours(0, 0, 0, 0);
           }
-          
+
           // Calculate actual loan term days from disbursement to last EMI
           if (lastEmiDate) {
             loanTermDaysForAPR = Math.ceil((lastEmiDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
           }
         }
-        
+
         // For Multi-EMI loans, calculate total interest by summing interest for each EMI period
         // Each EMI period has interest calculated on the outstanding principal for that period
         // Define baseDate for debug logging (used for both single and multi-EMI)
@@ -796,35 +796,35 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
         }
         if (baseDate && !isNaN(baseDate.getTime())) {
-        baseDate.setHours(0, 0, 0, 0);
+          baseDate.setHours(0, 0, 0, 0);
         } else {
           baseDate = new Date();
           baseDate.setHours(0, 0, 0, 0);
         }
-        
+
         // baseDateStr is already defined at higher scope (before kfsData object)
         // No need to redefine it here
-        
+
         // Initialize emiPeriodDetails for debug logging
         let emiPeriodDetails = [];
-        
+
         let interestForAPR = interest;
         if (emiCount > 1) {
           const interestRatePerDay = loanValues.interest?.rate_per_day || planData.interest_percent_per_day || (interest / (principal * days));
-          
+
           // Generate all EMI dates for APR calculation
           // PRIORITY 1: Use processed_due_date if available (source of truth for processed loans)
           // PRIORITY 2: Recalculate from today (for non-processed loans)
           // NOTE: We do NOT use emi_schedule as it can have stale/incorrect dates from when loan was applied
           let allEmiDates = [];
-          
+
           // PRIORITY 1: Check processed_due_date first (for processed loans)
           if (loan.processed_due_date) {
             try {
-              const parsedDueDate = typeof loan.processed_due_date === 'string' 
-                ? JSON.parse(loan.processed_due_date) 
+              const parsedDueDate = typeof loan.processed_due_date === 'string'
+                ? JSON.parse(loan.processed_due_date)
                 : loan.processed_due_date;
-              
+
               if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
                 allEmiDates = parsedDueDate.map(date => {
                   if (typeof date === 'string') {
@@ -839,7 +839,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               console.error('❌ [User APR] Error parsing processed_due_date:', e);
             }
           }
-          
+
           // PRIORITY 2: Recalculate from today (for non-processed loans)
           if (allEmiDates.length === 0 && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
             const salaryDate = parseInt(userData.salary_date);
@@ -886,7 +886,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               }
               baseDateForEmi.setHours(0, 0, 0, 0);
               let nextSalaryDate = getNextSalaryDate(baseDateForEmi, salaryDate);
-              
+
               // Check if duration is less than minimum days
               const minDuration = planData.repayment_days || 15;
               const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDateForEmi.getTime()) / (1000 * 60 * 60 * 24)) + 1;
@@ -895,7 +895,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
                 nextSalaryDate = getSalaryDateForMonth(baseDateForEmi, salaryDate, 1);
                 console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
               }
-              
+
               // Generate all EMI dates from the first salary date
               for (let i = 0; i < emiCount; i++) {
                 const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
@@ -915,7 +915,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               firstDueDate.setDate(firstDueDate.getDate() + plannedTermDays);
             }
             firstDueDate.setHours(0, 0, 0, 0);
-            
+
             const daysPerEmi = {
               daily: 1,
               weekly: 7,
@@ -934,7 +934,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               allEmiDates.push(emiDate);
             }
           }
-          
+
           // Calculate total interest by summing interest for each EMI period
           if (allEmiDates.length === emiCount) {
             // Calculate principal distribution (handle cases where it doesn't divide evenly)
@@ -942,10 +942,10 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             // For 4 EMIs: 25%, 25%, 25%, 25% (or ₹2,500 each)
             const principalPerEmi = Math.floor(principal / emiCount * 100) / 100; // Round to 2 decimals
             const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
-            
+
             let outstandingPrincipal = principal;
             interestForAPR = 0;
-            
+
             for (let i = 0; i < emiCount; i++) {
               // allEmiDates may contain Date objects or date strings (YYYY-MM-DD)
               // Convert to string for accurate day calculation (no timezone issues)
@@ -962,15 +962,15 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
                 emiDate.setHours(0, 0, 0, 0);
                 emiDateStr = formatDateToString(emiDate) || parseDateToString(emiDate);
               }
-              
-          // Calculate days for this EMI period using string-based calculation
-          // First period (disbursement to first EMI): inclusive
+
+              // Calculate days for this EMI period using string-based calculation
+              // First period (disbursement to first EMI): inclusive
               // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
-          let previousDateStr;
+              let previousDateStr;
               if (i === 0) {
-            // Use baseDateStr (disbursement/processed date as string) directly
-            // This avoids any timezone conversion issues
-            previousDateStr = baseDateStr || getTodayString();
+                // Use baseDateStr (disbursement/processed date as string) directly
+                // This avoids any timezone conversion issues
+                previousDateStr = baseDateStr || getTodayString();
               } else {
                 // Start from day AFTER previous EMI date
                 let prevEmiDateStr;
@@ -985,7 +985,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
                   const prevEmiDate = new Date(allEmiDates[i - 1]);
                   prevEmiDateStr = formatDateToString(prevEmiDate) || parseDateToString(prevEmiDate);
                 }
-                
+
                 if (prevEmiDateStr) {
                   // Parse date string and add 1 day
                   const [year, month, day] = prevEmiDateStr.split('-').map(Number);
@@ -995,19 +995,19 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
                   previousDateStr = getTodayString();
                 }
               }
-              
+
               // Use calculateDaysBetween for accurate calendar day calculation (inclusive)
               const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStr);
-              
+
               // Calculate principal for this EMI (add remainder to last EMI)
-              const principalForThisEmi = i === emiCount - 1 
+              const principalForThisEmi = i === emiCount - 1
                 ? Math.round((principalPerEmi + remainder) * 100) / 100
                 : principalPerEmi;
-              
+
               // Calculate interest for this period on outstanding principal
               const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
               interestForAPR += interestForPeriod;
-              
+
               // Store period details for debugging
               emiPeriodDetails.push({
                 period: i + 1,
@@ -1019,27 +1019,27 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
                 interestForPeriod: interestForPeriod.toFixed(2),
                 interestRatePerDay
               });
-              
+
               // Reduce outstanding principal for next period
               outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
             }
           }
         }
-        
+
         // Calculate APR
         const totalCharges = processingFee + gst + repayableFee + interestForAPR;
         const apr = loanTermDaysForAPR > 0 ? ((totalCharges / principal) / loanTermDaysForAPR) * 36500 : 0;
-        
+
         // Use baseDateStr directly to avoid timezone conversion
         const disbursementDate = baseDateStr || getTodayString();
-        
+
         // For single payment loans, ensure total_amount includes fees correctly (not multiplied by EMI count)
         // Check if this is actually a single payment loan by checking plan type
         const planType = planData.plan_type || planSnapshot?.plan_type || (emiCount > 1 ? 'multi_emi' : 'single');
         const isActuallySinglePayment = planType === 'single' || (!emiCount || emiCount <= 1);
-        
+
         let totalAmount = loanValues.total?.repayable || loanValues.totalRepayableAmount || 0;
-        
+
         // If it's a single payment loan but emi_count > 1, fees were incorrectly multiplied
         // Recalculate: principal + interest + base post service fee (NOT multiplied) + GST
         if (isActuallySinglePayment && emiCount > 1) {
@@ -1053,7 +1053,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           totalAmount = Math.round((principalForCalc + interestForCalc + baseRepayableFee + baseRepayableFeeGST) * 100) / 100;
           console.log(`✅ Recalculated total_amount for single payment: ₹${totalAmount.toFixed(2)} (Principal: ₹${principalForCalc}, Interest: ₹${interestForCalc}, Fee: ₹${baseRepayableFee}, GST: ₹${baseRepayableFeeGST}, Previous: ₹${loanValues.total?.repayable || 0})`);
         }
-        
+
         return {
           principal,
           interest: emiCount > 1 ? interestForAPR : interest,
@@ -1068,7 +1068,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       repayment: (() => {
         const emiCount = planData.emi_count || null;
         const isMultiEmi = emiCount && emiCount > 1;
-        
+
         // Calculate first due date
         let firstDueDate;
         if (plannedTermResult.repaymentDate) {
@@ -1088,14 +1088,14 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         // PRIORITY 2: Recalculate from today (for non-processed loans)
         // NOTE: We do NOT use emi_schedule as it can have stale/incorrect dates from when loan was applied
         let allEmiDates = [];
-        
+
         // PRIORITY 1: Check if loan has processed_due_date (for processed loans)
         if (loan.processed_due_date) {
           try {
-            const parsedDueDate = typeof loan.processed_due_date === 'string' 
-              ? JSON.parse(loan.processed_due_date) 
+            const parsedDueDate = typeof loan.processed_due_date === 'string'
+              ? JSON.parse(loan.processed_due_date)
               : loan.processed_due_date;
-            
+
             if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
               allEmiDates = parsedDueDate.map(date => {
                 if (typeof date === 'string') {
@@ -1110,7 +1110,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             console.error('❌ [User Repayment] Error parsing processed_due_date:', e, loan.processed_due_date);
           }
         }
-        
+
         // PRIORITY 2: Recalculate from today (for non-processed loans)
         if (allEmiDates.length === 0 && isMultiEmi && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
           const salaryDate = parseInt(userData.salary_date);
@@ -1147,7 +1147,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             }
             baseDate.setHours(0, 0, 0, 0);
             let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
-            
+
             // Check if duration is less than minimum days
             const minDuration = planData.repayment_days || 15;
             const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
@@ -1156,13 +1156,13 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
               console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
             }
-            
+
             // Generate all EMI dates from the first salary date
             for (let i = 0; i < emiCount; i++) {
               const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
               allEmiDates.push(formatDateLocal(emiDate));
             }
-            
+
             // Debug: Log all generated EMI dates for repayment schedule
           }
         } else if (allEmiDates.length === 0 && isMultiEmi) {
@@ -1175,7 +1175,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             monthly: 30
           };
           const daysBetween = daysPerEmi[planData.emi_frequency] || 30;
-          
+
           for (let i = 0; i < emiCount; i++) {
             const emiDate = new Date(baseDate);
             if (planData.emi_frequency === 'monthly') {
@@ -1196,7 +1196,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         const principal = loanValues.principal || loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0;
         let totalRepayable = loanValues.total?.repayable || loanValues.totalRepayableAmount || 0;
         const interest = loanValues.interest?.amount || loanValues.totalInterest || 0;
-        
+
         if (isMultiEmi && allEmiDates.length === emiCount) {
           // For Multi-EMI loans, generate schedule with all installments
           const interestDays = loanValues.interest?.days || plannedTermDays || 15;
@@ -1209,22 +1209,22 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           const totalRepayableFeeGST = loanValues.totals?.repayableFeeGST || 0;
           const postServiceFeePerEmi = Math.round((totalRepayableFee / emiCount) * 100) / 100;
           const postServiceFeeGSTPerEmi = Math.round((totalRepayableFeeGST / emiCount) * 100) / 100;
-          
+
           let outstandingPrincipal = principal;
           // For processed loans, use processed_at as base date; otherwise use disbursed_at
           // This must match the base date used for EMI date generation and interest calculation
           // Use baseDateStr (already calculated above) for schedule generation to avoid timezone issues
           const baseDateStrForSchedule = baseDateStr || getTodayString();
-          
+
           for (let i = 0; i < emiCount; i++) {
             // Get EMI date (handle both Date objects and strings)
             const emiDateStr = allEmiDates[i];
             const emiDate = emiDateStr instanceof Date ? new Date(emiDateStr) : new Date(emiDateStr);
             emiDate.setHours(0, 0, 0, 0);
-            
+
             // Convert to string for accurate day calculation (no timezone issues)
             const emiDateStrFormatted = formatDateToString(emiDate) || parseDateToString(emiDate);
-            
+
             // Calculate days for this period using string-based calculation
             let previousDateStr;
             if (i === 0) {
@@ -1244,21 +1244,21 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
                 previousDateStr = getTodayString();
               }
             }
-            
+
             // Use calculateDaysBetween for accurate calendar day calculation (inclusive)
             const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStrFormatted);
-            
+
             // Calculate principal for this EMI
-            const principalForThisEmi = i === emiCount - 1 
+            const principalForThisEmi = i === emiCount - 1
               ? Math.round((principalPerEmi + remainder) * 100) / 100
               : principalPerEmi;
-            
+
             // Calculate interest for this period
             const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
-            
+
             // Calculate installment amount (principal + interest + post service fee + GST)
             const instalmentAmount = Math.round((principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi) * 100) / 100;
-            
+
             schedule.push({
               instalment_no: i + 1,
               outstanding_principal: Math.round(outstandingPrincipal * 100) / 100,
@@ -1269,7 +1269,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               instalment_amount: instalmentAmount,
               due_date: formatDateLocal(emiDate) // Use local date format without timezone conversion
             });
-            
+
             // Reduce outstanding principal for next period
             outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
           }
@@ -1278,11 +1278,11 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           // Check if this is actually a single payment loan with incorrect emi_count
           const planType = planData.plan_type || planSnapshot?.plan_type || (emiCount > 1 ? 'multi_emi' : 'single');
           const isActuallySinglePayment = planType === 'single' || (!emiCount || emiCount <= 1);
-          
+
           // For single payment loans, use base fees (not multiplied by EMI count)
           let postServiceFee = loanValues.totals?.repayableFee || 0;
           let postServiceFeeGST = loanValues.totals?.repayableFeeGST || 0;
-          
+
           // If fees were incorrectly multiplied (single payment with emi_count > 1), divide back
           if (isActuallySinglePayment && emiCount > 1) {
             postServiceFee = postServiceFee / emiCount;
@@ -1292,7 +1292,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             const interestForInst = interest; // Use single payment interest
             totalRepayable = Math.round((principalForInst + interestForInst + postServiceFee + postServiceFeeGST) * 100) / 100;
           }
-          
+
           schedule.push({
             instalment_no: 1,
             outstanding_principal: principal,
@@ -1360,10 +1360,10 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       signature: (() => {
         if (loan.clickwrap_signed_at && loan.clickwrap_webhook_data) {
           try {
-            const webhookData = typeof loan.clickwrap_webhook_data === 'string' 
-              ? JSON.parse(loan.clickwrap_webhook_data) 
+            const webhookData = typeof loan.clickwrap_webhook_data === 'string'
+              ? JSON.parse(loan.clickwrap_webhook_data)
               : loan.clickwrap_webhook_data;
-            
+
             return {
               signed_at: loan.clickwrap_signed_at,
               signers_info: webhookData['signers-info'] || webhookData.signersInfo || []
@@ -1467,24 +1467,24 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
     // Reuse the same logic as admin endpoint (lines 1455-2087)
     // We'll call a helper function to avoid code duplication
     // For now, let's inline it but we can refactor later
-    
+
     // Get principal amount - prioritize sanctioned_amount/principal_amount (more reliable)
     // processed_amount might be wrong from old calculations
     const principal = parseFloat(
-      loan.sanctioned_amount || 
-      loan.principal_amount || 
-      loan.loan_amount || 
-      loan.processed_amount || 
+      loan.sanctioned_amount ||
+      loan.principal_amount ||
+      loan.loan_amount ||
+      loan.processed_amount ||
       0
     );
-    
+
     console.log(`💰 Principal for extension letter (loan #${loanId}):
       sanctioned_amount: ${loan.sanctioned_amount}
       principal_amount: ${loan.principal_amount}
       loan_amount: ${loan.loan_amount}
       processed_amount: ${loan.processed_amount}
       Final Principal: ₹${principal}`);
-    
+
     if (principal <= 0 || principal > 1000000) {
       return res.status(400).json({
         success: false,
@@ -1524,20 +1524,20 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
     // Calculate original due date and all EMI dates (same logic as admin endpoint)
     // This is a simplified version - full implementation would copy lines 1608-2087
     // For now, let's use the extension calculations utility
-    
+
     const { calculateExtensionFees, calculateNewDueDate, calculateOutstandingBalance } = require('../utils/extensionCalculations');
-    
+
     // Get original due date from processed_due_date
     let originalDueDate = null;
     let allOriginalEmiDates = [];
     let isMultiEmi = false;
-    
+
     if (loan.processed_due_date) {
       try {
-        const parsed = typeof loan.processed_due_date === 'string' 
-          ? JSON.parse(loan.processed_due_date) 
+        const parsed = typeof loan.processed_due_date === 'string'
+          ? JSON.parse(loan.processed_due_date)
           : loan.processed_due_date;
-        
+
         if (Array.isArray(parsed) && parsed.length > 0) {
           isMultiEmi = true;
           allOriginalEmiDates = parsed;
@@ -1553,39 +1553,39 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
         }
       }
     }
-    
+
     // If processed_due_date is null, calculate it from plan snapshot and processed_at
     if (!originalDueDate && loan.processed_at) {
       console.log(`📅 processed_due_date is null, calculating from plan snapshot and processed_at`);
-      
+
       const emiCount = parseInt(planSnapshot.emi_count || 0) || 1;
       isMultiEmi = emiCount > 1;
       const usesSalaryDate = planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true;
       const salaryDate = loan.salary_date ? parseInt(loan.salary_date) : null;
-      
+
       // Parse processed_at to get base date
       const processedAtStr = parseDateToString(loan.processed_at);
       if (processedAtStr) {
         const baseDate = new Date(processedAtStr);
         baseDate.setHours(0, 0, 0, 0);
-        
+
         if (isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
           // Multi-EMI with salary date: Calculate all EMI dates
           let firstDueDate = getNextSalaryDate(baseDate, salaryDate);
           const minDuration = planSnapshot.repayment_days || 15;
           const firstDueDateStr = formatDateToString(firstDueDate);
           const daysToFirstSalary = calculateDaysBetween(processedAtStr, firstDueDateStr);
-          
+
           if (daysToFirstSalary < minDuration) {
             firstDueDate = getSalaryDateForMonth(firstDueDateStr, salaryDate, 1);
           }
-          
+
           // Generate all EMI dates
           for (let i = 0; i < emiCount; i++) {
             const emiDate = getSalaryDateForMonth(firstDueDate, salaryDate, i);
             allOriginalEmiDates.push(formatDateToString(emiDate));
           }
-          
+
           originalDueDate = allOriginalEmiDates[0]; // First EMI for extension
         } else if (!isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
           // Single payment with salary date
@@ -1593,7 +1593,7 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
           const minDuration = planSnapshot.repayment_days || 15;
           const nextSalaryDateStr = formatDateToString(nextSalaryDate);
           const daysToSalary = calculateDaysBetween(processedAtStr, nextSalaryDateStr);
-          
+
           if (daysToSalary < minDuration) {
             originalDueDate = formatDateToString(getSalaryDateForMonth(nextSalaryDateStr, salaryDate, 1));
           } else {
@@ -1607,13 +1607,13 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
           const dueDate = new Date(baseDate);
           dueDate.setDate(dueDate.getDate() + repaymentDays);
           dueDate.setHours(0, 0, 0, 0);
-          
+
           if (isMultiEmi) {
             // For multi-EMI fixed days, calculate all EMI dates
             const daysPerEmi = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
             const emiFrequency = planSnapshot.emi_frequency || 'monthly';
             const daysBetween = daysPerEmi[emiFrequency] || 30;
-            
+
             for (let i = 0; i < emiCount; i++) {
               const emiDate = new Date(baseDate);
               if (emiFrequency === 'monthly') {
@@ -1633,14 +1633,14 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
         }
       }
     }
-    
+
     // Final fallback to processed_at only if we still don't have a due date
     if (!originalDueDate) {
       originalDueDate = parseDateToString(loan.processed_at) || loan.processed_at;
       allOriginalEmiDates = [originalDueDate];
       console.log(`⚠️ Using processed_at as final fallback: Original due date = ${originalDueDate}`);
     }
-    
+
     if (!originalDueDate) {
       return res.status(400).json({
         success: false,
@@ -1650,27 +1650,27 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
 
     // Calculate extension fees and new due date using utility functions
     let fees = calculateExtensionFees(loan);
-    
+
     // CRITICAL: Recalculate interest using the EXACT principal from this scope (line 1508)
     // This ensures we use the correct principal value, not a potentially wrong value from loan object
     // Interest = Principal × Rate Per Day × Days
     const todayStr = getTodayString();
     const processedDateStr = parseDateToString(loan.processed_at);
-    
+
     // Validate principal is reasonable (should be between 1 and 1,000,000 for sanity check)
     if (principal <= 0 || principal > 1000000) {
       console.error(`⚠️ ERROR: Invalid principal value (₹${principal}) for loan #${loanId}. Using default calculation.`);
     }
-    
+
     if (processedDateStr && principal > 0 && principal <= 1000000) {
       const interestDays = calculateDaysBetween(processedDateStr, todayStr);
       const interestRatePerDay = parseFloat(planSnapshot.interest_percent_per_day || loan.processed_interest_percent_per_day || 0.001);
       const recalculatedInterest = Math.round(principal * interestRatePerDay * interestDays * 100) / 100;
-      
+
       // Override with recalculated interest using correct principal
       fees.interestTillDate = recalculatedInterest;
       fees.interestDays = interestDays; // Store days for logging
-      
+
       console.log(`💰 Interest Recalculation for Extension Letter (loan #${loanId}):
         Principal: ₹${principal} (from: processed_amount=${loan.processed_amount}, sanctioned_amount=${loan.sanctioned_amount})
         Processed Date: ${processedDateStr}
@@ -1681,191 +1681,191 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
     } else {
       console.error(`⚠️ ERROR: Cannot recalculate interest - processedDateStr=${processedDateStr}, principal=${principal}`);
     }
-    
+
     // Calculate penalty if overdue (not included in calculateExtensionFees utility)
     // IMPORTANT: Always recalculate penalty using late_fee_structure (don't use processed_penalty from database)
     // This ensures penalty matches EMI calculation and uses current late_fee_structure
     let penaltyAmount = 0;
     let penaltyBase = 0;
     let penaltyGST = 0;
-    
+
     // Always recalculate penalty - check if any EMI is overdue
-      const parseDueDates = (dueDateStr) => {
-        if (!dueDateStr) return [];
-        try {
-          const parsed = typeof dueDateStr === 'string' ? JSON.parse(dueDateStr) : dueDateStr;
-          return Array.isArray(parsed) ? parsed : [parsed];
-        } catch (e) {
-          return typeof dueDateStr === 'string' ? [dueDateStr] : [];
-        }
-      };
-      
-      const isOverdue = (dueDateStr, currentDate) => {
-        if (!dueDateStr) return false;
-        const dueDate = new Date(dueDateStr);
-        dueDate.setHours(0, 0, 0, 0);
-        currentDate.setHours(0, 0, 0, 0);
-        return dueDate < currentDate;
-      };
-      
-      const calculateDaysInclusive = (startDate, endDate) => {
-        const msPerDay = 1000 * 60 * 60 * 24;
-        return Math.ceil((endDate - startDate) / msPerDay) + 1;
-      };
-      
-      // Parse late_fee_structure from loan
-      let lateFeeStructure = null;
+    const parseDueDates = (dueDateStr) => {
+      if (!dueDateStr) return [];
       try {
-        if (loan.late_fee_structure) {
-          lateFeeStructure = typeof loan.late_fee_structure === 'string' 
-            ? JSON.parse(loan.late_fee_structure) 
-            : loan.late_fee_structure;
-        } else if (planSnapshot && planSnapshot.late_fee_structure) {
-          lateFeeStructure = typeof planSnapshot.late_fee_structure === 'string'
-            ? JSON.parse(planSnapshot.late_fee_structure)
-            : planSnapshot.late_fee_structure;
-        }
+        const parsed = typeof dueDateStr === 'string' ? JSON.parse(dueDateStr) : dueDateStr;
+        return Array.isArray(parsed) ? parsed : [parsed];
       } catch (e) {
-        console.error('Error parsing late_fee_structure:', e);
+        return typeof dueDateStr === 'string' ? [dueDateStr] : [];
       }
-      
-      // Calculate penalty using late_fee_structure from database
-      const calculatePenalty = (principal, daysOverdue, lateFeeStructure) => {
-        if (daysOverdue <= 0) return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
-        
-        // If no late_fee_structure, return 0 (no penalty)
-        if (!lateFeeStructure || !Array.isArray(lateFeeStructure) || lateFeeStructure.length === 0) {
-          console.warn('⚠️ No late_fee_structure found, skipping penalty calculation');
-          return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
-        }
-        
-        let penaltyBase = 0;
-        
-        // Sort tiers by tier_order or days_overdue_start
-        const sortedTiers = [...lateFeeStructure].sort((a, b) => {
-          const orderA = a.tier_order !== undefined ? a.tier_order : (a.days_overdue_start || 0);
-          const orderB = b.tier_order !== undefined ? b.tier_order : (b.days_overdue_start || 0);
-          return orderA - orderB;
-        });
-        
-        // Calculate penalty based on tiers
-        // Example: For 32 days overdue with structure [Day 1: 5%, Day 2-10: 1%, Day 11-120: 0.6%, Day 121+: 0%]
-        // - Day 1: 5% one-time
-        // - Days 2-10: 1% × 9 days = 9%
-        // - Days 11-32: 0.6% × 22 days = 13.2%
-        // Total: 5% + 9% + 13.2% = 27.2%
-        for (const tier of sortedTiers) {
-          const startDay = tier.days_overdue_start || 0;
-          const endDay = tier.days_overdue_end !== null && tier.days_overdue_end !== undefined 
-            ? tier.days_overdue_end 
-            : null; // null means unlimited (e.g., Day 121+)
-          
-          // Skip tiers that haven't started yet
-          if (daysOverdue < startDay) continue;
-          
-          const feeValue = parseFloat(tier.fee_value || tier.penalty_percent || 0);
-          if (feeValue <= 0) continue;
-          
-          if (startDay === endDay || (startDay === 1 && endDay === 1)) {
-            // Single day tier (e.g., "Day 1-1"): apply as one-time percentage
-            // Only applies if the loan is at least this many days overdue
-            if (daysOverdue >= startDay) {
-              penaltyBase += principal * (feeValue / 100);
-            }
-          } else if (endDay === null || endDay === undefined) {
-            // Unlimited tier (e.g., "Day 121+"): apply for all days from startDay onwards
-            if (daysOverdue >= startDay) {
-              const daysInTier = daysOverdue - startDay + 1;
-              penaltyBase += principal * (feeValue / 100) * daysInTier;
-            }
-          } else {
-            // Multi-day tier (e.g., "Day 2-10", "Day 11-120"): calculate for applicable days
-            if (daysOverdue >= startDay) {
-              // Calculate how many days in this tier apply
-              // Example: If tier is Day 2-10 and loan is 10 days overdue:
-              //   - Days 2, 3, 4, 5, 6, 7, 8, 9, 10 = 9 days (not 10!)
-              //   - Formula: daysInTier = min(endDay, daysOverdue) - startDay + 1
-              const tierStartDay = startDay;
-              const tierEndDay = Math.min(endDay, daysOverdue); // Cap at days overdue
-              // Calculate days: if tier is 2-10 and daysOverdue is 10, then days 2-10 = 9 days
-              // Formula: (tierEndDay - tierStartDay + 1)
-              // For Day 2-10 with 10 days overdue: (10 - 2 + 1) = 9 days ✓
-              const daysInTier = Math.max(0, tierEndDay - tierStartDay + 1);
-              
-              if (daysInTier > 0) {
-                // Apply percentage per day for days in this tier
-                const tierPenalty = principal * (feeValue / 100) * daysInTier;
-                penaltyBase += tierPenalty;
-                console.log(`    Tier ${tier.tier_name || `Day ${startDay}-${endDay}`}: ${daysInTier} day(s) × ${feeValue}% × ₹${principal} = ₹${tierPenalty.toFixed(2)}`);
-              }
+    };
+
+    const isOverdue = (dueDateStr, currentDate) => {
+      if (!dueDateStr) return false;
+      const dueDate = new Date(dueDateStr);
+      dueDate.setHours(0, 0, 0, 0);
+      currentDate.setHours(0, 0, 0, 0);
+      return dueDate < currentDate;
+    };
+
+    const calculateDaysInclusive = (startDate, endDate) => {
+      const msPerDay = 1000 * 60 * 60 * 24;
+      return Math.ceil((endDate - startDate) / msPerDay) + 1;
+    };
+
+    // Parse late_fee_structure from loan
+    let lateFeeStructure = null;
+    try {
+      if (loan.late_fee_structure) {
+        lateFeeStructure = typeof loan.late_fee_structure === 'string'
+          ? JSON.parse(loan.late_fee_structure)
+          : loan.late_fee_structure;
+      } else if (planSnapshot && planSnapshot.late_fee_structure) {
+        lateFeeStructure = typeof planSnapshot.late_fee_structure === 'string'
+          ? JSON.parse(planSnapshot.late_fee_structure)
+          : planSnapshot.late_fee_structure;
+      }
+    } catch (e) {
+      console.error('Error parsing late_fee_structure:', e);
+    }
+
+    // Calculate penalty using late_fee_structure from database
+    const calculatePenalty = (principal, daysOverdue, lateFeeStructure) => {
+      if (daysOverdue <= 0) return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+
+      // If no late_fee_structure, return 0 (no penalty)
+      if (!lateFeeStructure || !Array.isArray(lateFeeStructure) || lateFeeStructure.length === 0) {
+        console.warn('⚠️ No late_fee_structure found, skipping penalty calculation');
+        return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+      }
+
+      let penaltyBase = 0;
+
+      // Sort tiers by tier_order or days_overdue_start
+      const sortedTiers = [...lateFeeStructure].sort((a, b) => {
+        const orderA = a.tier_order !== undefined ? a.tier_order : (a.days_overdue_start || 0);
+        const orderB = b.tier_order !== undefined ? b.tier_order : (b.days_overdue_start || 0);
+        return orderA - orderB;
+      });
+
+      // Calculate penalty based on tiers
+      // Example: For 32 days overdue with structure [Day 1: 5%, Day 2-10: 1%, Day 11-120: 0.6%, Day 121+: 0%]
+      // - Day 1: 5% one-time
+      // - Days 2-10: 1% × 9 days = 9%
+      // - Days 11-32: 0.6% × 22 days = 13.2%
+      // Total: 5% + 9% + 13.2% = 27.2%
+      for (const tier of sortedTiers) {
+        const startDay = tier.days_overdue_start || 0;
+        const endDay = tier.days_overdue_end !== null && tier.days_overdue_end !== undefined
+          ? tier.days_overdue_end
+          : null; // null means unlimited (e.g., Day 121+)
+
+        // Skip tiers that haven't started yet
+        if (daysOverdue < startDay) continue;
+
+        const feeValue = parseFloat(tier.fee_value || tier.penalty_percent || 0);
+        if (feeValue <= 0) continue;
+
+        if (startDay === endDay || (startDay === 1 && endDay === 1)) {
+          // Single day tier (e.g., "Day 1-1"): apply as one-time percentage
+          // Only applies if the loan is at least this many days overdue
+          if (daysOverdue >= startDay) {
+            penaltyBase += principal * (feeValue / 100);
+          }
+        } else if (endDay === null || endDay === undefined) {
+          // Unlimited tier (e.g., "Day 121+"): apply for all days from startDay onwards
+          if (daysOverdue >= startDay) {
+            const daysInTier = daysOverdue - startDay + 1;
+            penaltyBase += principal * (feeValue / 100) * daysInTier;
+          }
+        } else {
+          // Multi-day tier (e.g., "Day 2-10", "Day 11-120"): calculate for applicable days
+          if (daysOverdue >= startDay) {
+            // Calculate how many days in this tier apply
+            // Example: If tier is Day 2-10 and loan is 10 days overdue:
+            //   - Days 2, 3, 4, 5, 6, 7, 8, 9, 10 = 9 days (not 10!)
+            //   - Formula: daysInTier = min(endDay, daysOverdue) - startDay + 1
+            const tierStartDay = startDay;
+            const tierEndDay = Math.min(endDay, daysOverdue); // Cap at days overdue
+            // Calculate days: if tier is 2-10 and daysOverdue is 10, then days 2-10 = 9 days
+            // Formula: (tierEndDay - tierStartDay + 1)
+            // For Day 2-10 with 10 days overdue: (10 - 2 + 1) = 9 days ✓
+            const daysInTier = Math.max(0, tierEndDay - tierStartDay + 1);
+
+            if (daysInTier > 0) {
+              // Apply percentage per day for days in this tier
+              const tierPenalty = principal * (feeValue / 100) * daysInTier;
+              penaltyBase += tierPenalty;
+              console.log(`    Tier ${tier.tier_name || `Day ${startDay}-${endDay}`}: ${daysInTier} day(s) × ${feeValue}% × ₹${principal} = ₹${tierPenalty.toFixed(2)}`);
             }
           }
         }
-        
-        const penaltyBaseRounded = toDecimal2(penaltyBase);
-        const gstPercent = lateFeeStructure[0]?.gst_percent || 18; // Use GST from structure or default 18%
-        const penaltyGST = toDecimal2(penaltyBaseRounded * (gstPercent / 100));
-        const penaltyTotal = toDecimal2(penaltyBaseRounded + penaltyGST);
-        
-        // Debug logging for penalty calculation
-        if (daysOverdue > 0) {
-          console.log(`📊 Penalty Calculation Details:
+      }
+
+      const penaltyBaseRounded = toDecimal2(penaltyBase);
+      const gstPercent = lateFeeStructure[0]?.gst_percent || 18; // Use GST from structure or default 18%
+      const penaltyGST = toDecimal2(penaltyBaseRounded * (gstPercent / 100));
+      const penaltyTotal = toDecimal2(penaltyBaseRounded + penaltyGST);
+
+      // Debug logging for penalty calculation
+      if (daysOverdue > 0) {
+        console.log(`📊 Penalty Calculation Details:
             Principal: ₹${principal}
             Days Overdue: ${daysOverdue}
             Penalty Base: ₹${penaltyBaseRounded} (${((penaltyBaseRounded / principal) * 100).toFixed(2)}%)
             GST (${gstPercent}%): ₹${penaltyGST}
             Penalty Total: ₹${penaltyTotal}`);
+      }
+
+      return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
+    };
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dueDates = parseDueDates(loan.processed_due_date);
+    if (dueDates.length > 0) {
+      let maxDaysOverdue = 0;
+      for (const dueDateStr of dueDates) {
+        if (isOverdue(dueDateStr, today)) {
+          const dueDate = new Date(dueDateStr);
+          dueDate.setHours(0, 0, 0, 0);
+          // Calculate days overdue: if due date is 1st and today is 11th, that's 10 days past due
+          // calculateDaysInclusive gives 11 days (1st to 11th inclusive), but for penalty we need exclusive
+          // So subtract 1 to get actual days past due (excluding today)
+          const daysOverdueInclusive = calculateDaysInclusive(dueDate, today);
+          const daysOverdue = Math.max(1, daysOverdueInclusive - 1); // Exclude today for penalty calculation
+          maxDaysOverdue = Math.max(maxDaysOverdue, daysOverdue);
         }
-        
-        return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
-      };
-      
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const dueDates = parseDueDates(loan.processed_due_date);
-      if (dueDates.length > 0) {
-        let maxDaysOverdue = 0;
-        for (const dueDateStr of dueDates) {
-          if (isOverdue(dueDateStr, today)) {
-            const dueDate = new Date(dueDateStr);
-            dueDate.setHours(0, 0, 0, 0);
-            // Calculate days overdue: if due date is 1st and today is 11th, that's 10 days past due
-            // calculateDaysInclusive gives 11 days (1st to 11th inclusive), but for penalty we need exclusive
-            // So subtract 1 to get actual days past due (excluding today)
-            const daysOverdueInclusive = calculateDaysInclusive(dueDate, today);
-            const daysOverdue = Math.max(1, daysOverdueInclusive - 1); // Exclude today for penalty calculation
-            maxDaysOverdue = Math.max(maxDaysOverdue, daysOverdue);
-          }
-        }
-        
-        if (maxDaysOverdue > 0) {
-          const penaltyCalc = calculatePenalty(principal, maxDaysOverdue, lateFeeStructure);
-          // Update local variables for use in extension letter data
-          penaltyAmount = penaltyCalc.penaltyTotal;
-          penaltyBase = penaltyCalc.penaltyBase;
-          penaltyGST = penaltyCalc.penaltyGST;
-          // Also store in fees object
-          fees.penaltyBase = penaltyCalc.penaltyBase;
-          fees.penaltyGST = penaltyCalc.penaltyGST;
-          console.log(`💰 Penalty calculation using late_fee_structure (loan #${loanId}):
+      }
+
+      if (maxDaysOverdue > 0) {
+        const penaltyCalc = calculatePenalty(principal, maxDaysOverdue, lateFeeStructure);
+        // Update local variables for use in extension letter data
+        penaltyAmount = penaltyCalc.penaltyTotal;
+        penaltyBase = penaltyCalc.penaltyBase;
+        penaltyGST = penaltyCalc.penaltyGST;
+        // Also store in fees object
+        fees.penaltyBase = penaltyCalc.penaltyBase;
+        fees.penaltyGST = penaltyCalc.penaltyGST;
+        console.log(`💰 Penalty calculation using late_fee_structure (loan #${loanId}):
             Principal: ₹${principal}
             Days Overdue: ${maxDaysOverdue}
             Late Fee Structure: ${JSON.stringify(lateFeeStructure)}
             Penalty Base: ₹${penaltyCalc.penaltyBase}
             Penalty GST (${lateFeeStructure?.[0]?.gst_percent || 18}%): ₹${penaltyCalc.penaltyGST}
             Penalty Total: ₹${penaltyCalc.penaltyTotal}`);
-        }
       }
-    
+    }
+
     // Add penalty to fees object (base, GST, and total)
     fees.penalty = penaltyBase; // Base penalty for backward compatibility
     fees.penaltyBase = penaltyBase;
     fees.penaltyGST = penaltyGST;
     fees.penaltyTotal = penaltyAmount;
-    
+
     // Recalculate total: Extension Fee + GST on Extension Fee + Interest + Penalty Base + GST on Penalty
     fees.totalExtensionAmount = toDecimal2(fees.extensionFee + fees.gstAmount + fees.interestTillDate + penaltyAmount);
-    
+
     // Add debug logging to verify calculations
     console.log(`💰 Final Extension Calculation for loan #${loanId}:
       Principal: ₹${principal}
@@ -1876,7 +1876,7 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
       GST on Penalty (18%): ₹${penaltyGST}
       Penalty Total: ₹${penaltyAmount}
       Total Extension Amount: ₹${fees.totalExtensionAmount}`);
-    
+
     const newDueDateResult = calculateNewDueDate(loan, originalDueDate, planSnapshot, loan.salary_date, allOriginalEmiDates);
     const outstandingBalance = calculateOutstandingBalance(loan);
 
@@ -2108,7 +2108,7 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
 
     // Get principal amount and plan snapshot for calculations
     const principal = parseFloat(loan.processed_amount || loan.sanctioned_amount || loan.loan_amount || 0);
-    
+
     if (principal <= 0) {
       return res.status(400).json({
         success: false,
@@ -2134,7 +2134,7 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         SELECT transaction_type FROM transactions 
         WHERE id = ? AND loan_application_id = ?
       `, [transactionId, loanId]);
-      
+
       if (specificTransaction && specificTransaction.length > 0) {
         const txType = specificTransaction[0].transaction_type;
         if (txType === 'loan_extension_1st') extensionNumberFromType = 1;
@@ -2168,14 +2168,14 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
     // For multi-EMI loans, processed_due_date is a JSON array of EMI dates
     // We need to get the LAST EMI date as the original due date
     let originalDueDate = null;
-    
+
     if (loan.processed_due_date) {
       try {
         // Try to parse as JSON array (for multi-EMI loans)
-        const parsedDueDate = typeof loan.processed_due_date === 'string' 
-          ? JSON.parse(loan.processed_due_date) 
+        const parsedDueDate = typeof loan.processed_due_date === 'string'
+          ? JSON.parse(loan.processed_due_date)
           : loan.processed_due_date;
-        
+
         if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
           // Multi-EMI loan: use the LAST EMI date as original due date
           originalDueDate = parsedDueDate[parsedDueDate.length - 1];
@@ -2190,17 +2190,17 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         console.log(`📅 Parsed as single date string: Original due date = ${originalDueDate}`);
       }
     }
-    
+
     // For multi-EMI loans, we need to get all EMI dates and shift them all forward
     let allOriginalEmiDates = [];
     let isMultiEmi = false;
-    
+
     if (loan.processed_due_date) {
       try {
-        const parsedDueDate = typeof loan.processed_due_date === 'string' 
-          ? JSON.parse(loan.processed_due_date) 
+        const parsedDueDate = typeof loan.processed_due_date === 'string'
+          ? JSON.parse(loan.processed_due_date)
           : loan.processed_due_date;
-        
+
         if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
           isMultiEmi = true;
           allOriginalEmiDates = parsedDueDate;
@@ -2211,12 +2211,12 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         // If parsing fails, treat as single date
       }
     }
-    
+
     // If processed_due_date is null, calculate it from plan snapshot and processed_at
     // This is the same logic used when processing the loan
     if (!originalDueDate && loan.processed_at) {
       console.log(`📅 processed_due_date is null, calculating from plan snapshot and processed_at`);
-      
+
       // Get plan snapshot if not already parsed
       if (!planSnapshot || Object.keys(planSnapshot).length === 0) {
         try {
@@ -2228,35 +2228,35 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
           planSnapshot = {};
         }
       }
-      
+
       const emiCount = parseInt(planSnapshot.emi_count || 0) || 1;
       isMultiEmi = emiCount > 1;
       const usesSalaryDate = planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true;
       const salaryDate = loan.salary_date ? parseInt(loan.salary_date) : null;
-      
+
       // Parse processed_at to get base date
       const processedAtStr = parseDateToString(loan.processed_at);
       if (processedAtStr) {
         const baseDate = new Date(processedAtStr);
         baseDate.setHours(0, 0, 0, 0);
-        
+
         if (isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
           // Multi-EMI with salary date: Calculate all EMI dates
           let firstDueDate = getNextSalaryDate(baseDate, salaryDate);
           const minDuration = planSnapshot.repayment_days || 15;
           const firstDueDateStr = formatDateToString(firstDueDate);
           const daysToFirstSalary = calculateDaysBetween(processedAtStr, firstDueDateStr);
-          
+
           if (daysToFirstSalary < minDuration) {
             firstDueDate = getSalaryDateForMonth(firstDueDateStr, salaryDate, 1);
           }
-          
+
           // Generate all EMI dates
           for (let i = 0; i < emiCount; i++) {
             const emiDate = getSalaryDateForMonth(firstDueDate, salaryDate, i);
             allOriginalEmiDates.push(formatDateToString(emiDate));
           }
-          
+
           originalDueDate = allOriginalEmiDates[allOriginalEmiDates.length - 1];
         } else if (!isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
           // Single payment with salary date
@@ -2264,7 +2264,7 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
           const minDuration = planSnapshot.repayment_days || 15;
           const nextSalaryDateStr = formatDateToString(nextSalaryDate);
           const daysToSalary = calculateDaysBetween(processedAtStr, nextSalaryDateStr);
-          
+
           if (daysToSalary < minDuration) {
             originalDueDate = formatDateToString(getSalaryDateForMonth(nextSalaryDateStr, salaryDate, 1));
           } else {
@@ -2277,13 +2277,13 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
           const dueDate = new Date(baseDate);
           dueDate.setDate(dueDate.getDate() + repaymentDays);
           dueDate.setHours(0, 0, 0, 0);
-          
+
           if (isMultiEmi) {
             // For multi-EMI fixed days, calculate all EMI dates
             const daysPerEmi = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
             const emiFrequency = planSnapshot.emi_frequency || 'monthly';
             const daysBetween = daysPerEmi[emiFrequency] || 30;
-            
+
             for (let i = 0; i < emiCount; i++) {
               const emiDate = new Date(baseDate);
               if (emiFrequency === 'monthly') {
@@ -2302,27 +2302,27 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         }
       }
     }
-    
+
     // Final fallback to processed_at only if we still don't have a due date
     if (!originalDueDate) {
       originalDueDate = parseDateToString(loan.processed_at) || loan.processed_at;
       console.log(`⚠️ Using processed_at as final fallback: Original due date = ${originalDueDate}`);
     }
-    
+
     // Get current due date (after all previous extensions)
     // Use the calculated originalDueDate (which might have been calculated from plan snapshot)
     let currentDueDate = originalDueDate;
     let allCurrentEmiDates = isMultiEmi && allOriginalEmiDates.length > 0 ? [...allOriginalEmiDates] : [];
-    
+
     if (existingExtensions && existingExtensions.length > 0) {
       // Get the latest extension's new due date
       const latestExtension = existingExtensions[existingExtensions.length - 1];
       if (latestExtension.description) {
         try {
-          const desc = typeof latestExtension.description === 'string' 
-            ? JSON.parse(latestExtension.description) 
+          const desc = typeof latestExtension.description === 'string'
+            ? JSON.parse(latestExtension.description)
             : latestExtension.description;
-          
+
           // For multi-EMI, check if extension stored all new EMI dates
           if (isMultiEmi && desc.new_emi_dates && Array.isArray(desc.new_emi_dates)) {
             allCurrentEmiDates = desc.new_emi_dates;
@@ -2348,25 +2348,25 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         planSnapshot = {};
       }
     }
-    
+
     const usesSalaryDate = planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true;
     const salaryDate = loan.salary_date ? parseInt(loan.salary_date) : null;
-    
+
     console.log(`📅 Extension calculation method: ${usesSalaryDate ? 'Salary Date Based' : 'Fixed Days'}`);
     if (usesSalaryDate && salaryDate) {
       console.log(`   Salary Date: ${salaryDate}`);
     }
-    
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     const currentDueDateObj = currentDueDate ? new Date(currentDueDate) : today;
     currentDueDateObj.setHours(0, 0, 0, 0);
-    
+
     let newDueDate;
     let allNewEmiDates = [];
     let extensionPeriodDays = 15; // Default for fixed days
-    
+
     // Calculate new due date based on plan type
     if (usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
       // Salary Date Based Plan: Shift to next month's salary date
@@ -2419,7 +2419,7 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         newDueDate.setHours(0, 0, 0, 0);
       }
     }
-    
+
     const extensionPeriodTill = formatDateLocal(newDueDate);
 
     // Calculate extension fee: 21% of principal
@@ -2434,7 +2434,7 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
     // IMPORTANT: Use processed_interest from database if available (calculated by cron job)
     // Only recalculate if processed_interest is not available
     let interestTillDate = 0;
-    
+
     if (loan.processed_interest !== null && loan.processed_interest !== undefined && parseFloat(loan.processed_interest) > 0) {
       // Use interest already calculated by cron job (most accurate)
       interestTillDate = Math.round(parseFloat(loan.processed_interest) * 100) / 100;
@@ -2443,7 +2443,7 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
       // Recalculate if not available (fallback)
       // Interest should be calculated on PRINCIPAL only, NOT outstanding balance
       // Outstanding balance includes fees which are not interest-bearing
-      
+
       // Use processed_at as the start date (processed_at is day 1)
       // If processed_at is not available, use disbursed_at or created_at
       let processedDate;
@@ -2454,27 +2454,27 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
       } else {
         processedDate = new Date(loan.created_at);
       }
-      
+
       // Normalize dates to start of day (ignore time)
       processedDate.setHours(0, 0, 0, 0);
       today.setHours(0, 0, 0, 0);
-      
+
       // Calculate days from processed_at to today (inclusive counting)
       // processed_at date is day 1, so: days = (today - processed_at) + 1
       // Use the same calculation as cron job: Math.ceil((end - start) / msPerDay) + 1
       const msPerDay = 1000 * 60 * 60 * 24;
       const days = Math.ceil((today - processedDate) / msPerDay) + 1;
-      
+
       // Ensure days is at least 1 (if processed_at is today, days = 1)
       const finalDays = Math.max(1, days);
-      
+
       // Get interest rate from plan snapshot (already parsed above)
       const interestRatePerDay = parseFloat(planSnapshot.interest_percent_per_day || 0.001); // Default 0.1% per day
-      
+
       // Calculate total interest from processed_at to today: Principal × Interest Rate Per Day × Days
       // IMPORTANT: Use PRINCIPAL only, NOT outstanding balance (fees are not interest-bearing)
       interestTillDate = Math.round(principal * interestRatePerDay * finalDays * 100) / 100;
-      
+
       console.log(`💰 Interest calculation (recalculated):
         Principal: ₹${principal}
         Interest Rate Per Day: ${interestRatePerDay} (${(interestRatePerDay * 100).toFixed(4)}%)
@@ -2492,174 +2492,174 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
     let penaltyAmount = 0;
     let penaltyBase = 0;
     let penaltyGST = 0;
-    
+
     // Always recalculate penalty - check if any EMI is overdue
-      const parseDueDates = (dueDateStr) => {
-        if (!dueDateStr) return [];
-        try {
-          const parsed = typeof dueDateStr === 'string' ? JSON.parse(dueDateStr) : dueDateStr;
-          return Array.isArray(parsed) ? parsed : [parsed];
-        } catch (e) {
-          return typeof dueDateStr === 'string' ? [dueDateStr] : [];
-        }
-      };
-      
-      const isOverdue = (dueDateStr, currentDate) => {
-        if (!dueDateStr) return false;
-        const dueDate = new Date(dueDateStr);
-        dueDate.setHours(0, 0, 0, 0);
-        currentDate.setHours(0, 0, 0, 0);
-        return dueDate < currentDate;
-      };
-      
-      const calculateDaysInclusive = (startDate, endDate) => {
-        const msPerDay = 1000 * 60 * 60 * 24;
-        return Math.ceil((endDate - startDate) / msPerDay) + 1;
-      };
-      
-      // Parse late_fee_structure from loan
-      let lateFeeStructure = null;
+    const parseDueDates = (dueDateStr) => {
+      if (!dueDateStr) return [];
       try {
-        if (loan.late_fee_structure) {
-          lateFeeStructure = typeof loan.late_fee_structure === 'string' 
-            ? JSON.parse(loan.late_fee_structure) 
-            : loan.late_fee_structure;
-        } else if (planSnapshot && planSnapshot.late_fee_structure) {
-          lateFeeStructure = typeof planSnapshot.late_fee_structure === 'string'
-            ? JSON.parse(planSnapshot.late_fee_structure)
-            : planSnapshot.late_fee_structure;
-        }
+        const parsed = typeof dueDateStr === 'string' ? JSON.parse(dueDateStr) : dueDateStr;
+        return Array.isArray(parsed) ? parsed : [parsed];
       } catch (e) {
-        console.error('Error parsing late_fee_structure:', e);
+        return typeof dueDateStr === 'string' ? [dueDateStr] : [];
       }
-      
-      // Calculate penalty using late_fee_structure from database
-      const calculatePenalty = (principal, daysOverdue, lateFeeStructure) => {
-        if (daysOverdue <= 0) return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
-        
-        // If no late_fee_structure, return 0 (no penalty)
-        if (!lateFeeStructure || !Array.isArray(lateFeeStructure) || lateFeeStructure.length === 0) {
-          console.warn('⚠️ No late_fee_structure found, skipping penalty calculation');
-          return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
-        }
-        
-        let penaltyBase = 0;
-        
-        // Sort tiers by tier_order or days_overdue_start
-        const sortedTiers = [...lateFeeStructure].sort((a, b) => {
-          const orderA = a.tier_order !== undefined ? a.tier_order : (a.days_overdue_start || 0);
-          const orderB = b.tier_order !== undefined ? b.tier_order : (b.days_overdue_start || 0);
-          return orderA - orderB;
-        });
-        
-        // Calculate penalty based on tiers
-        // Example: For 32 days overdue with structure [Day 1: 5%, Day 2-10: 1%, Day 11-120: 0.6%, Day 121+: 0%]
-        // - Day 1: 5% one-time
-        // - Days 2-10: 1% × 9 days = 9%
-        // - Days 11-32: 0.6% × 22 days = 13.2%
-        // Total: 5% + 9% + 13.2% = 27.2%
-        for (const tier of sortedTiers) {
-          const startDay = tier.days_overdue_start || 0;
-          const endDay = tier.days_overdue_end !== null && tier.days_overdue_end !== undefined 
-            ? tier.days_overdue_end 
-            : null; // null means unlimited (e.g., Day 121+)
-          
-          // Skip tiers that haven't started yet
-          if (daysOverdue < startDay) continue;
-          
-          const feeValue = parseFloat(tier.fee_value || tier.penalty_percent || 0);
-          if (feeValue <= 0) continue;
-          
-          if (startDay === endDay || (startDay === 1 && endDay === 1)) {
-            // Single day tier (e.g., "Day 1-1"): apply as one-time percentage
-            // Only applies if the loan is at least this many days overdue
-            if (daysOverdue >= startDay) {
-              penaltyBase += principal * (feeValue / 100);
-            }
-          } else if (endDay === null || endDay === undefined) {
-            // Unlimited tier (e.g., "Day 121+"): apply for all days from startDay onwards
-            if (daysOverdue >= startDay) {
-              const daysInTier = daysOverdue - startDay + 1;
-              penaltyBase += principal * (feeValue / 100) * daysInTier;
-            }
-          } else {
-            // Multi-day tier (e.g., "Day 2-10", "Day 11-120"): calculate for applicable days
-            if (daysOverdue >= startDay) {
-              // Calculate how many days in this tier apply
-              // Example: If tier is Day 2-10 and loan is 10 days overdue:
-              //   - Days 2, 3, 4, 5, 6, 7, 8, 9, 10 = 9 days (not 10!)
-              //   - Formula: daysInTier = min(endDay, daysOverdue) - startDay + 1
-              const tierStartDay = startDay;
-              const tierEndDay = Math.min(endDay, daysOverdue); // Cap at days overdue
-              // Calculate days: if tier is 2-10 and daysOverdue is 10, then days 2-10 = 9 days
-              // Formula: (tierEndDay - tierStartDay + 1)
-              // For Day 2-10 with 10 days overdue: (10 - 2 + 1) = 9 days ✓
-              const daysInTier = Math.max(0, tierEndDay - tierStartDay + 1);
-              
-              if (daysInTier > 0) {
-                // Apply percentage per day for days in this tier
-                const tierPenalty = principal * (feeValue / 100) * daysInTier;
-                penaltyBase += tierPenalty;
-                console.log(`    Tier ${tier.tier_name || `Day ${startDay}-${endDay}`}: ${daysInTier} day(s) × ${feeValue}% × ₹${principal} = ₹${tierPenalty.toFixed(2)}`);
-              }
+    };
+
+    const isOverdue = (dueDateStr, currentDate) => {
+      if (!dueDateStr) return false;
+      const dueDate = new Date(dueDateStr);
+      dueDate.setHours(0, 0, 0, 0);
+      currentDate.setHours(0, 0, 0, 0);
+      return dueDate < currentDate;
+    };
+
+    const calculateDaysInclusive = (startDate, endDate) => {
+      const msPerDay = 1000 * 60 * 60 * 24;
+      return Math.ceil((endDate - startDate) / msPerDay) + 1;
+    };
+
+    // Parse late_fee_structure from loan
+    let lateFeeStructure = null;
+    try {
+      if (loan.late_fee_structure) {
+        lateFeeStructure = typeof loan.late_fee_structure === 'string'
+          ? JSON.parse(loan.late_fee_structure)
+          : loan.late_fee_structure;
+      } else if (planSnapshot && planSnapshot.late_fee_structure) {
+        lateFeeStructure = typeof planSnapshot.late_fee_structure === 'string'
+          ? JSON.parse(planSnapshot.late_fee_structure)
+          : planSnapshot.late_fee_structure;
+      }
+    } catch (e) {
+      console.error('Error parsing late_fee_structure:', e);
+    }
+
+    // Calculate penalty using late_fee_structure from database
+    const calculatePenalty = (principal, daysOverdue, lateFeeStructure) => {
+      if (daysOverdue <= 0) return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+
+      // If no late_fee_structure, return 0 (no penalty)
+      if (!lateFeeStructure || !Array.isArray(lateFeeStructure) || lateFeeStructure.length === 0) {
+        console.warn('⚠️ No late_fee_structure found, skipping penalty calculation');
+        return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+      }
+
+      let penaltyBase = 0;
+
+      // Sort tiers by tier_order or days_overdue_start
+      const sortedTiers = [...lateFeeStructure].sort((a, b) => {
+        const orderA = a.tier_order !== undefined ? a.tier_order : (a.days_overdue_start || 0);
+        const orderB = b.tier_order !== undefined ? b.tier_order : (b.days_overdue_start || 0);
+        return orderA - orderB;
+      });
+
+      // Calculate penalty based on tiers
+      // Example: For 32 days overdue with structure [Day 1: 5%, Day 2-10: 1%, Day 11-120: 0.6%, Day 121+: 0%]
+      // - Day 1: 5% one-time
+      // - Days 2-10: 1% × 9 days = 9%
+      // - Days 11-32: 0.6% × 22 days = 13.2%
+      // Total: 5% + 9% + 13.2% = 27.2%
+      for (const tier of sortedTiers) {
+        const startDay = tier.days_overdue_start || 0;
+        const endDay = tier.days_overdue_end !== null && tier.days_overdue_end !== undefined
+          ? tier.days_overdue_end
+          : null; // null means unlimited (e.g., Day 121+)
+
+        // Skip tiers that haven't started yet
+        if (daysOverdue < startDay) continue;
+
+        const feeValue = parseFloat(tier.fee_value || tier.penalty_percent || 0);
+        if (feeValue <= 0) continue;
+
+        if (startDay === endDay || (startDay === 1 && endDay === 1)) {
+          // Single day tier (e.g., "Day 1-1"): apply as one-time percentage
+          // Only applies if the loan is at least this many days overdue
+          if (daysOverdue >= startDay) {
+            penaltyBase += principal * (feeValue / 100);
+          }
+        } else if (endDay === null || endDay === undefined) {
+          // Unlimited tier (e.g., "Day 121+"): apply for all days from startDay onwards
+          if (daysOverdue >= startDay) {
+            const daysInTier = daysOverdue - startDay + 1;
+            penaltyBase += principal * (feeValue / 100) * daysInTier;
+          }
+        } else {
+          // Multi-day tier (e.g., "Day 2-10", "Day 11-120"): calculate for applicable days
+          if (daysOverdue >= startDay) {
+            // Calculate how many days in this tier apply
+            // Example: If tier is Day 2-10 and loan is 10 days overdue:
+            //   - Days 2, 3, 4, 5, 6, 7, 8, 9, 10 = 9 days (not 10!)
+            //   - Formula: daysInTier = min(endDay, daysOverdue) - startDay + 1
+            const tierStartDay = startDay;
+            const tierEndDay = Math.min(endDay, daysOverdue); // Cap at days overdue
+            // Calculate days: if tier is 2-10 and daysOverdue is 10, then days 2-10 = 9 days
+            // Formula: (tierEndDay - tierStartDay + 1)
+            // For Day 2-10 with 10 days overdue: (10 - 2 + 1) = 9 days ✓
+            const daysInTier = Math.max(0, tierEndDay - tierStartDay + 1);
+
+            if (daysInTier > 0) {
+              // Apply percentage per day for days in this tier
+              const tierPenalty = principal * (feeValue / 100) * daysInTier;
+              penaltyBase += tierPenalty;
+              console.log(`    Tier ${tier.tier_name || `Day ${startDay}-${endDay}`}: ${daysInTier} day(s) × ${feeValue}% × ₹${principal} = ₹${tierPenalty.toFixed(2)}`);
             }
           }
         }
-        
-        const penaltyBaseRounded = toDecimal2(penaltyBase);
-        const gstPercent = lateFeeStructure[0]?.gst_percent || 18; // Use GST from structure or default 18%
-        const penaltyGST = toDecimal2(penaltyBaseRounded * (gstPercent / 100));
-        const penaltyTotal = toDecimal2(penaltyBaseRounded + penaltyGST);
-        
-        // Debug logging for penalty calculation
-        if (daysOverdue > 0) {
-          console.log(`📊 Penalty Calculation Details:
+      }
+
+      const penaltyBaseRounded = toDecimal2(penaltyBase);
+      const gstPercent = lateFeeStructure[0]?.gst_percent || 18; // Use GST from structure or default 18%
+      const penaltyGST = toDecimal2(penaltyBaseRounded * (gstPercent / 100));
+      const penaltyTotal = toDecimal2(penaltyBaseRounded + penaltyGST);
+
+      // Debug logging for penalty calculation
+      if (daysOverdue > 0) {
+        console.log(`📊 Penalty Calculation Details:
             Principal: ₹${principal}
             Days Overdue: ${daysOverdue}
             Penalty Base: ₹${penaltyBaseRounded} (${((penaltyBaseRounded / principal) * 100).toFixed(2)}%)
             GST (${gstPercent}%): ₹${penaltyGST}
             Penalty Total: ₹${penaltyTotal}`);
+      }
+
+      return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
+    };
+
+    const dueDates = parseDueDates(loan.processed_due_date);
+    if (dueDates.length > 0) {
+      let maxDaysOverdue = 0;
+      for (const dueDateStr of dueDates) {
+        if (isOverdue(dueDateStr, today)) {
+          const dueDate = new Date(dueDateStr);
+          dueDate.setHours(0, 0, 0, 0);
+          // Calculate days overdue: if due date is 1st and today is 11th, that's 10 days past due
+          // calculateDaysInclusive gives 11 days (1st to 11th inclusive), but for penalty we need exclusive
+          // So subtract 1 to get actual days past due (excluding today)
+          const daysOverdueInclusive = calculateDaysInclusive(dueDate, today);
+          const daysOverdue = Math.max(1, daysOverdueInclusive - 1); // Exclude today for penalty calculation
+          maxDaysOverdue = Math.max(maxDaysOverdue, daysOverdue);
         }
-        
-        return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
-      };
-      
-      const dueDates = parseDueDates(loan.processed_due_date);
-      if (dueDates.length > 0) {
-        let maxDaysOverdue = 0;
-        for (const dueDateStr of dueDates) {
-          if (isOverdue(dueDateStr, today)) {
-            const dueDate = new Date(dueDateStr);
-            dueDate.setHours(0, 0, 0, 0);
-            // Calculate days overdue: if due date is 1st and today is 11th, that's 10 days past due
-            // calculateDaysInclusive gives 11 days (1st to 11th inclusive), but for penalty we need exclusive
-            // So subtract 1 to get actual days past due (excluding today)
-            const daysOverdueInclusive = calculateDaysInclusive(dueDate, today);
-            const daysOverdue = Math.max(1, daysOverdueInclusive - 1); // Exclude today for penalty calculation
-            maxDaysOverdue = Math.max(maxDaysOverdue, daysOverdue);
-          }
-        }
-        
-        if (maxDaysOverdue > 0) {
-          const penaltyCalc = calculatePenalty(principal, maxDaysOverdue, lateFeeStructure);
-          penaltyAmount = penaltyCalc.penaltyTotal;
-          // Store penalty base and GST separately for extension letter display
-          penaltyBase = penaltyCalc.penaltyBase;
-          penaltyGST = penaltyCalc.penaltyGST;
-          console.log(`💰 Penalty calculation using late_fee_structure (admin endpoint):
+      }
+
+      if (maxDaysOverdue > 0) {
+        const penaltyCalc = calculatePenalty(principal, maxDaysOverdue, lateFeeStructure);
+        penaltyAmount = penaltyCalc.penaltyTotal;
+        // Store penalty base and GST separately for extension letter display
+        penaltyBase = penaltyCalc.penaltyBase;
+        penaltyGST = penaltyCalc.penaltyGST;
+        console.log(`💰 Penalty calculation using late_fee_structure (admin endpoint):
             Principal: ₹${principal}
             Days Overdue: ${maxDaysOverdue}
             Late Fee Structure: ${JSON.stringify(lateFeeStructure)}
             Penalty Base: ₹${penaltyCalc.penaltyBase}
             Penalty GST (${lateFeeStructure?.[0]?.gst_percent || 18}%): ₹${penaltyCalc.penaltyGST}
             Penalty Total: ₹${penaltyCalc.penaltyTotal}`);
-        }
       }
-    
+    }
+
     // Initialize penalty base and GST if not set
     if (!penaltyBase) penaltyBase = 0;
     if (!penaltyGST) penaltyGST = 0;
-    
+
     // Calculate total extension amount: Extension Fee + GST on Extension Fee + Interest + Penalty Base + GST on Penalty
     // Note: Penalty amount already includes GST
     const totalExtensionAmount = Math.round((extensionFee + gstAmount + interestTillDate + penaltyAmount) * 100) / 100;
@@ -2668,13 +2668,13 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
     // Outstanding Balance = Principal + Post Service Fee + GST on Post Service Fee
     // Extension charges (extension fee, GST on extension fee, interest till date) are NOT part of outstanding balance
     // They are settled separately when user pays for extension
-    
+
     // Get EMI count to determine if this is a multi-EMI loan
     const emiCount = parseInt(planSnapshot.emi_count || 0) || (isMultiEmi && allOriginalEmiDates.length > 0 ? allOriginalEmiDates.length : 1);
     const isMultiEmiLoan = emiCount > 1;
-    
+
     console.log(`📊 Loan type: ${isMultiEmiLoan ? `Multi-EMI (${emiCount} EMIs)` : 'Single Payment'}`);
-    
+
     // Get post service fee from processed values
     // IMPORTANT: For multi-EMI loans, processed_post_service_fee is the BASE fee per EMI (needs multiplication)
     // For single payment loans, processed_post_service_fee is the total fee
@@ -2682,21 +2682,21 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
     // Track if we got base fee (per EMI) or total fee
     // For multi-EMI loans, processed_post_service_fee is typically base fee
     let isBaseFee = isMultiEmiLoan && postServiceFee > 0; // If multi-EMI and we have processed_post_service_fee, it's base
-    
+
     // If processed_post_service_fee is 0 or missing, try to get from fees_breakdown
     if (postServiceFee === 0 && loan.fees_breakdown) {
       try {
-        const feesBreakdown = typeof loan.fees_breakdown === 'string' 
-          ? JSON.parse(loan.fees_breakdown) 
+        const feesBreakdown = typeof loan.fees_breakdown === 'string'
+          ? JSON.parse(loan.fees_breakdown)
           : loan.fees_breakdown;
-        
+
         if (Array.isArray(feesBreakdown)) {
           // Find post service fee in fees_breakdown
-          const postServiceFeeObj = feesBreakdown.find(fee => 
+          const postServiceFeeObj = feesBreakdown.find(fee =>
             (fee.fee_name && fee.fee_name.toLowerCase().includes('post service')) ||
             (fee.name && fee.name.toLowerCase().includes('post service'))
           );
-          
+
           if (postServiceFeeObj) {
             // Use fee_amount if available, otherwise calculate from principal and fee_percent
             if (postServiceFeeObj.base_fee_amount) {
@@ -2722,21 +2722,21 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         console.error('Error parsing fees_breakdown for post service fee:', e);
       }
     }
-    
+
     // If still 0, try to calculate from plan snapshot fees
     if (postServiceFee === 0 && planSnapshot.fees && Array.isArray(planSnapshot.fees)) {
-      const postServiceFeeObj = planSnapshot.fees.find(fee => 
+      const postServiceFeeObj = planSnapshot.fees.find(fee =>
         fee.fee_name && fee.fee_name.toLowerCase().includes('post service') &&
         fee.application_method === 'add_to_total'
       );
-      
+
       if (postServiceFeeObj && postServiceFeeObj.fee_percent && principal > 0) {
         postServiceFee = Math.round((principal * parseFloat(postServiceFeeObj.fee_percent) / 100) * 100) / 100;
         isBaseFee = true; // This is base fee per EMI
         console.log(`📊 Calculated post service fee from plan snapshot: ₹${postServiceFee} (${postServiceFeeObj.fee_percent}% of ₹${principal}) - base per EMI`);
       }
     }
-    
+
     // For multi-EMI loans, multiply post service fee by EMI count
     // processed_post_service_fee stores BASE fee per EMI for multi-EMI loans
     // fees_breakdown might have base_fee_amount (base) or fee_amount (total)
@@ -2760,22 +2760,22 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
       } else {
       }
     }
-    
+
     // Calculate GST on Post Service Fee (18% of post service fee)
     // Note: processed_gst is total GST (on both processing fee and post service fee)
     // But outstanding balance only includes GST on post service fee
     const GST_RATE_FOR_FEES = 0.18; // 18% GST
     const postServiceFeeGST = Math.round(postServiceFee * GST_RATE_FOR_FEES * 100) / 100;
-    
+
     // Outstanding balance BEFORE extension = Principal + Post Service Fee + GST on Post Service Fee
     const outstandingLoanBalance = Math.round((principal + postServiceFee + postServiceFeeGST) * 100) / 100;
-    
+
     console.log(`💰 Outstanding Balance Calculation:
       Principal: ₹${principal}
       Post Service Fee: ₹${postServiceFee}
       Post Service Fee GST (18%): ₹${postServiceFeeGST}
       Outstanding Balance: ₹${outstandingLoanBalance}`);
-    
+
     // Outstanding balance AFTER extension remains the SAME (extension is date shift, not balance mutation)
     // Extension payment is a separate transactional charge, not added to outstanding
     const outstandingLoanBalanceAfterExtension = outstandingLoanBalance;
@@ -2788,7 +2788,7 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
     originalDueDateObj.setHours(0, 0, 0, 0);
     const newDueDateObj = new Date(newDueDate);
     newDueDateObj.setHours(0, 0, 0, 0);
-    
+
     let extensionPeriodDaysCalculated;
     if (isMultiEmi && allOriginalEmiDates.length > 0) {
       if (usesSalaryDate && allOriginalEmiDates.length >= 2) {
@@ -2808,7 +2808,7 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
       // For single payment: Extension Period = New Due Date - Original Due Date
       extensionPeriodDaysCalculated = Math.ceil((newDueDateObj - originalDueDateObj) / (1000 * 60 * 60 * 24));
     }
-    
+
     // Ensure extension period is at least 1 day
     const finalExtensionPeriodDays = Math.max(1, extensionPeriodDaysCalculated);
 
@@ -2816,11 +2816,11 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
     // Use parseDateToString and calculateDaysBetween for consistent inclusive day counting
     const disbursementDateStr = parseDateToString(loan.disbursed_at || loan.processed_at);
     const newDueDateStr = parseDateToString(newDueDate);
-    
+
     // Create disbursementDateObj for console.log (always needed)
     const disbursementDateObj = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date(loan.processed_at);
     disbursementDateObj.setHours(0, 0, 0, 0);
-    
+
     let totalTenureDays = 0;
     if (disbursementDateStr && newDueDateStr) {
       // Use calculateDaysBetween for inclusive day counting (both start and end dates count)
@@ -2962,7 +2962,7 @@ router.post('/:loanId/extension-letter/generate-pdf', authenticateAdmin, async (
     let extensionNum = 1;
     try {
       const db = await initializeDatabase();
-      
+
       // Get application number
       const [loans] = await db.execute(
         'SELECT application_number FROM loan_applications WHERE id = ?',
@@ -3020,11 +3020,11 @@ router.post('/:loanId/extension-letter/generate-pdf', authenticateAdmin, async (
 
       console.log('📄 Starting Extension Letter PDF generation, HTML length:', htmlContent.length);
       pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
-      
+
       if (!pdfResult) {
         throw new Error('PDF generation returned null or undefined');
       }
-      
+
       let pdfBuffer;
       if (Buffer.isBuffer(pdfResult)) {
         pdfBuffer = pdfResult;
@@ -3033,7 +3033,7 @@ router.post('/:loanId/extension-letter/generate-pdf', authenticateAdmin, async (
       } else {
         throw new Error('PDF generation returned invalid result structure');
       }
-      
+
       if (!Buffer.isBuffer(pdfBuffer)) {
         if (pdfBuffer instanceof Uint8Array || pdfBuffer.constructor?.name === 'Uint8Array') {
           pdfBuffer = Buffer.from(pdfBuffer);
@@ -3041,7 +3041,7 @@ router.post('/:loanId/extension-letter/generate-pdf', authenticateAdmin, async (
           throw new Error('PDF generation returned invalid buffer type');
         }
       }
-      
+
       pdfResult.buffer = pdfBuffer;
       console.log('✅ Extension Letter PDF generated successfully, buffer size:', pdfBuffer.length);
     } catch (pdfError) {
@@ -3072,7 +3072,7 @@ router.post('/:loanId/extension-letter/generate-pdf', authenticateAdmin, async (
 
   } catch (error) {
     console.error('❌ Error generating Extension Letter PDF:', error);
-    
+
     if (!res.headersSent) {
       const accepts = req.headers.accept || '';
       if (accepts.includes('application/json')) {
@@ -3217,7 +3217,7 @@ router.post('/:loanId/noc/generate-pdf', authenticateAdmin, async (req, res) => 
     let applicationNumber = null;
     try {
       await initializeDatabase();
-      
+
       const loans = await executeQuery(
         'SELECT application_number, status FROM loan_applications WHERE id = ?',
         [loanId]
@@ -3266,11 +3266,11 @@ router.post('/:loanId/noc/generate-pdf', authenticateAdmin, async (req, res) => 
 
       console.log('📄 Starting NOC PDF generation, HTML length:', htmlContent.length);
       pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
-      
+
       if (!pdfResult) {
         throw new Error('PDF generation returned null or undefined');
       }
-      
+
       let pdfBuffer;
       if (Buffer.isBuffer(pdfResult)) {
         pdfBuffer = pdfResult;
@@ -3279,7 +3279,7 @@ router.post('/:loanId/noc/generate-pdf', authenticateAdmin, async (req, res) => 
       } else {
         throw new Error('PDF generation returned invalid result structure');
       }
-      
+
       if (!Buffer.isBuffer(pdfBuffer)) {
         if (pdfBuffer instanceof Uint8Array || pdfBuffer.constructor?.name === 'Uint8Array') {
           pdfBuffer = Buffer.from(pdfBuffer);
@@ -3287,7 +3287,7 @@ router.post('/:loanId/noc/generate-pdf', authenticateAdmin, async (req, res) => 
           throw new Error('PDF generation returned invalid buffer type');
         }
       }
-      
+
       pdfResult.buffer = pdfBuffer;
       console.log('✅ NOC PDF generated successfully, buffer size:', pdfBuffer.length);
     } catch (pdfError) {
@@ -3318,7 +3318,7 @@ router.post('/:loanId/noc/generate-pdf', authenticateAdmin, async (req, res) => 
 
   } catch (error) {
     console.error('❌ Error generating NOC PDF:', error);
-    
+
     if (!res.headersSent) {
       const accepts = req.headers.accept || '';
       if (accepts.includes('application/json')) {
@@ -3376,15 +3376,15 @@ function generateNOCHTML(nocData) {
     }
   };
 
-  const borrowerName = nocData.borrower?.name || 
-    `${nocData.borrower?.first_name || ''} ${nocData.borrower?.last_name || ''}`.trim() || 
+  const borrowerName = nocData.borrower?.name ||
+    `${nocData.borrower?.first_name || ''} ${nocData.borrower?.last_name || ''}`.trim() ||
     'N/A';
-  
+
   const applicationNumber = nocData.loan?.application_number || nocData.loan?.loan_id || 'N/A';
-  const shortLoanId = applicationNumber && applicationNumber !== 'N/A' 
+  const shortLoanId = applicationNumber && applicationNumber !== 'N/A'
     ? `PLL${String(applicationNumber).slice(-4)}`
     : (nocData.loan?.id ? `PLL${String(nocData.loan.id).padStart(4, '0').slice(-4)}` : 'PLLXXX');
-  
+
   const todayDate = formatDate(nocData.generated_at || new Date().toISOString());
 
   return `
@@ -3538,7 +3538,7 @@ async function generateAndSendNOCEmail(loanId) {
     let pdfResult;
     try {
       pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
-      
+
       let pdfBuffer;
       if (Buffer.isBuffer(pdfResult)) {
         pdfBuffer = pdfResult;
@@ -3547,7 +3547,7 @@ async function generateAndSendNOCEmail(loanId) {
       } else {
         throw new Error('PDF generation returned invalid result structure');
       }
-      
+
       if (!Buffer.isBuffer(pdfBuffer)) {
         if (pdfBuffer instanceof Uint8Array || pdfBuffer.constructor?.name === 'Uint8Array') {
           pdfBuffer = Buffer.from(pdfBuffer);
@@ -3555,7 +3555,7 @@ async function generateAndSendNOCEmail(loanId) {
           throw new Error('PDF generation returned invalid buffer type');
         }
       }
-      
+
       pdfResult.buffer = pdfBuffer;
       console.log('✅ NOC PDF generated for email, size:', pdfBuffer.length, 'bytes');
     } catch (pdfError) {
@@ -3652,13 +3652,13 @@ router.get('/:loanId', async (req, res, next) => {
       if (kycVerifications && kycVerifications.length > 0) {
         const verificationData = kycVerifications[0].verification_data;
         let kycData = typeof verificationData === 'string' ? JSON.parse(verificationData) : verificationData;
-        
+
         // Try to get masked Aadhar from various possible locations in the JSON structure
-        maskedAadharNumber = kycData?.kycData?.maskedAdharNumber || 
-                             kycData?.maskedAdharNumber || 
-                             kycData?.masked_adhar_number ||
-                             kycData?.uid ||
-                             'N/A';
+        maskedAadharNumber = kycData?.kycData?.maskedAdharNumber ||
+          kycData?.maskedAdharNumber ||
+          kycData?.masked_adhar_number ||
+          kycData?.uid ||
+          'N/A';
       }
     } catch (kycError) {
       console.error('Error fetching KYC verification for Aadhar:', kycError);
@@ -3697,7 +3697,7 @@ router.get('/:loanId', async (req, res, next) => {
         `, [loan.user_bank_id]);
         bankDetails = bankDetailsQuery && bankDetailsQuery.length > 0 ? bankDetailsQuery[0] : null;
       }
-      
+
       // If no bank details from user_bank_id, try to get primary bank details
       if (!bankDetails) {
         const primaryBankQuery = await executeQuery(`
@@ -3750,16 +3750,16 @@ router.get('/:loanId', async (req, res, next) => {
           const feeName = (fee.fee_name || fee.name || '').toLowerCase();
           // Use fee_amount (new) or amount (old) - database stores fee_amount
           const feeAmount = fee.fee_amount || fee.amount || 0;
-          
+
           // Determine application_method from stored value or infer from fee name
           let applicationMethod = fee.application_method;
           if (!applicationMethod) {
             // Infer from fee name: "post service fee" is add_to_total, others are deduct_from_disbursal
-            applicationMethod = feeName.includes('post service') || feeName.includes('post_service') 
-              ? 'add_to_total' 
+            applicationMethod = feeName.includes('post service') || feeName.includes('post_service')
+              ? 'add_to_total'
               : 'deduct_from_disbursal';
           }
-          
+
           return {
             fee_name: fee.fee_name || fee.name || 'Fee',
             fee_amount: feeAmount,  // Use fee_amount for frontend compatibility
@@ -3820,7 +3820,7 @@ router.get('/:loanId', async (req, res, next) => {
           return {
             fee_name: fee.fee_name || fee.name || 'Fee',
             fee_percent: feePercent || 0,
-        application_method: fee.application_method || 'deduct_from_disbursal'
+            application_method: fee.application_method || 'deduct_from_disbursal'
           };
         });
       } else if (loan.loan_plan_id) {
@@ -3837,7 +3837,7 @@ router.get('/:loanId', async (req, res, next) => {
             ORDER BY ft.fee_name ASC`,
             [loan.loan_plan_id]
           );
-          
+
           if (planFees && planFees.length > 0) {
             planSnapshot.fees = planFees.map(pf => ({
               fee_name: pf.fee_name || 'Fee',
@@ -3861,7 +3861,7 @@ router.get('/:loanId', async (req, res, next) => {
         // Try to get application_method from fees_breakdown by matching fee_name
         if (feesBreakdown && feesBreakdown.length > 0) {
           planSnapshot.fees = planSnapshot.fees.map(fee => {
-            const matchingFee = feesBreakdown.find(bf => 
+            const matchingFee = feesBreakdown.find(bf =>
               (bf.fee_name === fee.fee_name || bf.name === fee.fee_name)
             );
             // Calculate fee_percent from amount if not provided
@@ -3889,7 +3889,7 @@ router.get('/:loanId', async (req, res, next) => {
               ORDER BY ft.fee_name ASC`,
               [loan.loan_plan_id]
             );
-            
+
             if (planFees && planFees.length > 0) {
               planSnapshot.fees = planSnapshot.fees.map(fee => {
                 const matchingFee = planFees.find(pf => pf.fee_name === fee.fee_name);
@@ -3904,13 +3904,13 @@ router.get('/:loanId', async (req, res, next) => {
           }
         }
       }
-      
+
       // Validate and correct application_method based on fee name (even if already set)
       // This ensures "post service fee" is always "add_to_total" regardless of what's in fees_breakdown
       planSnapshot.fees = planSnapshot.fees.map(fee => {
         const feeNameLower = fee.fee_name?.toLowerCase() || '';
         let correctMethod = fee.application_method;
-        
+
         // Validate: "post service fee" should always be "add_to_total"
         if (feeNameLower.includes('post service')) {
           if (fee.application_method !== 'add_to_total') {
@@ -3922,7 +3922,7 @@ router.get('/:loanId', async (req, res, next) => {
             correctMethod = 'deduct_from_disbursal';
           }
         }
-        
+
         return {
           ...fee,
           application_method: correctMethod
@@ -4054,7 +4054,7 @@ router.get('/:loanId', async (req, res, next) => {
     // Extract values for KFS
     // Define emiCount early so it can be used in firstDueDate calculation
     const emiCount = planData.emi_count || 1;
-    
+
     const processingFee = calculations.totals.disbursalFee;
     // NOTE: repayableFeeGST is ALREADY multiplied by emiCount in loanCalculations.js
     // Do NOT multiply again here!
@@ -4080,7 +4080,7 @@ router.get('/:loanId', async (req, res, next) => {
       firstDueDate.setHours(0, 0, 0, 0);
     }
     firstDueDate.setHours(0, 0, 0, 0);
-    
+
     // For salary-based Multi-EMI loans, ensure firstDueDate matches the salary date
     if (emiCount > 1 && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
       const salaryDate = parseInt(userData.salary_date);
@@ -4093,12 +4093,12 @@ router.get('/:loanId', async (req, res, next) => {
     // For Multi-EMI loans, calculate from disbursement date to last EMI date
     // For single payment loans, use actual interest calculation days
     let loanTermDaysForAPR = days;  // Default: use interest calculation days
-    
+
     if (emiCount > 1) {
       // Generate last EMI date to calculate actual loan term
       const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
       baseDate.setHours(0, 0, 0, 0);
-      
+
       let lastEmiDate;
       if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
         const salaryDate = parseInt(userData.salary_date);
@@ -4128,7 +4128,7 @@ router.get('/:loanId', async (req, res, next) => {
         }
         lastEmiDate.setHours(0, 0, 0, 0);
       }
-      
+
       // Calculate actual loan term days from disbursement to last EMI
       if (lastEmiDate) {
         loanTermDaysForAPR = Math.ceil((lastEmiDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
@@ -4140,7 +4140,7 @@ router.get('/:loanId', async (req, res, next) => {
     // NOTE: repayableFee is ALREADY multiplied by emiCount in loanCalculations.js
     // Do NOT multiply again here!
     const repayableFee = calculations.totals.repayableFee;
-    
+
     // For Multi-EMI loans, calculate total interest by summing interest for each EMI period
     // Each EMI period has interest calculated on the outstanding principal for that period
     // Define baseDate for debug logging (used for both single and multi-EMI)
@@ -4182,32 +4182,32 @@ router.get('/:loanId', async (req, res, next) => {
         baseDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
       }
     }
-    
+
     // Convert string to Date for calendar arithmetic (using parsed components to avoid timezone shift)
     const [year, month, day] = baseDateStr.split('-').map(Number);
     const baseDate = new Date(year, month - 1, day);
     baseDate.setHours(0, 0, 0, 0);
-    
+
     // Initialize emiPeriodDetails for debug logging
     let emiPeriodDetails = [];
-    
+
     let interestForAPR = interest;
     if (emiCount > 1) {
       const interestRatePerDay = calculations.interest.rate_per_day || (interest / (principal * days));
-      
+
       // Generate all EMI dates
       // PRIORITY 1: Use processed_due_date if available (source of truth for processed loans)
       // PRIORITY 2: Recalculate from today (for non-processed loans)
       // NOTE: We do NOT use emi_schedule as it can have stale/incorrect dates from when loan was applied
       let allEmiDates = [];
-      
+
       // PRIORITY 1: Check if loan has processed_due_date (for processed loans)
       if (loan.processed_due_date) {
         try {
-          const parsedDueDate = typeof loan.processed_due_date === 'string' 
-            ? JSON.parse(loan.processed_due_date) 
+          const parsedDueDate = typeof loan.processed_due_date === 'string'
+            ? JSON.parse(loan.processed_due_date)
             : loan.processed_due_date;
-          
+
           if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
             allEmiDates = parsedDueDate.map(date => {
               if (typeof date === 'string') {
@@ -4224,75 +4224,75 @@ router.get('/:loanId', async (req, res, next) => {
           console.error('❌ [Admin APR] Error parsing processed_due_date:', e, loan.processed_due_date);
         }
       }
-      
+
       // PRIORITY 2: Recalculate from today (for non-processed loans)
       if (allEmiDates.length === 0 && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
         const salaryDate = parseInt(userData.salary_date);
         if (salaryDate >= 1 && salaryDate <= 31) {
-              // For processed loans, use processed_at_date (from SQL DATE()) to avoid timezone issues
-              // For non-processed loans, use disbursed_at_date
-              let baseDateForEmi;
-              if (loan.processed_at_date) {
-                // Use processed_at_date from SQL DATE() function (already extracted, no timezone issues)
-                let processedDateStr;
-                if (typeof loan.processed_at_date === 'string') {
-                  processedDateStr = loan.processed_at_date;
-                } else if (loan.processed_at_date instanceof Date) {
-                  // MySQL DATE() returns as Date object - extract UTC components to avoid timezone shift
-                  const year = loan.processed_at_date.getUTCFullYear();
-                  const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
-                  const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
-                  processedDateStr = `${year}-${month}-${day}`;
-                } else {
-                  // Fallback: parse from processed_at
-                  processedDateStr = parseDateToString(loan.processed_at) || getTodayString();
-                }
-                // Parse date components directly to avoid timezone issues
-                const [year, month, day] = processedDateStr.split('-').map(Number);
-                baseDateForEmi = new Date(year, month - 1, day); // month is 0-indexed
-                console.log(`📅 [Admin] Using processed_at_date as base date for EMI calculation: ${processedDateStr}`);
-              } else if (loan.disbursed_at_date) {
-                // Use disbursed_at_date from SQL DATE() function
-                let disbursedDateStr;
-                if (typeof loan.disbursed_at_date === 'string') {
-                  disbursedDateStr = loan.disbursed_at_date;
-                } else if (loan.disbursed_at_date instanceof Date) {
-                  const year = loan.disbursed_at_date.getUTCFullYear();
-                  const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
-                  const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
-                  disbursedDateStr = `${year}-${month}-${day}`;
-                } else {
-                  disbursedDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
-                }
-                const [year, month, day] = disbursedDateStr.split('-').map(Number);
-                baseDateForEmi = new Date(year, month - 1, day);
-                console.log(`📅 [Admin] Using disbursed_at_date as base date: ${disbursedDateStr}`);
-              } else {
-                // Fallback: use today
-                baseDateForEmi = new Date();
-                console.log(`📅 [Admin] Using today as base date`);
-              }
-              baseDateForEmi.setHours(0, 0, 0, 0);
-              let nextSalaryDate = getNextSalaryDate(baseDateForEmi, salaryDate);
-              
-              // Check if duration is less than minimum days
-              const minDuration = planData.repayment_days || 15;
-              const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDateForEmi.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-              console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDateForEmi)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
-              if (daysToNextSalary < minDuration) {
-                nextSalaryDate = getSalaryDateForMonth(baseDateForEmi, salaryDate, 1);
-                console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
-              }
-          
+          // For processed loans, use processed_at_date (from SQL DATE()) to avoid timezone issues
+          // For non-processed loans, use disbursed_at_date
+          let baseDateForEmi;
+          if (loan.processed_at_date) {
+            // Use processed_at_date from SQL DATE() function (already extracted, no timezone issues)
+            let processedDateStr;
+            if (typeof loan.processed_at_date === 'string') {
+              processedDateStr = loan.processed_at_date;
+            } else if (loan.processed_at_date instanceof Date) {
+              // MySQL DATE() returns as Date object - extract UTC components to avoid timezone shift
+              const year = loan.processed_at_date.getUTCFullYear();
+              const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
+              const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
+              processedDateStr = `${year}-${month}-${day}`;
+            } else {
+              // Fallback: parse from processed_at
+              processedDateStr = parseDateToString(loan.processed_at) || getTodayString();
+            }
+            // Parse date components directly to avoid timezone issues
+            const [year, month, day] = processedDateStr.split('-').map(Number);
+            baseDateForEmi = new Date(year, month - 1, day); // month is 0-indexed
+            console.log(`📅 [Admin] Using processed_at_date as base date for EMI calculation: ${processedDateStr}`);
+          } else if (loan.disbursed_at_date) {
+            // Use disbursed_at_date from SQL DATE() function
+            let disbursedDateStr;
+            if (typeof loan.disbursed_at_date === 'string') {
+              disbursedDateStr = loan.disbursed_at_date;
+            } else if (loan.disbursed_at_date instanceof Date) {
+              const year = loan.disbursed_at_date.getUTCFullYear();
+              const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
+              const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
+              disbursedDateStr = `${year}-${month}-${day}`;
+            } else {
+              disbursedDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
+            }
+            const [year, month, day] = disbursedDateStr.split('-').map(Number);
+            baseDateForEmi = new Date(year, month - 1, day);
+            console.log(`📅 [Admin] Using disbursed_at_date as base date: ${disbursedDateStr}`);
+          } else {
+            // Fallback: use today
+            baseDateForEmi = new Date();
+            console.log(`📅 [Admin] Using today as base date`);
+          }
+          baseDateForEmi.setHours(0, 0, 0, 0);
+          let nextSalaryDate = getNextSalaryDate(baseDateForEmi, salaryDate);
+
+          // Check if duration is less than minimum days
+          const minDuration = planData.repayment_days || 15;
+          const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDateForEmi.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDateForEmi)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
+          if (daysToNextSalary < minDuration) {
+            nextSalaryDate = getSalaryDateForMonth(baseDateForEmi, salaryDate, 1);
+            console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
+          }
+
           // Generate all EMI dates from the first salary date
           for (let i = 0; i < emiCount; i++) {
             const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
             allEmiDates.push(formatDateLocal(emiDate));
           }
-          
+
           // Debug: Log generated EMI dates
           console.log('📅 [Admin] Generated EMI Dates:', allEmiDates);
-          
+
           // Update firstDueDate to match the first EMI date for consistency
           if (allEmiDates.length > 0) {
             const [y, m, d] = allEmiDates[0].split('-').map(Number);
@@ -4319,7 +4319,7 @@ router.get('/:loanId', async (req, res, next) => {
           allEmiDates.push(emiDate);
         }
       }
-      
+
       // Calculate total interest by summing interest for each EMI period
       if (allEmiDates.length === emiCount) {
         // Calculate principal distribution (handle cases where it doesn't divide evenly)
@@ -4327,14 +4327,14 @@ router.get('/:loanId', async (req, res, next) => {
         // For 4 EMIs: 25%, 25%, 25%, 25% (or ₹2,500 each)
         const principalPerEmi = Math.floor(principal / emiCount * 100) / 100; // Round to 2 decimals
         const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
-        
+
         let outstandingPrincipal = principal;
         interestForAPR = 0;
-        
+
         for (let i = 0; i < emiCount; i++) {
           // allEmiDates contains date strings (YYYY-MM-DD), use directly
           const emiDateStr = allEmiDates[i];
-          
+
           // Calculate days for this EMI period using string-based calculation
           // First period (disbursement to first EMI): inclusive
           // Subsequent periods: start from day AFTER previous EMI date (e.g., 1 Feb if previous was 31 Jan)
@@ -4355,19 +4355,19 @@ router.get('/:loanId', async (req, res, next) => {
               previousDateStr = getTodayString();
             }
           }
-          
+
           // Use calculateDaysBetween for accurate calendar day calculation (inclusive)
           const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStr);
-          
+
           // Calculate principal for this EMI (add remainder to last EMI)
-          const principalForThisEmi = i === emiCount - 1 
+          const principalForThisEmi = i === emiCount - 1
             ? Math.round((principalPerEmi + remainder) * 100) / 100
             : principalPerEmi;
-          
+
           // Calculate interest for this period on outstanding principal
           const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
           interestForAPR += interestForPeriod;
-          
+
           // Store period details for debugging
           // Note: emiDate is from allEmiDates array which uses corrected dates
           // Use date format for EMI dates
@@ -4381,13 +4381,13 @@ router.get('/:loanId', async (req, res, next) => {
             interestForPeriod: interestForPeriod.toFixed(2),
             interestRatePerDay
           });
-          
+
           // Reduce outstanding principal for next period
           outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
         }
       }
     }
-    
+
     const totalCharges = processingFee + gst + repayableFee + interestForAPR;
     const apr = loanTermDaysForAPR > 0 ? ((totalCharges / principal) / loanTermDaysForAPR) * 36500 : 0;
 
@@ -4501,12 +4501,12 @@ router.get('/:loanId', async (req, res, next) => {
           })),
           ...calculations.fees.addToTotal.map(fee => ({
             // Fee amounts are already multiplied by EMI count in loanCalculations.js
-              fee_name: fee.fee_name,
-              fee_percent: fee.fee_percent,
+            fee_name: fee.fee_name,
+            fee_percent: fee.fee_percent,
             fee_amount: fee.fee_amount,
             gst_amount: fee.gst_amount,
             total_with_gst: fee.total_with_gst,
-              application_method: 'add_to_total',
+            application_method: 'add_to_total',
             amount: fee.fee_amount
           }))
         ],
@@ -4532,20 +4532,20 @@ router.get('/:loanId', async (req, res, next) => {
       repayment: (() => {
         const emiCount = planData.emi_count || null;
         const isMultiEmi = emiCount && emiCount > 1;
-        
+
         // Generate all EMI dates for Multi-EMI plans
         // PRIORITY 1: Use processed_due_date if available (source of truth for processed loans)
         // PRIORITY 2: Recalculate from today (for non-processed loans)
         // NOTE: We do NOT use emi_schedule as it can have stale/incorrect dates from when loan was applied
         let allEmiDates = [];
-        
+
         // PRIORITY 1: Check processed_due_date first (for processed loans)
         if (loan.processed_due_date) {
           try {
-            const parsedDueDate = typeof loan.processed_due_date === 'string' 
-              ? JSON.parse(loan.processed_due_date) 
+            const parsedDueDate = typeof loan.processed_due_date === 'string'
+              ? JSON.parse(loan.processed_due_date)
               : loan.processed_due_date;
-            
+
             if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
               allEmiDates = parsedDueDate.map(date => {
                 if (typeof date === 'string') {
@@ -4562,7 +4562,7 @@ router.get('/:loanId', async (req, res, next) => {
             console.error('❌ [Admin Repayment] Error parsing processed_due_date:', e, loan.processed_due_date);
           }
         }
-        
+
         // PRIORITY 2: Recalculate from today (for non-processed loans)
         if (allEmiDates.length === 0 && isMultiEmi && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
           const salaryDate = parseInt(userData.salary_date);
@@ -4594,7 +4594,7 @@ router.get('/:loanId', async (req, res, next) => {
             }
             baseDate.setHours(0, 0, 0, 0);
             let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
-            
+
             // Check if duration is less than minimum days
             const minDuration = planData.repayment_days || 15;
             const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
@@ -4603,13 +4603,13 @@ router.get('/:loanId', async (req, res, next) => {
               nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
               console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
             }
-            
+
             // Generate all EMI dates from the first salary date
             for (let i = 0; i < emiCount; i++) {
               const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
               allEmiDates.push(formatDateLocal(emiDate));
             }
-            
+
             // Debug: Log all generated EMI dates for repayment schedule
           }
         } else if (allEmiDates.length === 0 && isMultiEmi) {
@@ -4622,7 +4622,7 @@ router.get('/:loanId', async (req, res, next) => {
             monthly: 30
           };
           const daysBetween = daysPerEmi[planData.emi_frequency] || 30;
-          
+
           for (let i = 0; i < emiCount; i++) {
             const emiDate = new Date(baseDate);
             if (planData.emi_frequency === 'monthly') {
@@ -4640,7 +4640,7 @@ router.get('/:loanId', async (req, res, next) => {
 
         // Generate repayment schedule with all installments
         let schedule = [];
-        
+
         if (isMultiEmi && allEmiDates.length === emiCount) {
           // For Multi-EMI loans, generate schedule with all installments
           const interestRatePerDay = calculations.interest.rate_per_day || (interest / (principal * days));
@@ -4652,17 +4652,17 @@ router.get('/:loanId', async (req, res, next) => {
           const totalRepayableFeeGST = calculations.totals.repayableFeeGST || 0;
           const postServiceFeePerEmi = Math.round((totalRepayableFee / emiCount) * 100) / 100;
           const postServiceFeeGSTPerEmi = Math.round((totalRepayableFeeGST / emiCount) * 100) / 100;
-          
+
           let outstandingPrincipal = principal;
           // For processed loans, use processed_at as base date; otherwise use disbursed_at
           // This must match the base date used for EMI date generation and interest calculation
           // Use baseDateStr (already calculated above) for schedule generation to avoid timezone issues
           const baseDateStrForSchedule = baseDateStr || getTodayString();
-          
+
           for (let i = 0; i < emiCount; i++) {
             // Get EMI date (allEmiDates contains date strings in YYYY-MM-DD format)
             const emiDateStr = allEmiDates[i];
-            
+
             // Calculate days for this period using string-based calculation
             let previousDateStr;
             if (i === 0) {
@@ -4680,21 +4680,21 @@ router.get('/:loanId', async (req, res, next) => {
                 previousDateStr = getTodayString();
               }
             }
-            
+
             // Use calculateDaysBetween for accurate calendar day calculation (inclusive)
             const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStr);
-            
+
             // Calculate principal for this EMI
-            const principalForThisEmi = i === emiCount - 1 
+            const principalForThisEmi = i === emiCount - 1
               ? Math.round((principalPerEmi + remainder) * 100) / 100
               : principalPerEmi;
-            
+
             // Calculate interest for this period
             const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
-            
+
             // Calculate installment amount (principal + interest + post service fee + GST)
             const instalmentAmount = Math.round((principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi) * 100) / 100;
-            
+
             schedule.push({
               instalment_no: i + 1,
               outstanding_principal: Math.round(outstandingPrincipal * 100) / 100,
@@ -4705,7 +4705,7 @@ router.get('/:loanId', async (req, res, next) => {
               instalment_amount: instalmentAmount,
               due_date: emiDateStr // Use date string directly (already in YYYY-MM-DD format)
             });
-            
+
             // Reduce outstanding principal for next period
             outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
           }
@@ -4714,13 +4714,13 @@ router.get('/:loanId', async (req, res, next) => {
           const postServiceFee = calculations.totals.repayableFee || 0;
           const postServiceFeeGST = calculations.totals.repayableFeeGST || 0;
           schedule.push({
-              instalment_no: 1,
-              outstanding_principal: principal,
-              principal: principal,
-              interest: interest,
+            instalment_no: 1,
+            outstanding_principal: principal,
+            principal: principal,
+            interest: interest,
             post_service_fee: postServiceFee,
             gst_on_post_service_fee: postServiceFeeGST,
-              instalment_amount: totalRepayable,
+            instalment_amount: totalRepayable,
             due_date: formatDateLocal(dueDate)
           });
         }
@@ -4747,6 +4747,9 @@ router.get('/:loanId', async (req, res, next) => {
 
       // Grievance Redressal
       grievance: {
+        name: 'Mr.Kiran',
+        phone: '+91 9573794121',
+        email: 'Kiran@pocketcredit.in',
         nodal_officer: {
           name: 'Mr.Kiran',
           phone: '+91 9573794121',
@@ -4800,10 +4803,10 @@ router.get('/:loanId', async (req, res, next) => {
       signature: (() => {
         if (loan.clickwrap_signed_at && loan.clickwrap_webhook_data) {
           try {
-            const webhookData = typeof loan.clickwrap_webhook_data === 'string' 
-              ? JSON.parse(loan.clickwrap_webhook_data) 
+            const webhookData = typeof loan.clickwrap_webhook_data === 'string'
+              ? JSON.parse(loan.clickwrap_webhook_data)
               : loan.clickwrap_webhook_data;
-            
+
             return {
               signed_at: loan.clickwrap_signed_at,
               signers_info: webhookData['signers-info'] || webhookData.signersInfo || []
@@ -4885,18 +4888,18 @@ router.post('/:loanId/generate-pdf', authenticateAdmin, async (req, res) => {
     // Get loan data for filename
     let applicationNumber = null;
     try {
-    const db = await initializeDatabase();
-    const [loans] = await db.execute(
-      'SELECT application_number FROM loan_applications WHERE id = ?',
-      [loanId]
-    );
+      const db = await initializeDatabase();
+      const [loans] = await db.execute(
+        'SELECT application_number FROM loan_applications WHERE id = ?',
+        [loanId]
+      );
 
       if (!loans || loans.length === 0 || !loans[0]) {
-      return res.status(404).json({
-        success: false,
-        message: 'Loan not found'
-      });
-    }
+        return res.status(404).json({
+          success: false,
+          message: 'Loan not found'
+        });
+      }
 
       applicationNumber = loans[0].application_number || `LOAN_${loanId}`;
     } catch (dbError) {
@@ -4926,19 +4929,19 @@ router.post('/:loanId/generate-pdf', authenticateAdmin, async (req, res) => {
 
       console.log('📄 Starting PDF generation, HTML length:', htmlContent.length);
       console.log('📄 HTML preview (first 200 chars):', htmlContent.substring(0, 200));
-      
+
       pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
-      
+
       if (!pdfResult) {
         throw new Error('PDF generation returned null or undefined');
       }
-      
+
       // Debug: Log the structure of pdfResult
       console.log('📊 pdfResult type:', typeof pdfResult);
       console.log('📊 pdfResult keys:', Object.keys(pdfResult || {}));
       console.log('📊 pdfResult.buffer type:', typeof pdfResult.buffer);
       console.log('📊 pdfResult.buffer is Buffer?', Buffer.isBuffer(pdfResult.buffer));
-      
+
       // Check if pdfResult is a Buffer (direct return) or an object with buffer property
       let pdfBuffer;
       if (Buffer.isBuffer(pdfResult)) {
@@ -4953,13 +4956,13 @@ router.post('/:loanId/generate-pdf', authenticateAdmin, async (req, res) => {
         console.error('❌ pdfResult structure:', JSON.stringify(Object.keys(pdfResult || {})));
         throw new Error('PDF generation returned invalid result structure');
       }
-      
+
       // Validate buffer
       if (!pdfBuffer) {
         console.error('❌ pdfBuffer is null or undefined');
         throw new Error('PDF generation returned null buffer');
       }
-      
+
       // Puppeteer returns Uint8Array, not Buffer - convert it
       if (!Buffer.isBuffer(pdfBuffer)) {
         // Check if it's a Uint8Array (which Puppeteer returns)
@@ -4972,7 +4975,7 @@ router.post('/:loanId/generate-pdf', authenticateAdmin, async (req, res) => {
           throw new Error('PDF generation returned invalid buffer type');
         }
       }
-      
+
       // Update pdfResult to have the buffer for consistency
       pdfResult.buffer = pdfBuffer;
 
@@ -4985,7 +4988,7 @@ router.post('/:loanId/generate-pdf', authenticateAdmin, async (req, res) => {
         name: pdfError.name,
         cause: pdfError.cause
       });
-      
+
       // Ensure we haven't sent headers yet
       if (!res.headersSent) {
         // Since frontend uses responseType: 'blob', we need to send error in a way that can be parsed
@@ -5019,19 +5022,19 @@ router.post('/:loanId/generate-pdf', authenticateAdmin, async (req, res) => {
   } catch (error) {
     console.error('❌ Error generating PDF:', error);
     console.error('Error stack:', error.stack);
-    
+
     // Check if response has already been sent
     if (!res.headersSent) {
       // Since frontend expects blob, send error as text/plain or JSON
       // But first check if client accepts JSON
       const accepts = req.headers.accept || '';
-      
+
       if (accepts.includes('application/json')) {
-    res.status(500).json({
-      success: false,
-      message: 'Failed to generate PDF',
+        res.status(500).json({
+          success: false,
+          message: 'Failed to generate PDF',
           error: error.message || 'Unknown error occurred'
-    });
+        });
       } else {
         // Send as plain text error message
         res.status(500).setHeader('Content-Type', 'text/plain');
@@ -5182,7 +5185,7 @@ router.post('/:loanId/generate-and-save', requireAuth, async (req, res) => {
 
     // Just mark KFS as accepted - PDF generation will be done by admin when adding transaction
     // We can add a column to track this if needed, but for now just return success
-    
+
     res.json({
       success: true,
       message: 'KFS accepted successfully. PDF will be generated when loan is disbursed.',
