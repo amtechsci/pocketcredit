@@ -12,7 +12,7 @@ const PARTNER_JWT_SECRET = process.env.PARTNER_JWT_SECRET || JWT_SECRET;
 const authenticatePartnerBasic = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
-    
+
     if (!authHeader || !authHeader.startsWith('Basic ')) {
       return res.status(401).json({
         status: false,
@@ -36,7 +36,7 @@ const authenticatePartnerBasic = async (req, res, next) => {
 
     // Verify partner credentials
     const { verifyPartnerCredentials, findPartnerByClientId } = require('../models/partner');
-    
+
     // First check if partner exists (for better error messages)
     const partnerExists = await findPartnerByClientId(clientId);
     if (!partnerExists) {
@@ -47,7 +47,7 @@ const authenticatePartnerBasic = async (req, res, next) => {
         message: `Invalid API credentials: Client ID '${clientId}' not found or inactive`
       });
     }
-    
+
     // Verify credentials
     const partner = await verifyPartnerCredentials(clientId, clientSecret);
 
@@ -61,10 +61,14 @@ const authenticatePartnerBasic = async (req, res, next) => {
     }
 
     // Check IP whitelist (if configured)
-    if (partner.allowed_ips && partner.allowed_ips.trim() !== '') {
+    // Bypass check if request is from pocketcredit domain (internal usage)
+    const origin = req.headers.origin || req.headers.referer;
+    const isInternalRequest = origin && origin.includes('pocketcredit');
+
+    if (!isInternalRequest && partner.allowed_ips && partner.allowed_ips.trim() !== '') {
       const clientIp = getIpAddress(req);
       const allowedIps = partner.allowed_ips.split(',').map(ip => ip.trim()).filter(ip => ip);
-      
+
       // Check if client IP is in whitelist
       const isIpAllowed = allowedIps.some(allowedIp => {
         // Support exact match and CIDR notation (basic support)
@@ -76,21 +80,21 @@ const authenticatePartnerBasic = async (req, res, next) => {
           const [network, prefixLength] = allowedIp.split('/');
           const prefix = parseInt(prefixLength);
           if (isNaN(prefix)) return false;
-          
+
           // Simple CIDR check (for IPv4)
           const ipToNumber = (ip) => {
             return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0) >>> 0;
           };
-          
+
           const networkNum = ipToNumber(network);
           const clientNum = ipToNumber(clientIp);
           const mask = (0xFFFFFFFF << (32 - prefix)) >>> 0;
-          
+
           return (networkNum & mask) === (clientNum & mask);
         }
         return false;
       });
-      
+
       if (!isIpAllowed) {
         console.error(`Partner login failed: IP address '${clientIp}' not in whitelist for Client ID '${clientId}'`);
         return res.status(403).json({
@@ -99,7 +103,7 @@ const authenticatePartnerBasic = async (req, res, next) => {
           message: 'IP address not allowed. Please contact support to whitelist your IP address.'
         });
       }
-      
+
       console.log(`✅ IP address '${clientIp}' verified for partner '${clientId}'`);
     }
 
@@ -123,7 +127,7 @@ const authenticatePartnerBasic = async (req, res, next) => {
 const authenticatePartnerToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         status: false,
@@ -157,7 +161,7 @@ const authenticatePartnerToken = async (req, res, next) => {
         } catch (e) {
           // Ignore decode errors
         }
-        
+
         console.error('Token expired error:', {
           tokenExp: tokenInfo?.exp,
           currentTime: Math.floor(Date.now() / 1000),
@@ -177,7 +181,7 @@ const authenticatePartnerToken = async (req, res, next) => {
       } catch (e) {
         // Ignore decode errors
       }
-      
+
       console.error('Token verification error:', {
         errorName: error.name,
         errorMessage: error.message,
@@ -191,7 +195,7 @@ const authenticatePartnerToken = async (req, res, next) => {
           timeDiff: tokenInfo.exp ? Math.floor(Date.now() / 1000) - tokenInfo.exp : 'N/A'
         } : 'Could not decode token'
       });
-      
+
       return res.status(401).json({
         status: false,
         code: 4118,
@@ -211,7 +215,7 @@ const authenticatePartnerToken = async (req, res, next) => {
 
     // Verify partner exists and is active
     const partner = await findPartnerByUuid(decoded.partner_id);
-    
+
     if (!partner || !partner.is_active) {
       return res.status(401).json({
         status: false,
@@ -221,10 +225,14 @@ const authenticatePartnerToken = async (req, res, next) => {
     }
 
     // Check IP whitelist (if configured)
-    if (partner.allowed_ips && partner.allowed_ips.trim() !== '') {
+    // Bypass check if request is from pocketcredit domain (internal usage)
+    const origin = req.headers.origin || req.headers.referer;
+    const isInternalRequest = origin && (origin.includes('pocketcredit') || origin.includes('localhost'));
+
+    if (!isInternalRequest && partner.allowed_ips && partner.allowed_ips.trim() !== '') {
       const clientIp = getIpAddress(req);
       const allowedIps = partner.allowed_ips.split(',').map(ip => ip.trim()).filter(ip => ip);
-      
+
       // Check if client IP is in whitelist
       const isIpAllowed = allowedIps.some(allowedIp => {
         // Support exact match and CIDR notation (basic support)
@@ -236,21 +244,21 @@ const authenticatePartnerToken = async (req, res, next) => {
           const [network, prefixLength] = allowedIp.split('/');
           const prefix = parseInt(prefixLength);
           if (isNaN(prefix)) return false;
-          
+
           // Simple CIDR check (for IPv4)
           const ipToNumber = (ip) => {
             return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0) >>> 0;
           };
-          
+
           const networkNum = ipToNumber(network);
           const clientNum = ipToNumber(clientIp);
           const mask = (0xFFFFFFFF << (32 - prefix)) >>> 0;
-          
+
           return (networkNum & mask) === (clientNum & mask);
         }
         return false;
       });
-      
+
       if (!isIpAllowed) {
         console.error(`Partner API access denied: IP address '${clientIp}' not in whitelist for partner '${decoded.partner_id}'`);
         return res.status(403).json({
@@ -290,7 +298,7 @@ const generatePartnerAccessToken = (partner) => {
     aud: partner.partner_uuid,
     iss: 'pocketcredit'
   };
-  
+
   return jwt.sign(payload, PARTNER_JWT_SECRET);
 };
 
@@ -309,7 +317,7 @@ const generatePartnerRefreshToken = (partner) => {
     aud: partner.partner_uuid,
     iss: 'pocketcredit'
   };
-  
+
   return jwt.sign(payload, PARTNER_JWT_SECRET);
 };
 
@@ -323,11 +331,11 @@ const verifyRefreshToken = (token) => {
     const decoded = jwt.verify(token, PARTNER_JWT_SECRET, {
       clockTolerance: 60 // Allow 60 seconds clock skew to handle server/client time differences
     });
-    
+
     if (decoded.type !== 'refresh_token') {
       throw new Error('Invalid token type');
     }
-    
+
     return decoded;
   } catch (error) {
     if (error.name === 'TokenExpiredError') {
