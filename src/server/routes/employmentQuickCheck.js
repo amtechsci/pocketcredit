@@ -89,11 +89,11 @@ router.post('/', requireAuth, async (req, res) => {
     if (holdTypes.includes(employment_type)) {
       // Hold application permanently
       const holdReason = `Application held due to employment type: ${employment_type}`;
-      
+
       console.log(`🔒 Placing user ${userId} on hold due to employment type: ${employment_type}`);
-      
+
       const updateResult = await executeQuery(
-        'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
+        'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, profile_completion_step = 1, updated_at = NOW() WHERE id = ?',
         ['on_hold', 'not_eligible', holdReason, userId]
       );
 
@@ -140,7 +140,7 @@ router.post('/', requireAuth, async (req, res) => {
         // Hold application permanently due to age
         // Use COALESCE to preserve existing date_of_birth if it exists
         await executeQuery(
-          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, date_of_birth = COALESCE(date_of_birth, ?), profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
+          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, date_of_birth = COALESCE(date_of_birth, ?), profile_completion_step = 1, updated_at = NOW() WHERE id = ?',
           ['on_hold', 'not_eligible', `Application held: Age (${age} years) exceeds maximum limit of 45 years`, date_of_birth, userId]
         );
 
@@ -193,7 +193,7 @@ router.post('/', requireAuth, async (req, res) => {
           : `₹${parseInt(rangeConfig.min_salary).toLocaleString('en-IN')} and above`;
 
         await executeQuery(
-          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
+          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, profile_completion_step = 1, updated_at = NOW() WHERE id = ?',
           ['on_hold', 'not_eligible', `Application held: Gross monthly income ${salaryRange}`, userId]
         );
 
@@ -212,7 +212,7 @@ router.post('/', requireAuth, async (req, res) => {
       if (payment_mode === 'cash') {
         // Cash payment - hold permanently
         await executeQuery(
-          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
+          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, profile_completion_step = 1, updated_at = NOW() WHERE id = ?',
           ['on_hold', 'not_eligible', 'Cash payment mode not allowed', userId]
         );
 
@@ -231,7 +231,7 @@ router.post('/', requireAuth, async (req, res) => {
         holdUntil.setDate(holdUntil.getDate() + holdDays);
 
         await executeQuery(
-          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, hold_until_date = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
+          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, hold_until_date = ?, profile_completion_step = 1, updated_at = NOW() WHERE id = ?',
           ['on_hold', 'not_eligible', 'Cheque payment mode', holdUntil, userId]
         );
 
@@ -285,7 +285,7 @@ router.post('/', requireAuth, async (req, res) => {
         const eligibilityReason = issues.join('. ');
 
         await executeQuery(
-          'UPDATE users SET status = ?, eligibility_status = ?, eligibility_reason = ?, profile_completion_step = 2, updated_at = NOW() WHERE id = ?',
+          'UPDATE users SET status = ?, eligibility_status = ?, eligibility_reason = ?, profile_completion_step = 1, updated_at = NOW() WHERE id = ?',
           ['on_hold', 'not_eligible', eligibilityReason, userId]
         );
 
