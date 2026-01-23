@@ -202,11 +202,10 @@ export const LoanDocumentUpload: React.FC<LoanDocumentUploadProps> = ({
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
-            className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
-              isDragging
+            className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${isDragging
                 ? 'border-blue-500 bg-blue-50'
                 : 'border-gray-300 hover:border-gray-400'
-            }`}
+              }`}
           >
             <input
               ref={fileInputRef}
@@ -242,7 +241,14 @@ export const LoanDocumentUpload: React.FC<LoanDocumentUploadProps> = ({
                     disabled={uploading}
                     className="text-sm text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
                   >
-                    {uploading ? 'Uploading...' : 'Upload'}
+                    {uploading ? (
+                      <span className="flex items-center">
+                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                        Uploading...
+                      </span>
+                    ) : (
+                      'Upload'
+                    )}
                   </button>
                 </div>
               </div>

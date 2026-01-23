@@ -2067,6 +2067,52 @@ export function UserProfileDetail() {
     return datePart; // Return as-is if format is unexpected
   };
 
+  // Format date and time - shows exactly what's in the database without timezone conversion
+  const formatDateTime = (dateString: string | null | undefined) => {
+    if (!dateString || dateString === 'null' || dateString === 'undefined' || dateString === '') return 'N/A';
+
+    const str = String(dateString);
+    let datePart = '';
+    let timePart = '';
+
+    // Handle "2025-12-25 23:19:50" format
+    if (str.includes(' ')) {
+      const parts = str.split(' ');
+      datePart = parts[0];
+      timePart = parts[1] || '';
+    }
+    // Handle ISO format: "2025-12-25T23:19:50.000Z"
+    else if (str.includes('T')) {
+      const parts = str.split('T');
+      datePart = parts[0];
+      // Extract time part before the Z or timezone
+      if (parts[1]) {
+        timePart = parts[1].split('.')[0].split('Z')[0].split('+')[0].split('-')[0];
+      }
+    }
+    // Just date without time
+    else {
+      datePart = str;
+    }
+
+    // Format date as DD/MM/YYYY
+    const dateParts = datePart.split('-');
+    let formattedDate = datePart;
+    if (dateParts.length === 3) {
+      const [year, month, day] = dateParts;
+      const formattedDay = String(day).padStart(2, '0');
+      const formattedMonth = String(month).padStart(2, '0');
+      formattedDate = `${formattedDay}/${formattedMonth}/${year}`;
+    }
+
+    // If we have time, append it
+    if (timePart) {
+      return `${formattedDate} ${timePart}`;
+    }
+
+    return formattedDate;
+  };
+
   // Use real data with fallback to mock data
   const currentUserData = userData || mockUserData;
 
@@ -3305,7 +3351,7 @@ export function UserProfileDetail() {
       setLoadingStatement(true);
       try {
         const response = await adminApiService.getBankStatement(params.userId);
-        if (response.success && response.data) {
+        if (response.status === 'success' && response.data) {
           setBankStatement(response.data.statement);
         }
       } catch (error) {
@@ -3326,7 +3372,7 @@ export function UserProfileDetail() {
       try {
         // Call Start Upload API to get upload URL
         const response = await adminApiService.startBankStatementUpload(params.userId);
-        if (response.success && response.data?.uploadUrl) {
+        if (response.status === 'success' && response.data?.uploadUrl) {
           toast.success('Upload URL generated. Redirecting to Digitap...');
           // Redirect admin to Digitap upload URL
           window.open(response.data.uploadUrl, '_blank');
@@ -3352,7 +3398,7 @@ export function UserProfileDetail() {
       setVerifyingStatement(true);
       try {
         const response = await adminApiService.completeBankStatementUpload(params.userId);
-        if (response.success) {
+        if (response.status === 'success') {
           toast.success('Upload completed. Processing has started.');
           await fetchBankStatement();
         } else {
@@ -3371,7 +3417,7 @@ export function UserProfileDetail() {
       setLoadingStatement(true);
       try {
         const response = await adminApiService.checkBankStatementStatus(params.userId);
-        if (response.success) {
+        if (response.status === 'success') {
           toast.success('Status updated');
           await fetchBankStatement();
         } else {
@@ -3390,7 +3436,7 @@ export function UserProfileDetail() {
       setLoadingStatement(true);
       try {
         const response = await adminApiService.fetchBankStatementReport(params.userId);
-        if (response.success) {
+        if (response.status === 'success') {
           toast.success('Report fetched successfully');
           await fetchBankStatement();
         } else {
@@ -3408,7 +3454,7 @@ export function UserProfileDetail() {
       if (!params.userId) return;
       try {
         const response = await adminApiService.updateBankStatementDecision(params.userId, decision, notes);
-        if (response.success) {
+        if (response.status === 'success') {
           toast.success(`Statement ${decision} successfully`);
           await fetchBankStatement();
         } else {
@@ -3495,164 +3541,188 @@ export function UserProfileDetail() {
           </div>
         )}
 
-        {/* Verification Actions - Only for manual uploads */}
-        {(!hasStatement || (hasStatement && statement.upload_method === 'manual')) && (
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <h4 className="text-md font-semibold text-gray-900 mb-4">Verification Actions</h4>
+        {/* Verification Actions */}
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <h4 className="text-md font-semibold text-gray-900 mb-4">Verification Actions</h4>
 
-            {!hasStatement && (
-              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <p className="text-sm text-yellow-800">
-                  No bank statement uploaded yet. User needs to upload a statement first.
+          {!hasStatement && (
+            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <p className="text-sm text-yellow-800">
+                No bank statement uploaded yet. User needs to upload a statement first.
+              </p>
+            </div>
+          )}
+
+          {hasStatement && verificationStatus === 'not_started' && statement.upload_method === 'manual' && (
+            <div className="space-y-4">
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-800 mb-2">
+                  The existing uploaded file will be used for Digitap verification. Click the button below to generate a Digitap upload URL and upload the file.
                 </p>
               </div>
-            )}
+              <Button
+                onClick={handleTriggerVerification}
+                disabled={verifyingStatement}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {verifyingStatement ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4 mr-2" />
+                    Trigger Digitap Verification
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
 
-            {hasStatement && verificationStatus === 'not_started' && statement.upload_method === 'manual' && (
-              <div className="space-y-4">
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-sm text-blue-800 mb-2">
-                    The existing uploaded file will be used for Digitap verification. Click the button below to generate a Digitap upload URL and upload the file.
-                  </p>
-                </div>
-                <Button
-                  onClick={handleTriggerVerification}
-                  disabled={verifyingStatement}
-                  className="bg-blue-600 hover:bg-blue-700"
-                >
-                  {verifyingStatement ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="w-4 h-4 mr-2" />
-                      Trigger Digitap Verification
-                    </>
-                  )}
-                </Button>
+          {hasStatement && verificationStatus === 'api_verification_pending' && statement.upload_method === 'manual' && (
+            <div className="space-y-4">
+              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-sm text-yellow-800 mb-2">
+                  {statement.request_id ?
+                    'After uploading the file on Digitap, click "Complete Upload" to finalize the upload process and start verification. Then check status to see the progress.' :
+                    'Verification is in progress. You can check the status or fetch the report when ready.'}
+                </p>
               </div>
-            )}
-
-            {hasStatement && verificationStatus === 'api_verification_pending' && statement.upload_method === 'manual' && (
-              <div className="space-y-4">
-                <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <p className="text-sm text-yellow-800 mb-2">
-                    {statement.request_id ?
-                      'After uploading the file on Digitap, click "Complete Upload" to finalize the upload process and start verification. Then check status to see the progress.' :
-                      'Verification is in progress. You can check the status or fetch the report when ready.'}
-                  </p>
-                </div>
-                <div className="flex gap-3">
-                  {statement.request_id && (
-                    <Button
-                      onClick={handleCompleteUpload}
-                      disabled={verifyingStatement}
-                      className="bg-green-600 hover:bg-green-700"
-                    >
-                      {verifyingStatement ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Completing...
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle className="w-4 h-4 mr-2" />
-                          Complete Upload
-                        </>
-                      )}
-                    </Button>
-                  )}
+              <div className="flex gap-3">
+                {statement.request_id && (
                   <Button
-                    onClick={handleCheckStatus}
-                    disabled={loadingStatement}
-                    variant="outline"
-                  >
-                    <RefreshCw className={`w-4 h-4 mr-2 ${loadingStatement ? 'animate-spin' : ''}`} />
-                    Check Status
-                  </Button>
-                  <Button
-                    onClick={handleFetchReport}
-                    disabled={loadingStatement}
-                    variant="outline"
-                  >
-                    <Download className="w-4 h-4 mr-2" />
-                    Fetch Report
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {hasStatement && verificationStatus === 'api_verified' && statement.upload_method === 'manual' && (
-              <div className="space-y-4">
-                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                  <p className="text-sm text-green-800 mb-2">
-                    ✓ Digitap API verification completed successfully.
-                  </p>
-                </div>
-                <div className="flex gap-3">
-                  <Button
-                    onClick={handleFetchReport}
-                    disabled={loadingStatement}
-                    variant="outline"
-                  >
-                    <Download className="w-4 h-4 mr-2" />
-                    View Report
-                  </Button>
-                  <Button
-                    onClick={() => handleUpdateDecision('approved')}
+                    onClick={handleCompleteUpload}
+                    disabled={verifyingStatement}
                     className="bg-green-600 hover:bg-green-700"
                   >
-                    <CheckCircle className="w-4 h-4 mr-2" />
-                    Approve Statement
+                    {verifyingStatement ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Completing...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-4 h-4 mr-2" />
+                        Complete Upload
+                      </>
+                    )}
                   </Button>
-                  <Button
-                    onClick={() => {
-                      const notes = prompt('Enter rejection reason:');
-                      if (notes) handleUpdateDecision('rejected', notes);
-                    }}
-                    variant="destructive"
-                  >
-                    <XCircle className="w-4 h-4 mr-2" />
-                    Reject Statement
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {hasStatement && verificationStatus === 'api_failed' && statement.upload_method === 'manual' && (
-              <div className="space-y-4">
-                <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-sm text-red-800 mb-2">
-                    ✗ Digitap API verification failed. {statement.upload_method === 'manual' ? 'You can retry with a new file.' : 'Please check the API logs or contact support.'}
-                  </p>
-                </div>
-                {statement.upload_method === 'manual' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Upload New File for Retry
-                    </label>
-                    <Button
-                      onClick={handleTriggerVerification}
-                      disabled={verifyingStatement}
-                      className="mt-3 bg-blue-600 hover:bg-blue-700"
-                    >
-                      {verifyingStatement ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Processing...
-                        </>
-                      ) : (
-                        'Retry Verification'
-                      )}
-                    </Button>
-                  </div>
                 )}
+                <Button
+                  onClick={handleCheckStatus}
+                  disabled={loadingStatement}
+                  variant="outline"
+                >
+                  <RefreshCw className={`w-4 h-4 mr-2 ${loadingStatement ? 'animate-spin' : ''}`} />
+                  Check Status
+                </Button>
+                <Button
+                  onClick={handleFetchReport}
+                  disabled={loadingStatement}
+                  variant="outline"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Fetch Report
+                </Button>
               </div>
-            )}
+            </div>
+          )}
+
+          {hasStatement && verificationStatus === 'api_verified' && statement.upload_method === 'manual' && (
+            <div className="space-y-4">
+              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-sm text-green-800 mb-2">
+                  ✓ Digitap API verification completed successfully.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <Button
+                  onClick={handleFetchReport}
+                  disabled={loadingStatement}
+                  variant="outline"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  View Report
+                </Button>
+                <Button
+                  onClick={() => handleUpdateDecision('approved')}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Approve Statement
+                </Button>
+                <Button
+                  onClick={() => {
+                    const notes = prompt('Enter rejection reason:');
+                    if (notes) handleUpdateDecision('rejected', notes);
+                  }}
+                  variant="destructive"
+                >
+                  <XCircle className="w-4 h-4 mr-2" />
+                  Reject Statement
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {hasStatement && verificationStatus === 'api_failed' && statement.upload_method === 'manual' && (
+            <div className="space-y-4">
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-sm text-red-800 mb-2">
+                  ✗ Digitap API verification failed. {statement.upload_method === 'manual' ? 'You can retry with a new file.' : 'Please check the API logs or contact support.'}
+                </p>
+              </div>
+              {statement.upload_method === 'manual' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Upload New File for Retry
+                  </label>
+                  <Button
+                    onClick={handleTriggerVerification}
+                    disabled={verifyingStatement}
+                    className="mt-3 bg-blue-600 hover:bg-blue-700"
+                  >
+                    {verifyingStatement ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      'Retry Verification'
+                    )}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Always allow manual verification trigger */}
+          <div className="mt-6 pt-6 border-t border-gray-100">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h5 className="text-sm font-medium text-gray-900">Manual Verification Upload</h5>
+                <p className="text-xs text-gray-500 mt-1">
+                  Trigger a new verification process or upload a manual statement file. This enables multiple account verification.
+                </p>
+              </div>
+              <Button
+                onClick={handleTriggerVerification}
+                disabled={verifyingStatement}
+                variant="outline"
+                size="sm"
+                className="border-blue-200 text-blue-700 hover:bg-blue-50 whitespace-nowrap"
+              >
+                {verifyingStatement ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Upload className="w-4 h-4 mr-2" />
+                )}
+                Upload Statement
+              </Button>
+            </div>
           </div>
-        )}
+        </div>
 
         {/* Report Data */}
         {hasStatement && statement.reportData && (
@@ -4913,7 +4983,7 @@ export function UserProfileDetail() {
 
                             {/* Apply Date & Time */}
                             <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                              {loan.created_at ? formatDate(loan.created_at) : <span className="text-gray-400">N/A</span>}
+                              {loan.created_at ? formatDateTime(loan.created_at) : <span className="text-gray-400">N/A</span>}
                             </td>
 
                             {/* Principal Amount - Editable */}
