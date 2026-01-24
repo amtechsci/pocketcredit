@@ -426,22 +426,67 @@ export const RepaymentSchedulePage = () => {
   dPlus15.setDate(dPlus15.getDate() + 15);
   const canExtend = currentDateMidnight >= dMinus5 && currentDateMidnight <= dPlus15;
 
-  // Calculate loan progression stages based on completed loans count
+  // Calculate loan progression stages based on percentage system (8%, 11%, 15.2%, etc.)
   // Get user's current loan limit
   const currentLimit = (user as any)?.loan_limit || loanData.sanctioned_amount || loanData.loan_amount || 0;
+  
+  // Get user's monthly salary
+  // Priority: monthly_net_income from user object, then calculate backwards from current limit
+  let monthlySalary = (user as any)?.monthly_net_income || 0;
+  
+  // If salary not available, try to calculate backwards from current limit and percentage
+  // Percentage multipliers: [8, 11, 15.2, 20.9, 28, 32.1]
+  const percentageMultipliers = [8, 11, 15.2, 20.9, 28, 32.1];
   
   // Determine current loan number (completed + 1 for current loan)
   const currentLoanNumber = completedLoansCount + 1; // 1st loan, 2nd loan, 3rd loan, etc.
   
-  // Create stages starting from current loan number
-  // For 1st loan: stages 1-10 (1x to 10x)
-  // For 2nd loan: stages 2-10 (2x to 10x) 
-  // For 3rd loan: stages 3-10 (3x to 10x)
-  const totalStages = 10;
-  const startStage = Math.min(currentLoanNumber, totalStages); // Cap at stage 10
+  // If salary not available, estimate from current limit and current loan number
+  if (!monthlySalary || monthlySalary <= 0) {
+    // Try to reverse calculate from current limit
+    // Current limit should be approximately: salary * percentageMultipliers[currentLoanNumber - 1]
+    if (currentLimit > 0 && currentLoanNumber > 0 && currentLoanNumber <= percentageMultipliers.length) {
+      const currentPercentage = percentageMultipliers[currentLoanNumber - 1];
+      monthlySalary = Math.round((currentLimit * 100) / currentPercentage);
+      console.log(`[Stages] Estimated salary from current limit: ₹${monthlySalary} (limit: ₹${currentLimit}, percentage: ${currentPercentage}%)`);
+    } else {
+      // Fallback: use a default salary estimate
+      monthlySalary = 30000; // Default fallback
+      console.warn(`[Stages] Could not determine salary, using default: ₹${monthlySalary}`);
+    }
+  }
   
-  // Calculate next limit for header message (final stage limit)
-  const nextLimit = currentLimit * totalStages; // Always show 10x for max potential
+  // Calculate limits for each percentage tier
+  const calculateLimitForPercentage = (percentage: number) => {
+    const calculatedLimit = Math.round((monthlySalary * percentage) / 100);
+    // Apply maximum cap of ₹45,600 for regular limits
+    return Math.min(calculatedLimit, 45600);
+  };
+  
+  // Determine current stage percentage index (0-based)
+  // currentLoanNumber = 1 means 1st loan (8%), 2 means 2nd loan (11%), etc.
+  const currentStageIndex = Math.min(currentLoanNumber - 1, percentageMultipliers.length - 1);
+  const currentPercentage = percentageMultipliers[currentStageIndex];
+  const currentStageLimit = calculateLimitForPercentage(currentPercentage);
+  
+  // Calculate next stage (what they'll get after completing current loan)
+  // Next stage is the next percentage tier
+  const nextStageIndex = Math.min(currentLoanNumber, percentageMultipliers.length - 1);
+  const nextPercentage = nextStageIndex < percentageMultipliers.length ? percentageMultipliers[nextStageIndex] : null;
+  const nextStageLimit = nextPercentage ? calculateLimitForPercentage(nextPercentage) : null;
+  
+  // Premium limit (₹1,50,000) - shown as ultimate stage
+  const premiumLimit = 150000;
+  
+  // Check if premium limit should be shown
+  // Show premium if: current percentage is max (32.1%), or next limit would exceed ₹45,600, or we're at the last tier
+  const isMaxPercentageReached = currentPercentage >= 32.1;
+  const wouldCrossMaxLimit = nextStageLimit ? nextStageLimit > 45600 : false;
+  const isLastTier = currentLoanNumber >= percentageMultipliers.length;
+  const shouldShowPremium = isMaxPercentageReached || wouldCrossMaxLimit || isLastTier;
+  
+  // Calculate ultimate limit for header message
+  const ultimateLimit = shouldShowPremium ? premiumLimit : (nextStageLimit || premiumLimit);
 
   // Generate short loan ID format: PLL + last 4 digits
   const getShortLoanId = () => {
@@ -475,7 +520,7 @@ export const RepaymentSchedulePage = () => {
         {/* Header Message */}
         <div className="text-center mb-6 sm:mb-8">
           <h5 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-2">
-          Get upto ₹{formatCurrency(nextLimit).replace('₹', '')}
+          Get upto ₹{formatCurrency(ultimateLimit).replace('₹', '')}
           </h5>
           <p className="text-xs sm:text-sm text-gray-500"> by closing this loan. Clear your loan fast to unlock higher limits</p>
         </div>
@@ -1905,36 +1950,48 @@ export const RepaymentSchedulePage = () => {
           );
         })()}
 
-        {/* Loan Progression Stages - Redesigned */}
+        {/* Loan Progression Stages - Percentage-Based */}
         <Card className="bg-white shadow-lg rounded-xl overflow-hidden mb-6">
           <CardContent className="p-3 sm:p-5">
             <div className="space-y-3">
               {(() => {
-                // Only show: current stage, next stage, and final stage (10)
-                const stagesToShow = [];
+                // Define stages to show: current, next, and ultimate (premium)
+                const stagesToShow: Array<{index: number, percentage: number, limit: number, isPremium: boolean}> = [];
                 
                 // Always show current stage
-                stagesToShow.push(startStage);
+                stagesToShow.push({
+                  index: currentStageIndex,
+                  percentage: currentPercentage,
+                  limit: currentStageLimit,
+                  isPremium: false
+                });
                 
-                // Show next stage if it exists and is not the final stage
-                const nextStage = startStage + 1;
-                if (nextStage <= totalStages && nextStage !== totalStages) {
-                  stagesToShow.push(nextStage);
+                // Show next stage if it exists and is not premium
+                if (nextPercentage && nextStageLimit && !shouldShowPremium) {
+                  stagesToShow.push({
+                    index: nextStageIndex,
+                    percentage: nextPercentage,
+                    limit: nextStageLimit,
+                    isPremium: false
+                  });
                 }
                 
-                // Always show final stage (10) if it's not already included
-                if (totalStages !== startStage && !stagesToShow.includes(totalStages)) {
-                  stagesToShow.push(totalStages);
-                }
+                // Always show premium/ultimate stage
+                stagesToShow.push({
+                  index: percentageMultipliers.length, // Use length as index for premium
+                  percentage: 0, // Premium doesn't have a percentage
+                  limit: premiumLimit,
+                  isPremium: true
+                });
                 
-                return stagesToShow.map((stageNumber) => {
-                  const stageLimit = currentLimit * stageNumber;
-                  const isCurrentStage = stageNumber === startStage;
-                  const isFinalStage = stageNumber === totalStages;
-                  const isNextStage = stageNumber === nextStage && stageNumber !== totalStages;
+                return stagesToShow.map((stage, idx) => {
+                  const isCurrentStage = idx === 0;
+                  const isUltimateStage = stage.isPremium;
+                  const isNextStage = idx === 1 && !isUltimateStage;
+                  const stageNumber = stage.index + 1; // Display as 1-based
                 
                 return (
-                  <div key={stageNumber} className="relative">
+                  <div key={`${stage.index}-${stage.isPremium}`} className="relative">
                     {/* Stage Card */}
                     <div className={`flex items-stretch gap-3 rounded-xl overflow-hidden transition-all ${
                       isCurrentStage 
@@ -1969,7 +2026,7 @@ export const RepaymentSchedulePage = () => {
                               <span className={`text-xs font-bold ${
                                 isCurrentStage ? 'text-blue-100' : 'text-gray-500'
                               }`}>
-                                Stage {String(stageNumber).padStart(2, '0')}
+                                {isUltimateStage ? 'Stage Premium' : `Stage ${String(stageNumber).padStart(2, '0')}`}
                               </span>
                               {isCurrentStage && (
                                 <span className="flex items-center gap-1 text-[10px] font-semibold bg-orange-500 text-white px-2 py-0.5 rounded-full">
@@ -1977,27 +2034,27 @@ export const RepaymentSchedulePage = () => {
                                   You are Here
                                 </span>
                               )}
-                              {!isCurrentStage && !isFinalStage && (
+                              {!isCurrentStage && !isUltimateStage && (
                                 <span className="text-[10px] font-medium text-gray-500">Next</span>
                               )}
-                              {isFinalStage && !isCurrentStage && (
+                              {isUltimateStage && !isCurrentStage && (
                                 <span className="text-[10px] font-medium text-gray-500">Ultimate</span>
                               )}
                             </div>
                             <div className={`text-xl sm:text-2xl font-bold mb-0.5 ${
                               isCurrentStage ? 'text-white' : 'text-gray-900'
                             }`}>
-                              {formatCurrency(stageLimit).replace('.00', '')}
+                              {formatCurrency(stage.limit).replace('.00', '')}
                             </div>
                             <div className={`text-xs ${
                               isCurrentStage ? 'text-blue-100' : 'text-gray-500'
                             }`}>
                               {isCurrentStage 
-                                ? 'Your Current limit' 
-                                : isFinalStage 
-                                ? 'Your Ultimate limit' 
+                                ? `Your Current limit (${stage.percentage}% of salary)` 
+                                : isUltimateStage 
+                                ? 'Your Ultimate limit (Premium)' 
                                 : isNextStage
-                                ? 'Your Next limit'
+                                ? `Your Next limit (${stage.percentage}% of salary)`
                                 : 'Your Ultimate limit'}
                             </div>
                           </div>
@@ -2030,7 +2087,7 @@ export const RepaymentSchedulePage = () => {
                     </div>
 
                     {/* Connector Line */}
-                    {!isFinalStage && (
+                    {!isUltimateStage && (
                       <div className="flex justify-start pl-8 sm:pl-10 py-2">
                         <div className="w-0.5 h-4 bg-gray-300"></div>
                       </div>
