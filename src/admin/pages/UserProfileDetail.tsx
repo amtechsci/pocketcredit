@@ -181,6 +181,7 @@ export function UserProfileDetail() {
     officialEmail: '',
     companyEmail: ''
   });
+  const [contactInfoError, setContactInfoError] = useState<string | null>(null);
   const [addressInfoForm, setAddressInfoForm] = useState({
     address_line1: '',
     address_line2: '',
@@ -877,6 +878,7 @@ export function UserProfileDetail() {
         officialEmail: userData.officialEmail || '',
         companyEmail: userData.companyEmail || ''
       });
+      setContactInfoError(null); // Clear any previous errors when opening modal
     }
   }, [userData, showContactModal]);
 
@@ -971,22 +973,35 @@ export function UserProfileDetail() {
   };
 
   const handleContactInfoSubmit = async () => {
+    setContactInfoError(null); // Clear previous errors
     try {
       const response = await adminApiService.updateUserContactInfo(params.userId!, contactInfoForm);
+      console.log('Contact info update response:', response);
+      
       if (response.status === 'success') {
         toast.success('Contact information updated successfully!');
         setShowContactModal(false);
+        setContactInfoError(null);
         // Refresh user data
         const profileResponse = await adminApiService.getUserProfile(params.userId!);
         if (profileResponse.status === 'success') {
           setUserData(profileResponse.data);
         }
       } else {
-        toast.error(response.message || 'Failed to update contact information');
+        // Handle error response (e.g., 409 Conflict for duplicate phone/email)
+        const errorMessage = response.message || 'Failed to update contact information';
+        console.error('Contact info update failed:', errorMessage);
+        setContactInfoError(errorMessage);
+        toast.error(errorMessage);
       }
     } catch (error: any) {
       console.error('Error updating contact info:', error);
-      const errorMessage = error.response?.data?.message || error.message || 'Error updating contact information';
+      // Extract error message from various possible error structures
+      const errorMessage = 
+        error.response?.data?.message || 
+        error.message || 
+        (typeof error === 'string' ? error : 'Error updating contact information');
+      setContactInfoError(errorMessage);
       toast.error(errorMessage);
     }
   };
@@ -8434,12 +8449,23 @@ export function UserProfileDetail() {
             <div className="flex items-center justify-between mb-4">
               <h4 className="text-lg font-semibold text-gray-900">Edit Contact Information</h4>
               <button
-                onClick={() => setShowContactModal(false)}
+                onClick={() => {
+                  setShowContactModal(false);
+                  setContactInfoError(null);
+                }}
                 className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
+            {contactInfoError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                <div className="flex items-start">
+                  <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 mr-2 flex-shrink-0" />
+                  <p className="text-sm text-red-800">{contactInfoError}</p>
+                </div>
+              </div>
+            )}
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Primary Mobile</label>
