@@ -421,12 +421,16 @@ async function startUploadAPI(params) {
     // Generate signature
     const signature = generateSignature(payload);
 
-    const requestBody = {
+    // Try two different request structures:
+    // 1. With payload/signature structure (original)
+    // 2. With direct fields + token (if API requires token)
+    // First try with payload/signature structure
+    let requestBody = {
       payload: payload,
       signature: signature
     };
 
-    console.log('📤 Start Upload Request:', JSON.stringify({ ...requestBody, signature: '[REDACTED]' }, null, 2));
+    console.log('📤 Start Upload Request (payload structure):', JSON.stringify({ ...requestBody, signature: '[REDACTED]' }, null, 2));
 
     // Try primary endpoint first, then fallback to alternative
     // Note: Some Digitap APIs require both signature AND Basic Auth headers
@@ -445,10 +449,80 @@ async function startUploadAPI(params) {
         }
       );
     } catch (error) {
+      lastError = error;
+      
+      // If error is "RequiredToken", try alternative request structure with token field
+      if (error.response && error.response.data && error.response.data.code === 'RequiredToken') {
+        console.log('⚠️  API requires token field. Trying alternative request structure with token...');
+        try {
+          // Try with token field added to request body
+          const requestBodyWithToken = {
+            ...requestBody,
+            token: DIGITAP_CLIENT_ID // Add token field using client_id
+          };
+          
+          response = await axios.post(
+            ENDPOINTS.START_UPLOAD,
+            requestBodyWithToken,
+            {
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': getAuthHeader()
+              },
+              timeout: 30000
+            }
+          );
+          console.log('✅ Start Upload succeeded with token field');
+        } catch (tokenError) {
+          // If that fails, try direct structure (like Generate URL API)
+          console.log('⚠️  Token structure failed. Trying direct request structure (like Generate URL API)...');
+          try {
+            const directRequestBody = {
+              ...payload,
+              signature: signature,
+              token: DIGITAP_CLIENT_ID
+            };
+            
+            response = await axios.post(
+              ENDPOINTS.START_UPLOAD,
+              directRequestBody,
+              {
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': getAuthHeader()
+                },
+                timeout: 30000
+              }
+            );
+            console.log('✅ Start Upload succeeded with direct structure');
+          } catch (directError) {
+            // If all structures fail, try alternative endpoint
+            if (ENDPOINTS.START_UPLOAD_ALT) {
+              console.log(`⚠️  Trying alternative endpoint: ${ENDPOINTS.START_UPLOAD_ALT}`);
+              try {
+                response = await axios.post(
+                  ENDPOINTS.START_UPLOAD_ALT,
+                  requestBody,
+                  {
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': getAuthHeader()
+                    },
+                    timeout: 30000
+                  }
+                );
+              } catch (altError) {
+                throw lastError; // Throw original error
+              }
+            } else {
+              throw lastError; // Throw original error
+            }
+          }
+        }
+      }
       // If 404, try alternative endpoint
-      if (error.response && error.response.status === 404 && ENDPOINTS.START_UPLOAD_ALT) {
+      else if (error.response && error.response.status === 404 && ENDPOINTS.START_UPLOAD_ALT) {
         console.log(`⚠️  Primary endpoint failed (404), trying alternative: ${ENDPOINTS.START_UPLOAD_ALT}`);
-        lastError = error;
         try {
           response = await axios.post(
             ENDPOINTS.START_UPLOAD_ALT,
