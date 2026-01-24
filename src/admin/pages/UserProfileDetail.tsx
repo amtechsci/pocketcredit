@@ -974,7 +974,7 @@ export function UserProfileDetail() {
     try {
       const response = await adminApiService.updateUserContactInfo(params.userId!, contactInfoForm);
       if (response.status === 'success') {
-        alert('Contact information updated successfully!');
+        toast.success('Contact information updated successfully!');
         setShowContactModal(false);
         // Refresh user data
         const profileResponse = await adminApiService.getUserProfile(params.userId!);
@@ -982,11 +982,12 @@ export function UserProfileDetail() {
           setUserData(profileResponse.data);
         }
       } else {
-        alert('Failed to update contact information');
+        toast.error(response.message || 'Failed to update contact information');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating contact info:', error);
-      alert('Error updating contact information');
+      const errorMessage = error.response?.data?.message || error.message || 'Error updating contact information';
+      toast.error(errorMessage);
     }
   };
 

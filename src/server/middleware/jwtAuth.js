@@ -47,7 +47,7 @@ const requireAuth = async (req, res, next) => {
       });
       return;
     }
-    
+
     if (!user) {
       res.status(401).json({
         success: false,
@@ -59,7 +59,7 @@ const requireAuth = async (req, res, next) => {
     // Allow 'active', 'on_hold', and 'deleted' users to authenticate
     // Users on hold can view their dashboard but can't progress (enforced by checkHoldStatus middleware)
     // Deleted users can view their deleted status message
-    if (user.status !== 'active' && user.status !== 'on_hold' && user.status !== 'deleted') {
+    if (user.status !== 'active' && user.status !== 'on_hold' && user.status !== 'deleted' && user.status !== 'qa_verification') {
       return res.status(401).json({
         success: false,
         message: 'Account is not active'
@@ -97,9 +97,9 @@ const requireAuthHybrid = async (req, res, next) => {
       try {
         const decoded = jwt.verify(token, JWT_SECRET);
         const user = await findUserById(decoded.id);
-        
+
         // Allow both 'active' and 'on_hold' users
-        if (user && (user.status === 'active' || user.status === 'on_hold')) {
+        if (user && (user.status === 'active' || user.status === 'on_hold' || user.status === 'qa_verification')) {
           req.user = user;
           req.userId = user.id;
           return next();
@@ -112,9 +112,9 @@ const requireAuthHybrid = async (req, res, next) => {
     // Fall back to session-based auth
     if (req.session && req.session.userId) {
       const user = await findUserById(req.session.userId);
-      
+
       // Allow both 'active' and 'on_hold' users
-      if (user && (user.status === 'active' || user.status === 'on_hold')) {
+      if (user && (user.status === 'active' || user.status === 'on_hold' || user.status === 'qa_verification')) {
         req.user = user;
         req.userId = user.id;
         return next();

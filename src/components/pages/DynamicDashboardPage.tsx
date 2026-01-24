@@ -244,10 +244,10 @@ export function DynamicDashboardPage() {
             }
           }
 
-          // PRIORITY 2: Check for pre-disbursal statuses (follow_up, ready_for_disbursement, etc.)
+          // PRIORITY 2: Check for pre-disbursal statuses (qa_verification, follow_up, ready_for_disbursement, etc.)
           // NOTE: ready_to_repeat_disbursal should NOT redirect here - it should go to post-disbursal
           const preDisbursalApp = applications.find(
-            (app: any) => app.status === 'follow_up' || (app.status === 'ready_for_disbursement' && app.status !== 'ready_to_repeat_disbursal')
+            (app: any) => app.status === 'qa_verification' || app.status === 'follow_up' || (app.status === 'ready_for_disbursement' && app.status !== 'ready_to_repeat_disbursal')
           );
           if (preDisbursalApp) {
             // Check if it has pending documents first
@@ -287,7 +287,7 @@ export function DynamicDashboardPage() {
               // Continue
             }
             // If no pending documents, show under review or appropriate page
-            if (preDisbursalApp.status === 'follow_up') {
+            if (preDisbursalApp.status === 'follow_up' || preDisbursalApp.status === 'qa_verification') {
               navigate('/application-under-review');
               return;
             }
@@ -886,13 +886,13 @@ export function DynamicDashboardPage() {
                         <Badge
                           variant="secondary"
                           className={`text-[10px] px-1.5 py-0.5 ${loan.status === 'submitted' ? 'bg-blue-100 text-blue-800' :
-                              loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
-                                loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
-                                  loan.status === 'ready_for_disbursement' ? 'bg-green-100 text-green-800' :
-                                    loan.status === 'ready_to_repeat_disbursal' ? 'bg-green-100 text-green-800' :
-                                      loan.status === 'repeat_disbursal' ? 'bg-orange-100 text-orange-800' :
-                                        loan.status === 'account_manager' ? 'bg-emerald-100 text-emerald-800' :
-                                          'bg-gray-100 text-gray-800'
+                            loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
+                              loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
+                                loan.status === 'ready_for_disbursement' ? 'bg-green-100 text-green-800' :
+                                  loan.status === 'ready_to_repeat_disbursal' ? 'bg-green-100 text-green-800' :
+                                    loan.status === 'repeat_disbursal' ? 'bg-orange-100 text-orange-800' :
+                                      loan.status === 'account_manager' ? 'bg-emerald-100 text-emerald-800' :
+                                        'bg-gray-100 text-gray-800'
                             }`}
                         >
                           {loan.status === 'account_manager' ? 'Active' :
@@ -1056,13 +1056,13 @@ export function DynamicDashboardPage() {
                     <Badge
                       variant="secondary"
                       className={`text-[10px] px-1.5 py-0.5 ${loan.status === 'submitted' ? 'bg-blue-100 text-blue-800' :
-                          loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
-                            loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
-                              loan.status === 'ready_for_disbursement' ? 'bg-green-100 text-green-800' :
-                                loan.status === 'ready_to_repeat_disbursal' ? 'bg-green-100 text-green-800' :
-                                  loan.status === 'repeat_disbursal' ? 'bg-orange-100 text-orange-800' :
-                                    loan.status === 'account_manager' ? 'bg-emerald-100 text-emerald-800' :
-                                      'bg-gray-100 text-gray-800'
+                        loan.status === 'under_review' ? 'bg-purple-100 text-purple-800' :
+                          loan.status === 'follow_up' ? 'bg-yellow-100 text-yellow-800' :
+                            loan.status === 'ready_for_disbursement' ? 'bg-green-100 text-green-800' :
+                              loan.status === 'ready_to_repeat_disbursal' ? 'bg-green-100 text-green-800' :
+                                loan.status === 'repeat_disbursal' ? 'bg-orange-100 text-orange-800' :
+                                  loan.status === 'account_manager' ? 'bg-emerald-100 text-emerald-800' :
+                                    'bg-gray-100 text-gray-800'
                         }`}
                     >
                       {loan.status === 'account_manager' ? 'Active' :
@@ -1257,8 +1257,8 @@ export function DynamicDashboardPage() {
 
                         return (
                           <Card key={loan.id} className={`p-4 hover:shadow-md transition-shadow ${isCleared ? 'border-l-4 border-l-green-500 bg-green-50' :
-                              isActive ? 'border-l-4 border-l-blue-500' :
-                                'border-l-4 border-l-yellow-500'
+                            isActive ? 'border-l-4 border-l-blue-500' :
+                              'border-l-4 border-l-yellow-500'
                             }`}>
                             <div className="space-y-3">
                               {/* Header */}
@@ -1616,8 +1616,8 @@ export function DynamicDashboardPage() {
               <div className="flex justify-center">
                 <Badge
                   className={`text-base px-6 py-2 ${selectedLoanDetails.status === 'cleared' ? 'bg-green-500 text-white' :
-                      selectedLoanDetails.status === 'account_manager' ? 'bg-blue-500 text-white' :
-                        'bg-yellow-500 text-white'
+                    selectedLoanDetails.status === 'account_manager' ? 'bg-blue-500 text-white' :
+                      'bg-yellow-500 text-white'
                     }`}
                 >
                   {selectedLoanDetails.status.replace('_', ' ').toUpperCase()}

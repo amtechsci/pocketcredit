@@ -1381,6 +1381,22 @@ router.put('/:userId/contact-info', authenticateAdmin, async (req, res) => {
 
   } catch (error) {
     console.error('Update contact info error:', error);
+
+    // Check for duplicate entry error
+    if (error.code === 'ER_DUP_ENTRY') {
+      let message = 'Duplicate entry found.';
+      if (error.sqlMessage && error.sqlMessage.includes('email')) {
+        message = 'This email address is already registered with another account.';
+      } else if (error.sqlMessage && error.sqlMessage.includes('phone')) {
+        message = 'This phone number is already registered with another account.';
+      }
+
+      return res.status(409).json({
+        status: 'error',
+        message: message
+      });
+    }
+
     res.status(500).json({
       status: 'error',
       message: 'Failed to update contact information'
