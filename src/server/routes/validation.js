@@ -201,11 +201,11 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // For cancel action, validate loan before saving history
+    // For cancel/qa_verification actions, ensure we have the loan to update
     let loanToUpdate = null;
     let actualLoanId = loanApplicationId;
 
-    if (actionType === 'cancel') {
+    if (['cancel', 'qa_verification', 'qa_approve'].includes(actionType)) {
       // Try to find the loan to cancel
       if (loanApplicationId) {
         // Verify loan exists and get current status
@@ -255,7 +255,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
         const activeLoans = await executeQuery(
           `SELECT id, status FROM loan_applications 
            WHERE user_id = ? 
-           AND status IN ('submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'repeat_ready_for_disbursement', 'repeat_disbursal')
+           AND status IN ('submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'repeat_ready_for_disbursement', 'repeat_disbursal', 'qa_verification')
            ORDER BY created_at DESC
            LIMIT 1`,
           [userId]
