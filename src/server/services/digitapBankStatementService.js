@@ -24,7 +24,7 @@ const DIGITAP_ENCRYPTION_KEY = process.env.DIGITAP_ENCRYPTION_KEY || process.env
 // Try both patterns if one fails
 const ENDPOINTS = {
   GENERATE_URL: `${DIGITAP_BASE_URL}/bank-data/generateurl`,
-  START_UPLOAD: `${DIGITAP_BASE_URL}/bank-data/generateurl`, // Try /bank-data/startupload first
+  START_UPLOAD: `${DIGITAP_BASE_URL}/startupload`, // Try /bank-data/startupload first
   START_UPLOAD_ALT: `${DIGITAP_BASE_URL}/startupload`, // Fallback to root level
   COMPLETE_UPLOAD: `${DIGITAP_BASE_URL}/bank-data/completeupload`,
   COMPLETE_UPLOAD_ALT: `${DIGITAP_BASE_URL}/completeupload`,
