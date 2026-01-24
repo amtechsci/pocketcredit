@@ -5627,17 +5627,26 @@ export function UserProfileDetail() {
                         // Exhausted period - calculate from processed_at or disbursed_at
                         // Per rulebook: Use inclusive counting (day 1 = processing day)
                         let exhaustedPeriod = 'N/A';
-                        if (isProcessed && (loan.exhausted_period_days === null || loan.exhausted_period_days === undefined || loan.exhausted_period_days === 0)) {
+
+                        // Priority 1: Backend calculated exhausted days (most accurate)
+                        if (calculation?.interest?.exhaustedDays !== undefined && calculation?.interest?.exhaustedDays !== null) {
+                          exhaustedPeriod = `${calculation.interest.exhaustedDays} days`;
+                        }
+                        // Priority 2: Stored exhausted_period_days from loan record
+                        else if (isProcessed && loan.exhausted_period_days > 0) {
+                          exhaustedPeriod = `${loan.exhausted_period_days} days`;
+                        }
+                        // Priority 3: Calculate from processed date
+                        else if (isProcessed && (loan.exhausted_period_days === null || loan.exhausted_period_days === undefined || loan.exhausted_period_days === 0)) {
                           // If processed but no exhausted_period_days value (or it's 0), calculate from processed_at
                           const processedDateForCalc = loan.processed_at || loan.processedDate;
                           if (processedDateForCalc) {
                             const days = Math.max(1, daysDifference(processedDateForCalc, getCurrentDateString()) + 1); // +1 for inclusive counting
                             exhaustedPeriod = `${days} days`;
                           }
-                        } else if (isProcessed && loan.exhausted_period_days > 0) {
-                          // Use stored value if it's greater than 0 (from new loans)
-                          exhaustedPeriod = `${loan.exhausted_period_days} days`;
-                        } else if (disbursedDate) {
+                        }
+                        // Priority 4: Calculate from disbursed date (fallback)
+                        else if (disbursedDate) {
                           const days = Math.max(1, daysDifference(disbursedDate, getCurrentDateString()) + 1); // +1 for inclusive counting
                           exhaustedPeriod = `${days} days`;
                         }
