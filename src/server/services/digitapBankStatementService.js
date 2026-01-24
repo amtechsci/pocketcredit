@@ -402,8 +402,12 @@ async function startUploadAPI(params) {
       };
     }
 
-    console.log('📤 Calling Digitap Start Upload API...');
+    console.log('\n═══════════════════════════════════════════════════════════');
+    console.log('📤 DIGITAP START UPLOAD API - DETAILED REQUEST LOG');
+    console.log('═══════════════════════════════════════════════════════════');
     console.log('📤 Endpoint (primary):', ENDPOINTS.START_UPLOAD);
+    console.log('📤 Method: POST');
+    console.log('📤 Timestamp:', new Date().toISOString());
 
     const payload = {
       client_name: DIGITAP_CLIENT_NAME,
@@ -430,30 +434,91 @@ async function startUploadAPI(params) {
       signature: signature
     };
 
-    console.log('📤 Start Upload Request (payload structure):', JSON.stringify({ ...requestBody, signature: '[REDACTED]' }, null, 2));
+    // Log complete request details
+    console.log('\n📋 REQUEST PAYLOAD:');
+    console.log(JSON.stringify(payload, null, 2));
+    console.log('\n📋 REQUEST BODY STRUCTURE:');
+    console.log(JSON.stringify({ 
+      payload: payload, 
+      signature: '[REDACTED - Length: ' + signature.length + ' chars]' 
+    }, null, 2));
+    console.log('\n📋 REQUEST HEADERS:');
+    const authHeader = getAuthHeader();
+    console.log(JSON.stringify({
+      'Content-Type': 'application/json',
+      'Authorization': authHeader ? '[REDACTED - Basic Auth]' : 'NOT SET',
+      'User-Agent': 'axios/' + require('axios/package.json').version
+    }, null, 2));
+    console.log('📋 Authorization Header (first 20 chars):', authHeader ? authHeader.substring(0, 20) + '...' : 'NOT SET');
+    console.log('\n📋 CONFIGURATION:');
+    console.log(JSON.stringify({
+      DIGITAP_BASE_URL: DIGITAP_BASE_URL,
+      DIGITAP_CLIENT_ID: DIGITAP_CLIENT_ID,
+      DIGITAP_CLIENT_NAME: DIGITAP_CLIENT_NAME,
+      'DIGITAP_CLIENT_SECRET': '[REDACTED]',
+      'DIGITAP_ENCRYPTION_KEY': '[REDACTED]',
+      signature_length: signature.length,
+      signature_first_10_chars: signature.substring(0, 10) + '...'
+    }, null, 2));
 
     // Try primary endpoint first, then fallback to alternative
     // Note: Some Digitap APIs require both signature AND Basic Auth headers
     let response;
     let lastError;
+    const requestConfig = {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': getAuthHeader() // Add Basic Auth header as well
+      },
+      timeout: 30000
+    };
+    
     try {
+      console.log('\n🚀 ATTEMPT 1: Sending request with payload/signature structure...');
       response = await axios.post(
         ENDPOINTS.START_UPLOAD,
         requestBody,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': getAuthHeader() // Add Basic Auth header as well
-          },
-          timeout: 30000
-        }
+        requestConfig
       );
+      
+      // Log successful response
+      console.log('\n✅ RESPONSE RECEIVED (SUCCESS):');
+      console.log('📥 Status Code:', response.status);
+      console.log('📥 Status Text:', response.statusText);
+      console.log('📥 Response Headers:', JSON.stringify(response.headers, null, 2));
+      console.log('📥 Response Data:', JSON.stringify(response.data, null, 2));
+      console.log('═══════════════════════════════════════════════════════════\n');
     } catch (error) {
       lastError = error;
       
+      // Log error response details
+      console.log('\n❌ RESPONSE RECEIVED (ERROR):');
+      if (error.response) {
+        console.log('📥 Status Code:', error.response.status);
+        console.log('📥 Status Text:', error.response.statusText);
+        console.log('📥 Response Headers:', JSON.stringify(error.response.headers, null, 2));
+        console.log('📥 Response Data:', JSON.stringify(error.response.data, null, 2));
+        console.log('📥 Error Code:', error.response.data?.code || 'N/A');
+        console.log('📥 Error Message:', error.response.data?.msg || error.response.data?.message || 'N/A');
+      } else if (error.request) {
+        console.log('📥 No response received from server');
+        console.log('📥 Request details:', JSON.stringify({
+          url: error.config?.url,
+          method: error.config?.method,
+          headers: error.config?.headers
+        }, null, 2));
+      } else {
+        console.log('📥 Error setting up request:', error.message);
+      }
+      console.log('📥 Full Error Object:', JSON.stringify({
+        message: error.message,
+        code: error.code,
+        stack: error.stack?.split('\n').slice(0, 5) // First 5 lines of stack
+      }, null, 2));
+      
       // If error is "RequiredToken", try alternative request structure with token field
       if (error.response && error.response.data && error.response.data.code === 'RequiredToken') {
-        console.log('⚠️  API requires token field. Trying alternative request structure with token...');
+        console.log('\n⚠️  ATTEMPT 2: API requires token field. Trying alternative request structure with token...');
         try {
           // Try with token field added to request body
           const requestBodyWithToken = {
@@ -461,21 +526,33 @@ async function startUploadAPI(params) {
             token: DIGITAP_CLIENT_ID // Add token field using client_id
           };
           
+          console.log('📋 REQUEST BODY (with token):');
+          console.log(JSON.stringify({ 
+            ...requestBodyWithToken, 
+            signature: '[REDACTED]',
+            token: '[REDACTED]'
+          }, null, 2));
+          
           response = await axios.post(
             ENDPOINTS.START_UPLOAD,
             requestBodyWithToken,
-            {
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': getAuthHeader()
-              },
-              timeout: 30000
-            }
+            requestConfig
           );
-          console.log('✅ Start Upload succeeded with token field');
+          
+          console.log('\n✅ RESPONSE RECEIVED (SUCCESS with token):');
+          console.log('📥 Status Code:', response.status);
+          console.log('📥 Response Data:', JSON.stringify(response.data, null, 2));
+          console.log('═══════════════════════════════════════════════════════════\n');
         } catch (tokenError) {
+          // Log token error
+          console.log('\n❌ ATTEMPT 2 FAILED:');
+          if (tokenError.response) {
+            console.log('📥 Status Code:', tokenError.response.status);
+            console.log('📥 Response Data:', JSON.stringify(tokenError.response.data, null, 2));
+          }
+          
           // If that fails, try direct structure (like Generate URL API)
-          console.log('⚠️  Token structure failed. Trying direct request structure (like Generate URL API)...');
+          console.log('\n⚠️  ATTEMPT 3: Token structure failed. Trying direct request structure (like Generate URL API)...');
           try {
             const directRequestBody = {
               ...payload,
@@ -483,38 +560,56 @@ async function startUploadAPI(params) {
               token: DIGITAP_CLIENT_ID
             };
             
+            console.log('📋 REQUEST BODY (direct structure):');
+            console.log(JSON.stringify({ 
+              ...directRequestBody, 
+              signature: '[REDACTED]',
+              token: '[REDACTED]'
+            }, null, 2));
+            
             response = await axios.post(
               ENDPOINTS.START_UPLOAD,
               directRequestBody,
-              {
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': getAuthHeader()
-                },
-                timeout: 30000
-              }
+              requestConfig
             );
-            console.log('✅ Start Upload succeeded with direct structure');
+            
+            console.log('\n✅ RESPONSE RECEIVED (SUCCESS with direct structure):');
+            console.log('📥 Status Code:', response.status);
+            console.log('📥 Response Data:', JSON.stringify(response.data, null, 2));
+            console.log('═══════════════════════════════════════════════════════════\n');
           } catch (directError) {
+            // Log direct error
+            console.log('\n❌ ATTEMPT 3 FAILED:');
+            if (directError.response) {
+              console.log('📥 Status Code:', directError.response.status);
+              console.log('📥 Response Data:', JSON.stringify(directError.response.data, null, 2));
+            }
+            
             // If all structures fail, try alternative endpoint
             if (ENDPOINTS.START_UPLOAD_ALT) {
-              console.log(`⚠️  Trying alternative endpoint: ${ENDPOINTS.START_UPLOAD_ALT}`);
+              console.log(`\n⚠️  ATTEMPT 4: Trying alternative endpoint: ${ENDPOINTS.START_UPLOAD_ALT}`);
               try {
                 response = await axios.post(
                   ENDPOINTS.START_UPLOAD_ALT,
                   requestBody,
-                  {
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'Authorization': getAuthHeader()
-                    },
-                    timeout: 30000
-                  }
+                  requestConfig
                 );
+                
+                console.log('\n✅ RESPONSE RECEIVED (SUCCESS with alternative endpoint):');
+                console.log('📥 Status Code:', response.status);
+                console.log('📥 Response Data:', JSON.stringify(response.data, null, 2));
+                console.log('═══════════════════════════════════════════════════════════\n');
               } catch (altError) {
+                console.log('\n❌ ATTEMPT 4 FAILED:');
+                if (altError.response) {
+                  console.log('📥 Status Code:', altError.response.status);
+                  console.log('📥 Response Data:', JSON.stringify(altError.response.data, null, 2));
+                }
+                console.log('═══════════════════════════════════════════════════════════\n');
                 throw lastError; // Throw original error
               }
             } else {
+              console.log('═══════════════════════════════════════════════════════════\n');
               throw lastError; // Throw original error
             }
           }
@@ -522,29 +617,43 @@ async function startUploadAPI(params) {
       }
       // If 404, try alternative endpoint
       else if (error.response && error.response.status === 404 && ENDPOINTS.START_UPLOAD_ALT) {
-        console.log(`⚠️  Primary endpoint failed (404), trying alternative: ${ENDPOINTS.START_UPLOAD_ALT}`);
+        console.log(`\n⚠️  ATTEMPT 5: Primary endpoint failed (404), trying alternative: ${ENDPOINTS.START_UPLOAD_ALT}`);
         try {
           response = await axios.post(
             ENDPOINTS.START_UPLOAD_ALT,
             requestBody,
-            {
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': getAuthHeader() // Add Basic Auth header as well
-              },
-              timeout: 30000
-            }
+            requestConfig
           );
+          
+          console.log('\n✅ RESPONSE RECEIVED (SUCCESS with alternative endpoint):');
+          console.log('📥 Status Code:', response.status);
+          console.log('📥 Response Data:', JSON.stringify(response.data, null, 2));
+          console.log('═══════════════════════════════════════════════════════════\n');
         } catch (altError) {
+          console.log('\n❌ ATTEMPT 5 FAILED:');
+          if (altError.response) {
+            console.log('📥 Status Code:', altError.response.status);
+            console.log('📥 Response Data:', JSON.stringify(altError.response.data, null, 2));
+          }
+          console.log('═══════════════════════════════════════════════════════════\n');
           // Both endpoints failed, throw the original error
           throw lastError;
         }
       } else {
+        console.log('═══════════════════════════════════════════════════════════\n');
         throw error;
       }
     }
 
-    console.log('✅ Start Upload Response:', JSON.stringify(response.data, null, 2));
+    // Final response logging (if we got here, request succeeded)
+    if (response && response.data) {
+      console.log('\n✅ FINAL RESPONSE (SUCCESS):');
+      console.log('📥 Status Code:', response.status);
+      console.log('📥 Status Text:', response.statusText);
+      console.log('📥 Response Headers:', JSON.stringify(response.headers, null, 2));
+      console.log('📥 Response Data:', JSON.stringify(response.data, null, 2));
+      console.log('═══════════════════════════════════════════════════════════\n');
+    }
 
     if (response.data && response.data.status === 'success') {
       return {
@@ -566,10 +675,18 @@ async function startUploadAPI(params) {
       };
     }
   } catch (error) {
-    console.error('❌ Start Upload API Error:', error.message);
+    // Final error logging - comprehensive error details for Digitap team
+    console.log('\n═══════════════════════════════════════════════════════════');
+    console.log('❌ FINAL ERROR - ALL ATTEMPTS FAILED');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.error('❌ Error Message:', error.message);
+    console.error('❌ Error Code:', error.code || 'N/A');
+    
     if (error.response) {
       console.error('❌ Response Status:', error.response.status);
-      console.error('❌ Response Data:', error.response.data);
+      console.error('❌ Response Status Text:', error.response.statusText);
+      console.error('❌ Response Headers:', JSON.stringify(error.response.headers, null, 2));
+      console.error('❌ Response Data:', JSON.stringify(error.response.data, null, 2));
       
       const errorCode = error.response.data?.code;
       let errorMessage = error.response.data?.msg || error.response.data?.message || `API error: ${error.response.status}`;
@@ -583,8 +700,17 @@ async function startUploadAPI(params) {
         errorMessage = `Invalid client_name. Please check if DIGITAP_CLIENT_NAME environment variable is set correctly. Current value: ${DIGITAP_CLIENT_NAME}`;
       } else if (errorCode === 'SignatureDoesNotMatch' || errorCode === 'InvalidEncryption') {
         errorMessage = `Signature authentication failed. Please verify DIGITAP_ENCRYPTION_KEY is set correctly. Error: ${errorMessage}`;
+      } else if (errorCode === 'RequiredToken') {
+        console.error('⚠️  IMPORTANT: API requires a token field but we are unable to determine the correct format.');
+        console.error('⚠️  We tried:');
+        console.error('   1. payload/signature structure');
+        console.error('   2. payload/signature/token structure');
+        console.error('   3. direct fields + signature + token structure');
+        console.error('   4. alternative endpoint');
+        console.error('⚠️  Please contact Digitap support to clarify the correct request structure for uploadstmt API.');
       }
       
+      console.log('═══════════════════════════════════════════════════════════\n');
       return {
         success: false,
         error: errorMessage,
@@ -592,10 +718,24 @@ async function startUploadAPI(params) {
         status: error.response.status,
         raw_response: error.response.data
       };
+    } else if (error.request) {
+      console.error('❌ No response received from server');
+      console.error('❌ Request Config:', JSON.stringify({
+        url: error.config?.url,
+        method: error.config?.method,
+        timeout: error.config?.timeout,
+        headers: error.config?.headers ? Object.keys(error.config.headers) : 'N/A'
+      }, null, 2));
+      console.log('═══════════════════════════════════════════════════════════\n');
+    } else {
+      console.error('❌ Error setting up request:', error.message);
+      console.error('❌ Stack Trace:', error.stack?.split('\n').slice(0, 10).join('\n'));
+      console.log('═══════════════════════════════════════════════════════════\n');
     }
+    
     return {
       success: false,
-      error: error.message
+      error: error.message || 'Start Upload failed'
     };
   }
 }
