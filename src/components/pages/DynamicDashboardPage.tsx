@@ -462,9 +462,9 @@ export function DynamicDashboardPage() {
         }
 
         // Split applications into applied loans and running loans
-        // Applied: Pre-disbursal statuses (submitted, under_review, follow_up, ready_for_disbursement, ready_to_repeat_disbursal)
+        // Applied: Pre-disbursal statuses (submitted, under_review, follow_up, ready_for_disbursement, ready_to_repeat_disbursal, qa_verification)
         const applied = uniqueApplications.filter((app: any) =>
-          ['submitted', 'under_review', 'follow_up', 'ready_for_disbursement', 'ready_to_repeat_disbursal'].includes(app.status)
+          ['submitted', 'under_review', 'follow_up', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'qa_verification'].includes(app.status)
         );
 
         // Running loans: Only active loans with account manager (NOT cleared, NOT ready_for_disbursement)
@@ -1253,7 +1253,7 @@ export function DynamicDashboardPage() {
                       {allLoans.map((loan) => {
                         const isCleared = loan.status === 'cleared';
                         const isActive = loan.status === 'account_manager';
-                        const isApplied = ['submitted', 'under_review', 'follow_up'].includes(loan.status);
+                        const isApplied = ['submitted', 'under_review', 'follow_up', 'qa_verification'].includes(loan.status);
 
                         return (
                           <Card key={loan.id} className={`p-4 hover:shadow-md transition-shadow ${isCleared ? 'border-l-4 border-l-green-500 bg-green-50' :
