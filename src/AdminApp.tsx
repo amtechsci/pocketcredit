@@ -290,117 +290,122 @@ function AdminRedirect() {
   return <Navigate to={`${BASE_PATH}/login`} replace />;
 }
 
+import { Toaster } from './components/ui/sonner';
+
 export default function AdminApp() {
   return (
-    <Routes>
-      <Route path="/" element={<AdminRedirect />} />
-      <Route path="login" element={<AdminLoginPage />} />
-      <Route path="dashboard" element={
-        <ProtectedRoute>
-          <AdminDashboard />
-        </ProtectedRoute>
-      } />
-      <Route path="applications" element={
-        <ProtectedRoute>
-          <LoanApplicationsQueue />
-        </ProtectedRoute>
-      } />
-      <Route path="extensions" element={
-        <ProtectedRoute>
-          <PendingExtensionsPage />
-        </ProtectedRoute>
-      } />
-      <Route path="user-profile/:userId" element={
-        <ProtectedRoute>
-          <UserProfileDetail />
-        </ProtectedRoute>
-      } />
-      <Route path="users" element={
-        <ProtectedRoute>
-          <AdminUsersPage />
-        </ProtectedRoute>
-      } />
-      <Route path="cooling-period" element={
-        <ProtectedRoute>
-          <CoolingPeriodPage />
-        </ProtectedRoute>
-      } />
-      <Route path="registered" element={
-        <ProtectedRoute>
-          <RegisteredPage />
-        </ProtectedRoute>
-      } />
-      <Route path="approved" element={
-        <ProtectedRoute>
-          <ApprovedPage />
-        </ProtectedRoute>
-      } />
-      <Route path="qa-verification" element={
-        <ProtectedRoute>
-          <QAVerificationPage />
-        </ProtectedRoute>
-      } />
-      <Route path="activity-logs" element={
-        <ProtectedRoute>
-          <ActivityLogsPage />
-        </ProtectedRoute>
-      } />
-      <Route path="team-management" element={
-        <ProtectedRoute>
-          <AdminTeamManagement />
-        </ProtectedRoute>
-      } />
-      <Route path="reports" element={
-        <ProtectedRoute>
-          <AdminReports />
-        </ProtectedRoute>
-      } />
-      <Route path="settings" element={
-        <ProtectedRoute>
-          <AdminSettings />
-        </ProtectedRoute>
-      } />
-      <Route path="policies" element={
-        <ProtectedRoute>
-          <PoliciesManagement />
-        </ProtectedRoute>
-      } />
-      <Route path="system-settings" element={
-        <ProtectedRoute>
-          <SystemSettings />
-        </ProtectedRoute>
-      } />
-      <Route path="kfs/:loanId" element={
-        <ProtectedRoute>
-          <KFSDocument />
-        </ProtectedRoute>
-      } />
-      <Route path="loan-agreement/:loanId" element={
-        <ProtectedRoute>
-          <LoanAgreementDocument />
-        </ProtectedRoute>
-      } />
-      <Route path="extension-letter/:loanId" element={
-        <ProtectedRoute>
-          <ExtensionLetterDocument />
-        </ProtectedRoute>
-      } />
-      <Route path="noc/:loanId" element={
-        <ProtectedRoute>
-          <NOCDocument />
-        </ProtectedRoute>
-      } />
-      <Route path="search" element={
-        <ProtectedRoute>
-          <SearchResultsPage />
-        </ProtectedRoute>
-      } />
-      <Route path="users/:userId" element={
-        <ProtectedRoute>
-          <UserProfileDetail />
-        </ProtectedRoute>
-      } />
-      <Route path="*" element={<AdminRedirect />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/" element={<AdminRedirect />} />
+        <Route path="login" element={<AdminLoginPage />} />
+        <Route path="dashboard" element={
+          <ProtectedRoute>
+            <AdminDashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="applications" element={
+          <ProtectedRoute>
+            <LoanApplicationsQueue />
+          </ProtectedRoute>
+        } />
+        <Route path="extensions" element={
+          <ProtectedRoute>
+            <PendingExtensionsPage />
+          </ProtectedRoute>
+        } />
+        <Route path="user-profile/:userId" element={
+          <ProtectedRoute>
+            <UserProfileDetail />
+          </ProtectedRoute>
+        } />
+        <Route path="users" element={
+          <ProtectedRoute>
+            <AdminUsersPage />
+          </ProtectedRoute>
+        } />
+        <Route path="cooling-period" element={
+          <ProtectedRoute>
+            <CoolingPeriodPage />
+          </ProtectedRoute>
+        } />
+        <Route path="registered" element={
+          <ProtectedRoute>
+            <RegisteredPage />
+          </ProtectedRoute>
+        } />
+        <Route path="approved" element={
+          <ProtectedRoute>
+            <ApprovedPage />
+          </ProtectedRoute>
+        } />
+        <Route path="qa-verification" element={
+          <ProtectedRoute>
+            <QAVerificationPage />
+          </ProtectedRoute>
+        } />
+        <Route path="activity-logs" element={
+          <ProtectedRoute>
+            <ActivityLogsPage />
+          </ProtectedRoute>
+        } />
+        <Route path="team-management" element={
+          <ProtectedRoute>
+            <AdminTeamManagement />
+          </ProtectedRoute>
+        } />
+        <Route path="reports" element={
+          <ProtectedRoute>
+            <AdminReports />
+          </ProtectedRoute>
+        } />
+        <Route path="settings" element={
+          <ProtectedRoute>
+            <AdminSettings />
+          </ProtectedRoute>
+        } />
+        <Route path="policies" element={
+          <ProtectedRoute>
+            <PoliciesManagement />
+          </ProtectedRoute>
+        } />
+        <Route path="system-settings" element={
+          <ProtectedRoute>
+            <SystemSettings />
+          </ProtectedRoute>
+        } />
+        <Route path="kfs/:loanId" element={
+          <ProtectedRoute>
+            <KFSDocument />
+          </ProtectedRoute>
+        } />
+        <Route path="loan-agreement/:loanId" element={
+          <ProtectedRoute>
+            <LoanAgreementDocument />
+          </ProtectedRoute>
+        } />
+        <Route path="extension-letter/:loanId" element={
+          <ProtectedRoute>
+            <ExtensionLetterDocument />
+          </ProtectedRoute>
+        } />
+        <Route path="noc/:loanId" element={
+          <ProtectedRoute>
+            <NOCDocument />
+          </ProtectedRoute>
+        } />
+        <Route path="search" element={
+          <ProtectedRoute>
+            <SearchResultsPage />
+          </ProtectedRoute>
+        } />
+        <Route path="users/:userId" element={
+          <ProtectedRoute>
+            <UserProfileDetail />
+          </ProtectedRoute>
+        } />
+        <Route path="*" element={<AdminRedirect />} />
+      </Routes>
+      <Toaster />
+    </>
   );
 }

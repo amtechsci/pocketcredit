@@ -5624,31 +5624,22 @@ export function UserProfileDetail() {
                         // Use processed values if available (frozen at processing time), otherwise calculate
                         const isProcessed = loan.processed_at || loan.processedDate;
 
-                        // Exhausted period - calculate from processed_at or disbursed_at
-                        // Per rulebook: Use inclusive counting (day 1 = processing day)
+                        // Exhausted period - only use backend API values, no frontend calculations
                         let exhaustedPeriod = 'N/A';
 
-                        // Priority 1: Backend calculated exhausted days (most accurate)
-                        if (calculation?.interest?.exhaustedDays !== undefined && calculation?.interest?.exhaustedDays !== null) {
+                        // Priority 1: Backend calculated exhausted days from calculation API
+                        // Check if calculation exists and has exhaustedDays (including 0 as valid value)
+                        if (calculation && calculation.interest && typeof calculation.interest.exhaustedDays === 'number') {
                           exhaustedPeriod = `${calculation.interest.exhaustedDays} days`;
                         }
-                        // Priority 2: Stored exhausted_period_days from loan record
-                        else if (isProcessed && loan.exhausted_period_days > 0) {
+                        // Priority 2: Stored exhausted_period_days from loan record (backend value)
+                        // Check if loan has exhausted_period_days (including 0 as valid value)
+                        else if (typeof loan.exhausted_period_days === 'number') {
                           exhaustedPeriod = `${loan.exhausted_period_days} days`;
                         }
-                        // Priority 3: Calculate from processed date
-                        else if (isProcessed && (loan.exhausted_period_days === null || loan.exhausted_period_days === undefined || loan.exhausted_period_days === 0)) {
-                          // If processed but no exhausted_period_days value (or it's 0), calculate from processed_at
-                          const processedDateForCalc = loan.processed_at || loan.processedDate;
-                          if (processedDateForCalc) {
-                            const days = Math.max(1, daysDifference(processedDateForCalc, getCurrentDateString()) + 1); // +1 for inclusive counting
-                            exhaustedPeriod = `${days} days`;
-                          }
-                        }
-                        // Priority 4: Calculate from disbursed date (fallback)
-                        else if (disbursedDate) {
-                          const days = Math.max(1, daysDifference(disbursedDate, getCurrentDateString()) + 1); // +1 for inclusive counting
-                          exhaustedPeriod = `${days} days`;
+                        // If calculation is still loading, show loading state
+                        else if (isLoading) {
+                          exhaustedPeriod = 'Loading...';
                         }
 
                         // Due date - use processed value if available, otherwise calculate
