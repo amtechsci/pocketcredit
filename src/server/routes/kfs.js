@@ -1305,6 +1305,53 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           });
         }
 
+        // Merge EMI payment status from emi_schedule into repayment schedule
+        // This preserves the 'paid' status when EMIs are paid, even though we don't use emi_schedule for dates
+        try {
+          let emiScheduleArray = null;
+          if (loan.emi_schedule) {
+            emiScheduleArray = typeof loan.emi_schedule === 'string' 
+              ? JSON.parse(loan.emi_schedule) 
+              : loan.emi_schedule;
+          }
+          
+          if (Array.isArray(emiScheduleArray) && emiScheduleArray.length > 0) {
+            // Merge status from emi_schedule into repayment schedule
+            schedule = schedule.map((instalment, index) => {
+              // Match by instalment_no or emi_number (both are 1-indexed)
+              const instalmentNo = instalment.instalment_no || index + 1;
+              const emiFromSchedule = emiScheduleArray.find((emi) => 
+                (emi.instalment_no === instalmentNo || emi.emi_number === instalmentNo)
+              ) || emiScheduleArray[index];
+              
+              if (emiFromSchedule && emiFromSchedule.status) {
+                return {
+                  ...instalment,
+                  status: emiFromSchedule.status // 'paid' or 'pending'
+                };
+              }
+              return {
+                ...instalment,
+                status: 'pending' // Default status
+              };
+            });
+            console.log(`✅ [User KFS] Merged EMI status from emi_schedule into repayment schedule`);
+          } else {
+            // No emi_schedule found, set all to pending
+            schedule = schedule.map((instalment) => ({
+              ...instalment,
+              status: 'pending'
+            }));
+          }
+        } catch (emiScheduleError) {
+          console.error('❌ [User KFS] Error merging emi_schedule status:', emiScheduleError);
+          // If merge fails, set all to pending
+          schedule = schedule.map((instalment) => ({
+            ...instalment,
+            status: 'pending'
+          }));
+        }
+
         return {
           type: isMultiEmi ? 'EMI' : 'Bullet Payment',
           number_of_instalments: isMultiEmi ? emiCount : 1,

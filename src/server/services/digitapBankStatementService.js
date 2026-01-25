@@ -486,7 +486,6 @@ async function startUploadAPI(params) {
       headers: {
         'Content-Type': 'application/json',
         'ent_authorization': getEntAuthToken(), // Base64 token without "Basic " prefix
-        'Authorization': getAuthHeader() // Also include Authorization for backward compatibility
       },
       timeout: 30000
     };

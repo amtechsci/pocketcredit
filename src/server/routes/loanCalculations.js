@@ -945,53 +945,54 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           calculation.repayment = {};
         }
         
-        // For account_manager loans, status is already preserved in the recalculated schedule above
-        // For non-account_manager loans, merge status from emi_schedule to preserve payment tracking
-        if (!isAccountManager) {
-          try {
-            let emiScheduleArray = null;
-            if (loan.emi_schedule) {
-              emiScheduleArray = typeof loan.emi_schedule === 'string' 
-                ? JSON.parse(loan.emi_schedule) 
-                : loan.emi_schedule;
-            }
-            
-            if (Array.isArray(emiScheduleArray) && emiScheduleArray.length > 0) {
-              // Merge status from emi_schedule into repayment schedule
-              schedule = schedule.map((instalment, index) => {
-                // Match by instalment_no or emi_number (both are 1-indexed)
-                const instalmentNo = instalment.instalment_no || index + 1;
-                const emiFromSchedule = emiScheduleArray.find((emi) => 
-                  (emi.instalment_no === instalmentNo || emi.emi_number === instalmentNo)
-                ) || emiScheduleArray[index];
-                
-                if (emiFromSchedule && emiFromSchedule.status) {
-                  return {
-                    ...instalment,
-                    status: emiFromSchedule.status // 'paid' or 'pending'
-                  };
-                }
+        // Always merge status from emi_schedule to preserve payment tracking
+        // emi_schedule is the source of truth for payment status (updated when payments are made)
+        // This applies to both account_manager and non-account_manager loans
+        try {
+          let emiScheduleArray = null;
+          if (loan.emi_schedule) {
+            emiScheduleArray = typeof loan.emi_schedule === 'string' 
+              ? JSON.parse(loan.emi_schedule) 
+              : loan.emi_schedule;
+          }
+          
+          if (Array.isArray(emiScheduleArray) && emiScheduleArray.length > 0) {
+            // Merge status from emi_schedule into repayment schedule
+            schedule = schedule.map((instalment, index) => {
+              // Match by instalment_no or emi_number (both are 1-indexed)
+              const instalmentNo = instalment.instalment_no || instalment.emi_number || index + 1;
+              const emiFromSchedule = emiScheduleArray.find((emi) => 
+                (emi.instalment_no === instalmentNo || emi.emi_number === instalmentNo)
+              ) || emiScheduleArray[index];
+              
+              // Use status from emi_schedule if available, otherwise keep existing status
+              if (emiFromSchedule && emiFromSchedule.status) {
                 return {
                   ...instalment,
-                  status: 'pending' // Default status
+                  status: emiFromSchedule.status // 'paid' or 'pending'
                 };
-              });
-              console.log(`✅ Merged EMI status from emi_schedule into repayment schedule`);
-            } else {
-              // No emi_schedule found, set all to pending
-              schedule = schedule.map((instalment) => ({
+              }
+              // If no status in emi_schedule, keep existing status or default to pending
+              return {
                 ...instalment,
-                status: 'pending'
-              }));
-            }
-          } catch (emiScheduleError) {
-            console.error('❌ Error merging emi_schedule status:', emiScheduleError);
-            // If error, set all to pending
+                status: instalment.status || 'pending'
+              };
+            });
+            console.log(`✅ Merged EMI status from emi_schedule into repayment schedule (account_manager: ${isAccountManager})`);
+          } else {
+            // No emi_schedule found, ensure all have status (keep existing or set to pending)
             schedule = schedule.map((instalment) => ({
               ...instalment,
-              status: 'pending'
+              status: instalment.status || 'pending'
             }));
           }
+        } catch (emiScheduleError) {
+          console.error('❌ Error merging emi_schedule status:', emiScheduleError);
+          // If error, ensure all have status (keep existing or set to pending)
+          schedule = schedule.map((instalment) => ({
+            ...instalment,
+            status: instalment.status || 'pending'
+          }));
         }
         // Note: For account_manager loans, status was already preserved during recalculation above
         
