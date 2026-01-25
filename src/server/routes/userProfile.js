@@ -3084,6 +3084,64 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             // Don't fail - cooling period check failure shouldn't block loan clearance
           }
 
+          // Recalculate and update credit limit for 2 EMI products after loan is cleared
+          try {
+            // Check if this is a 2 EMI product
+            const planSnapshot = loan.plan_snapshot 
+              ? (typeof loan.plan_snapshot === 'string' ? JSON.parse(loan.plan_snapshot) : loan.plan_snapshot)
+              : null;
+            const is2EMIProduct = planSnapshot?.emi_count === 2 && planSnapshot?.plan_type === 'multi_emi';
+            
+            if (is2EMIProduct) {
+              console.log(`[UserProfile] Detected 2 EMI product - recalculating credit limit after loan clearance for user ${loan.user_id}`);
+              
+              const { calculateCreditLimitFor2EMI, storePendingCreditLimit } = require('../utils/creditLimitCalculator');
+              const notificationService = require('../services/notificationService');
+              
+              // Calculate new credit limit (now includes the cleared loan)
+              const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
+              
+              if (creditLimitData.newLimit > 0) {
+                // Get current limit to check if it's actually an increase
+                const currentLimit = parseFloat(loan.loan_limit) || 0;
+                
+                // Only store pending limit if it's higher than current limit
+                if (creditLimitData.newLimit > currentLimit) {
+                  // Store as pending credit limit (requires user acceptance)
+                  await storePendingCreditLimit(loan.user_id, creditLimitData.newLimit, creditLimitData);
+                  
+                  // Get user details for notification
+                  const userQuery = await executeQuery(
+                    `SELECT first_name, last_name, phone, email FROM users WHERE id = ?`,
+                    [loan.user_id]
+                  );
+                  const user = userQuery && userQuery.length > 0 ? userQuery[0] : null;
+                  
+                  if (user) {
+                    // Send SMS and Email notification
+                    const recipientName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Customer';
+                    await notificationService.sendCreditLimitNotification({
+                      userId: loan.user_id,
+                      mobile: user.phone,
+                      email: user.email,
+                      recipientName: recipientName,
+                      newLimit: creditLimitData.newLimit
+                    });
+                  }
+                  
+                  console.log(`[UserProfile] Pending credit limit stored (₹${creditLimitData.newLimit}) and notifications sent for user ${loan.user_id} after loan clearance`);
+                } else {
+                  console.log(`[UserProfile] New limit (₹${creditLimitData.newLimit}) is not higher than current limit (₹${currentLimit}), skipping pending limit storage`);
+                }
+              } else {
+                console.warn(`[UserProfile] Could not calculate credit limit for user ${loan.user_id} after loan clearance - salary may be missing`);
+              }
+            }
+          } catch (creditLimitError) {
+            console.error('❌ Error recalculating credit limit after loan clearance (non-fatal):', creditLimitError);
+            // Don't fail - credit limit update failure shouldn't block loan clearance
+          }
+
           loanStatusUpdated = true;
           newStatus = 'cleared';
         } else {

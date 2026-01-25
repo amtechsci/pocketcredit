@@ -424,9 +424,9 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             <td className="border border-black p-2">3</td>
                             <td className="border border-black p-2">Phone number and email id of the nodal grievance redressal officer</td>
                             <td className="border border-black p-2">
-                                Name: {kfsData?.grievance?.name || 'Mr.Kiran'}<br />
-                                Number: {kfsData?.grievance?.phone || '+91 9573794121'}<br />
-                                Mail ID: {kfsData?.grievance?.email || 'Kiran@pocketcredit.in'}
+                                Name: {'Mr.Kiran'}<br />
+                                Number: {'+91 9573794121'}<br />
+                                Mail ID: {'Kiran@pocketcredit.in'}
                             </td>
                         </tr>
                         <tr>

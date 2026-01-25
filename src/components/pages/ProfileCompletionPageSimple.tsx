@@ -347,24 +347,14 @@ const ProfileCompletionPageSimple = () => {
           return;
         }
 
-        // Convert DD/MM/YYYY to YYYY-MM-DD for age calculation
+        // Convert DD/MM/YYYY to YYYY-MM-DD for backend
         const dobFormatted = convertDDMMYYYYtoYYYYMMDD(employmentQuickCheckData.date_of_birth);
-        const dob = new Date(dobFormatted);
-        const today = new Date();
-        const age = today.getFullYear() - dob.getFullYear() -
-          ((today.getMonth() < dob.getMonth() ||
-            (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate())) ? 1 : 0);
-
-        if (age > 45) {
-          toast.error('Sorry, applicants above 45 years of age are not eligible at this time.');
-          setLoading(false);
-          return;
-        }
 
         submitData.income_range = employmentQuickCheckData.income_range;
         submitData.eligible_loan_amount = employmentQuickCheckData.eligible_loan_amount;
         submitData.payment_mode = employmentQuickCheckData.payment_mode;
         submitData.date_of_birth = dobFormatted; // Send in YYYY-MM-DD format to backend
+        // Note: Age validation (> 45) is handled by backend, which will put user on hold
       }
 
       const response = await apiService.saveEmploymentQuickCheck(submitData);
