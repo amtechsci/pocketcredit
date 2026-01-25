@@ -37,12 +37,22 @@ const ENDPOINTS = {
 };
 
 /**
- * Generate Base64 encoded authorization header
+ * Generate Base64 encoded authorization header (with "Basic " prefix)
+ * Used for Authorization header
  */
 function getAuthHeader() {
   const credentials = `${DIGITAP_CLIENT_ID}:${DIGITAP_CLIENT_SECRET}`;
   const base64Credentials = Buffer.from(credentials).toString('base64');
   return `Basic ${base64Credentials}`;
+}
+
+/**
+ * Generate Base64 encoded auth token (without "Basic " prefix)
+ * Used for ent_authorization header (like other Digitap APIs)
+ */
+function getEntAuthToken() {
+  const credentials = `${DIGITAP_CLIENT_ID}:${DIGITAP_CLIENT_SECRET}`;
+  return Buffer.from(credentials).toString('base64');
 }
 
 /**
@@ -444,12 +454,16 @@ async function startUploadAPI(params) {
     }, null, 2));
     console.log('\n📋 REQUEST HEADERS:');
     const authHeader = getAuthHeader();
+    const entAuthToken = getEntAuthToken();
     console.log(JSON.stringify({
       'Content-Type': 'application/json',
+      'ent_authorization': entAuthToken ? '[REDACTED - Base64 token]' : 'NOT SET',
       'Authorization': authHeader ? '[REDACTED - Basic Auth]' : 'NOT SET',
       'User-Agent': 'axios/' + require('axios/package.json').version
     }, null, 2));
+    console.log('📋 ent_authorization Header (first 20 chars):', entAuthToken ? entAuthToken.substring(0, 20) + '...' : 'NOT SET');
     console.log('📋 Authorization Header (first 20 chars):', authHeader ? authHeader.substring(0, 20) + '...' : 'NOT SET');
+    console.log('📋 Note: Using ent_authorization header like other Digitap APIs (Digilocker, ClickWrap)');
     console.log('\n📋 CONFIGURATION:');
     console.log(JSON.stringify({
       DIGITAP_BASE_URL: DIGITAP_BASE_URL,
@@ -462,23 +476,36 @@ async function startUploadAPI(params) {
     }, null, 2));
 
     // Try primary endpoint first, then fallback to alternative
-    // Note: Some Digitap APIs require both signature AND Basic Auth headers
+    // Note: Other Digitap APIs use ent_authorization header instead of Authorization
+    // Let's try both formats like Digilocker API does
     let response;
     let lastError;
-    const requestConfig = {
+    
+    // Attempt 1: Try with ent_authorization header (like other Digitap APIs)
+    const requestConfigWithEntAuth = {
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': getAuthHeader() // Add Basic Auth header as well
+        'ent_authorization': getEntAuthToken(), // Base64 token without "Basic " prefix
+        'Authorization': getAuthHeader() // Also include Authorization for backward compatibility
+      },
+      timeout: 30000
+    };
+    
+    // Attempt 1a: Try with only Authorization header (original)
+    const requestConfigWithAuth = {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': getAuthHeader() // Basic Auth header
       },
       timeout: 30000
     };
     
     try {
-      console.log('\n🚀 ATTEMPT 1: Sending request with payload/signature structure...');
+      console.log('\n🚀 ATTEMPT 1: Sending request with ent_authorization + Authorization headers (like other Digitap APIs)...');
       response = await axios.post(
         ENDPOINTS.START_UPLOAD,
         requestBody,
-        requestConfig
+        requestConfigWithEntAuth
       );
       
       // Log successful response
@@ -492,7 +519,7 @@ async function startUploadAPI(params) {
       lastError = error;
       
       // Log error response details
-      console.log('\n❌ RESPONSE RECEIVED (ERROR):');
+      console.log('\n❌ ATTEMPT 1 FAILED:');
       if (error.response) {
         console.log('📥 Status Code:', error.response.status);
         console.log('📥 Status Text:', error.response.statusText);
@@ -505,19 +532,38 @@ async function startUploadAPI(params) {
         console.log('📥 Request details:', JSON.stringify({
           url: error.config?.url,
           method: error.config?.method,
-          headers: error.config?.headers
+          headers: error.config?.headers ? Object.keys(error.config.headers) : 'N/A'
         }, null, 2));
       } else {
         console.log('📥 Error setting up request:', error.message);
       }
-      console.log('📥 Full Error Object:', JSON.stringify({
-        message: error.message,
-        code: error.code,
-        stack: error.stack?.split('\n').slice(0, 5) // First 5 lines of stack
-      }, null, 2));
+      
+      // Try with only Authorization header (without ent_authorization)
+      if (error.response && (error.response.data?.code === 'RequiredToken' || error.response.status === 401 || error.response.status === 403)) {
+        console.log('\n🚀 ATTEMPT 1b: Trying with only Authorization header (without ent_authorization)...');
+        try {
+          response = await axios.post(
+            ENDPOINTS.START_UPLOAD,
+            requestBody,
+            requestConfigWithAuth
+          );
+          
+          console.log('\n✅ RESPONSE RECEIVED (SUCCESS with Authorization only):');
+          console.log('📥 Status Code:', response.status);
+          console.log('📥 Response Data:', JSON.stringify(response.data, null, 2));
+          console.log('═══════════════════════════════════════════════════════════\n');
+        } catch (authOnlyError) {
+          console.log('\n❌ ATTEMPT 1b FAILED:');
+          if (authOnlyError.response) {
+            console.log('📥 Status Code:', authOnlyError.response.status);
+            console.log('📥 Response Data:', JSON.stringify(authOnlyError.response.data, null, 2));
+          }
+          lastError = authOnlyError;
+        }
+      }
       
       // If error is "RequiredToken", try alternative request structure with token field
-      if (error.response && error.response.data && error.response.data.code === 'RequiredToken') {
+      if (error.response && error.response.data && error.response.data.code === 'RequiredToken' && !response) {
         console.log('\n⚠️  ATTEMPT 2: API requires token field. Trying alternative request structure with token...');
         try {
           // Try with token field added to request body
@@ -536,7 +582,7 @@ async function startUploadAPI(params) {
           response = await axios.post(
             ENDPOINTS.START_UPLOAD,
             requestBodyWithToken,
-            requestConfig
+            requestConfigWithEntAuth // Use ent_authorization header
           );
           
           console.log('\n✅ RESPONSE RECEIVED (SUCCESS with token):');
@@ -570,7 +616,7 @@ async function startUploadAPI(params) {
             response = await axios.post(
               ENDPOINTS.START_UPLOAD,
               directRequestBody,
-              requestConfig
+              requestConfigWithEntAuth // Use ent_authorization header
             );
             
             console.log('\n✅ RESPONSE RECEIVED (SUCCESS with direct structure):');
@@ -592,7 +638,7 @@ async function startUploadAPI(params) {
                 response = await axios.post(
                   ENDPOINTS.START_UPLOAD_ALT,
                   requestBody,
-                  requestConfig
+                  requestConfigWithEntAuth // Use ent_authorization header
                 );
                 
                 console.log('\n✅ RESPONSE RECEIVED (SUCCESS with alternative endpoint):');
@@ -622,7 +668,7 @@ async function startUploadAPI(params) {
           response = await axios.post(
             ENDPOINTS.START_UPLOAD_ALT,
             requestBody,
-            requestConfig
+            requestConfigWithEntAuth // Use ent_authorization header
           );
           
           console.log('\n✅ RESPONSE RECEIVED (SUCCESS with alternative endpoint):');
@@ -701,13 +747,68 @@ async function startUploadAPI(params) {
       } else if (errorCode === 'SignatureDoesNotMatch' || errorCode === 'InvalidEncryption') {
         errorMessage = `Signature authentication failed. Please verify DIGITAP_ENCRYPTION_KEY is set correctly. Error: ${errorMessage}`;
       } else if (errorCode === 'RequiredToken') {
-        console.error('⚠️  IMPORTANT: API requires a token field but we are unable to determine the correct format.');
-        console.error('⚠️  We tried:');
-        console.error('   1. payload/signature structure');
-        console.error('   2. payload/signature/token structure');
-        console.error('   3. direct fields + signature + token structure');
-        console.error('   4. alternative endpoint');
-        console.error('⚠️  Please contact Digitap support to clarify the correct request structure for uploadstmt API.');
+        console.error('\n═══════════════════════════════════════════════════════════');
+        console.error('📧 INFORMATION FOR DIGITAP SUPPORT TEAM');
+        console.error('═══════════════════════════════════════════════════════════');
+        console.error('❌ ISSUE: uploadstmt API requires a token field, but we cannot determine the correct format.');
+        console.error('');
+        console.error('📋 WHAT WE TRIED:');
+        console.error('   1. Request structure: { payload: {...}, signature: "..." }');
+        console.error('      → Result: "RequiredToken" error - "token is missing"');
+        console.error('');
+        console.error('   2. Request structure: { payload: {...}, signature: "...", token: CLIENT_ID }');
+        console.error('      → Result: "InvalidToken" error - "The token is invalid or expired"');
+        console.error('');
+        console.error('   3. Request structure: { client_name, institution_id, ..., signature: "...", token: CLIENT_ID }');
+        console.error('      → Result: "InvalidToken" error - "The token is invalid or expired"');
+        console.error('');
+        console.error('   4. Alternative endpoint: /startupload');
+        console.error('      → Result: 404 Not Found');
+        console.error('');
+        console.error('📋 OBSERVATIONS:');
+        console.error('   • The API clearly requires a token field (error changes from RequiredToken to InvalidToken)');
+        console.error('   • Using CLIENT_ID as token results in "InvalidToken" error');
+        console.error('   • The Generate URL API (/bank-data/generateurl) works fine WITHOUT a token');
+        console.error('   • Both APIs use the same Basic Auth header (CLIENT_ID:CLIENT_SECRET)');
+        console.error('');
+        console.error('❓ QUESTIONS FOR DIGITAP SUPPORT:');
+        console.error('   1. How do we obtain the token for uploadstmt API?');
+        console.error('   2. Is there a separate authentication endpoint to get the token?');
+        console.error('   3. What is the correct token format/value for uploadstmt API?');
+        console.error('   4. Is the token different from CLIENT_ID?');
+        console.error('   5. Does the token need to be generated/obtained before calling uploadstmt?');
+        console.error('   6. What is the correct request structure for uploadstmt API?');
+        console.error('');
+        console.error('📋 OUR CURRENT CONFIGURATION:');
+        console.error('   • Endpoint: https://svc.digitap.ai/bank-data/uploadstmt');
+        console.error('   • Method: POST');
+        console.error('   • Auth Header: Basic Auth (CLIENT_ID:CLIENT_SECRET)');
+        console.error('   • CLIENT_ID: ' + DIGITAP_CLIENT_ID);
+        console.error('   • CLIENT_NAME: ' + DIGITAP_CLIENT_NAME);
+        console.error('   • Signature: Generated using HMAC-SHA256 with ENCRYPTION_KEY');
+        console.error('');
+        console.error('📋 REQUEST PAYLOAD WE ARE SENDING:');
+        console.error(JSON.stringify({
+          payload: {
+            client_name: DIGITAP_CLIENT_NAME,
+            institution_id: '1',
+            client_ref_num: 'PC0001831769269888697',
+            txn_completed_cburl: 'https://pocketcredit.in/bank-statement/bank-data/webhook',
+            acceptance_policy: 'atLeastOneTransactionInRange'
+          },
+          signature: '[64 character hex string]'
+        }, null, 2));
+        console.error('');
+        console.error('📋 ERROR RESPONSE WE ARE RECEIVING:');
+        console.error(JSON.stringify({
+          status: 'error',
+          code: 'RequiredToken',
+          msg: 'token is missing'
+        }, null, 2));
+        console.error('');
+        console.error('═══════════════════════════════════════════════════════════');
+        console.error('⚠️  Please contact Digitap support with the above information.');
+        console.error('═══════════════════════════════════════════════════════════\n');
       }
       
       console.log('═══════════════════════════════════════════════════════════\n');
