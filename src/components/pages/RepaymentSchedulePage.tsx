@@ -562,6 +562,12 @@ export const RepaymentSchedulePage = () => {
 
         {/* Single Payment Plan - Current Page */}
         {!shouldShowMultiEmi && !isLoanCleared && (() => {
+          // Hide preclose option if first loan is already cleared
+          // If completedLoansCount > 0, user has cleared at least one loan, so hide preclose
+          if (completedLoansCount > 0) {
+            return null;
+          }
+          
           // Calculate DPD (Days Past Due Date) to determine if Pre-close button should be shown
           // Pre-close button shall be available till DPD = -6 only (6 days before due date)
           const dueDate = kfsData.repayment?.first_due_date || loanData.processed_due_date;
@@ -1263,6 +1269,12 @@ export const RepaymentSchedulePage = () => {
 
         {/* Multi-EMI Plan - Preclose Section */}
         {shouldShowMultiEmi && !isLoanCleared && (() => {
+          // Hide preclose option if first loan is already cleared
+          // If completedLoansCount > 0, user has cleared at least one loan, so hide preclose
+          if (completedLoansCount > 0) {
+            return null;
+          }
+          
           // Calculate DPD (Days Past Due Date) using first EMI's due date
           // Pre-close button shall be available till DPD = -6 only (6 days before first EMI due date)
           const firstEmiDueDate = kfsData.repayment?.first_due_date 
