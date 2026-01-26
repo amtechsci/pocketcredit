@@ -1385,11 +1385,12 @@ class ApiService {
    * Generate and download NOC PDF for a cleared loan
    */
   async downloadNOCPDF(loanId: number, htmlContent: string): Promise<Blob> {
+    const token = localStorage.getItem('pocket_user_token');
     const response = await fetch(`${this.baseURL}/kfs/user/${loanId}/noc/generate-pdf`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.getToken()}`
+        'Authorization': token ? `Bearer ${token}` : ''
       },
       body: JSON.stringify({ htmlContent })
     });
