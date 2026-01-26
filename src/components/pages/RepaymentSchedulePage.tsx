@@ -457,11 +457,12 @@ export const RepaymentSchedulePage = () => {
   }
   
   // Calculate limits for each percentage tier
+  // NOTE: Stages show percentage-based limits WITHOUT cap (backend caps at 45600, but stages show theoretical limits)
   const calculateLimitForPercentage = (percentage: number) => {
     // Round down to nearest 1000 (e.g., 11055 -> 11000, 11555 -> 11000)
     const calculatedLimit = Math.floor((monthlySalary * percentage) / 1000) * 1000;
-    // Apply maximum cap of ₹45,600 for regular limits
-    return Math.min(calculatedLimit, 45600);
+    // DO NOT apply cap here - stages show theoretical percentage-based limits
+    return calculatedLimit;
   };
   
   // Determine current stage percentage index (0-based)
@@ -475,10 +476,11 @@ export const RepaymentSchedulePage = () => {
   const nextStageIndex = Math.min(currentLoanNumber, percentageMultipliers.length - 1);
   const nextPercentage = nextStageIndex < percentageMultipliers.length ? percentageMultipliers[nextStageIndex] : null;
   
-  // Calculate next limit BEFORE applying cap (to check if it would exceed ₹45,600)
+  // Calculate next limit for display (stages show percentage-based limits, not capped)
   // Round down to nearest 1000 for display (e.g., 11055 -> 11000)
   const nextStageLimitUncapped = nextPercentage ? Math.floor((monthlySalary * nextPercentage) / 1000) * 1000 : null;
-  const nextStageLimit = nextStageLimitUncapped ? Math.min(nextStageLimitUncapped, 45600) : null;
+  // For stages, show the uncapped limit (backend will cap at 45600, but stages show theoretical)
+  const nextStageLimit = nextStageLimitUncapped;
   
   // Premium limit (₹1,50,000) - shown as ultimate stage
   const premiumLimit = 150000;
