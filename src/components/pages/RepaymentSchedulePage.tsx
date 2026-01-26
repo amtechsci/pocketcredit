@@ -473,20 +473,36 @@ export const RepaymentSchedulePage = () => {
   // Next stage is the next percentage tier
   const nextStageIndex = Math.min(currentLoanNumber, percentageMultipliers.length - 1);
   const nextPercentage = nextStageIndex < percentageMultipliers.length ? percentageMultipliers[nextStageIndex] : null;
-  const nextStageLimit = nextPercentage ? calculateLimitForPercentage(nextPercentage) : null;
+  
+  // Calculate next limit BEFORE applying cap (to check if it would exceed ₹45,600)
+  const nextStageLimitUncapped = nextPercentage ? Math.round((monthlySalary * nextPercentage) / 100) : null;
+  const nextStageLimit = nextStageLimitUncapped ? Math.min(nextStageLimitUncapped, 45600) : null;
   
   // Premium limit (₹1,50,000) - shown as ultimate stage
   const premiumLimit = 150000;
   
   // Check if premium limit should be shown
-  // Show premium if: current percentage is max (32.1%), or next limit would exceed ₹45,600, or we're at the last tier
+  // Show premium if: current percentage is max (32.1%), or next limit (before cap) would exceed ₹45,600, or we're at the last tier
   const isMaxPercentageReached = currentPercentage >= 32.1;
-  const wouldCrossMaxLimit = nextStageLimit ? nextStageLimit > 45600 : false;
+  const wouldCrossMaxLimit = nextStageLimitUncapped ? nextStageLimitUncapped > 45600 : false;
   const isLastTier = currentLoanNumber >= percentageMultipliers.length;
   const shouldShowPremium = isMaxPercentageReached || wouldCrossMaxLimit || isLastTier;
   
-  // Calculate ultimate limit for header message
-  const ultimateLimit = shouldShowPremium ? premiumLimit : (nextStageLimit || premiumLimit);
+  // Calculate limit to show in "Get upto" header message
+  // Show the next stage limit (what they'll get after clearing this loan)
+  // Only show premium if they're already at max tier (32.1%) or next limit calculation would exceed ₹45,600
+  // Note: wouldCrossMaxLimit checks if the calculated percentage limit (before cap) would exceed ₹45,600
+  let headerLimit: number;
+  if (shouldShowPremium) {
+    // User is at max tier or next limit would be premium - show premium
+    headerLimit = premiumLimit;
+  } else if (nextStageLimit && nextStageLimit > 0) {
+    // Show the next stage limit (what they'll unlock after clearing this loan)
+    headerLimit = nextStageLimit;
+  } else {
+    // Fallback: if we can't calculate next stage, show current stage limit as next
+    headerLimit = currentStageLimit;
+  }
 
   // Generate short loan ID format: PLL + last 4 digits
   const getShortLoanId = () => {
@@ -520,7 +536,7 @@ export const RepaymentSchedulePage = () => {
         {/* Header Message */}
         <div className="text-center mb-6 sm:mb-8">
           <h5 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-2">
-          Get upto ₹{formatCurrency(ultimateLimit).replace('₹', '')}
+          Get upto ₹{formatCurrency(headerLimit).replace('₹', '')}
           </h5>
           <p className="text-xs sm:text-sm text-gray-500"> by closing this loan. Clear your loan fast to unlock higher limits</p>
         </div>
