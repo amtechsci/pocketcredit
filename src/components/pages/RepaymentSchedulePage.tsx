@@ -458,7 +458,8 @@ export const RepaymentSchedulePage = () => {
   
   // Calculate limits for each percentage tier
   const calculateLimitForPercentage = (percentage: number) => {
-    const calculatedLimit = Math.round((monthlySalary * percentage) / 100);
+    // Round down to nearest 1000 (e.g., 11055 -> 11000, 11555 -> 11000)
+    const calculatedLimit = Math.floor((monthlySalary * percentage) / 1000) * 1000;
     // Apply maximum cap of ₹45,600 for regular limits
     return Math.min(calculatedLimit, 45600);
   };
@@ -475,7 +476,8 @@ export const RepaymentSchedulePage = () => {
   const nextPercentage = nextStageIndex < percentageMultipliers.length ? percentageMultipliers[nextStageIndex] : null;
   
   // Calculate next limit BEFORE applying cap (to check if it would exceed ₹45,600)
-  const nextStageLimitUncapped = nextPercentage ? Math.round((monthlySalary * nextPercentage) / 100) : null;
+  // Round down to nearest 1000 for display (e.g., 11055 -> 11000)
+  const nextStageLimitUncapped = nextPercentage ? Math.floor((monthlySalary * nextPercentage) / 1000) * 1000 : null;
   const nextStageLimit = nextStageLimitUncapped ? Math.min(nextStageLimitUncapped, 45600) : null;
   
   // Premium limit (₹1,50,000) - shown as ultimate stage
@@ -490,7 +492,7 @@ export const RepaymentSchedulePage = () => {
   
   // Calculate limit to show in "Get upto" header message
   // Always show premium limit (₹1,50,000) as the ultimate goal
-  const headerLimit = premiumLimit;
+  const headerLimit = 150000; // Always show ₹1,50,000
 
   // Generate short loan ID format: PLL + last 4 digits
   const getShortLoanId = () => {

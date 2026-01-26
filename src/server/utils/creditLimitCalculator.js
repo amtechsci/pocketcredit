@@ -110,7 +110,10 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
     const nextPercentage = percentageMultipliers[nextPercentageIndex];
 
     // Calculate next limit based on next percentage tier
-    const calculatedLimitByPercentage = Math.round((salary * nextPercentage) / 100);
+    // First calculate exact value to check premium eligibility
+    const calculatedLimitByPercentageExact = Math.round((salary * nextPercentage) / 100);
+    // Round down to nearest 1000 for display (e.g., 11055 -> 11000, 11555 -> 11000)
+    const calculatedLimitByPercentage = Math.floor(calculatedLimitByPercentageExact / 1000) * 1000;
 
     // Next limit should be based on current limit AND next percentage calculation
     // Use whichever is higher: current limit or calculated next limit
@@ -120,9 +123,9 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
     const isMaxPercentageReached = nextPercentage >= 32.1;
 
     // Check if next limit (based on percentage calculation) would cross ₹45,600
-    // This check should be based on the calculated percentage limit (before rounding), not the max of current and calculated
+    // This check should be based on the exact calculated percentage limit (before rounding down)
     // because premium limit should trigger when the progression-based limit crosses ₹45,600
-    const wouldCrossMaxLimit = calculatedLimitByPercentage > 45600;
+    const wouldCrossMaxLimit = calculatedLimitByPercentageExact > 45600;
 
     // If max percentage reached OR would cross ₹45,600, show premium limit of ₹1,50,000
     const showPremiumLimit = isMaxPercentageReached || wouldCrossMaxLimit;
@@ -135,7 +138,7 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
       newLimit = Math.min(calculatedLimit, 45600);
     }
 
-    console.log(`[CreditLimit] User ${userId}: Salary=₹${salary}, Current Limit=₹${currentLimit}, 2EMI Loans=${loanCount}, Next Percentage=${nextPercentage}%, Calculated=₹${calculatedLimitByPercentage}, Final Limit=₹${newLimit}, Premium=${showPremiumLimit}`);
+    console.log(`[CreditLimit] User ${userId}: Salary=₹${salary}, Current Limit=₹${currentLimit}, 2EMI Loans=${loanCount}, Next Percentage=${nextPercentage}%, Calculated Exact=₹${calculatedLimitByPercentageExact}, Calculated Rounded=₹${calculatedLimitByPercentage}, Final Limit=₹${newLimit}, Premium=${showPremiumLimit}`);
 
     return {
       newLimit,
