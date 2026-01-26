@@ -1375,6 +1375,34 @@ class ApiService {
   }
 
   /**
+   * Get NOC (No Dues Certificate) data for a cleared loan
+   */
+  async getNOC(loanId: number): Promise<ApiResponse<any>> {
+    return this.request('GET', `/kfs/user/${loanId}/noc`);
+  }
+
+  /**
+   * Generate and download NOC PDF for a cleared loan
+   */
+  async downloadNOCPDF(loanId: number, htmlContent: string): Promise<Blob> {
+    const response = await fetch(`${this.baseURL}/kfs/user/${loanId}/noc/generate-pdf`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.getToken()}`
+      },
+      body: JSON.stringify({ htmlContent })
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Failed to download NOC PDF' }));
+      throw new Error(error.message || 'Failed to download NOC PDF');
+    }
+
+    return response.blob();
+  }
+
+  /**
    * Generate KFS PDF, upload to S3, save URL, and send email
    */
   async generateAndSaveKFS(loanId: number, htmlContent: string): Promise<ApiResponse<{

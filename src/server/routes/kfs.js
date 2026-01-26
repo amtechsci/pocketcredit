@@ -3137,8 +3137,237 @@ router.post('/:loanId/extension-letter/generate-pdf', authenticateAdmin, async (
 });
 
 /**
+ * GET /api/kfs/user/:loanId/noc
+ * User-facing endpoint to get NOC (No Dues Certificate) data for their own cleared loan
+ * NOTE: This route must be BEFORE /:loanId/noc to avoid route conflicts
+ */
+router.get('/user/:loanId/noc', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { loanId } = req.params;
+    const userId = req.userId;
+
+    console.log('📄 Generating NOC for loan ID:', loanId, 'for user:', userId);
+
+    // Verify loan belongs to user
+    const loans = await executeQuery(`
+      SELECT 
+        la.*,
+        DATE(la.disbursed_at) as disbursed_at_date,
+        u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
+        u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
+      FROM loan_applications la
+      INNER JOIN users u ON la.user_id = u.id
+      WHERE la.id = ? AND la.user_id = ?
+    `, [loanId, userId]);
+
+    if (!loans || loans.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan application not found or access denied'
+      });
+    }
+
+    const loan = loans[0];
+
+    // Verify loan is cleared
+    if (loan.status !== 'cleared') {
+      return res.status(400).json({
+        success: false,
+        message: 'NOC can only be generated for cleared loans'
+      });
+    }
+
+    // Prepare borrower data
+    const borrower = {
+      name: `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'N/A',
+      first_name: loan.first_name || '',
+      last_name: loan.last_name || '',
+      email: loan.personal_email || loan.official_email || loan.email || '',
+      phone: loan.phone || '',
+      date_of_birth: loan.date_of_birth || '',
+      gender: loan.gender || '',
+      marital_status: loan.marital_status || '',
+      pan_number: loan.pan_number || ''
+    };
+
+    // Prepare company data
+    const company = {
+      name: 'SPHEETI FINTECH PRIVATE LIMITED',
+      cin: 'U65929MH2018PTC306088',
+      rbi_registration: 'N-13.02361',
+      address: 'Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI, MAHARASHTRA, 421001'
+    };
+
+    // Prepare loan data
+    const loanData = {
+      id: loan.id,
+      application_number: loan.application_number || loan.id,
+      loan_id: loan.application_number || loan.id,
+      sanctioned_amount: loan.sanctioned_amount || loan.loan_amount || 0,
+      loan_amount: loan.loan_amount || loan.sanctioned_amount || 0,
+      disbursed_at: loan.disbursed_at || loan.disbursed_at_date,
+      status: loan.status
+    };
+
+    // Generate NOC data
+    const nocData = {
+      company,
+      loan: loanData,
+      borrower,
+      generated_at: new Date().toISOString()
+    };
+
+    console.log('✅ NOC data generated successfully for loan ID:', loanId);
+
+    res.json({
+      success: true,
+      data: nocData
+    });
+
+  } catch (error) {
+    console.error('❌ Error generating NOC:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate NOC',
+      error: error.message || 'Unknown error occurred'
+    });
+  }
+});
+
+/**
+ * POST /api/kfs/user/:loanId/noc/generate-pdf
+ * User-facing endpoint to generate and download PDF for NOC (No Dues Certificate)
+ * NOTE: This route must be BEFORE /:loanId/noc/generate-pdf to avoid route conflicts
+ */
+router.post('/user/:loanId/noc/generate-pdf', requireAuth, async (req, res) => {
+  try {
+    const { loanId } = req.params;
+    const userId = req.userId;
+    const { htmlContent } = req.body;
+
+    if (!htmlContent) {
+      return res.status(400).json({
+        success: false,
+        message: 'HTML content is required'
+      });
+    }
+
+    if (!loanId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Loan ID is required'
+      });
+    }
+
+    console.log('📄 Generating NOC PDF for loan ID:', loanId, 'for user:', userId);
+
+    // Verify loan belongs to user and is cleared
+    await initializeDatabase();
+    const loans = await executeQuery(
+      'SELECT application_number, status, user_id FROM loan_applications WHERE id = ? AND user_id = ?',
+      [loanId, userId]
+    );
+
+    if (!loans || loans.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan not found or access denied'
+      });
+    }
+
+    const loan = loans[0];
+
+    // Verify loan is cleared
+    if (loan.status !== 'cleared') {
+      return res.status(400).json({
+        success: false,
+        message: 'NOC can only be generated for cleared loans'
+      });
+    }
+
+    const applicationNumber = loan.application_number || `LOAN_${loanId}`;
+    const filename = `No_Dues_Certificate_${applicationNumber}.pdf`;
+
+    // Validate PDF service is available
+    if (!pdfService) {
+      console.error('❌ PDF service is not available');
+      return res.status(500).json({
+        success: false,
+        message: 'PDF service not initialized'
+      });
+    }
+
+    // Generate PDF
+    let pdfResult;
+    try {
+      if (typeof htmlContent !== 'string' ||
+        htmlContent.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid HTML content'
+        });
+      }
+
+      console.log('📄 Starting NOC PDF generation, HTML length:', htmlContent.length);
+      pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
+
+      let pdfBuffer;
+      if (Buffer.isBuffer(pdfResult)) {
+        pdfBuffer = pdfResult;
+      } else if (pdfResult.buffer) {
+        pdfBuffer = pdfResult.buffer;
+      } else {
+        throw new Error('PDF generation returned invalid result structure');
+      }
+
+      if (!Buffer.isBuffer(pdfBuffer)) {
+        if (pdfBuffer instanceof Uint8Array || pdfBuffer.constructor?.name === 'Uint8Array') {
+          pdfBuffer = Buffer.from(pdfBuffer);
+        } else {
+          throw new Error('PDF generation returned invalid buffer type');
+        }
+      }
+
+      pdfResult.buffer = pdfBuffer;
+      console.log('✅ NOC PDF generated successfully, buffer size:', pdfBuffer.length);
+    } catch (pdfError) {
+      console.error('❌ NOC PDF generation error:', pdfError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to generate PDF',
+        error: pdfError.message || 'Unknown error occurred'
+      });
+    }
+
+    console.log('📤 Sending NOC PDF, size:', pdfResult.buffer.length, 'bytes');
+
+    // Set headers for PDF download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfResult.buffer.length);
+
+    // Send PDF
+    res.send(pdfResult.buffer);
+    console.log('✅ NOC PDF sent successfully');
+
+  } catch (error) {
+    console.error('❌ Error generating NOC PDF:', error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to generate NOC PDF',
+        error: error.message || 'Unknown error occurred'
+      });
+    } else {
+      res.send(`Error generating NOC PDF: ${error.message || 'Unknown error occurred'}`);
+    }
+  }
+});
+
+/**
  * GET /api/kfs/:loanId/noc
- * Get NOC (No Dues Certificate) data for a cleared loan
+ * Get NOC (No Dues Certificate) data for a cleared loan (Admin only)
  * NOTE: This route must be BEFORE /:loanId to avoid route conflicts
  */
 router.get('/:loanId/noc', authenticateAdmin, async (req, res) => {

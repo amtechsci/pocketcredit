@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
+import { toast } from 'sonner';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -27,7 +28,8 @@ import {
   FileText,
   ShieldCheck,
   Star,
-  X
+  X,
+  Loader2
 } from 'lucide-react';
 import { DashboardHeader } from '../DashboardHeader';
 import { ApplicationFlow } from '../ApplicationFlow';
@@ -137,6 +139,7 @@ export function DynamicDashboardPage() {
   const [loanDocumentStatus, setLoanDocumentStatus] = useState<{ [loanId: number]: { allUploaded: boolean; hasPending: boolean } }>({});
   const [pendingCreditLimit, setPendingCreditLimit] = useState<any>(null);
   const [showCreditLimitModal, setShowCreditLimitModal] = useState(false);
+  const [downloadingNOC, setDownloadingNOC] = useState<number | null>(null);
 
   // Combine applied loans (pre-disbursal) and running loans (account_manager) for "Active Loans" display
   // This ensures all in-progress loans are visible to the user
@@ -611,6 +614,106 @@ export function DynamicDashboardPage() {
     if (!appNumber) return 'N/A';
     const last4 = appNumber.slice(-4);
     return `PLL${last4}`;
+  };
+
+  // Handle NOC PDF download
+  const handleDownloadNOC = async (loanId: number, applicationNumber: string) => {
+    try {
+      setDownloadingNOC(loanId);
+      
+      // Get NOC data
+      const nocResponse = await apiService.getNOC(loanId);
+      if (!nocResponse.success || !nocResponse.data) {
+        throw new Error(nocResponse.message || 'Failed to get NOC data');
+      }
+
+      const nocData = nocResponse.data;
+
+      // Generate NOC HTML (using the same format as backend)
+      const formatDateForNOC = (dateStr: string) => {
+        if (!dateStr) return 'N/A';
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' });
+      };
+
+      const borrowerName = nocData.borrower?.name || 
+        `${nocData.borrower?.first_name || ''} ${nocData.borrower?.last_name || ''}`.trim() || 
+        'N/A';
+      const shortLoanId = nocData.loan?.application_number 
+        ? `PLL${String(nocData.loan.application_number).slice(-4)}`
+        : (nocData.loan?.id ? `PLL${String(nocData.loan.id).padStart(4, '0').slice(-4)}` : 'PLLXXX');
+      const todayDate = formatDateForNOC(nocData.generated_at || new Date().toISOString());
+
+      const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>No Dues Certificate</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
+    .header { text-align: center; margin-bottom: 30px; }
+    .company-name { font-size: 18px; font-weight: bold; margin-bottom: 10px; }
+    .company-details { font-size: 12px; color: #666; }
+    .certificate-title { font-size: 20px; font-weight: bold; text-align: center; margin: 30px 0; text-decoration: underline; }
+    .content { margin: 20px 0; }
+    .signature-section { margin-top: 50px; }
+    .signature-line { border-top: 1px solid #000; width: 200px; margin-top: 50px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="company-name">${nocData.company?.name || 'SPHEETI FINTECH PRIVATE LIMITED'}</div>
+    <div class="company-details">
+      CIN: ${nocData.company?.cin || 'U65929MH2018PTC306088'}<br>
+      RBI Registration: ${nocData.company?.rbi_registration || 'N-13.02361'}<br>
+      ${nocData.company?.address || 'Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI, MAHARASHTRA, 421001'}
+    </div>
+  </div>
+
+  <div class="certificate-title">NO DUES CERTIFICATE</div>
+
+  <div class="content">
+    <p style="font-size: 12px;"><strong>Sub: No Dues Certificate for Loan ID - ${shortLoanId}</strong></p>
+    
+    <p>This is to certify that <strong>${borrowerName}</strong> (PAN: ${nocData.borrower?.pan_number || 'N/A'}) 
+    has successfully repaid the loan amount of <strong>₹${Number(nocData.loan?.loan_amount || 0).toLocaleString('en-IN')}</strong> 
+    (Loan ID: ${shortLoanId}, Application Number: ${nocData.loan?.application_number || 'N/A'}) 
+    disbursed on ${formatDateForNOC(nocData.loan?.disbursed_at)}.</p>
+
+    <p>We confirm that there are no outstanding dues, pending payments, or any other financial obligations 
+    from the borrower towards SPHEETI FINTECH PRIVATE LIMITED for the above-mentioned loan.</p>
+
+    <p>This certificate is issued on ${todayDate} and is valid for all purposes.</p>
+  </div>
+
+  <div class="signature-section">
+    <p><strong>For SPHEETI FINTECH PRIVATE LIMITED</strong></p>
+    <div class="signature-line"></div>
+    <p style="margin-top: 5px; font-size: 12px;">Authorized Signatory</p>
+  </div>
+</body>
+</html>
+      `;
+
+      // Download PDF
+      const blob = await apiService.downloadNOCPDF(loanId, htmlContent);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `No_Dues_Certificate_${applicationNumber || loanId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast.success('No Dues Certificate downloaded successfully');
+    } catch (error: any) {
+      console.error('Error downloading NOC:', error);
+      toast.error(error.message || 'Failed to download No Dues Certificate');
+    } finally {
+      setDownloadingNOC(null);
+    }
   };
 
   // Get credit score category
@@ -1308,7 +1411,7 @@ export function DynamicDashboardPage() {
                               </div>
 
                               {/* Actions */}
-                              <div className="flex gap-2 pt-2 border-t">
+                              <div className="flex gap-2 pt-2 border-t flex-wrap">
                                 {isActive && (
                                   <Button
                                     onClick={() => navigate(`/repayment-schedule?applicationId=${loan.id}`)}
@@ -1316,6 +1419,27 @@ export function DynamicDashboardPage() {
                                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs"
                                   >
                                     View Repayment
+                                  </Button>
+                                )}
+                                {isCleared && (
+                                  <Button
+                                    onClick={() => handleDownloadNOC(loan.id, loan.application_number)}
+                                    size="sm"
+                                    variant="outline"
+                                    className="flex-1 text-xs flex items-center gap-1"
+                                    disabled={downloadingNOC === loan.id}
+                                  >
+                                    {downloadingNOC === loan.id ? (
+                                      <>
+                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                        Downloading...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Download className="w-3 h-3" />
+                                        No Dues Certificate
+                                      </>
+                                    )}
                                   </Button>
                                 )}
                                 {isApplied && (
@@ -1618,16 +1742,18 @@ export function DynamicDashboardPage() {
                 </Badge>
               </div>
 
-              {/* Loan Amount Card */}
-              <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
-                <CardContent className="p-6 text-center">
-                  <p className="text-sm text-gray-600 mb-2">Loan Amount</p>
-                  <p className="text-4xl font-bold text-blue-700">
-                    ₹{selectedLoanDetails.loan_amount?.toLocaleString('en-IN') || '0'}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-2">{selectedLoanDetails.loan_purpose || 'Personal'} Loan</p>
-                </CardContent>
-              </Card>
+              {/* Loan Amount Card - Only show for account_manager and cleared loans */}
+              {(selectedLoanDetails.status === 'account_manager' || selectedLoanDetails.status === 'cleared') && (
+                <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
+                  <CardContent className="p-6 text-center">
+                    <p className="text-sm text-gray-600 mb-2">Loan Amount</p>
+                    <p className="text-4xl font-bold text-blue-700">
+                      ₹{selectedLoanDetails.loan_amount?.toLocaleString('en-IN') || '0'}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-2">{selectedLoanDetails.loan_purpose || 'Personal'} Loan</p>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Loan Information Grid */}
               <div className="grid grid-cols-2 gap-4">
