@@ -358,7 +358,12 @@ export const EmploymentDetailsPage: React.FC = () => {
           // Pass applicationId if available from location state
           const creditCheckResponse = await apiService.checkCreditEligibility(applicationId);
 
-          if (creditCheckResponse.status === 'success' && creditCheckResponse.data?.eligible) {
+          // Backend returns 'is_eligible' not 'eligible' - check both for compatibility
+          // Type assertion needed because TypeScript interface doesn't match backend response
+          const responseData = creditCheckResponse.data as any;
+          const isEligible = responseData?.is_eligible ?? responseData?.eligible ?? false;
+
+          if (creditCheckResponse.status === 'success' && isEligible) {
             toast.success('Eligibility verified! Proceeding to next step...');
 
             // Wait a moment before navigating
@@ -370,8 +375,11 @@ export const EmploymentDetailsPage: React.FC = () => {
             }, 1000);
           } else {
             // Failed BRE or other checks
-            const reasons = creditCheckResponse.data?.rejection_reasons || [];
-            const displayReason = reasons.length > 0 ? reasons[0] : 'Credit criteria not met';
+            // Backend returns 'reasons' array, not 'rejection_reasons'
+            const reasons = responseData?.reasons || responseData?.rejection_reasons || [];
+            const displayReason = Array.isArray(reasons) && reasons.length > 0 
+              ? reasons[0] 
+              : (responseData?.hold_reason || 'Credit criteria not met');
 
             toast.error(`Application placed on hold: ${displayReason}`, { duration: 5000 });
 

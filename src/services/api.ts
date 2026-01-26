@@ -783,10 +783,19 @@ class ApiService {
 
   // Credit Analytics APIs
   async checkCreditEligibility(applicationId?: number): Promise<ApiResponse<{
-    eligible: boolean;
+    eligible?: boolean; // Legacy field name
+    is_eligible?: boolean; // Actual field name from backend
     credit_score?: number;
     rejection_reasons?: string[];
+    reasons?: string[]; // Actual field name from backend
+    hold_reason?: string; // Hold reason from backend
     hold_until?: string;
+    on_hold?: boolean;
+    bre_evaluation?: {
+      passed: boolean;
+      reasons: string[];
+      results: any;
+    };
   }>> {
     const data = applicationId ? { application_id: applicationId } : {};
     return this.request('POST', '/credit-analytics/check', data);
