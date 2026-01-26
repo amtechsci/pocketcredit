@@ -1382,25 +1382,42 @@ class ApiService {
   }
 
   /**
-   * Generate and download NOC PDF for a cleared loan
+   * Download NOC PDF for a cleared loan
+   * If PDF exists in S3, downloads it directly. Otherwise generates it.
+   * htmlContent is optional - backend will generate it if not provided
    */
-  async downloadNOCPDF(loanId: number, htmlContent: string): Promise<Blob> {
-    const token = localStorage.getItem('pocket_user_token');
-    const response = await fetch(`${this.baseURL}/kfs/user/${loanId}/noc/generate-pdf`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : ''
-      },
-      body: JSON.stringify({ htmlContent })
-    });
+  async downloadNOCPDF(loanId: number, htmlContent?: string): Promise<Blob> {
+    try {
+      const response = await this.api.post(
+        `/kfs/user/${loanId}/noc/generate-pdf`,
+        htmlContent ? { htmlContent } : {},
+        {
+          responseType: 'blob',
+          timeout: 60000 // 60 seconds timeout for PDF generation
+        }
+      );
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Failed to download NOC PDF' }));
-      throw new Error(error.message || 'Failed to download NOC PDF');
+      return response.data;
+    } catch (error: any) {
+      console.error('Error downloading NOC PDF:', error);
+      
+      // Try to extract error message from blob response if possible
+      if (error.response?.data instanceof Blob) {
+        try {
+          const text = await error.response.data.text();
+          const errorData = JSON.parse(text);
+          throw new Error(errorData.message || errorData.error || 'Failed to download NOC PDF');
+        } catch (parseError) {
+          throw new Error('Failed to download NOC PDF');
+        }
+      }
+      
+      const errorMessage = error.response?.data?.message || 
+                          error.response?.data?.error || 
+                          error.message || 
+                          'Failed to download NOC PDF';
+      throw new Error(errorMessage);
     }
-
-    return response.blob();
   }
 
   /**

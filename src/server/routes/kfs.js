@@ -3244,14 +3244,7 @@ router.post('/user/:loanId/noc/generate-pdf', requireAuth, async (req, res) => {
   try {
     const { loanId } = req.params;
     const userId = req.userId;
-    const { htmlContent } = req.body;
-
-    if (!htmlContent) {
-      return res.status(400).json({
-        success: false,
-        message: 'HTML content is required'
-      });
-    }
+    const { htmlContent } = req.body; // Optional - backend will generate if not provided
 
     if (!loanId) {
       return res.status(400).json({
@@ -3260,12 +3253,12 @@ router.post('/user/:loanId/noc/generate-pdf', requireAuth, async (req, res) => {
       });
     }
 
-    console.log('📄 Generating NOC PDF for loan ID:', loanId, 'for user:', userId);
+    console.log('📄 Getting NOC PDF for loan ID:', loanId, 'for user:', userId);
 
     // Verify loan belongs to user and is cleared
     await initializeDatabase();
     const loans = await executeQuery(
-      'SELECT application_number, status, user_id FROM loan_applications WHERE id = ? AND user_id = ?',
+      'SELECT application_number, status, user_id, noc_pdf_url FROM loan_applications WHERE id = ? AND user_id = ?',
       [loanId, userId]
     );
 
@@ -3289,6 +3282,34 @@ router.post('/user/:loanId/noc/generate-pdf', requireAuth, async (req, res) => {
     const applicationNumber = loan.application_number || `LOAN_${loanId}`;
     const filename = `No_Dues_Certificate_${applicationNumber}.pdf`;
 
+    // Check if NOC PDF already exists in S3
+    if (loan.noc_pdf_url) {
+      console.log('📥 NOC PDF found in database, downloading from S3:', loan.noc_pdf_url);
+      try {
+        const { downloadFromS3 } = require('../services/s3Service');
+        const pdfBuffer = await downloadFromS3(loan.noc_pdf_url);
+        
+        console.log('✅ NOC PDF downloaded from S3, size:', pdfBuffer.length, 'bytes');
+
+        // Set headers for PDF download
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Length', pdfBuffer.length);
+
+        // Send PDF
+        res.send(pdfBuffer);
+        console.log('✅ NOC PDF sent successfully (from S3)');
+        return;
+      } catch (s3Error) {
+        console.error('❌ Error downloading NOC PDF from S3:', s3Error);
+        console.log('🔄 Falling back to PDF generation...');
+        // Continue to generate new PDF if download fails
+      }
+    }
+
+    // If no PDF exists or download failed, generate new one
+    console.log('📄 Generating new NOC PDF...');
+
     // Validate PDF service is available
     if (!pdfService) {
       console.error('❌ PDF service is not available');
@@ -3298,19 +3319,82 @@ router.post('/user/:loanId/noc/generate-pdf', requireAuth, async (req, res) => {
       });
     }
 
-    // Generate PDF
+    // Generate PDF (only if htmlContent is provided, otherwise backend will generate it)
     let pdfResult;
     try {
-      if (typeof htmlContent !== 'string' ||
-        htmlContent.length === 0) {
+      // If htmlContent not provided, generate NOC data and HTML
+      let finalHtmlContent = htmlContent;
+      if (!finalHtmlContent || typeof finalHtmlContent !== 'string' || finalHtmlContent.length === 0) {
+        console.log('📄 HTML content not provided, generating NOC data...');
+        // Get NOC data
+        const nocDataQuery = await executeQuery(`
+          SELECT 
+            la.*,
+            DATE(la.disbursed_at) as disbursed_at_date,
+            u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
+            u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
+          FROM loan_applications la
+          INNER JOIN users u ON la.user_id = u.id
+          WHERE la.id = ?
+        `, [loanId]);
+
+        if (!nocDataQuery || nocDataQuery.length === 0) {
+          return res.status(404).json({
+            success: false,
+            message: 'Loan data not found'
+          });
+        }
+
+        const loanData = nocDataQuery[0];
+        const borrower = {
+          name: `${loanData.first_name || ''} ${loanData.last_name || ''}`.trim() || 'N/A',
+          first_name: loanData.first_name || '',
+          last_name: loanData.last_name || '',
+          email: loanData.personal_email || loanData.official_email || loanData.email || '',
+          phone: loanData.phone || '',
+          date_of_birth: loanData.date_of_birth || '',
+          gender: loanData.gender || '',
+          marital_status: loanData.marital_status || '',
+          pan_number: loanData.pan_number || ''
+        };
+
+        const company = {
+          name: 'SPHEETI FINTECH PRIVATE LIMITED',
+          cin: 'U65929MH2018PTC306088',
+          rbi_registration: 'N-13.02361',
+          address: 'Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI, MAHARASHTRA, 421001'
+        };
+
+        const loanInfo = {
+          id: loanData.id,
+          application_number: loanData.application_number || loanData.id,
+          loan_id: loanData.application_number || loanData.id,
+          sanctioned_amount: loanData.sanctioned_amount || loanData.loan_amount || 0,
+          loan_amount: loanData.loan_amount || loanData.sanctioned_amount || 0,
+          disbursed_at: loanData.disbursed_at || loanData.disbursed_at_date,
+          status: loanData.status
+        };
+
+        const nocData = {
+          company,
+          loan: loanInfo,
+          borrower,
+          generated_at: new Date().toISOString()
+        };
+
+        // Generate HTML using the generateNOCHTML function defined in this file
+        finalHtmlContent = generateNOCHTML(nocData);
+      }
+
+      if (typeof finalHtmlContent !== 'string' || finalHtmlContent.length === 0) {
         return res.status(400).json({
           success: false,
           message: 'Invalid HTML content'
         });
       }
 
-      console.log('📄 Starting NOC PDF generation, HTML length:', htmlContent.length);
-      pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
+      console.log('📄 Starting NOC PDF generation, HTML length:', finalHtmlContent.length);
+      pdfResult = await pdfService.generateKFSPDF(finalHtmlContent, filename);
 
       let pdfBuffer;
       if (Buffer.isBuffer(pdfResult)) {
@@ -3338,6 +3422,51 @@ router.post('/user/:loanId/noc/generate-pdf', requireAuth, async (req, res) => {
         message: 'Failed to generate PDF',
         error: pdfError.message || 'Unknown error occurred'
       });
+    }
+
+    // Upload PDF to S3 and save URL to database
+    let s3Key = null;
+    try {
+      // Get user_id from loan
+      const loanDetails = await executeQuery(
+        'SELECT user_id FROM loan_applications WHERE id = ?',
+        [loanId]
+      );
+      const userId = loanDetails && loanDetails.length > 0 ? loanDetails[0].user_id : null;
+
+      if (userId) {
+        console.log('📤 Uploading NOC PDF to S3...');
+        const uploadResult = await uploadGeneratedPDF(
+          pdfResult.buffer,
+          filename,
+          userId,
+          'noc'
+        );
+        s3Key = uploadResult.key;
+        console.log('✅ NOC PDF uploaded to S3:', s3Key);
+
+        // Save S3 key to database (check if noc_pdf_url column exists, if not use a JSON field or add column)
+        try {
+          await executeQuery(
+            `UPDATE loan_applications 
+             SET noc_pdf_url = ?, 
+                 noc_pdf_generated_at = NOW(),
+                 updated_at = NOW() 
+             WHERE id = ?`,
+            [s3Key, loanId]
+          );
+          console.log('✅ NOC PDF URL saved to database');
+        } catch (dbError) {
+          // If column doesn't exist, try alternative approach
+          console.warn('⚠️ Could not save NOC PDF URL to database (column may not exist):', dbError.message);
+          // Could add column migration here if needed
+        }
+      } else {
+        console.warn('⚠️ User ID not found, skipping S3 upload');
+      }
+    } catch (uploadError) {
+      console.error('❌ Error uploading NOC PDF to S3 (non-fatal):', uploadError);
+      // Continue - still send PDF to user even if S3 upload fails
     }
 
     console.log('📤 Sending NOC PDF, size:', pdfResult.buffer.length, 'bytes');
@@ -3576,6 +3705,51 @@ router.post('/:loanId/noc/generate-pdf', authenticateAdmin, async (req, res) => 
         });
       }
       return;
+    }
+
+    // Upload PDF to S3 and save URL to database
+    let s3Key = null;
+    try {
+      // Get user_id from loan
+      const loanDetails = await executeQuery(
+        'SELECT user_id FROM loan_applications WHERE id = ?',
+        [loanId]
+      );
+      const userId = loanDetails && loanDetails.length > 0 ? loanDetails[0].user_id : null;
+
+      if (userId) {
+        console.log('📤 Uploading NOC PDF to S3...');
+        const uploadResult = await uploadGeneratedPDF(
+          pdfResult.buffer,
+          filename,
+          userId,
+          'noc'
+        );
+        s3Key = uploadResult.key;
+        console.log('✅ NOC PDF uploaded to S3:', s3Key);
+
+        // Save S3 key to database (check if noc_pdf_url column exists, if not use a JSON field or add column)
+        try {
+          await executeQuery(
+            `UPDATE loan_applications 
+             SET noc_pdf_url = ?, 
+                 noc_pdf_generated_at = NOW(),
+                 updated_at = NOW() 
+             WHERE id = ?`,
+            [s3Key, loanId]
+          );
+          console.log('✅ NOC PDF URL saved to database');
+        } catch (dbError) {
+          // If column doesn't exist, try alternative approach
+          console.warn('⚠️ Could not save NOC PDF URL to database (column may not exist):', dbError.message);
+          // Could add column migration here if needed
+        }
+      } else {
+        console.warn('⚠️ User ID not found, skipping S3 upload');
+      }
+    } catch (uploadError) {
+      console.error('❌ Error uploading NOC PDF to S3 (non-fatal):', uploadError);
+      // Continue - still send PDF to user even if S3 upload fails
     }
 
     console.log('📤 Sending NOC PDF, size:', pdfResult.buffer.length, 'bytes');
