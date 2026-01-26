@@ -2910,17 +2910,17 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
       console.log('Skipping loan status update (conditions not met)');
     }
 
-    // Handle full_payment transaction type - mark loan as cleared
+    // Handle full_payment or settlement transaction type - mark loan as cleared
     console.log(`🔍 Checking transaction type: ${txType}, loan_application_id: ${loan_application_id}`);
-    if (txType === 'full_payment' && loan_application_id) {
+    if ((txType === 'full_payment' || txType === 'settlement') && loan_application_id) {
       const loanIdInt = parseInt(loan_application_id);
       const userIdInt = parseInt(userId);
 
-      console.log(`💳 Processing full_payment transaction for loan #${loanIdInt}, user #${userIdInt}`);
+      console.log(`💳 Processing ${txType} transaction for loan #${loanIdInt}, user #${userIdInt}`);
 
-      // Verify loan exists and get loan data
+      // Verify loan exists and get loan data (including plan_snapshot for credit limit check)
       const loans = await executeQuery(
-        'SELECT id, user_id, status FROM loan_applications WHERE id = ?',
+        'SELECT id, user_id, status, plan_snapshot FROM loan_applications WHERE id = ?',
         [loanIdInt]
       );
 
@@ -2939,7 +2939,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             WHERE id = ?
           `, [loanIdInt]);
 
-          console.log(`✅ Loan #${loanIdInt} marked as cleared (full payment received)`);
+          console.log(`✅ Loan #${loanIdInt} marked as cleared (${txType} received)`);
 
           // Send NOC email to user
           try {
@@ -3102,8 +3102,16 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
               const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
               
               if (creditLimitData.newLimit > 0) {
-                // Get current limit to check if it's actually an increase
-                const currentLimit = parseFloat(loan.loan_limit) || 0;
+                // Get user's current credit limit from users table (not loan.loan_limit)
+                const userLimitQuery = await executeQuery(
+                  `SELECT loan_limit FROM users WHERE id = ?`,
+                  [loan.user_id]
+                );
+                const currentLimit = userLimitQuery && userLimitQuery.length > 0
+                  ? parseFloat(userLimitQuery[0].loan_limit) || 0
+                  : 0;
+                
+                console.log(`[UserProfile] Current user limit: ₹${currentLimit}, New calculated limit: ₹${creditLimitData.newLimit}, Loan count: ${creditLimitData.loanCount}, Percentage: ${creditLimitData.percentage}%`);
                 
                 // Only store pending limit if it's higher than current limit
                 if (creditLimitData.newLimit > currentLimit) {

@@ -13,6 +13,7 @@ const {
   getPendingCreditLimit,
   acceptPendingCreditLimit,
   rejectPendingCreditLimit,
+  getCreditLimitHistory,
   getMonthlyIncomeFromRange
 } = require('../utils/creditLimitCalculator');
 
@@ -164,6 +165,43 @@ router.post('/reject', requireAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to reject credit limit increase'
+    });
+  }
+});
+
+/**
+ * GET /api/credit-limit/history
+ * Get credit limit history for current user
+ */
+router.get('/history', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+    const limit = parseInt(req.query.limit) || 10;
+
+    const history = await getCreditLimitHistory(userId, limit);
+
+    res.json({
+      success: true,
+      data: history.map(item => ({
+        id: item.id,
+        oldLimit: parseFloat(item.old_limit),
+        newLimit: parseFloat(item.new_limit),
+        increaseAmount: parseFloat(item.increase_amount),
+        percentage: item.percentage ? parseFloat(item.percentage) : null,
+        loanCount: item.loan_count,
+        salary: item.salary ? parseFloat(item.salary) : null,
+        isPremiumLimit: item.is_premium_limit === 1,
+        premiumTenure: item.premium_tenure,
+        createdAt: item.created_at
+      }))
+    });
+
+  } catch (error) {
+    console.error('Error fetching credit limit history:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch credit limit history'
     });
   }
 });

@@ -595,8 +595,16 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                                             const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
                                             
                                             if (creditLimitData.newLimit > 0) {
-                                                // Get current limit to check if it's actually an increase
-                                                const currentLimit = parseFloat(loan.loan_limit) || 0;
+                                                // Get user's current credit limit from users table (not loan.loan_limit)
+                                                const userLimitQuery = await executeQuery(
+                                                    `SELECT loan_limit FROM users WHERE id = ?`,
+                                                    [loan.user_id]
+                                                );
+                                                const currentLimit = userLimitQuery && userLimitQuery.length > 0
+                                                    ? parseFloat(userLimitQuery[0].loan_limit) || 0
+                                                    : 0;
+                                                
+                                                console.log(`[Payment] Current user limit: ₹${currentLimit}, New calculated limit: ₹${creditLimitData.newLimit}, Loan count: ${creditLimitData.loanCount}, Percentage: ${creditLimitData.percentage}%`);
                                                 
                                                 // Only store pending limit if it's higher than current limit
                                                 if (creditLimitData.newLimit > currentLimit) {
@@ -1541,8 +1549,16 @@ router.post('/webhook', async (req, res) => {
                                                 const creditLimitData = await calculateCreditLimitFor2EMI(paymentOrder.user_id);
                                                 
                                                 if (creditLimitData.newLimit > 0) {
-                                                    // Get current limit to check if it's actually an increase
-                                                    const currentLimit = parseFloat(loan.loan_limit) || 0;
+                                                    // Get user's current credit limit from users table (not loan.loan_limit)
+                                                    const userLimitQuery = await executeQuery(
+                                                        `SELECT loan_limit FROM users WHERE id = ?`,
+                                                        [paymentOrder.user_id]
+                                                    );
+                                                    const currentLimit = userLimitQuery && userLimitQuery.length > 0
+                                                        ? parseFloat(userLimitQuery[0].loan_limit) || 0
+                                                        : 0;
+                                                    
+                                                    console.log(`[Payment Webhook] Current user limit: ₹${currentLimit}, New calculated limit: ₹${creditLimitData.newLimit}, Loan count: ${creditLimitData.loanCount}, Percentage: ${creditLimitData.percentage}%`);
                                                     
                                                     // Only store pending limit if it's higher than current limit
                                                     if (creditLimitData.newLimit > currentLimit) {
@@ -2036,8 +2052,16 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                                             const creditLimitData = await calculateCreditLimitFor2EMI(paymentOrder.user_id);
                                                             
                                                             if (creditLimitData.newLimit > 0) {
-                                                                // Get current limit to check if it's actually an increase
-                                                                const currentLimit = parseFloat(loan.loan_limit) || 0;
+                                                                // Get user's current credit limit from users table (not loan.loan_limit)
+                                                                const userLimitQuery = await executeQuery(
+                                                                    `SELECT loan_limit FROM users WHERE id = ?`,
+                                                                    [paymentOrder.user_id]
+                                                                );
+                                                                const currentLimit = userLimitQuery && userLimitQuery.length > 0
+                                                                    ? parseFloat(userLimitQuery[0].loan_limit) || 0
+                                                                    : 0;
+                                                                
+                                                                console.log(`[Payment Order Status] Current user limit: ₹${currentLimit}, New calculated limit: ₹${creditLimitData.newLimit}, Loan count: ${creditLimitData.loanCount}, Percentage: ${creditLimitData.percentage}%`);
                                                                 
                                                                 // Only store pending limit if it's higher than current limit
                                                                 if (creditLimitData.newLimit > currentLimit) {

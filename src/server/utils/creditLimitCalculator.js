@@ -313,6 +313,49 @@ async function acceptPendingCreditLimit(userId, pendingLimitId) {
 
     const pendingLimit = pending[0];
 
+    // Create credit_limit_history table if it doesn't exist
+    const createHistoryTableQuery = `
+      CREATE TABLE IF NOT EXISTS credit_limit_history (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        old_limit DECIMAL(12,2) NOT NULL,
+        new_limit DECIMAL(12,2) NOT NULL,
+        increase_amount DECIMAL(12,2) NOT NULL,
+        percentage DECIMAL(5,2),
+        loan_count INT,
+        salary DECIMAL(12,2),
+        is_premium_limit TINYINT(1) DEFAULT 0,
+        premium_tenure INT,
+        pending_limit_id INT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (pending_limit_id) REFERENCES pending_credit_limits(id) ON DELETE SET NULL,
+        INDEX idx_user_id (user_id),
+        INDEX idx_created_at (created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `;
+    await executeQuery(createHistoryTableQuery);
+
+    // Store history BEFORE updating the limit
+    const increaseAmount = parseFloat(pendingLimit.new_limit) - parseFloat(pendingLimit.current_limit);
+    await executeQuery(
+      `INSERT INTO credit_limit_history 
+       (user_id, old_limit, new_limit, increase_amount, percentage, loan_count, salary, is_premium_limit, premium_tenure, pending_limit_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        pendingLimit.current_limit,
+        pendingLimit.new_limit,
+        increaseAmount,
+        pendingLimit.percentage || null,
+        pendingLimit.loan_count || null,
+        pendingLimit.salary || null,
+        pendingLimit.is_premium_limit || 0,
+        pendingLimit.premium_tenure || null,
+        pendingLimitId
+      ]
+    );
+
     // Update user's credit limit
     await updateUserCreditLimit(userId, pendingLimit.new_limit);
 
@@ -324,7 +367,7 @@ async function acceptPendingCreditLimit(userId, pendingLimitId) {
       [pendingLimitId]
     );
 
-    console.log(`[CreditLimit] User ${userId} accepted credit limit increase to ₹${pendingLimit.new_limit}`);
+    console.log(`[CreditLimit] User ${userId} accepted credit limit increase from ₹${pendingLimit.current_limit} to ₹${pendingLimit.new_limit} (history stored)`);
     return true;
 
   } catch (error) {
@@ -354,6 +397,65 @@ async function rejectPendingCreditLimit(userId, pendingLimitId) {
   } catch (error) {
     console.error(`[CreditLimit] Error rejecting pending credit limit:`, error);
     throw error;
+  }
+}
+
+/**
+ * Get credit limit history for a user
+ * @param {number} userId - User ID
+ * @param {number} limit - Number of records to return (default: 10)
+ * @returns {Promise<Array>}
+ */
+async function getCreditLimitHistory(userId, limit = 10) {
+  try {
+    // Ensure table exists first
+    const createHistoryTableQuery = `
+      CREATE TABLE IF NOT EXISTS credit_limit_history (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        old_limit DECIMAL(12,2) NOT NULL,
+        new_limit DECIMAL(12,2) NOT NULL,
+        increase_amount DECIMAL(12,2) NOT NULL,
+        percentage DECIMAL(5,2),
+        loan_count INT,
+        salary DECIMAL(12,2),
+        is_premium_limit TINYINT(1) DEFAULT 0,
+        premium_tenure INT,
+        pending_limit_id INT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (pending_limit_id) REFERENCES pending_credit_limits(id) ON DELETE SET NULL,
+        INDEX idx_user_id (user_id),
+        INDEX idx_created_at (created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `;
+    await executeQuery(createHistoryTableQuery);
+
+    const query = `
+      SELECT 
+        id,
+        old_limit,
+        new_limit,
+        increase_amount,
+        percentage,
+        loan_count,
+        salary,
+        is_premium_limit,
+        premium_tenure,
+        created_at
+      FROM credit_limit_history
+      WHERE user_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `;
+
+    const result = await executeQuery(query, [userId, limit]);
+    return result || [];
+
+  } catch (error) {
+    console.error(`[CreditLimit] Error fetching credit limit history for user ${userId}:`, error);
+    // Return empty array on error instead of throwing
+    return [];
   }
 }
 
@@ -536,6 +638,7 @@ module.exports = {
   getPendingCreditLimit,
   acceptPendingCreditLimit,
   rejectPendingCreditLimit,
+  getCreditLimitHistory,
   getMonthlyIncomeFromRange,
   adjustFirstTimeLoanAmount,
   checkAndMarkCoolingPeriod
