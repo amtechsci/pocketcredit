@@ -902,11 +902,7 @@ export function DynamicDashboardPage() {
                         </Badge>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 mb-3">
-                        <div>
-                          <p className="text-xs text-gray-500">Loan Amount</p>
-                          <p className="text-sm font-semibold">₹{Number(loan.loan_amount).toLocaleString()}</p>
-                        </div>
+                      <div className="mb-3">
                         <div>
                           <p className="text-xs text-gray-500">Applied On</p>
                           <p className="text-xs font-medium">{formatDate(loan.created_at)}</p>
@@ -1072,11 +1068,7 @@ export function DynamicDashboardPage() {
                     </Badge>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 mb-3">
-                    <div>
-                      <p className="text-xs text-gray-500">Loan Amount</p>
-                      <p className="text-sm font-semibold">₹{Number(loan.loan_amount).toLocaleString()}</p>
-                    </div>
+                  <div className="mb-3">
                     <div>
                       <p className="text-xs text-gray-500">Applied On</p>
                       <p className="text-xs font-medium">{formatDate(loan.created_at)}</p>
