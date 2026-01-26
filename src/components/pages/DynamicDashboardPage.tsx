@@ -1275,13 +1275,15 @@ export function DynamicDashboardPage() {
                                 </Badge>
                               </div>
 
-                              {/* Amount */}
-                              <div className="bg-gray-50 rounded-lg p-3">
-                                <p className="text-xs text-gray-600 mb-1">Loan Amount</p>
-                                <p className="text-2xl font-bold text-gray-900">
-                                  ₹{loan.loan_amount?.toLocaleString('en-IN') || '0'}
-                                </p>
-                              </div>
+                              {/* Amount - Only show for account_manager and cleared loans */}
+                              {(isActive || isCleared) && (
+                                <div className="bg-gray-50 rounded-lg p-3">
+                                  <p className="text-xs text-gray-600 mb-1">Loan Amount</p>
+                                  <p className="text-2xl font-bold text-gray-900">
+                                    ₹{loan.loan_amount?.toLocaleString('en-IN') || '0'}
+                                  </p>
+                                </div>
+                              )}
 
                               {/* Dates */}
                               <div className="grid grid-cols-2 gap-3 text-xs">
