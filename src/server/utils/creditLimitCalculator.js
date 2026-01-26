@@ -50,7 +50,7 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
     let salary = monthlySalary;
     if (!salary) {
       const userQuery = `
-        SELECT u.income_range, ed.monthly_income
+        SELECT u.income_range, u.monthly_net_income, ed.monthly_income
         FROM users u
         LEFT JOIN employment_details ed ON u.id = ed.user_id AND ed.is_active = 1
         WHERE u.id = ?
@@ -61,8 +61,8 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
 
       if (users && users.length > 0) {
         const user = users[0];
-        // Try to get from employment_details first, then from income_range
-        salary = user.monthly_income || getMonthlyIncomeFromRange(user.income_range) || 0;
+        // Priority: monthly_net_income from users table, then employment_details.monthly_income, then income_range
+        salary = user.monthly_net_income || user.monthly_income || getMonthlyIncomeFromRange(user.income_range) || 0;
       }
     }
 
@@ -120,7 +120,7 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
     const isMaxPercentageReached = nextPercentage >= 32.1;
 
     // Check if next limit (based on percentage calculation) would cross ₹45,600
-    // This check should be based on the calculated percentage limit, not the max of current and calculated
+    // This check should be based on the calculated percentage limit (before rounding), not the max of current and calculated
     // because premium limit should trigger when the progression-based limit crosses ₹45,600
     const wouldCrossMaxLimit = calculatedLimitByPercentage > 45600;
 
