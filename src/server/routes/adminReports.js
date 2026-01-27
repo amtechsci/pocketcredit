@@ -518,70 +518,73 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
         const GST_FACTOR = 1.18;
         const DAILY_INTEREST_RATE = 0.001; // 0.1% as a decimal
 
-        // Check if transaction_details table exists, otherwise use loan_payments
+        // Try new structure first (payment_orders + loan_payments)
         let sql = `
             SELECT 
-                u.rcid, u.pan_name, u.state_code,
-                l.lid, l.processed_amount, l.p_fee, l.service_charge, l.penality_charge,
-                la.amount AS principal_amount, la.processing_fees, la.pro_fee_per, la.interest_percentage,
-                td.transaction_number, td.transaction_date, td.transaction_flow, td.transaction_amount,
-                l.processed_date AS loan_start_date
-            FROM transaction_details td
-            INNER JOIN loan_apply la ON la.id = td.cllid
-            INNER JOIN user u ON u.id = la.uid
-            INNER JOIN loan l ON l.lid = td.cllid
-            WHERE td.transaction_flow IN ('settlement', 'part', 'renew', 'full', 'preclose')
+                CONCAT('PC', LPAD(u.id, 5, '0')) as rcid, 
+                CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as pan_name,
+                (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state_code,
+                la.id as lid, la.disbursal_amount as processed_amount, 
+                la.processing_fee as p_fee, la.total_interest as service_charge, 
+                la.processed_penalty as penality_charge,
+                la.loan_amount AS principal_amount, la.processing_fee as processing_fees, 
+                la.processing_fee_percent as pro_fee_per, 
+                COALESCE(la.interest_percent_per_day * 100, 0) as interest_percentage,
+                COALESCE(lp.transaction_id, po.order_id) as transaction_number, 
+                COALESCE(lp.payment_date, po.updated_at) as transaction_date, 
+                CASE 
+                    WHEN po.payment_type = 'pre-close' THEN 'preclose'
+                    WHEN po.payment_type = 'full_payment' THEN 'full'
+                    WHEN po.payment_type = 'settlement' THEN 'settlement'
+                    ELSE 'part'
+                END as transaction_flow,
+                COALESCE(lp.amount, po.amount) as transaction_amount,
+                la.processed_at AS loan_start_date
+            FROM payment_orders po
+            INNER JOIN loan_applications la ON la.id = po.loan_id
+            INNER JOIN users u ON u.id = la.user_id
+            LEFT JOIN loan_payments lp ON lp.loan_id = po.loan_id AND lp.transaction_id = po.order_id
+            WHERE po.status = 'PAID'
+            AND po.payment_type IN ('settlement', 'pre-close', 'full_payment', 'loan_repayment', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th')
         `;
 
         const params = [];
         if (from_date && to_date) {
-            sql += ` AND DATE(td.transaction_date) BETWEEN ? AND ?`;
+            sql += ` AND DATE(COALESCE(lp.payment_date, po.updated_at)) BETWEEN ? AND ?`;
             params.push(from_date, to_date);
         }
-
-        sql += ` ORDER BY td.transaction_date DESC`;
+        sql += ` ORDER BY COALESCE(lp.payment_date, po.updated_at) DESC`;
 
         let rows;
         try {
             rows = await executeQuery(sql, params);
         } catch (error) {
-            // If transaction_details doesn't exist, try alternative query using loan_payments
-            console.warn('transaction_details table not found, trying alternative query:', error.message);
+            // Fallback to old transaction_details structure if new structure doesn't work
+            console.warn('New payment structure not found, trying old transaction_details:', error.message);
             sql = `
                 SELECT 
-                    CONCAT('PC', LPAD(u.id, 5, '0')) as rcid, 
-                    CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as pan_name,
-                    (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state_code,
-                    la.id as lid, la.disbursal_amount as processed_amount, 
-                    la.processing_fee as p_fee, la.total_interest as service_charge, 
-                    la.processed_penalty as penality_charge,
-                    la.loan_amount AS principal_amount, la.processing_fee as processing_fees, 
-                    la.processing_fee_percent as pro_fee_per, 
-                    COALESCE(la.interest_percent_per_day * 100, 0) as interest_percentage,
-                    lp.transaction_id as transaction_number, lp.payment_date as transaction_date, 
-                    lp.payment_type as transaction_flow, lp.amount as transaction_amount,
-                    la.processed_at AS loan_start_date
-                FROM loan_payments lp
-                INNER JOIN loan_applications la ON la.id = lp.loan_id
-                INNER JOIN users u ON u.id = la.user_id
-                WHERE lp.payment_type IN ('settlement', 'part', 'renew', 'full', 'preclose', 'pre-close')
+                    u.rcid, u.pan_name, u.state_code,
+                    l.lid, l.processed_amount, l.p_fee, l.service_charge, l.penality_charge,
+                    la.amount AS principal_amount, la.processing_fees, la.pro_fee_per, la.interest_percentage,
+                    td.transaction_number, td.transaction_date, td.transaction_flow, td.transaction_amount,
+                    l.processed_date AS loan_start_date
+                FROM transaction_details td
+                INNER JOIN loan_apply la ON la.id = td.cllid
+                INNER JOIN user u ON u.id = la.uid
+                INNER JOIN loan l ON l.lid = td.cllid
+                WHERE td.transaction_flow IN ('settlement', 'part', 'renew', 'full', 'preclose')
             `;
 
             const params2 = [];
             if (from_date && to_date) {
-                sql += ` AND DATE(lp.payment_date) BETWEEN ? AND ?`;
+                sql += ` AND DATE(td.transaction_date) BETWEEN ? AND ?`;
                 params2.push(from_date, to_date);
             }
-            sql += ` ORDER BY lp.payment_date DESC`;
+            sql += ` ORDER BY td.transaction_date DESC`;
             rows = await executeQuery(sql, params2);
         }
 
-        // Get state mapping
-        const stateResult = await executeQuery("SELECT id, state_name FROM state_code");
-        const stateMap = {};
-        stateResult.forEach(state => {
-            stateMap[state.id] = state.state_name;
-        });
+        // State comes directly from addresses table, no mapping needed
 
         const csvRows = [];
         const headers = [
@@ -661,7 +664,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 'received',
                 transactionDate,
                 'India',
-                (row.state_code ? (stateMap[row.state_code] || stateNameMap[(row.state_code || '').toLowerCase()] || row.state_code) : '') || '',
+                (row.state_code || row.state || '') || '',
                 row.pro_fee_per || '',
                 processing_fee_collected === 'P.P' ? 'P.P' : processing_fee_collected.toFixed(2),
                 gst_on_processing_fees === 'P.P' ? 'P.P' : gst_on_processing_fees.toFixed(2),
@@ -697,21 +700,24 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
         await initializeDatabase();
         const { from_date, to_date } = req.query;
 
-        // Check if transaction_details table exists, otherwise use loan_applications
+        // Try new structure first (loan_applications)
         let sql = `
             SELECT 
-                u.rcid, u.pan_name, u.state_code, 
-                l.lid, la.amount, la.processing_fees, l.processed_amount, l.p_fee, 
-                l.exhausted_period, l.processed_date, la.pro_fee_per
-            FROM loan l 
-            INNER JOIN loan_apply la ON la.id = l.lid 
-            INNER JOIN user u ON u.id = la.uid 
-            WHERE l.status_log IN ('account manager','cleared')
+                CONCAT('PC', LPAD(u.id, 5, '0')) as rcid,
+                CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as pan_name,
+                (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state_code,
+                la.id as lid, la.loan_amount as amount, la.processing_fee as processing_fees,
+                la.disbursal_amount as processed_amount, la.processing_fee as p_fee,
+                la.exhausted_period_days as exhausted_period, la.processed_at as processed_date,
+                la.processing_fee_percent as pro_fee_per
+            FROM loan_applications la
+            INNER JOIN users u ON u.id = la.user_id
+            WHERE la.status IN ('account_manager', 'cleared')
         `;
 
         const params = [];
         if (from_date && to_date) {
-            sql += ` AND DATE(l.processed_date) BETWEEN ? AND ?`;
+            sql += ` AND DATE(la.processed_at) BETWEEN ? AND ?`;
             params.push(from_date, to_date);
         }
 
@@ -719,38 +725,28 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
         try {
             rows = await executeQuery(sql, params);
         } catch (error) {
-            // If old tables don't exist, use new schema
-            console.warn('Old loan/loan_apply tables not found, trying alternative query:', error.message);
+            // Fallback to old structure if new doesn't work
+            console.warn('New loan_applications structure not found, trying old loan/loan_apply tables:', error.message);
             sql = `
                 SELECT 
-                    CONCAT('PC', LPAD(u.id, 5, '0')) as rcid,
-                    CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as pan_name,
-                    (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state_code,
-                    la.id as lid, la.loan_amount as amount, la.processing_fee as processing_fees,
-                    la.disbursal_amount as processed_amount, la.processing_fee as p_fee,
-                    la.exhausted_period_days as exhausted_period, la.processed_at as processed_date,
-                    la.processing_fee_percent as pro_fee_per
-                FROM loan_applications la
-                INNER JOIN users u ON u.id = la.user_id
-                WHERE la.status IN ('account_manager', 'cleared')
+                    u.rcid, u.pan_name, u.state_code, 
+                    l.lid, la.amount, la.processing_fees, l.processed_amount, l.p_fee, 
+                    l.exhausted_period, l.processed_date, la.pro_fee_per
+                FROM loan l 
+                INNER JOIN loan_apply la ON la.id = l.lid 
+                INNER JOIN user u ON u.id = la.uid 
+                WHERE l.status_log IN ('account manager','cleared')
             `;
 
             const params2 = [];
             if (from_date && to_date) {
-                sql += ` AND DATE(la.processed_at) BETWEEN ? AND ?`;
+                sql += ` AND DATE(l.processed_date) BETWEEN ? AND ?`;
                 params2.push(from_date, to_date);
             }
             rows = await executeQuery(sql, params2);
         }
 
-        // Get state mapping (both by ID and by name for compatibility)
-        const stateResult = await executeQuery("SELECT id, state_name FROM state_code");
-        const stateMap = {};
-        const stateNameMap = {};
-        stateResult.forEach(state => {
-            stateMap[state.id] = state.state_name;
-            stateNameMap[state.state_name.toLowerCase()] = state.state_name;
-        });
+        // State comes directly from addresses table, no mapping needed
 
         const csvRows = [];
         const headers = [
@@ -762,37 +758,26 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
         csvRows.push(headers.map(escapeCSV).join(','));
 
         for (const row of rows) {
-            const gst = (row.processing_fees || row.p_fee || 0) * 0.18;
-            const totalamount = (row.amount || 0) + (row.processing_fees || row.p_fee || 0) + gst;
-
             const voucher_no = 'CLL' + row.lid;
 
-            // Try to get transaction number from transaction_details
+            // Try to get transaction number from transactions table (loan_disbursement)
             let tno = 0;
             try {
                 const trnum = await executeQuery(
-                    `SELECT * FROM transaction_details WHERE transaction_flow='creditlab To Customer' AND cllid=?`,
+                    `SELECT reference_number FROM transactions WHERE loan_application_id=? AND transaction_type='loan_disbursement' LIMIT 1`,
                     [row.lid]
                 );
-                if (trnum.length > 0) {
-                    tno = trnum[0].transaction_number || 0;
+                if (trnum.length > 0 && trnum[0].reference_number) {
+                    tno = trnum[0].reference_number;
                 }
             } catch (error) {
-                // If transaction_details doesn't exist, try transactions table
-                try {
-                    const trnum = await executeQuery(
-                        `SELECT reference_number FROM transactions WHERE loan_application_id=? AND transaction_type='loan_disbursement' LIMIT 1`,
-                        [row.lid]
-                    );
-                    if (trnum.length > 0) {
-                        tno = trnum[0].reference_number || 0;
-                    }
-                } catch (e) {
-                    // Ignore
-                }
+                // Ignore if transactions table doesn't exist or query fails
+                console.warn('Could not fetch transaction reference number:', error.message);
             }
 
-            const gst_amount = (row.p_fee || row.processing_fees || 0) * 0.18;
+            const gst_amount = parseFloat(row.p_fee || row.processing_fees || 0) * 0.18;
+            const totalamount = parseFloat(row.amount || 0) + parseFloat(row.processing_fees || row.p_fee || 0) + gst_amount;
+            
             let loanDate = '';
             if (row.processed_date) {
                 const date = new Date(row.processed_date);
@@ -814,7 +799,7 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
                 'Disbursed',
                 loanDate,
                 'India',
-                (row.state_code ? (stateMap[row.state_code] || stateNameMap[(row.state_code || '').toLowerCase()] || row.state_code) : '') || '',
+                (row.state_code || row.state || '') || '',
                 row.pro_fee_per || '',
                 30,
                 row.p_fee || row.processing_fees || 0,
