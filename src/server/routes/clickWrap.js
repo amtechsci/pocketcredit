@@ -476,14 +476,16 @@ router.get('/callback', async (req, res) => {
     // The loan_agreement_pdf_url will be set when admin generates the PDF during transaction addition
 
     // Determine new status based on current status
-    // Repeat loans: repeat_disbursal -> ready_to_repeat_disbursal
+    // Repeat loans: repeat_disbursal -> repeat_ready_for_disbursement
     // Regular loans: disbursal -> ready_for_disbursement
     const isRepeatLoan = application.status === 'repeat_disbursal';
-    const newStatus = isRepeatLoan ? 'ready_to_repeat_disbursal' : 'ready_for_disbursement';
+    const newStatus = isRepeatLoan ? 'repeat_ready_for_disbursement' : 'ready_for_disbursement';
 
     // Update database: mark as signed and store signed PDF S3 key
     // Save to BOTH clickwrap_signed_pdf_s3_key (tracks signed doc) AND loan_agreement_pdf_url (used in emails)
     console.log(`💾 Saving signed PDF S3 key to database: ${s3Key}`);
+    console.log(`📝 Updating status from ${application.status} to ${newStatus}`);
+    
     await executeQuery(
       `UPDATE loan_applications 
        SET agreement_signed = 1,
