@@ -50,19 +50,17 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
     let salary = monthlySalary;
     if (!salary) {
       const userQuery = `
-        SELECT u.income_range, u.monthly_net_income, ed.monthly_income
+        SELECT u.income_range, u.monthly_net_income
         FROM users u
-        LEFT JOIN employment_details ed ON u.id = ed.user_id AND ed.is_active = 1
         WHERE u.id = ?
-        ORDER BY ed.created_at DESC
         LIMIT 1
       `;
       const users = await executeQuery(userQuery, [userId]);
 
       if (users && users.length > 0) {
         const user = users[0];
-        // Priority: monthly_net_income from users table, then employment_details.monthly_income, then income_range
-        salary = user.monthly_net_income || user.monthly_income || getMonthlyIncomeFromRange(user.income_range) || 0;
+        // Priority: monthly_net_income from users table, then income_range
+        salary = user.monthly_net_income || getMonthlyIncomeFromRange(user.income_range) || 0;
       }
     }
 
