@@ -259,5 +259,117 @@ router.get('/admin/pending', authenticateAdmin, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/admin/credit-limit/:userId/recalculate
+ * Manually trigger credit limit recalculation for a user (admin only)
+ * Useful for debugging or fixing missed limit increases
+ */
+router.post('/admin/:userId/recalculate', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+    const adminId = req.admin?.id;
+
+    if (!adminId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Admin authentication required'
+      });
+    }
+
+    const { calculateCreditLimitFor2EMI, storePendingCreditLimit } = require('../utils/creditLimitCalculator');
+    const notificationService = require('../services/notificationService');
+
+    // Get user's current limit
+    const userLimitQuery = await executeQuery(
+      `SELECT loan_limit FROM users WHERE id = ?`,
+      [userId]
+    );
+    const currentLimit = userLimitQuery && userLimitQuery.length > 0
+      ? parseFloat(userLimitQuery[0].loan_limit) || 0
+      : 0;
+
+    // Calculate new credit limit
+    const creditLimitData = await calculateCreditLimitFor2EMI(userId);
+
+    // Get user info
+    const userQuery = await executeQuery(
+      `SELECT first_name, last_name, phone, email FROM users WHERE id = ?`,
+      [userId]
+    );
+    const user = userQuery && userQuery.length > 0 ? userQuery[0] : null;
+
+    if (!creditLimitData || creditLimitData.newLimit <= 0) {
+      return res.json({
+        success: false,
+        message: 'Could not calculate credit limit - salary may be missing',
+        data: {
+          currentLimit,
+          calculatedLimit: creditLimitData?.newLimit || 0,
+          loanCount: creditLimitData?.loanCount || 0,
+          salary: creditLimitData?.salary || 0,
+          error: 'No valid salary found or calculation failed'
+        }
+      });
+    }
+
+    const result = {
+      currentLimit,
+      newLimit: creditLimitData.newLimit,
+      loanCount: creditLimitData.loanCount,
+      percentage: creditLimitData.percentage,
+      salary: creditLimitData.salary,
+      willIncrease: creditLimitData.newLimit > currentLimit,
+      pendingLimitStored: false
+    };
+
+    // Only store pending limit if it's higher than current limit
+    if (creditLimitData.newLimit > currentLimit) {
+      // Store as pending credit limit (requires user acceptance)
+      await storePendingCreditLimit(userId, creditLimitData.newLimit, creditLimitData);
+      result.pendingLimitStored = true;
+
+      if (user) {
+        // Send SMS and Email notification
+        const recipientName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Customer';
+        try {
+          await notificationService.sendCreditLimitNotification({
+            userId: userId,
+            mobile: user.phone,
+            email: user.email,
+            recipientName: recipientName,
+            newLimit: creditLimitData.newLimit
+          });
+          result.notificationSent = true;
+        } catch (notifError) {
+          console.error('Error sending notification:', notifError);
+          result.notificationSent = false;
+          result.notificationError = notifError.message;
+        }
+      }
+
+      console.log(`[Admin] Manually triggered credit limit recalculation for user ${userId}: ₹${currentLimit} → ₹${creditLimitData.newLimit}`);
+    } else {
+      console.log(`[Admin] Credit limit recalculation for user ${userId}: New limit (₹${creditLimitData.newLimit}) is not higher than current (₹${currentLimit})`);
+    }
+
+    res.json({
+      success: true,
+      message: result.pendingLimitStored 
+        ? 'Credit limit recalculation completed. Pending limit stored and notification sent.'
+        : 'Credit limit recalculation completed. No increase needed.',
+      data: result
+    });
+
+  } catch (error) {
+    console.error('Error recalculating credit limit:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to recalculate credit limit',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
 

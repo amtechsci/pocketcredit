@@ -19,21 +19,17 @@ const DIGITAP_CLIENT_SECRET = process.env.DIGITAP_CLIENT_SECRET || 'o0GHuqVysgUK
 const DIGITAP_CLIENT_NAME = process.env.DIGITAP_CLIENT_NAME || '25845721'; // Client name provided by Digitap
 const DIGITAP_ENCRYPTION_KEY = process.env.DIGITAP_ENCRYPTION_KEY || process.env.DIGITAP_CLIENT_SECRET; // Key for signature encryption
 
-// Correct API Endpoints for Bank Statement (PDF Upload API v1.8)
-// Note: According to API docs, endpoints may be under /bank-data/ or root level
-// Try both patterns if one fails
+// Correct API Endpoints for Bank Statement (PDF Upload API v1.20)
+// According to Digitap API documentation v1.20
 const ENDPOINTS = {
   GENERATE_URL: `${DIGITAP_BASE_URL}/bank-data/generateurl`,
-  START_UPLOAD: `${DIGITAP_BASE_URL}/bank-data/uploadstmt`, // Try /bank-data/startupload first
-  START_UPLOAD_ALT: `${DIGITAP_BASE_URL}/startupload`, // Fallback to root level
-  COMPLETE_UPLOAD: `${DIGITAP_BASE_URL}/bank-data/completeupload`,
-  COMPLETE_UPLOAD_ALT: `${DIGITAP_BASE_URL}/completeupload`,
+  START_UPLOAD: `${DIGITAP_BASE_URL}/bank-data/startupload`, // Step 1: Start Upload API
+  UPLOAD_STATEMENT: `${DIGITAP_BASE_URL}/bank-data/uploadstmt`, // Step 2: Upload Statement API (uses URL from Step 1)
+  COMPLETE_UPLOAD: `${DIGITAP_BASE_URL}/bank-data/completeupload`, // Step 3: Complete Upload API
   STATUS_CHECK: `${DIGITAP_BASE_URL}/bank-data/statuscheck`,
-  STATUS_CHECK_ALT: `${DIGITAP_BASE_URL}/statuscheck`,
   RETRIEVE_REPORT: `${DIGITAP_BASE_URL}/bank-data/retrievereport`,
-  RETRIEVE_REPORT_ALT: `${DIGITAP_BASE_URL}/retrievereport`,
-  INSTITUTIONS: `${DIGITAP_BASE_URL}/bank-data/institutions`,
-  INSTITUTIONS_ALT: `${DIGITAP_BASE_URL}/institutions`
+  CANCEL_REQUEST: `${DIGITAP_BASE_URL}/bank-data/cancelrequest`,
+  INSTITUTIONS: `${DIGITAP_BASE_URL}/bank-data/institutions`
 };
 
 /**
@@ -405,12 +401,14 @@ async function startUploadAPI(params) {
       relaxation_days
     } = params;
 
-    if (!client_ref_num || !txn_completed_cburl || !institution_id) {
+    if (!client_ref_num || !txn_completed_cburl) {
       return {
         success: false,
-        error: 'Missing required parameters: client_ref_num, txn_completed_cburl, and institution_id are required'
+        error: 'Missing required parameters: client_ref_num and txn_completed_cburl are required'
       };
     }
+    
+    // Note: institution_id is optional per API docs - Digitap can auto-detect the bank from the PDF
 
     console.log('\n═══════════════════════════════════════════════════════════');
     console.log('📤 DIGITAP START UPLOAD API - DETAILED REQUEST LOG');
@@ -421,49 +419,32 @@ async function startUploadAPI(params) {
 
     const payload = {
       client_name: DIGITAP_CLIENT_NAME,
-      institution_id: institution_id,
       client_ref_num: client_ref_num,
       txn_completed_cburl: txn_completed_cburl
     };
 
     // Add optional parameters
+    if (institution_id) payload.institution_id = institution_id; // Optional - Digitap can auto-detect
     if (start_month) payload.start_month = start_month;
     if (end_month) payload.end_month = end_month;
     if (acceptance_policy) payload.acceptance_policy = acceptance_policy;
     if (relaxation_days !== undefined) payload.relaxation_days = String(relaxation_days);
 
-    // Generate signature
+    // Generate signature (for logging/debugging, but not used in Header-Based Auth)
     const signature = generateSignature(payload);
 
-    // Try two different request structures:
-    // 1. With payload/signature structure (original)
-    // 2. With direct fields + token (if API requires token)
-    // First try with payload/signature structure
-    let requestBody = {
-      payload: payload,
-      signature: signature
-    };
-
     // Log complete request details
-    console.log('\n📋 REQUEST PAYLOAD:');
+    console.log('\n📋 REQUEST PAYLOAD (fields to send directly):');
     console.log(JSON.stringify(payload, null, 2));
-    console.log('\n📋 REQUEST BODY STRUCTURE:');
-    console.log(JSON.stringify({ 
-      payload: payload, 
-      signature: '[REDACTED - Length: ' + signature.length + ' chars]' 
-    }, null, 2));
     console.log('\n📋 REQUEST HEADERS:');
     const authHeader = getAuthHeader();
-    const entAuthToken = getEntAuthToken();
     console.log(JSON.stringify({
       'Content-Type': 'application/json',
-      'ent_authorization': entAuthToken ? '[REDACTED - Base64 token]' : 'NOT SET',
       'Authorization': authHeader ? '[REDACTED - Basic Auth]' : 'NOT SET',
       'User-Agent': 'axios/' + require('axios/package.json').version
     }, null, 2));
-    console.log('📋 ent_authorization Header (first 20 chars):', entAuthToken ? entAuthToken.substring(0, 20) + '...' : 'NOT SET');
     console.log('📋 Authorization Header (first 20 chars):', authHeader ? authHeader.substring(0, 20) + '...' : 'NOT SET');
-    console.log('📋 Note: Using ent_authorization header like other Digitap APIs (Digilocker, ClickWrap)');
+    console.log('📋 Note: Using Header-Based Authentication (Basic Auth) - fields sent directly in body, NO payload wrapper');
     console.log('\n📋 CONFIGURATION:');
     console.log(JSON.stringify({
       DIGITAP_BASE_URL: DIGITAP_BASE_URL,
@@ -475,219 +456,67 @@ async function startUploadAPI(params) {
       signature_first_10_chars: signature.substring(0, 10) + '...'
     }, null, 2));
 
-    // Try primary endpoint first, then fallback to alternative
-    // Note: Other Digitap APIs use ent_authorization header instead of Authorization
-    // Let's try both formats like Digilocker API does
+    // According to Digitap Support Team's working example:
+    // Start Upload API expects fields DIRECTLY in request body (NO payload wrapper!)
+    // 
+    // Correct format:
+    //   - Request body: { client_name, institution_id, client_ref_num, txn_completed_cburl, acceptance_policy, ... }
+    //   - Headers: Authorization: Basic base64(CLIENT_ID:CLIENT_SECRET), Content-Type: application/json
+    //
+    // WRONG format (what we were doing):
+    //   - Request body: { payload: { ... } } ❌
+    
     let response;
-    let lastError;
     
-    // Attempt 1: Try with ent_authorization header (like other Digitap APIs)
-    const requestConfigWithEntAuth = {
+    // Request config with Header-Based Authentication
+    const requestConfig = {
       headers: {
         'Content-Type': 'application/json',
-        'ent_authorization': getEntAuthToken(), // Base64 token without "Basic " prefix
+        'Authorization': getAuthHeader() // Basic Auth: Base64(CLIENT_ID:CLIENT_SECRET)
       },
       timeout: 30000
     };
     
-    // Attempt 1a: Try with only Authorization header (original)
-    const requestConfigWithAuth = {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': getAuthHeader() // Basic Auth header
-      },
-      timeout: 30000
-    };
-    
+    // Send payload fields DIRECTLY (no payload wrapper!)
+    // This matches the working cURL from Digitap support
     try {
-      console.log('\n🚀 ATTEMPT 1: Sending request with ent_authorization + Authorization headers (like other Digitap APIs)...');
+      console.log('\n🚀 Sending request with Header-Based Authentication (fields directly in body, NO payload wrapper)...');
+      console.log('📋 Request Body:', JSON.stringify(payload, null, 2));
+      
       response = await axios.post(
         ENDPOINTS.START_UPLOAD,
-        requestBody,
-        requestConfigWithEntAuth
+        payload, // Send fields directly, NOT wrapped in payload object
+        requestConfig
       );
       
       // Log successful response
       console.log('\n✅ RESPONSE RECEIVED (SUCCESS):');
       console.log('📥 Status Code:', response.status);
       console.log('📥 Status Text:', response.statusText);
-      console.log('📥 Response Headers:', JSON.stringify(response.headers, null, 2));
       console.log('📥 Response Data:', JSON.stringify(response.data, null, 2));
       console.log('═══════════════════════════════════════════════════════════\n');
     } catch (error) {
-      lastError = error;
-      
       // Log error response details
-      console.log('\n❌ ATTEMPT 1 FAILED:');
+      console.log('\n❌ REQUEST FAILED:');
       if (error.response) {
         console.log('📥 Status Code:', error.response.status);
         console.log('📥 Status Text:', error.response.statusText);
-        console.log('📥 Response Headers:', JSON.stringify(error.response.headers, null, 2));
         console.log('📥 Response Data:', JSON.stringify(error.response.data, null, 2));
         console.log('📥 Error Code:', error.response.data?.code || 'N/A');
         console.log('📥 Error Message:', error.response.data?.msg || error.response.data?.message || 'N/A');
       } else if (error.request) {
         console.log('📥 No response received from server');
-        console.log('📥 Request details:', JSON.stringify({
-          url: error.config?.url,
-          method: error.config?.method,
-          headers: error.config?.headers ? Object.keys(error.config.headers) : 'N/A'
-        }, null, 2));
       } else {
         console.log('📥 Error setting up request:', error.message);
       }
-      
-      // Try with only Authorization header (without ent_authorization)
-      if (error.response && (error.response.data?.code === 'RequiredToken' || error.response.status === 401 || error.response.status === 403)) {
-        console.log('\n🚀 ATTEMPT 1b: Trying with only Authorization header (without ent_authorization)...');
-        try {
-          response = await axios.post(
-            ENDPOINTS.START_UPLOAD,
-            requestBody,
-            requestConfigWithAuth
-          );
-          
-          console.log('\n✅ RESPONSE RECEIVED (SUCCESS with Authorization only):');
-          console.log('📥 Status Code:', response.status);
-          console.log('📥 Response Data:', JSON.stringify(response.data, null, 2));
-          console.log('═══════════════════════════════════════════════════════════\n');
-        } catch (authOnlyError) {
-          console.log('\n❌ ATTEMPT 1b FAILED:');
-          if (authOnlyError.response) {
-            console.log('📥 Status Code:', authOnlyError.response.status);
-            console.log('📥 Response Data:', JSON.stringify(authOnlyError.response.data, null, 2));
-          }
-          lastError = authOnlyError;
-        }
-      }
-      
-      // If error is "RequiredToken", try alternative request structure with token field
-      if (error.response && error.response.data && error.response.data.code === 'RequiredToken' && !response) {
-        console.log('\n⚠️  ATTEMPT 2: API requires token field. Trying alternative request structure with token...');
-        try {
-          // Try with token field added to request body
-          const requestBodyWithToken = {
-            ...requestBody,
-            token: DIGITAP_CLIENT_ID // Add token field using client_id
-          };
-          
-          console.log('📋 REQUEST BODY (with token):');
-          console.log(JSON.stringify({ 
-            ...requestBodyWithToken, 
-            signature: '[REDACTED]',
-            token: '[REDACTED]'
-          }, null, 2));
-          
-          response = await axios.post(
-            ENDPOINTS.START_UPLOAD,
-            requestBodyWithToken,
-            requestConfigWithEntAuth // Use ent_authorization header
-          );
-          
-          console.log('\n✅ RESPONSE RECEIVED (SUCCESS with token):');
-          console.log('📥 Status Code:', response.status);
-          console.log('📥 Response Data:', JSON.stringify(response.data, null, 2));
-          console.log('═══════════════════════════════════════════════════════════\n');
-        } catch (tokenError) {
-          // Log token error
-          console.log('\n❌ ATTEMPT 2 FAILED:');
-          if (tokenError.response) {
-            console.log('📥 Status Code:', tokenError.response.status);
-            console.log('📥 Response Data:', JSON.stringify(tokenError.response.data, null, 2));
-          }
-          
-          // If that fails, try direct structure (like Generate URL API)
-          console.log('\n⚠️  ATTEMPT 3: Token structure failed. Trying direct request structure (like Generate URL API)...');
-          try {
-            const directRequestBody = {
-              ...payload,
-              signature: signature,
-              token: DIGITAP_CLIENT_ID
-            };
-            
-            console.log('📋 REQUEST BODY (direct structure):');
-            console.log(JSON.stringify({ 
-              ...directRequestBody, 
-              signature: '[REDACTED]',
-              token: '[REDACTED]'
-            }, null, 2));
-            
-            response = await axios.post(
-              ENDPOINTS.START_UPLOAD,
-              directRequestBody,
-              requestConfigWithEntAuth // Use ent_authorization header
-            );
-            
-            console.log('\n✅ RESPONSE RECEIVED (SUCCESS with direct structure):');
-            console.log('📥 Status Code:', response.status);
-            console.log('📥 Response Data:', JSON.stringify(response.data, null, 2));
-            console.log('═══════════════════════════════════════════════════════════\n');
-          } catch (directError) {
-            // Log direct error
-            console.log('\n❌ ATTEMPT 3 FAILED:');
-            if (directError.response) {
-              console.log('📥 Status Code:', directError.response.status);
-              console.log('📥 Response Data:', JSON.stringify(directError.response.data, null, 2));
-            }
-            
-            // If all structures fail, try alternative endpoint
-            if (ENDPOINTS.START_UPLOAD_ALT) {
-              console.log(`\n⚠️  ATTEMPT 4: Trying alternative endpoint: ${ENDPOINTS.START_UPLOAD_ALT}`);
-              try {
-                response = await axios.post(
-                  ENDPOINTS.START_UPLOAD_ALT,
-                  requestBody,
-                  requestConfigWithEntAuth // Use ent_authorization header
-                );
-                
-                console.log('\n✅ RESPONSE RECEIVED (SUCCESS with alternative endpoint):');
-                console.log('📥 Status Code:', response.status);
-                console.log('📥 Response Data:', JSON.stringify(response.data, null, 2));
-                console.log('═══════════════════════════════════════════════════════════\n');
-              } catch (altError) {
-                console.log('\n❌ ATTEMPT 4 FAILED:');
-                if (altError.response) {
-                  console.log('📥 Status Code:', altError.response.status);
-                  console.log('📥 Response Data:', JSON.stringify(altError.response.data, null, 2));
-                }
-                console.log('═══════════════════════════════════════════════════════════\n');
-                throw lastError; // Throw original error
-              }
-            } else {
-              console.log('═══════════════════════════════════════════════════════════\n');
-              throw lastError; // Throw original error
-            }
-          }
-        }
-      }
-      // If 404, try alternative endpoint
-      else if (error.response && error.response.status === 404 && ENDPOINTS.START_UPLOAD_ALT) {
-        console.log(`\n⚠️  ATTEMPT 5: Primary endpoint failed (404), trying alternative: ${ENDPOINTS.START_UPLOAD_ALT}`);
-        try {
-          response = await axios.post(
-            ENDPOINTS.START_UPLOAD_ALT,
-            requestBody,
-            requestConfigWithEntAuth // Use ent_authorization header
-          );
-          
-          console.log('\n✅ RESPONSE RECEIVED (SUCCESS with alternative endpoint):');
-          console.log('📥 Status Code:', response.status);
-          console.log('📥 Response Data:', JSON.stringify(response.data, null, 2));
-          console.log('═══════════════════════════════════════════════════════════\n');
-        } catch (altError) {
-          console.log('\n❌ ATTEMPT 5 FAILED:');
-          if (altError.response) {
-            console.log('📥 Status Code:', altError.response.status);
-            console.log('📥 Response Data:', JSON.stringify(altError.response.data, null, 2));
-          }
-          console.log('═══════════════════════════════════════════════════════════\n');
-          // Both endpoints failed, throw the original error
-          throw lastError;
-        }
-      } else {
-        console.log('═══════════════════════════════════════════════════════════\n');
-        throw error;
-      }
+      console.log('═══════════════════════════════════════════════════════════\n');
+      throw error;
+    }
+    
+    // If we still don't have a response, throw the error
+    if (!response) {
+      console.log('═══════════════════════════════════════════════════════════\n');
+      throw new Error('Failed to get response from Start Upload API');
     }
 
     // Final response logging (if we got here, request succeeded)
@@ -746,68 +575,10 @@ async function startUploadAPI(params) {
       } else if (errorCode === 'SignatureDoesNotMatch' || errorCode === 'InvalidEncryption') {
         errorMessage = `Signature authentication failed. Please verify DIGITAP_ENCRYPTION_KEY is set correctly. Error: ${errorMessage}`;
       } else if (errorCode === 'RequiredToken') {
-        console.error('\n═══════════════════════════════════════════════════════════');
-        console.error('📧 INFORMATION FOR DIGITAP SUPPORT TEAM');
-        console.error('═══════════════════════════════════════════════════════════');
-        console.error('❌ ISSUE: uploadstmt API requires a token field, but we cannot determine the correct format.');
-        console.error('');
-        console.error('📋 WHAT WE TRIED:');
-        console.error('   1. Request structure: { payload: {...}, signature: "..." }');
-        console.error('      → Result: "RequiredToken" error - "token is missing"');
-        console.error('');
-        console.error('   2. Request structure: { payload: {...}, signature: "...", token: CLIENT_ID }');
-        console.error('      → Result: "InvalidToken" error - "The token is invalid or expired"');
-        console.error('');
-        console.error('   3. Request structure: { client_name, institution_id, ..., signature: "...", token: CLIENT_ID }');
-        console.error('      → Result: "InvalidToken" error - "The token is invalid or expired"');
-        console.error('');
-        console.error('   4. Alternative endpoint: /startupload');
-        console.error('      → Result: 404 Not Found');
-        console.error('');
-        console.error('📋 OBSERVATIONS:');
-        console.error('   • The API clearly requires a token field (error changes from RequiredToken to InvalidToken)');
-        console.error('   • Using CLIENT_ID as token results in "InvalidToken" error');
-        console.error('   • The Generate URL API (/bank-data/generateurl) works fine WITHOUT a token');
-        console.error('   • Both APIs use the same Basic Auth header (CLIENT_ID:CLIENT_SECRET)');
-        console.error('');
-        console.error('❓ QUESTIONS FOR DIGITAP SUPPORT:');
-        console.error('   1. How do we obtain the token for uploadstmt API?');
-        console.error('   2. Is there a separate authentication endpoint to get the token?');
-        console.error('   3. What is the correct token format/value for uploadstmt API?');
-        console.error('   4. Is the token different from CLIENT_ID?');
-        console.error('   5. Does the token need to be generated/obtained before calling uploadstmt?');
-        console.error('   6. What is the correct request structure for uploadstmt API?');
-        console.error('');
-        console.error('📋 OUR CURRENT CONFIGURATION:');
-        console.error('   • Endpoint: https://svc.digitap.ai/bank-data/uploadstmt');
-        console.error('   • Method: POST');
-        console.error('   • Auth Header: Basic Auth (CLIENT_ID:CLIENT_SECRET)');
-        console.error('   • CLIENT_ID: ' + DIGITAP_CLIENT_ID);
-        console.error('   • CLIENT_NAME: ' + DIGITAP_CLIENT_NAME);
-        console.error('   • Signature: Generated using HMAC-SHA256 with ENCRYPTION_KEY');
-        console.error('');
-        console.error('📋 REQUEST PAYLOAD WE ARE SENDING:');
-        console.error(JSON.stringify({
-          payload: {
-            client_name: DIGITAP_CLIENT_NAME,
-            institution_id: '1',
-            client_ref_num: 'PC0001831769269888697',
-            txn_completed_cburl: 'https://pocketcredit.in/bank-statement/bank-data/webhook',
-            acceptance_policy: 'atLeastOneTransactionInRange'
-          },
-          signature: '[64 character hex string]'
-        }, null, 2));
-        console.error('');
-        console.error('📋 ERROR RESPONSE WE ARE RECEIVING:');
-        console.error(JSON.stringify({
-          status: 'error',
-          code: 'RequiredToken',
-          msg: 'token is missing'
-        }, null, 2));
-        console.error('');
-        console.error('═══════════════════════════════════════════════════════════');
-        console.error('⚠️  Please contact Digitap support with the above information.');
-        console.error('═══════════════════════════════════════════════════════════\n');
+        // This error shouldn't happen for Start Upload API - it doesn't require a token
+        // If we get this, there might be an issue with the endpoint or request structure
+        errorMessage = 'Start Upload API error: ' + errorMessage;
+        console.error('⚠️  Note: Start Upload API should not require a token. Please verify the endpoint and request structure.');
       }
       
       console.log('═══════════════════════════════════════════════════════════\n');
@@ -961,17 +732,10 @@ async function completeUploadAPI(params) {
     console.log('📤 Calling Digitap Complete Upload API...');
     console.log('📤 Endpoint:', ENDPOINTS.COMPLETE_UPLOAD);
 
-    const payload = {
-      client_name: DIGITAP_CLIENT_NAME,
-      request_id: request_id
-    };
-
-    // Generate signature
-    const signature = generateSignature(payload);
-
+    // According to API docs v1.20, for Header-Based Authentication:
+    // Send fields directly (no payload wrapper)
     const requestBody = {
-      payload: payload,
-      signature: signature
+      request_id: request_id
     };
 
     const response = await axios.post(
@@ -980,7 +744,7 @@ async function completeUploadAPI(params) {
       {
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': getAuthHeader() // Add Basic Auth header
+          'Authorization': getAuthHeader() // Basic Auth: Base64(CLIENT_ID:CLIENT_SECRET)
         },
         timeout: 30000
       }
@@ -1243,6 +1007,8 @@ async function checkBankStatementStatus(request_id) {
     }
 
 
+    // According to API docs v1.20, for Header-Based Authentication:
+    // Send fields directly (no payload wrapper)
     const response = await axios.post(
       ENDPOINTS.STATUS_CHECK,
       {
@@ -1256,16 +1022,19 @@ async function checkBankStatementStatus(request_id) {
         timeout: 15000
       }
     );
+    
+    console.log('📋 Status Check Request: request_id =', request_id);
 
     console.log('✅ Status Check Response:', JSON.stringify(response.data, null, 2));
 
     if (response.data && response.data.status === 'success') {
       const txnStatus = response.data.txn_status || [];
       
-      // Check transaction statuses (Digitap uses: Completed, InProgress, Failure)
-      const allCompleted = txnStatus.every(txn => txn.status === 'Completed');
+      // Check transaction statuses 
+      // Digitap uses: "Success" (report ready), "InProgress" (processing), "Failure" (failed)
+      const allCompleted = txnStatus.every(txn => txn.status === 'Success' || txn.status === 'Completed');
       const anyInProgress = txnStatus.some(txn => txn.status === 'InProgress');
-      const anyFailed = txnStatus.some(txn => txn.status === 'Failure' || txn.status === 'Failed');
+      const anyFailed = txnStatus.some(txn => txn.status === 'Failure' || txn.status === 'Failed' || txn.status === 'Error');
 
       // Map to our database enum: pending, processing, completed, failed, InProgress
       let overall_status = 'pending';
@@ -1335,12 +1104,11 @@ async function retrieveBankStatementReport(client_ref_num = null, format = 'json
 
     console.log(`📥 Retrieving report for: ${txn_id ? `txn_id=${txn_id}` : `client_ref_num=${client_ref_num}`} (format: ${format})`);
 
-    // Build request body - use txn_id if provided, otherwise use client_ref_num
-    // API expects: txn_id OR client_ref_num (not both), report_type, report_subtype
-    // When txn_id is provided, ONLY send txn_id (not client_ref_num)
+    // According to API docs v1.20, for Header-Based Authentication:
+    // Send fields directly (no payload wrapper)
     const requestBody = {
       report_type: format || 'json',
-      report_subtype: 'type3'
+      report_subtype: 'type1' // Changed to type1 as it works in Postman
     };
     
     if (txn_id) {
@@ -1350,6 +1118,8 @@ async function retrieveBankStatementReport(client_ref_num = null, format = 'json
       // Only use client_ref_num if txn_id is not available
       requestBody.client_ref_num = client_ref_num;
     }
+
+    console.log('📋 Retrieve Report Request Body:', JSON.stringify(requestBody, null, 2));
 
     // For Excel format, we need to receive binary data
     const response = await axios.post(
@@ -1604,6 +1374,7 @@ module.exports = {
   initiateBankStatementCollection,
   generateClientRefNum,
   startUploadAPI,
+  uploadStatementAPI,
   getInstitutionList,
   completeUploadAPI
 };

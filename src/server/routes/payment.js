@@ -589,7 +589,6 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                                             console.log(`[Payment] Detected 2 EMI product - recalculating credit limit after loan clearance for user ${loan.user_id}`);
                                             
                                             const { calculateCreditLimitFor2EMI, storePendingCreditLimit } = require('../utils/creditLimitCalculator');
-                                            const notificationService = require('../services/notificationService');
                                             
                                             // Calculate new credit limit (now includes the cleared loan)
                                             const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
@@ -611,26 +610,33 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                                                     // Store as pending credit limit (requires user acceptance)
                                                     await storePendingCreditLimit(loan.user_id, creditLimitData.newLimit, creditLimitData);
                                                     
-                                                    // Get user details for notification
-                                                    const userQuery = await executeQuery(
-                                                        `SELECT first_name, last_name, phone, email FROM users WHERE id = ?`,
-                                                        [loan.user_id]
-                                                    );
-                                                    const user = userQuery && userQuery.length > 0 ? userQuery[0] : null;
-                                                    
-                                                    if (user) {
-                                                        // Send SMS and Email notification
-                                                        const recipientName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Customer';
-                                                        await notificationService.sendCreditLimitNotification({
-                                                            userId: loan.user_id,
-                                                            mobile: user.phone,
-                                                            email: user.email,
-                                                            recipientName: recipientName,
-                                                            newLimit: creditLimitData.newLimit
-                                                        });
+                                                    // Try to send notification (but don't fail if it doesn't work)
+                                                    try {
+                                                        const notificationService = require('../services/notificationService');
+                                                        const userQuery = await executeQuery(
+                                                            `SELECT first_name, last_name, phone, email FROM users WHERE id = ?`,
+                                                            [loan.user_id]
+                                                        );
+                                                        const user = userQuery && userQuery.length > 0 ? userQuery[0] : null;
+                                                        
+                                                        if (user) {
+                                                            // Send SMS and Email notification
+                                                            const recipientName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Customer';
+                                                            await notificationService.sendCreditLimitNotification({
+                                                                userId: loan.user_id,
+                                                                mobile: user.phone,
+                                                                email: user.email,
+                                                                recipientName: recipientName,
+                                                                newLimit: creditLimitData.newLimit
+                                                            });
+                                                            console.log(`[Payment] Notification sent for credit limit increase`);
+                                                        }
+                                                    } catch (notificationError) {
+                                                        // Don't fail the credit limit increase if notification fails
+                                                        console.warn(`[Payment] Failed to send notification (non-fatal):`, notificationError.message);
                                                     }
                                                     
-                                                    console.log(`[Payment] Pending credit limit stored (₹${creditLimitData.newLimit}) and notifications sent for user ${loan.user_id} after loan clearance`);
+                                                    console.log(`[Payment] Pending credit limit stored (₹${creditLimitData.newLimit}) for user ${loan.user_id} after loan clearance`);
                                                 } else {
                                                     console.log(`[Payment] New limit (₹${creditLimitData.newLimit}) is not higher than current limit (₹${currentLimit}), skipping pending limit storage`);
                                                 }

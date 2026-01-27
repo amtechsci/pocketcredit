@@ -1147,16 +1147,29 @@ router.put('/:userId/basic-info', authenticateAdmin, async (req, res) => {
     const { userId } = req.params;
     const { firstName, lastName, dateOfBirth, panNumber } = req.body;
 
-    // Update user basic info in MySQL
+    // Validate PAN format if provided
+    if (panNumber && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(panNumber)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid PAN format. PAN must be in format ABCDE1234F'
+      });
+    }
+
+    // Update user basic info in MySQL (including PAN)
+    const updateFields = ['first_name = ?', 'last_name = ?', 'date_of_birth = ?', 'updated_at = NOW()'];
+    const updateValues = [firstName, lastName, dateOfBirth];
+
+    // Add PAN update if provided
+    if (panNumber !== undefined && panNumber !== null) {
+      updateFields.splice(3, 0, 'pan_number = ?'); // Insert before updated_at
+      updateValues.splice(3, 0, panNumber.toUpperCase()); // Insert before dateOfBirth
+    }
+
     await executeQuery(`
       UPDATE users 
-      SET 
-        first_name = ?,
-        last_name = ?,
-        date_of_birth = ?,
-        updated_at = NOW()
+      SET ${updateFields.join(', ')}
       WHERE id = ?
-    `, [firstName, lastName, dateOfBirth, userId]);
+    `, [...updateValues, userId]);
 
     console.log('✅ Basic info updated successfully');
     console.log('📝 Updated fields:', { firstName, lastName, dateOfBirth, panNumber });
@@ -1169,7 +1182,7 @@ router.put('/:userId/basic-info', authenticateAdmin, async (req, res) => {
         firstName,
         lastName,
         dateOfBirth,
-        panNumber: 'N/A (column not in DB yet)'
+        panNumber: panNumber || null
       }
     });
 
@@ -3096,7 +3109,6 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
               console.log(`[UserProfile] Detected 2 EMI product - recalculating credit limit after loan clearance for user ${loan.user_id}`);
               
               const { calculateCreditLimitFor2EMI, storePendingCreditLimit } = require('../utils/creditLimitCalculator');
-              const notificationService = require('../services/notificationService');
               
               // Calculate new credit limit (now includes the cleared loan)
               const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
@@ -3118,26 +3130,33 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                   // Store as pending credit limit (requires user acceptance)
                   await storePendingCreditLimit(loan.user_id, creditLimitData.newLimit, creditLimitData);
                   
-                  // Get user details for notification
-                  const userQuery = await executeQuery(
-                    `SELECT first_name, last_name, phone, email FROM users WHERE id = ?`,
-                    [loan.user_id]
-                  );
-                  const user = userQuery && userQuery.length > 0 ? userQuery[0] : null;
-                  
-                  if (user) {
-                    // Send SMS and Email notification
-                    const recipientName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Customer';
-                    await notificationService.sendCreditLimitNotification({
-                      userId: loan.user_id,
-                      mobile: user.phone,
-                      email: user.email,
-                      recipientName: recipientName,
-                      newLimit: creditLimitData.newLimit
-                    });
+                  // Try to send notification (but don't fail if it doesn't work)
+                  try {
+                    const notificationService = require('../services/notificationService');
+                    const userQuery = await executeQuery(
+                      `SELECT first_name, last_name, phone, email FROM users WHERE id = ?`,
+                      [loan.user_id]
+                    );
+                    const user = userQuery && userQuery.length > 0 ? userQuery[0] : null;
+                    
+                    if (user) {
+                      // Send SMS and Email notification
+                      const recipientName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Customer';
+                      await notificationService.sendCreditLimitNotification({
+                        userId: loan.user_id,
+                        mobile: user.phone,
+                        email: user.email,
+                        recipientName: recipientName,
+                        newLimit: creditLimitData.newLimit
+                      });
+                      console.log(`[UserProfile] Notification sent for credit limit increase`);
+                    }
+                  } catch (notificationError) {
+                    // Don't fail the credit limit increase if notification fails
+                    console.warn(`[UserProfile] Failed to send notification (non-fatal):`, notificationError.message);
                   }
                   
-                  console.log(`[UserProfile] Pending credit limit stored (₹${creditLimitData.newLimit}) and notifications sent for user ${loan.user_id} after loan clearance`);
+                  console.log(`[UserProfile] Pending credit limit stored (₹${creditLimitData.newLimit}) for user ${loan.user_id} after loan clearance`);
                 } else {
                   console.log(`[UserProfile] New limit (₹${creditLimitData.newLimit}) is not higher than current limit (₹${currentLimit}), skipping pending limit storage`);
                 }

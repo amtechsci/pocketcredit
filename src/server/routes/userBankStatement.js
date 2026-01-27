@@ -1624,10 +1624,11 @@ router.post('/init-bank-statement-table', async (req, res) => {
     }
 
     // Create table for user-level bank statements (not per-application)
+    // Note: Multiple statements per user are allowed (for multiple banks)
     await executeQuery(`
       CREATE TABLE IF NOT EXISTS user_bank_statements (
         id INT PRIMARY KEY AUTO_INCREMENT,
-        user_id INT NOT NULL UNIQUE,
+        user_id INT NOT NULL,
         client_ref_num VARCHAR(255) NOT NULL UNIQUE,
         request_id INT DEFAULT NULL,
         txn_id VARCHAR(255) DEFAULT NULL,
@@ -1652,8 +1653,29 @@ router.post('/init-bank-statement-table', async (req, res) => {
         INDEX idx_status (status),
         INDEX idx_expires_at (expires_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-      COMMENT='Stores user bank statements - one per user (profile level)'
+      COMMENT='Stores user bank statements - supports multiple statements per user (multiple banks)'
     `);
+
+    // Migration: Drop UNIQUE constraint on user_id if it exists (to support multiple statements per user)
+    try {
+      const constraints = await executeQuery(`
+        SELECT CONSTRAINT_NAME 
+        FROM information_schema.TABLE_CONSTRAINTS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'user_bank_statements' 
+        AND CONSTRAINT_TYPE = 'UNIQUE' 
+        AND CONSTRAINT_NAME = 'user_id'
+      `);
+      
+      if (constraints.length > 0) {
+        console.log('🔄 Dropping UNIQUE constraint on user_id to support multiple statements per user...');
+        await executeQuery(`ALTER TABLE user_bank_statements DROP INDEX user_id`);
+        console.log('✅ UNIQUE constraint on user_id removed successfully');
+      }
+    } catch (migrationError) {
+      // If constraint doesn't exist or already dropped, that's fine
+      console.log('ℹ️  UNIQUE constraint on user_id does not exist (or already removed)');
+    }
 
     res.json({
       success: true,

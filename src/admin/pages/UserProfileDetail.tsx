@@ -174,6 +174,8 @@ export function UserProfileDetail() {
     dateOfBirth: '',
     panNumber: ''
   });
+  const [editingPan, setEditingPan] = useState(false);
+  const [panValue, setPanValue] = useState('');
   const [contactInfoForm, setContactInfoForm] = useState({
     email: '',
     phone: '',
@@ -222,6 +224,7 @@ export function UserProfileDetail() {
   const [noteText, setNoteText] = useState<{ [key: number]: string }>({});
   const [editingSalaryDate, setEditingSalaryDate] = useState(false);
   const [bankStatement, setBankStatement] = useState<any>(null);
+  const [bankStatements, setBankStatements] = useState<any[]>([]);
   const [loadingStatement, setLoadingStatement] = useState(false);
   const [verifyingStatement, setVerifyingStatement] = useState(false);
   const [salaryDateEditValue, setSalaryDateEditValue] = useState('');
@@ -930,27 +933,13 @@ export function UserProfileDetail() {
     }
   }, [transactionForm.transactionType, transactionForm.loanApplicationId, loanCalculations, calculationsLoading]);
 
-  // Fetch bank statement when tab becomes active
+  // Fetch bank statements when tab becomes active
   useEffect(() => {
-    if (activeTab === 'statement-verification' && params.userId && !bankStatement) {
-      const fetchBankStatement = async () => {
-        if (!params.userId) return;
-        setLoadingStatement(true);
-        try {
-          const response = await adminApiService.getBankStatement(params.userId);
-          if (response.success && response.data) {
-            setBankStatement(response.data.statement);
-          }
-        } catch (error) {
-          console.error('Error fetching bank statement:', error);
-          toast.error('Failed to fetch bank statement');
-        } finally {
-          setLoadingStatement(false);
-        }
-      };
+    if (activeTab === 'statement-verification' && params.userId) {
       fetchBankStatement();
     }
-  }, [activeTab, params.userId, bankStatement]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, params.userId]);
 
   // Form submission handlers
   const handleBasicInfoSubmit = async () => {
@@ -2492,8 +2481,85 @@ export function UserProfileDetail() {
                   ⚠️
                 </span>
               )}
+              {!editingPan && (
+                <button
+                  onClick={() => {
+                    setPanValue(userData?.panNumber || '');
+                    setEditingPan(true);
+                  }}
+                  className="ml-auto text-blue-600 hover:text-blue-800"
+                  title="Edit PAN"
+                >
+                  <Edit className="w-3 h-3" />
+                </button>
+              )}
             </div>
-            <div className="text-sm font-semibold text-gray-900">{userData?.panNumber || 'N/A'}</div>
+            {editingPan ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={panValue}
+                  onChange={(e) => {
+                    const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+                    setPanValue(value);
+                  }}
+                  placeholder="ABCDE1234F"
+                  pattern="[A-Z]{5}[0-9]{4}[A-Z]{1}"
+                  className="flex-1 text-sm font-semibold text-gray-900 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  maxLength={10}
+                />
+                <button
+                  onClick={async () => {
+                    if (!panValue || panValue.length !== 10) {
+                      toast.error('PAN must be 10 characters (e.g., ABCDE1234F)');
+                      return;
+                    }
+                    if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(panValue)) {
+                      toast.error('Invalid PAN format. Must be in format ABCDE1234F');
+                      return;
+                    }
+                    try {
+                      const response = await adminApiService.updateUserBasicInfo(params.userId!, {
+                        firstName: userData?.name?.split(' ')[0] || '',
+                        lastName: userData?.name?.split(' ').slice(1).join(' ') || '',
+                        dateOfBirth: userData?.dateOfBirth || '',
+                        panNumber: panValue
+                      });
+                      if (response.status === 'success') {
+                        toast.success('PAN updated successfully');
+                        setEditingPan(false);
+                        // Refresh user data
+                        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+                        if (profileResponse.status === 'success') {
+                          setUserData(profileResponse.data);
+                        }
+                      } else {
+                        toast.error(response.message || 'Failed to update PAN');
+                      }
+                    } catch (error: any) {
+                      console.error('Error updating PAN:', error);
+                      toast.error(error.message || 'Failed to update PAN');
+                    }
+                  }}
+                  className="text-green-600 hover:text-green-800"
+                  title="Save PAN"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    setEditingPan(false);
+                    setPanValue('');
+                  }}
+                  className="text-red-600 hover:text-red-800"
+                  title="Cancel"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="text-sm font-semibold text-gray-900">{userData?.panNumber || 'N/A'}</div>
+            )}
           </div>
           <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm relative">
             <div className="text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
@@ -3370,23 +3436,38 @@ export function UserProfileDetail() {
     </div>
   );
 
+  // Fetch bank statements function (used by Statement Verification tab)
+  const fetchBankStatement = async () => {
+    if (!params.userId) return;
+    setLoadingStatement(true);
+    try {
+      const response = await adminApiService.getBankStatement(params.userId);
+      console.log('Bank statement API response:', response);
+      // Check for both 'status' and 'success' properties (API might return either)
+      const isSuccess = (response.status === 'success' || response.success === true);
+      if (isSuccess && response.data) {
+        // Update both for backward compatibility and new table view
+        setBankStatement(response.data.statement);
+        const statementsList = response.data.statements || [];
+        console.log('Setting bank statements:', statementsList.length, 'statements');
+        setBankStatements(statementsList);
+      } else {
+        console.warn('API response not successful or missing data:', response);
+        // Still set empty array if no data
+        setBankStatements([]);
+      }
+    } catch (error) {
+      console.error('Error fetching bank statement:', error);
+      toast.error('Failed to fetch bank statement');
+      setBankStatements([]);
+    } finally {
+      setLoadingStatement(false);
+    }
+  };
+
+
   // Statement Verification Tab
   const renderStatementVerificationTab = () => {
-    const fetchBankStatement = async () => {
-      if (!params.userId) return;
-      setLoadingStatement(true);
-      try {
-        const response = await adminApiService.getBankStatement(params.userId);
-        if (response.status === 'success' && response.data) {
-          setBankStatement(response.data.statement);
-        }
-      } catch (error) {
-        console.error('Error fetching bank statement:', error);
-        toast.error('Failed to fetch bank statement');
-      } finally {
-        setLoadingStatement(false);
-      }
-    };
 
     const handleTriggerVerification = async () => {
       if (!params.userId) {
@@ -3476,6 +3557,179 @@ export function UserProfileDetail() {
       }
     };
 
+    const handleAddNewStatement = async () => {
+      if (!params.userId) {
+        toast.error('User ID not found');
+        return;
+      }
+
+      setVerifyingStatement(true);
+      try {
+        // Call Add New Statement API to create new statement and get upload URL
+        const response = await adminApiService.addNewBankStatement(params.userId);
+        if (response.status === 'success' && response.data?.uploadUrl) {
+          toast.success('New statement created. Redirecting to Digitap...');
+          // Redirect admin to Digitap upload URL
+          window.open(response.data.uploadUrl, '_blank');
+          // Refresh statement data to get updated status
+          await fetchBankStatement();
+        } else {
+          toast.error(response.message || 'Failed to create new statement');
+        }
+      } catch (error: any) {
+        console.error('Add new statement error:', error);
+        toast.error(error.message || 'Failed to create new statement');
+      } finally {
+        setVerifyingStatement(false);
+      }
+    };
+
+    const handleDownloadReport = async (statementId: number, format: 'json' | 'xlsx' = 'json') => {
+      if (!params.userId) return;
+      
+      try {
+        const blob = await adminApiService.downloadBankStatementReport(params.userId, statementId, format);
+        
+        // Create download link
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `bank-statement-${statementId}.${format === 'json' ? 'json' : 'xlsx'}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        toast.success(`Report downloaded successfully`);
+      } catch (error: any) {
+        console.error('Download report error:', error);
+        toast.error(error.message || 'Failed to download report');
+      }
+    };
+
+    const handleGenerateReport = async (statementId: number) => {
+      if (!params.userId) {
+        toast.error('User ID not found');
+        return;
+      }
+
+      setVerifyingStatement(true);
+      try {
+        // Call Start Upload API to generate upload URL for manual statement
+        const response = await adminApiService.startBankStatementUploadForStatement(params.userId, statementId);
+        console.log('Start upload response:', response);
+        
+        // Check for both 'status' and 'success' properties (API might return either)
+        const isSuccess = (response.status === 'success' || response.success === true);
+        
+        if (isSuccess) {
+          // For manual uploads, the file is automatically uploaded to Digitap
+          // For online uploads, we would redirect to the upload URL
+          if (response.data?.uploadUrl && response.data?.status !== 'processing') {
+            // This is for online uploads (future feature)
+            toast.success('Upload URL generated. Opening Digitap upload page...');
+            window.open(response.data.uploadUrl, '_blank');
+          } else {
+            // Manual upload - file was automatically processed
+            toast.success(response.message || 'Bank statement uploaded to Digitap successfully. Processing has started.');
+          }
+          // Refresh statement data to get updated status
+          await fetchBankStatement();
+        } else {
+          const errorMessage = response.message || 'Failed to generate upload URL';
+          toast.error(errorMessage);
+          console.error('Failed to generate upload URL:', response);
+        }
+      } catch (error: any) {
+        console.error('Generate report error:', error);
+        const errorMessage = error.response?.data?.message || error.message || 'Failed to generate upload URL';
+        toast.error(errorMessage);
+      } finally {
+        setVerifyingStatement(false);
+      }
+    };
+
+    const handleRefreshStatus = async (statementId: number) => {
+      if (!params.userId) {
+        toast.error('User ID not found');
+        return;
+      }
+
+      setVerifyingStatement(true);
+      try {
+        const response = await adminApiService.checkBankStatementStatus(params.userId, statementId);
+        console.log('Status check response:', response);
+        
+        const isSuccess = (response.status === 'success' || response.success === true);
+        
+        if (isSuccess) {
+          if (response.data?.hasReport) {
+            toast.success('Report is ready! Download options are now available.');
+          } else if (response.data?.isInProgress) {
+            toast.info('Processing in progress. Please check again in a few moments.');
+          } else if (response.data?.isFailed) {
+            toast.error('Processing failed. Please check the transaction details.');
+          } else {
+            toast.info(response.message || 'Status updated');
+          }
+          // Refresh statement data
+          await fetchBankStatement();
+        } else {
+          toast.error(response.message || 'Failed to check status');
+        }
+      } catch (error: any) {
+        console.error('Status check error:', error);
+        toast.error(error.response?.data?.message || error.message || 'Failed to check status');
+      } finally {
+        setVerifyingStatement(false);
+      }
+    };
+
+    const handleUploadFile = async (statementId: number) => {
+      if (!params.userId) {
+        toast.error('User ID not found');
+        return;
+      }
+
+      // Create file input element
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/pdf';
+      input.onchange = async (e: any) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (file.type !== 'application/pdf') {
+          toast.error('Only PDF files are allowed');
+          return;
+        }
+
+        if (file.size > 10 * 1024 * 1024) {
+          toast.error('File size must be less than 10MB');
+          return;
+        }
+
+        setVerifyingStatement(true);
+        try {
+          const response = await adminApiService.uploadFileForStatement(params.userId, statementId, file);
+          console.log('Upload file response:', response);
+          
+          if (response.status === 'success' || response.success === true) {
+            toast.success('File uploaded successfully');
+            await fetchBankStatement();
+          } else {
+            toast.error(response.message || 'Failed to upload file');
+          }
+        } catch (error: any) {
+          console.error('Upload file error:', error);
+          toast.error(error.message || 'Failed to upload file');
+        } finally {
+          setVerifyingStatement(false);
+        }
+      };
+      input.click();
+    };
+
     const handleUpdateDecision = async (decision: 'approved' | 'rejected', notes?: string) => {
       if (!params.userId) return;
       try {
@@ -3500,483 +3754,253 @@ export function UserProfileDetail() {
       );
     }
 
-    const statement = bankStatement;
-    const hasStatement = !!statement;
-    const userStatus = statement?.user_status || 'none';
-    const verificationStatus = statement?.verification_status || 'not_started';
+    const statements = bankStatements || [];
+    const hasStatements = statements.length > 0;
 
     return (
       <div className="space-y-6">
-        {/* Statement Details */}
-        {hasStatement && (
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <h4 className="text-md font-semibold text-gray-900 mb-4">Statement Details</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Client Reference Number</label>
-                <p className="text-gray-900 font-mono text-sm">{statement.client_ref_num || 'N/A'}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">File Name</label>
-                <p className="text-gray-900">{statement.file_name || 'N/A'}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">File Size</label>
-                <p className="text-gray-900">
-                  {statement.file_size ? `${(statement.file_size / 1024 / 1024).toFixed(2)} MB` : 'N/A'}
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Upload Method</label>
-                <p className="text-gray-900 capitalize">{statement.upload_method || 'N/A'}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Uploaded At</label>
-                <p className="text-gray-900">
-                  {statement.created_at ? formatDate(statement.created_at) : 'N/A'}
-                </p>
-              </div>
-              {statement.request_id && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Request ID</label>
-                  <p className="text-gray-900 font-mono text-sm">{statement.request_id}</p>
-                </div>
-              )}
-              {statement.txn_id && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Transaction ID</label>
-                  <p className="text-gray-900 font-mono text-sm">{statement.txn_id}</p>
-                </div>
-              )}
-              {/* Show uploaded file for manual uploads */}
-              {statement.upload_method === 'manual' && statement.file_path && (
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Uploaded File</label>
-                  <a
-                    href={statement.file_path}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 text-blue-600 hover:underline"
-                  >
-                    <Download className="w-4 h-4" />
-                    {statement.file_name || 'Download File'}
-                  </a>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Verification Actions */}
+        {/* Add New Statement Button */}
         <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <h4 className="text-md font-semibold text-gray-900 mb-4">Verification Actions</h4>
-
-          {!hasStatement && (
-            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <p className="text-sm text-yellow-800">
-                No bank statement uploaded yet. User needs to upload a statement first.
-              </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-md font-semibold text-gray-900">Bank Statement Verification</h4>
+              <p className="text-sm text-gray-500 mt-1">Add and manage bank statements for verification</p>
             </div>
-          )}
-
-          {hasStatement && verificationStatus === 'not_started' && statement.upload_method === 'manual' && (
-            <div className="space-y-4">
-              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-sm text-blue-800 mb-2">
-                  The existing uploaded file will be used for Digitap verification. Click the button below to generate a Digitap upload URL and upload the file.
-                </p>
-              </div>
-              <Button
-                onClick={handleTriggerVerification}
-                disabled={verifyingStatement}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                {verifyingStatement ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-4 h-4 mr-2" />
-                    Trigger Digitap Verification
-                  </>
-                )}
-              </Button>
-            </div>
-          )}
-
-          {hasStatement && verificationStatus === 'api_verification_pending' && statement.upload_method === 'manual' && (
-            <div className="space-y-4">
-              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <p className="text-sm text-yellow-800 mb-2">
-                  {statement.request_id ?
-                    'After uploading the file on Digitap, click "Complete Upload" to finalize the upload process and start verification. Then check status to see the progress.' :
-                    'Verification is in progress. You can check the status or fetch the report when ready.'}
-                </p>
-              </div>
-              <div className="flex gap-3">
-                {statement.request_id && (
-                  <Button
-                    onClick={handleCompleteUpload}
-                    disabled={verifyingStatement}
-                    className="bg-green-600 hover:bg-green-700"
-                  >
-                    {verifyingStatement ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Completing...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle className="w-4 h-4 mr-2" />
-                        Complete Upload
-                      </>
-                    )}
-                  </Button>
-                )}
-                <Button
-                  onClick={handleCheckStatus}
-                  disabled={loadingStatement}
-                  variant="outline"
-                >
-                  <RefreshCw className={`w-4 h-4 mr-2 ${loadingStatement ? 'animate-spin' : ''}`} />
-                  Check Status
-                </Button>
-                <Button
-                  onClick={handleFetchReport}
-                  disabled={loadingStatement}
-                  variant="outline"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Fetch Report
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {hasStatement && verificationStatus === 'api_verified' && statement.upload_method === 'manual' && (
-            <div className="space-y-4">
-              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                <p className="text-sm text-green-800 mb-2">
-                  ✓ Digitap API verification completed successfully.
-                </p>
-              </div>
-              <div className="flex gap-3">
-                <Button
-                  onClick={handleFetchReport}
-                  disabled={loadingStatement}
-                  variant="outline"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  View Report
-                </Button>
-                <Button
-                  onClick={() => handleUpdateDecision('approved')}
-                  className="bg-green-600 hover:bg-green-700"
-                >
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Approve Statement
-                </Button>
-                <Button
-                  onClick={() => {
-                    const notes = prompt('Enter rejection reason:');
-                    if (notes) handleUpdateDecision('rejected', notes);
-                  }}
-                  variant="destructive"
-                >
-                  <XCircle className="w-4 h-4 mr-2" />
-                  Reject Statement
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {hasStatement && verificationStatus === 'api_failed' && statement.upload_method === 'manual' && (
-            <div className="space-y-4">
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm text-red-800 mb-2">
-                  ✗ Digitap API verification failed. {statement.upload_method === 'manual' ? 'You can retry with a new file.' : 'Please check the API logs or contact support.'}
-                </p>
-              </div>
-              {statement.upload_method === 'manual' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Upload New File for Retry
-                  </label>
-                  <Button
-                    onClick={handleTriggerVerification}
-                    disabled={verifyingStatement}
-                    className="mt-3 bg-blue-600 hover:bg-blue-700"
-                  >
-                    {verifyingStatement ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Processing...
-                      </>
-                    ) : (
-                      'Retry Verification'
-                    )}
-                  </Button>
-                </div>
+            <Button
+              onClick={handleAddNewStatement}
+              disabled={verifyingStatement}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {verifyingStatement ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add New Statement
+                </>
               )}
-            </div>
-          )}
-
-          {/* Always allow manual verification trigger */}
-          <div className="mt-6 pt-6 border-t border-gray-100">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h5 className="text-sm font-medium text-gray-900">Manual Verification Upload</h5>
-                <p className="text-xs text-gray-500 mt-1">
-                  Trigger a new verification process or upload a manual statement file. This enables multiple account verification.
-                </p>
-              </div>
-              <Button
-                onClick={handleTriggerVerification}
-                disabled={verifyingStatement}
-                variant="outline"
-                size="sm"
-                className="border-blue-200 text-blue-700 hover:bg-blue-50 whitespace-nowrap"
-              >
-                {verifyingStatement ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Upload className="w-4 h-4 mr-2" />
-                )}
-                Upload Statement
-              </Button>
-            </div>
+            </Button>
           </div>
         </div>
 
-        {/* Report Data */}
-        {hasStatement && statement.reportData && (
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <h4 className="text-md font-semibold text-gray-900 mb-4">Verification Report</h4>
-
-            {statement.upload_method === 'online' && typeof statement.reportData === 'object' ? (
-              <div className="space-y-6">
-                {/* Customer Info */}
-                {statement.reportData.customer_info && (
-                  <div>
-                    <h5 className="text-sm font-semibold text-gray-800 mb-3">Customer Information</h5>
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200 border border-gray-200">
-                        <tbody className="bg-white divide-y divide-gray-200">
-                          {Object.entries(statement.reportData.customer_info).map(([key, value]: [string, any]) => (
-                            <tr key={key}>
-                              <td className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-50 capitalize">
-                                {key.replace(/_/g, ' ')}
-                              </td>
-                              <td className="px-4 py-2 text-sm text-gray-900">{value || 'N/A'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {/* Accounts */}
-                {statement.reportData.accounts && Array.isArray(statement.reportData.accounts) && (
-                  <div>
-                    <h5 className="text-sm font-semibold text-gray-800 mb-3">Account Details</h5>
-                    {statement.reportData.accounts.map((account: any, accIndex: number) => (
-                      <div key={accIndex} className="mb-6 border border-gray-200 rounded-lg p-4">
-                        <h6 className="text-xs font-semibold text-gray-700 mb-3">Account {accIndex + 1}</h6>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
-                          {Object.entries(account).filter(([key]) => key !== 'transactions').map(([key, value]: [string, any]) => (
-                            <div key={key}>
-                              <div className="text-xs font-medium text-gray-600 capitalize mb-1">
-                                {key.replace(/_/g, ' ')}
-                              </div>
-                              <div className="text-sm text-gray-900">{value || 'N/A'}</div>
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Transactions Table */}
-                        {account.transactions && Array.isArray(account.transactions) && account.transactions.length > 0 && (
-                          <div className="mt-4">
-                            <h6 className="text-xs font-semibold text-gray-700 mb-2">Transactions ({account.transactions.length})</h6>
-                            <div className="overflow-x-auto max-h-96">
-                              <table className="min-w-full divide-y divide-gray-200 border border-gray-200 text-xs">
-                                <thead className="bg-gray-50 sticky top-0">
-                                  <tr>
-                                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Date</th>
-                                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Amount</th>
-                                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Balance</th>
-                                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Category</th>
-                                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Narration</th>
-                                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Tamper Flag</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="bg-white divide-y divide-gray-200">
-                                  {account.transactions.map((txn: any, txnIndex: number) => (
-                                    <tr key={txnIndex} className="hover:bg-gray-50">
-                                      <td className="px-3 py-2 text-gray-900">{txn.date || 'N/A'}</td>
-                                      <td className={`px-3 py-2 font-medium ${txn.amount > 0 ? 'text-green-600' : 'text-red-600'
-                                        }`}>
-                                        {txn.amount > 0 ? '+' : ''}{txn.amount?.toLocaleString('en-IN', { minimumFractionDigits: 2 }) || '0.00'}
-                                      </td>
-                                      <td className="px-3 py-2 text-gray-900">{txn.balance?.toLocaleString('en-IN', { minimumFractionDigits: 2 }) || 'N/A'}</td>
-                                      <td className="px-3 py-2 text-gray-900">{txn.category || 'N/A'}</td>
-                                      <td className="px-3 py-2 text-gray-900 max-w-xs truncate" title={txn.narration}>
-                                        {txn.narration || 'N/A'}
-                                      </td>
-                                      <td className="px-3 py-2">
-                                        <span className={`px-2 py-1 rounded text-xs font-medium ${txn.tamper_flag === 'GREEN' ? 'bg-green-100 text-green-800' :
-                                          txn.tamper_flag === 'RED' ? 'bg-red-100 text-red-800' :
-                                            'bg-yellow-100 text-yellow-800'
-                                          }`}>
-                                          {txn.tamper_flag || 'N/A'}
-                                        </span>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
+        {/* Statement Details Table */}
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <h4 className="text-md font-semibold text-gray-900 mb-4">Statement Details</h4>
+          
+          {!hasStatements ? (
+            <div className="text-center py-12">
+              <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-500">No bank statements found. Click "Add New Statement" to start.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Client Reference Number
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Upload Method
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Upload File
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Created At
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {statements.map((statement: any) => {
+                    const isManualUpload = statement.upload_method === 'manual';
+                    const hasFile = !!statement.file_path;
+                    const hasReport = statement.hasReport || statement.report_data;
+                    
+                    return (
+                      <tr key={statement.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-mono text-gray-900">
+                            {statement.client_ref_num || 'N/A'}
                           </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Analysis Data */}
-                {statement.reportData.analysis_data && (
-                  <div>
-                    <h5 className="text-sm font-semibold text-gray-800 mb-3">Analysis Data</h5>
-                    {Object.entries(statement.reportData.analysis_data).map(([period, data]: [string, any]) => (
-                      <div key={period} className="mb-4 border border-gray-200 rounded-lg p-4">
-                        <h6 className="text-xs font-semibold text-gray-700 mb-3">{period}</h6>
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full divide-y divide-gray-200 border border-gray-200 text-xs">
-                            <tbody className="bg-white divide-y divide-gray-200">
-                              {Object.entries(data).slice(0, 20).map(([key, value]: [string, any]) => (
-                                <tr key={key}>
-                                  <td className="px-3 py-2 text-xs font-medium text-gray-700 bg-gray-50 w-1/3">
-                                    {key.replace(/_/g, ' ')}
-                                  </td>
-                                  <td className="px-3 py-2 text-xs text-gray-900">
-                                    {typeof value === 'number' ? value.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : (value || 'N/A')}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                          {Object.keys(data).length > 20 && (
-                            <p className="text-xs text-gray-500 mt-2 px-3">
-                              Showing first 20 of {Object.keys(data).length} fields. Full data available in API response.
-                            </p>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${
+                            !hasFile && statement.upload_method === 'online' 
+                              ? 'bg-gray-100 text-gray-600' 
+                              : statement.upload_method === 'manual' 
+                              ? 'bg-purple-100 text-purple-800'
+                              : 'bg-blue-100 text-blue-800'
+                          }`}>
+                            {!hasFile && statement.upload_method === 'online' 
+                              ? 'Not Uploaded' 
+                              : statement.upload_method || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          {hasFile ? (
+                            <a
+                              href={statement.file_path}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+                            >
+                              <Download className="w-3 h-3" />
+                              {statement.file_name || 'Download File'}
+                            </a>
+                          ) : (
+                            <Button
+                              onClick={() => handleUploadFile(statement.id)}
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              disabled={verifyingStatement}
+                            >
+                              {verifyingStatement ? (
+                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                              ) : (
+                                <Upload className="w-3 h-3 mr-1" />
+                              )}
+                              Upload File
+                            </Button>
                           )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            statement.verification_status === 'api_verified' ? 'bg-green-100 text-green-800' :
+                            statement.verification_status === 'api_verification_pending' ? 'bg-yellow-100 text-yellow-800' :
+                            statement.verification_status === 'api_failed' ? 'bg-red-100 text-red-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {statement.verification_status === 'api_verified' ? 'Verified' :
+                             statement.verification_status === 'api_verification_pending' ? 'Pending' :
+                             statement.verification_status === 'api_failed' ? 'Failed' :
+                             statement.verification_status === 'not_started' ? 'Not Started' :
+                             statement.verification_status || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {statement.created_at ? formatDate(statement.created_at) : 'N/A'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <div className="flex gap-2 flex-wrap">
+                            {/* Show Refresh button if processing or pending */}
+                            {(statement.status === 'InProgress' || statement.status === 'processing' || 
+                              (statement.verification_status === 'api_verification_pending' && !hasReport)) && (
+                              <Button
+                                onClick={() => handleRefreshStatus(statement.id)}
+                                variant="outline"
+                                size="sm"
+                                className="h-8"
+                                disabled={verifyingStatement}
+                              >
+                                {verifyingStatement ? (
+                                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="w-3 h-3 mr-1" />
+                                )}
+                                Refresh
+                              </Button>
+                            )}
+                            
+                            {/* Show Generate Report button for manual uploads without report */}
+                            {isManualUpload && !hasReport && 
+                             statement.verification_status !== 'api_verification_pending' && 
+                             statement.status !== 'InProgress' && 
+                             statement.status !== 'processing' ? (
+                              <Button
+                                onClick={() => handleGenerateReport(statement.id)}
+                                variant="outline"
+                                size="sm"
+                                className="h-8"
+                                disabled={verifyingStatement}
+                              >
+                                {verifyingStatement ? (
+                                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                ) : (
+                                  <Upload className="w-3 h-3 mr-1" />
+                                )}
+                                Generate Report
+                              </Button>
+                            ) : null}
+                            
+                            {/* Show download buttons if report exists */}
+                            {hasReport && (
+                              <>
+                                <Button
+                                  onClick={() => handleDownloadReport(statement.id, 'json')}
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8"
+                                >
+                                  <Download className="w-3 h-3 mr-1" />
+                                  JSON
+                                </Button>
+                                <Button
+                                  onClick={() => handleDownloadReport(statement.id, 'xlsx')}
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8"
+                                >
+                                  <Download className="w-3 h-3 mr-1" />
+                                  Excel
+                                </Button>
+                              </>
+                            )}
+                            {!isManualUpload && !hasReport && (
+                              <span className="text-gray-400 text-xs">No report available</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
-                {/* Tamper Detection */}
-                {statement.reportData.tamper_detection_details && Array.isArray(statement.reportData.tamper_detection_details) && (
-                  <div>
-                    <h5 className="text-sm font-semibold text-gray-800 mb-3">Tamper Detection Details</h5>
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200 border border-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            {Object.keys(statement.reportData.tamper_detection_details[0] || {}).map((key) => (
-                              <th key={key} className="px-4 py-2 text-left text-xs font-semibold text-gray-700 capitalize">
-                                {key.replace(/_/g, ' ')}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                          {statement.reportData.tamper_detection_details.map((detail: any, index: number) => (
-                            <tr key={index}>
-                              {Object.values(detail).map((value: any, valIndex: number) => (
-                                <td key={valIndex} className="px-4 py-2 text-sm text-gray-900">
-                                  {value || 'N/A'}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
 
-                {/* Statement Period Info */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {statement.reportData.statement_start_date && (
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-xs font-medium text-gray-600 mb-1">Statement Start Date</div>
-                      <div className="text-sm text-gray-900">{statement.reportData.statement_start_date}</div>
-                    </div>
-                  )}
-                  {statement.reportData.statement_end_date && (
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-xs font-medium text-gray-600 mb-1">Statement End Date</div>
-                      <div className="text-sm text-gray-900">{statement.reportData.statement_end_date}</div>
-                    </div>
-                  )}
-                  {statement.reportData.duration_in_month && (
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-xs font-medium text-gray-600 mb-1">Duration (Months)</div>
-                      <div className="text-sm text-gray-900">{statement.reportData.duration_in_month}</div>
-                    </div>
-                  )}
-                  {statement.reportData.source_of_data && (
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-xs font-medium text-gray-600 mb-1">Source of Data</div>
-                      <div className="text-sm text-gray-900">{statement.reportData.source_of_data}</div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="bg-gray-50 rounded-lg p-4 max-h-96 overflow-auto">
-                <pre className="text-xs text-gray-700 whitespace-pre-wrap">
-                  {JSON.stringify(statement.reportData, null, 2)}
-                </pre>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Verification History */}
-        {hasStatement && statement.verified_at && (
+        {/* Verification History - Show for latest statement if available */}
+        {bankStatement && bankStatement.verified_at && (
           <div className="bg-white rounded-lg border border-gray-200 p-6">
             <h4 className="text-md font-semibold text-gray-900 mb-4">Verification History</h4>
             <div className="space-y-2 text-sm">
               <div>
                 <span className="font-medium text-gray-700">Verified By:</span>{' '}
-                <span className="text-gray-900">Admin ID {statement.verified_by || 'N/A'}</span>
+                <span className="text-gray-900">Admin ID {bankStatement.verified_by || 'N/A'}</span>
               </div>
               <div>
                 <span className="font-medium text-gray-700">Verified At:</span>{' '}
                 <span className="text-gray-900">
-                  {statement.verified_at ? formatDate(statement.verified_at) : 'N/A'}
+                  {bankStatement.verified_at ? formatDate(bankStatement.verified_at) : 'N/A'}
                 </span>
               </div>
-              {statement.verification_decision && (
+              {bankStatement.verification_decision && (
                 <div>
                   <span className="font-medium text-gray-700">Decision:</span>{' '}
-                  <span className={`font-semibold ${statement.verification_decision === 'approved' ? 'text-green-600' :
-                    statement.verification_decision === 'rejected' ? 'text-red-600' :
+                  <span className={`font-semibold ${bankStatement.verification_decision === 'approved' ? 'text-green-600' :
+                    bankStatement.verification_decision === 'rejected' ? 'text-red-600' :
                       'text-gray-600'
                     }`}>
-                    {statement.verification_decision.toUpperCase()}
+                    {bankStatement.verification_decision.toUpperCase()}
                   </span>
                 </div>
               )}
-              {statement.verification_notes && (
+              {bankStatement.verification_notes && (
                 <div>
                   <span className="font-medium text-gray-700">Notes:</span>{' '}
-                  <span className="text-gray-900">{statement.verification_notes}</span>
+                  <span className="text-gray-900">{bankStatement.verification_notes}</span>
                 </div>
               )}
             </div>

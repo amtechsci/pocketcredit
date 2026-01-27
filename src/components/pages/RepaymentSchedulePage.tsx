@@ -188,14 +188,22 @@ export const RepaymentSchedulePage = () => {
       }
 
       // Fetch user's completed loans count to determine current stage
+      // Count only 2 EMI loans that are account_manager or cleared and disbursed
       try {
         const loansResponse = await apiService.getPendingLoanApplications();
         if (loansResponse.success && loansResponse.data?.applications) {
-          // Count loans that are cleared (completed)
-          const clearedLoans = loansResponse.data.applications.filter(
-            (app: any) => app.status === 'cleared'
+          // Count 2 EMI loans that are completed (account_manager or cleared) and disbursed
+          const completed2EMILoans = loansResponse.data.applications.filter(
+            (app: any) => {
+              const is2EMI = app.plan_snapshot?.emi_count === 2 || 
+                            (app.plan_snapshot?.plan_type === 'multi_emi' && app.plan_snapshot?.emi_count === 2);
+              const isCompleted = app.status === 'account_manager' || app.status === 'cleared';
+              const isDisbursed = app.disbursed_at != null;
+              return is2EMI && isCompleted && isDisbursed;
+            }
           );
-          setCompletedLoansCount(clearedLoans.length);
+          setCompletedLoansCount(completed2EMILoans.length);
+          console.log(`[Stages] Completed 2 EMI loans count: ${completed2EMILoans.length}`);
         }
       } catch (err) {
         console.error('Error fetching completed loans count:', err);
@@ -459,8 +467,9 @@ export const RepaymentSchedulePage = () => {
   // Calculate limits for each percentage tier
   // NOTE: Stages show percentage-based limits WITHOUT cap (backend caps at 45600, but stages show theoretical limits)
   const calculateLimitForPercentage = (percentage: number) => {
-    // Round down to nearest 1000 (e.g., 11055 -> 11000, 11555 -> 11000)
-    const calculatedLimit = Math.floor((monthlySalary * percentage) / 1000) * 1000;
+    // First calculate percentage: (salary * percentage) / 100
+    // Then round down to nearest 1000 (e.g., 11055 -> 11000, 11555 -> 11000)
+    const calculatedLimit = Math.floor(((monthlySalary * percentage) / 100) / 1000) * 1000;
     // DO NOT apply cap here - stages show theoretical percentage-based limits
     return calculatedLimit;
   };
@@ -471,14 +480,18 @@ export const RepaymentSchedulePage = () => {
   const currentPercentage = percentageMultipliers[currentStageIndex];
   const currentStageLimit = calculateLimitForPercentage(currentPercentage);
   
+  // Debug logging
+  console.log(`[Stages Debug] Salary: ₹${monthlySalary}, Completed Loans: ${completedLoansCount}, Current Loan Number: ${currentLoanNumber}, Current Stage Index: ${currentStageIndex}, Current Percentage: ${currentPercentage}%, Current Stage Limit: ₹${currentStageLimit}`);
+  
   // Calculate next stage (what they'll get after completing current loan)
   // Next stage is the next percentage tier
   const nextStageIndex = Math.min(currentLoanNumber, percentageMultipliers.length - 1);
   const nextPercentage = nextStageIndex < percentageMultipliers.length ? percentageMultipliers[nextStageIndex] : null;
   
   // Calculate next limit for display (stages show percentage-based limits, not capped)
-  // Round down to nearest 1000 for display (e.g., 11055 -> 11000)
-  const nextStageLimitUncapped = nextPercentage ? Math.floor((monthlySalary * nextPercentage) / 1000) * 1000 : null;
+  // First calculate percentage: (salary * percentage) / 100
+  // Then round down to nearest 1000 for display (e.g., 11055 -> 11000)
+  const nextStageLimitUncapped = nextPercentage ? Math.floor(((monthlySalary * nextPercentage) / 100) / 1000) * 1000 : null;
   // For stages, show the uncapped limit (backend will cap at 45600, but stages show theoretical)
   const nextStageLimit = nextStageLimitUncapped;
   
@@ -1975,7 +1988,7 @@ export const RepaymentSchedulePage = () => {
           <CardContent className="p-3 sm:p-5">
             <div className="space-y-3">
               {(() => {
-                // Define stages to show: current, next, and ultimate (premium)
+                // Show only: Current, Next, and Premium stages
                 const stagesToShow: Array<{index: number, percentage: number, limit: number, isPremium: boolean}> = [];
                 
                 // Always show current stage
@@ -1987,13 +2000,21 @@ export const RepaymentSchedulePage = () => {
                 });
                 
                 // Show next stage if it exists and is not premium
-                if (nextPercentage && nextStageLimit && !shouldShowPremium) {
-                  stagesToShow.push({
-                    index: nextStageIndex,
-                    percentage: nextPercentage,
-                    limit: nextStageLimit,
-                    isPremium: false
-                  });
+                // Next stage should show if: it exists, limit is calculated, and it's not the last tier
+                if (nextPercentage !== null && nextStageLimitUncapped !== null && nextStageIndex < percentageMultipliers.length) {
+                  // Only skip next stage if it would exceed 45600 (then go straight to premium)
+                  // But still show it if it's a valid next stage
+                  const wouldExceedMax = nextStageLimitUncapped > 45600;
+                  
+                  // Show next stage unless it exceeds max (then premium is next)
+                  if (!wouldExceedMax) {
+                    stagesToShow.push({
+                      index: nextStageIndex,
+                      percentage: nextPercentage,
+                      limit: nextStageLimitUncapped,
+                      isPremium: false
+                    });
+                  }
                 }
                 
                 // Always show premium/ultimate stage
@@ -2005,10 +2026,11 @@ export const RepaymentSchedulePage = () => {
                 });
                 
                 return stagesToShow.map((stage, idx) => {
-                  const isCurrentStage = idx === 0;
+                  // Determine if this is the current stage
+                  const isCurrentStage = idx === 0; // First stage is always current
                   const isUltimateStage = stage.isPremium;
-                  const isNextStage = idx === 1 && !isUltimateStage;
-                  const stageNumber = stage.index + 1; // Display as 1-based
+                  const isNextStage = idx === 1 && !isUltimateStage; // Second stage (if not premium) is next
+                  const stageNumber = stage.isPremium ? 0 : stage.index + 1; // Display as 1-based (0 for premium)
                 
                 return (
                   <div key={`${stage.index}-${stage.isPremium}`} className="relative">
@@ -2054,7 +2076,7 @@ export const RepaymentSchedulePage = () => {
                                   You are Here
                                 </span>
                               )}
-                              {!isCurrentStage && !isUltimateStage && (
+                              {isNextStage && (
                                 <span className="text-[10px] font-medium text-gray-500">Next</span>
                               )}
                               {isUltimateStage && !isCurrentStage && (
@@ -2073,9 +2095,7 @@ export const RepaymentSchedulePage = () => {
                                 ? `Your Current limit (${stage.percentage}% of salary)` 
                                 : isUltimateStage 
                                 ? 'Your Ultimate limit (Premium)' 
-                                : isNextStage
-                                ? `Your Next limit (${stage.percentage}% of salary)`
-                                : 'Your Ultimate limit'}
+                                : `Stage ${stageNumber} limit (${stage.percentage}% of salary)`}
                             </div>
                           </div>
 

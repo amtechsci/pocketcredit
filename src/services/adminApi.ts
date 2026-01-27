@@ -625,7 +625,10 @@ class AdminApiService {
     return response.json();
   }
 
-  async checkBankStatementStatus(userId: string): Promise<ApiResponse<any>> {
+  async checkBankStatementStatus(userId: string, statementId?: number): Promise<ApiResponse<any>> {
+    if (statementId) {
+      return this.request('POST', `/bank-statement/${userId}/check-status/${statementId}`);
+    }
     return this.request('POST', `/bank-statement/${userId}/check-status`);
   }
 
@@ -641,8 +644,54 @@ class AdminApiService {
     return this.request('POST', `/bank-statement/${userId}/start-upload`, options || {});
   }
 
+  async startBankStatementUploadForStatement(userId: string, statementId: number, options?: { institution_id?: number; start_month?: string; end_month?: string }): Promise<ApiResponse<any>> {
+    return this.request('POST', `/bank-statement/${userId}/start-upload/${statementId}`, options || {});
+  }
+
+  async addNewBankStatement(userId: string, options?: { institution_id?: number; start_month?: string; end_month?: string; bank_name?: string }): Promise<ApiResponse<any>> {
+    return this.request('POST', `/bank-statement/${userId}/add-new`, options || {});
+  }
+
   async completeBankStatementUpload(userId: string): Promise<ApiResponse<any>> {
     return this.request('POST', `/bank-statement/${userId}/complete-upload`);
+  }
+
+  async downloadBankStatementReport(userId: string, statementId: number, format: 'json' | 'xlsx' = 'json'): Promise<Blob> {
+    const token = localStorage.getItem('adminToken');
+    const response = await fetch(`/api/admin/bank-statement/${userId}/download-report/${statementId}?format=${format}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to download report');
+    }
+
+    return response.blob();
+  }
+
+  async uploadFileForStatement(userId: string, statementId: number, file: File): Promise<ApiResponse<any>> {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const token = localStorage.getItem('adminToken');
+    const response = await fetch(`/api/admin/bank-statement/${userId}/upload-file/${statementId}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to upload file');
+    }
+
+    return response.json();
   }
 
   async updateUserContactInfo(userId: string, data: {

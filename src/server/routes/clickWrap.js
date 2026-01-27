@@ -78,27 +78,22 @@ router.post('/initiate', requireAuth, async (req, res) => {
       });
     }
 
-    // If transaction IDs already exist (but not signed yet), return them
-    // This allows re-initiating the SDK if user cancelled or closed the window
+    // Always create a new transaction to avoid expired link issues
+    // Clear old transaction IDs if they exist (they may be expired)
     if (application.clickwrap_ent_transaction_id || application.clickwrap_doc_transaction_id) {
-      console.log('ℹ️ ClickWrap transaction already exists for application:', applicationId);
-      console.log('   Returning existing transaction IDs');
-
-      // Get preview URL if available
-      const [appWithPreview] = await executeQuery(
-        'SELECT clickwrap_preview_url FROM loan_applications WHERE id = ?',
+      console.log('ℹ️ Old ClickWrap transaction exists for application:', applicationId);
+      console.log('   Clearing old transaction IDs to create a fresh one (prevents expired link errors)');
+      
+      // Clear old transaction IDs before creating new one
+      await executeQuery(
+        `UPDATE loan_applications 
+         SET clickwrap_doc_transaction_id = NULL,
+             clickwrap_ent_transaction_id = NULL,
+             clickwrap_preview_url = NULL,
+             updated_at = NOW()
+         WHERE id = ?`,
         [applicationId]
       );
-
-      return res.json({
-        success: true,
-        data: {
-          entTransactionId: application.clickwrap_ent_transaction_id,
-          docTransactionId: application.clickwrap_doc_transaction_id,
-          previewUrl: appWithPreview?.clickwrap_preview_url || null,
-          message: 'Existing ClickWrap transaction found. Use transaction IDs with SDK.'
-        }
-      });
     }
 
     // Get user details
