@@ -564,52 +564,63 @@ async function adjustFirstTimeLoanAmount(userId, monthlySalary) {
 }
 
 /**
- * Check if user should be marked in cooling period after clearing a premium loan (₹1,50,000)
+ * Check if user should be marked in cooling period after reaching premium limit (32.1% = ₹1,50,000)
+ * This triggers when user reaches 32.1% (after 5th 2 EMI loan cleared) OR accepts premium limit
  * @param {number} userId - User ID
- * @param {number} loanId - Loan ID that was just cleared
+ * @param {number} loanId - Loan ID that was just cleared (optional, for logging)
+ * @param {object} creditLimitData - Credit limit calculation data (optional)
  * @returns {Promise<boolean>} - Returns true if user was marked in cooling period
  */
-async function checkAndMarkCoolingPeriod(userId, loanId) {
+async function checkAndMarkCoolingPeriod(userId, loanId = null, creditLimitData = null) {
   try {
-    // Get the cleared loan details
-    const loanQuery = `
-      SELECT id, user_id, loan_amount, status, plan_snapshot
-      FROM loan_applications
-      WHERE id = ? AND user_id = ? AND status = 'cleared'
-    `;
-    const loans = await executeQuery(loanQuery, [loanId, userId]);
-
-    if (!loans || loans.length === 0) {
-      return false;
+    let shouldMarkCoolingPeriod = false;
+    
+    // Method 1: Check if credit limit data shows premium limit (32.1% reached)
+    if (creditLimitData) {
+      // If new limit is ₹1,50,000 (premium) and percentage is 32.1%, mark cooling period
+      if (creditLimitData.newLimit === 150000 && creditLimitData.percentage === 32.1) {
+        shouldMarkCoolingPeriod = true;
+        console.log(`[CreditLimit] User ${userId} reached premium limit (32.1%) - will mark in cooling period`);
+      }
     }
+    
+    // Method 2: Fallback - check if cleared loan is premium (₹1,50,000 with 24 EMIs)
+    if (!shouldMarkCoolingPeriod && loanId) {
+      const loanQuery = `
+        SELECT id, user_id, loan_amount, status, plan_snapshot
+        FROM loan_applications
+        WHERE id = ? AND user_id = ? AND status = 'cleared'
+      `;
+      const loans = await executeQuery(loanQuery, [loanId, userId]);
 
-    const loan = loans[0];
-    const loanAmount = parseFloat(loan.loan_amount) || 0;
+      if (loans && loans.length > 0) {
+        const loan = loans[0];
+        const loanAmount = parseFloat(loan.loan_amount) || 0;
 
-    // Check if this is a premium loan (₹1,50,000) with 24 EMIs
-    let isPremiumLoan = false;
-    if (loanAmount === 150000) {
-      // Check if it's a 2 EMI product with premium tenure (24 EMIs)
-      try {
-        const planSnapshot = typeof loan.plan_snapshot === 'string'
-          ? JSON.parse(loan.plan_snapshot)
-          : loan.plan_snapshot;
+        // Check if this is a premium loan (₹1,50,000) with 24 EMIs
+        if (loanAmount === 150000) {
+          try {
+            const planSnapshot = typeof loan.plan_snapshot === 'string'
+              ? JSON.parse(loan.plan_snapshot)
+              : loan.plan_snapshot;
 
-        const emiCount = planSnapshot?.emi_count || 0;
-        const planType = planSnapshot?.plan_type || '';
+            const emiCount = planSnapshot?.emi_count || 0;
+            const planType = planSnapshot?.plan_type || '';
 
-        // Premium loan: ₹1,50,000 with 24 EMIs
-        if (emiCount === 24 || (planType === 'multi_emi' && emiCount >= 24)) {
-          isPremiumLoan = true;
+            // Premium loan: ₹1,50,000 with 24 EMIs
+            if (emiCount === 24 || (planType === 'multi_emi' && emiCount >= 24)) {
+              shouldMarkCoolingPeriod = true;
+            }
+          } catch (parseError) {
+            // If plan_snapshot parsing fails, check by amount only
+            // ₹1,50,000 loans are premium by default
+            shouldMarkCoolingPeriod = true;
+          }
         }
-      } catch (parseError) {
-        // If plan_snapshot parsing fails, check by amount only
-        // ₹1,50,000 loans are premium by default
-        isPremiumLoan = true;
       }
     }
 
-    if (isPremiumLoan) {
+    if (shouldMarkCoolingPeriod) {
       // Mark user in cooling period
       await executeQuery(
         `UPDATE users 
@@ -621,7 +632,7 @@ async function checkAndMarkCoolingPeriod(userId, loanId) {
         [userId]
       );
 
-      console.log(`[CreditLimit] User ${userId} marked in cooling period after clearing premium loan (₹1,50,000)`);
+      console.log(`[CreditLimit] User ${userId} marked in cooling period after reaching premium limit (32.1% = ₹1,50,000)`);
       return true;
     }
 

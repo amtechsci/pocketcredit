@@ -269,7 +269,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         DATE_FORMAT(created_at, '%Y-%m-%d') as created_at, 
         DATE_FORMAT(updated_at, '%Y-%m-%d') as updated_at, 
         DATE_FORMAT(last_login_at, '%Y-%m-%d') as last_login_at,
-        pan_number, alternate_mobile, company_name, company_email, salary_date,
+        pan_number, alternate_mobile, aadhar_linked_mobile, account_aggregator_mobile, company_name, company_email, salary_date,
         personal_email, official_email, loan_limit, credit_score, experian_score,
         monthly_net_income, work_experience_range, employment_type, income_range,
         application_hold_reason
@@ -963,6 +963,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       dateOfBirth: user.date_of_birth || 'N/A',  // Send raw date (YYYY-MM-DD), frontend will format it
       panNumber: user.pan_number || 'N/A',
       alternateMobile: user.alternate_mobile || 'N/A',
+      aadharLinkedMobile: user.aadhar_linked_mobile || null,
+      accountAggregatorMobile: user.account_aggregator_mobile || null,
       companyName: user.company_name || 'N/A',
       companyEmail: user.company_email || 'N/A',
       salaryDate: user.salary_date || null,
@@ -2466,6 +2468,29 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
     `;
 
+    // Map payment_method to valid enum values
+    // Valid values: 'upi','net_banking','debit_card','credit_card','neft','rtgs','imps','cash','cheque','other'
+    let validPaymentMethod = payment_method || null;
+    if (validPaymentMethod) {
+      const paymentMethodMap = {
+        'bank_transfer': 'neft',
+        'bank_transfer_neft': 'neft',
+        'bank_transfer_rtgs': 'rtgs',
+        'bank_transfer_imps': 'imps',
+        'online': 'net_banking',
+        'card': 'debit_card',
+        'credit': 'credit_card'
+      };
+      validPaymentMethod = paymentMethodMap[validPaymentMethod.toLowerCase()] || validPaymentMethod.toLowerCase();
+      
+      // If still not valid, default to 'other'
+      const validMethods = ['upi', 'net_banking', 'debit_card', 'credit_card', 'neft', 'rtgs', 'imps', 'cash', 'cheque', 'other'];
+      if (!validMethods.includes(validPaymentMethod)) {
+        console.warn(`[UserProfile] Invalid payment_method "${payment_method}", defaulting to 'other'`);
+        validPaymentMethod = 'other';
+      }
+    }
+
     const values = [
       userId,
       loan_application_id || null,
@@ -2473,7 +2498,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
       amount,
       description || null,
       category || null,
-      payment_method || null,
+      validPaymentMethod,
       reference_number || null,
       txDate,
       transaction_time || null,
@@ -3088,15 +3113,6 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             // Don't fail - email failure shouldn't block loan clearance
           }
 
-          // Check if this is a premium loan (₹1,50,000) and mark user in cooling period
-          try {
-            const { checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
-            await checkAndMarkCoolingPeriod(loan.user_id, loanIdInt);
-          } catch (coolingPeriodError) {
-            console.error('❌ Error checking cooling period (non-fatal):', coolingPeriodError);
-            // Don't fail - cooling period check failure shouldn't block loan clearance
-          }
-
           // Recalculate and update credit limit for 2 EMI products after loan is cleared
           try {
             // Check if this is a 2 EMI product
@@ -3108,7 +3124,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             if (is2EMIProduct) {
               console.log(`[UserProfile] Detected 2 EMI product - recalculating credit limit after loan clearance for user ${loan.user_id}`);
               
-              const { calculateCreditLimitFor2EMI, storePendingCreditLimit } = require('../utils/creditLimitCalculator');
+              const { calculateCreditLimitFor2EMI, storePendingCreditLimit, checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
               
               // Calculate new credit limit (now includes the cleared loan)
               const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
@@ -3124,6 +3140,14 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                   : 0;
                 
                 console.log(`[UserProfile] Current user limit: ₹${currentLimit}, New calculated limit: ₹${creditLimitData.newLimit}, Loan count: ${creditLimitData.loanCount}, Percentage: ${creditLimitData.percentage}%`);
+                
+                // Check if user reached premium limit (32.1% = ₹1,50,000) and mark in cooling period
+                try {
+                  await checkAndMarkCoolingPeriod(loan.user_id, loanIdInt, creditLimitData);
+                } catch (coolingPeriodError) {
+                  console.error('❌ Error checking cooling period (non-fatal):', coolingPeriodError);
+                  // Don't fail - cooling period check failure shouldn't block loan clearance
+                }
                 
                 // Only store pending limit if it's higher than current limit
                 if (creditLimitData.newLimit > currentLimit) {

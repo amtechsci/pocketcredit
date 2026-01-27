@@ -2780,6 +2780,18 @@ export function UserProfileDetail() {
                 <span className="text-gray-500">Alternate:</span>
                 <span className="ml-2 text-gray-900">{userData?.alternateMobile || 'N/A'}</span>
               </div>
+              {userData?.aadharLinkedMobile && (
+                <div>
+                  <span className="text-gray-500">Aadhar linked number:</span>
+                  <span className="ml-2 text-gray-900">{userData.aadharLinkedMobile}</span>
+                </div>
+              )}
+              {userData?.accountAggregatorMobile && (
+                <div>
+                  <span className="text-gray-500">Account aggregator linked number:</span>
+                  <span className="ml-2 text-gray-900">{userData.accountAggregatorMobile}</span>
+                </div>
+              )}
               <div>
                 <span className="text-gray-500">Email:</span>
                 <span className="ml-2 text-gray-900 truncate">{getUserData('email') && getUserData('email') !== 'N/A' ? getUserData('email') : (userData?.personalEmail || userData?.officialEmail || 'N/A')}</span>

@@ -431,6 +431,18 @@ router.post('/initiate-bank-statement', requireAuth, async (req, res) => {
       [userId, clientRefNum, result.data.request_id, mobile_number, bank_name || null, result.data.url, expiresAt]
     );
 
+    // Save Account Aggregator linked mobile number to users table (only for accountaggregator method)
+    if (selectedDestination === 'accountaggregator' && mobile_number) {
+      await executeQuery(
+        `UPDATE users 
+         SET account_aggregator_mobile = ?, 
+             updated_at = NOW() 
+         WHERE id = ?`,
+        [mobile_number, userId]
+      );
+      console.log(`✅ Saved Account Aggregator linked mobile number to users table: ${mobile_number}`);
+    }
+
     console.log('✅ Digitap URL generated and stored:', result.data.url);
     console.log('   Request ID:', result.data.request_id);
     console.log('   Expires:', expiryTime);

@@ -346,6 +346,16 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
         timestamp: new Date().toISOString()
       });
 
+      // Save Aadhar linked mobile number to users table
+      await executeQuery(
+        `UPDATE users 
+         SET aadhar_linked_mobile = ?, 
+             updated_at = NOW() 
+         WHERE id = ?`,
+        [mobile_number, userId]
+      );
+      console.log(`✅ Saved Aadhar linked mobile number to users table: ${mobile_number}`);
+
       if (kycCheck.length > 0) {
         // Update existing record
         await executeQuery(
