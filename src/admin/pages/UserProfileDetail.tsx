@@ -528,8 +528,8 @@ export function UserProfileDetail() {
       // For cancel action, include all cancellable statuses
       const loans = getArray('loans');
       const activeStatuses = selectedAction === 'cancel'
-        ? ['submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'repeat_ready_for_disbursement', 'repeat_disbursal', 'qa_verification']
-        : ['submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'repeat_ready_for_disbursement', 'repeat_disbursal', 'qa_verification'];
+        ? ['submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal', 'qa_verification']
+        : ['submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal', 'qa_verification'];
 
       const appliedLoans = loans ? loans.filter((loan: any) =>
         activeStatuses.includes(loan.status)
@@ -897,7 +897,7 @@ export function UserProfileDetail() {
           const lId = l.id || l.loanId;
           return lId && (lId.toString() === loanId.toString() || parseInt(lId.toString()) === loanId);
         });
-        const isRepeatDisbursal = loan?.status === 'repeat_disbursal' || loan?.status === 'repeat_ready_for_disbursement';
+        const isRepeatDisbursal = loan?.status === 'repeat_disbursal' || loan?.status === 'ready_to_repeat_disbursal';
         const isFinalStatus = (loan?.status === 'account_manager' || loan?.status === 'cleared') && !isRepeatDisbursal;
         const isAlreadyDisbursed = (loan?.disbursed_at && isFinalStatus) || isFinalStatus;
         const loanAmount = loan?.loan_amount || loan?.amount || loan?.principalAmount || 0;
@@ -9473,7 +9473,7 @@ export function UserProfileDetail() {
                         if (loan) {
                           // Check if loan is in a status that requires recalculation
                           // For repeat_disbursal loans, ALWAYS recalculate (don't use stored disbursal_amount from previous disbursal)
-                          const isRepeatDisbursal = loan.status === 'repeat_disbursal' || loan.status === 'repeat_ready_for_disbursement';
+                          const isRepeatDisbursal = loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal';
                           // Check if loan is already in final status (account_manager/cleared) and not a repeat disbursal
                           const isFinalStatus = (loan.status === 'account_manager' || loan.status === 'cleared') && !isRepeatDisbursal;
                           const isAlreadyDisbursed = (loan.disbursed_at && isFinalStatus) || isFinalStatus;

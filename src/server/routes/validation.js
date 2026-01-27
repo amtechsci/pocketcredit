@@ -191,7 +191,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
     // Ensure loan_applications status enum includes qa_verification
     try {
       await executeQuery(
-        `ALTER TABLE loan_applications MODIFY COLUMN status ENUM('draft', 'submitted', 'under_review', 'follow_up', 'approved', 'rejected', 'disbursal', 'ready_for_disbursement', 'repeat_ready_for_disbursement', 'repeat_disbursal', 'account_manager', 'cleared', 'cancelled', 'defaulted', 'qa_verification') DEFAULT 'draft'`
+        `ALTER TABLE loan_applications MODIFY COLUMN status ENUM('draft', 'submitted', 'under_review', 'follow_up', 'approved', 'rejected', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal', 'account_manager', 'cleared', 'cancelled', 'defaulted', 'qa_verification') DEFAULT 'draft'`
       );
       console.log('✅ Updated loan_applications.status enum to include qa_verification');
     } catch (enumError) {
@@ -255,7 +255,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
         const activeLoans = await executeQuery(
           `SELECT id, status FROM loan_applications 
            WHERE user_id = ? 
-           AND status IN ('submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'repeat_ready_for_disbursement', 'repeat_disbursal', 'qa_verification')
+           AND status IN ('submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal', 'qa_verification')
            ORDER BY created_at DESC
            LIMIT 1`,
           [userId]

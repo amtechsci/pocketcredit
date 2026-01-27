@@ -1001,7 +1001,7 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
         // Update stored values in database for account_manager AND repeat_disbursal loans to fix incorrect stored values
         // This ensures existing loans with wrong stored values get corrected automatically
         // CRITICAL: Update ALL stored calculation values (emi_schedule, fees_breakdown, disbursal_amount) based on current loan_amount
-        const isRepeatDisbursal = loan.status === 'repeat_disbursal' || loan.status === 'repeat_ready_for_disbursement';
+        const isRepeatDisbursal = loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal';
         if (isAccountManager || isRepeatDisbursal) {
           try {
             // Recalculate fees_breakdown with correct values based on current loan_amount
