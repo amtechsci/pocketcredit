@@ -430,6 +430,24 @@ class AdminApiService {
     return this.request('POST', `/user-profile/${userId}/notes`, noteData);
   }
 
+  // Profile Comments Management (QA and TVR comments)
+  async getProfileComments(userId: string, commentType?: 'qa_comments' | 'tvr_comments'): Promise<ApiResponse<any>> {
+    const params = commentType ? { commentType } : {};
+    return this.request('GET', `/user-profile/${userId}/profile-comments`, undefined, params);
+  }
+
+  async addProfileComment(userId: string, commentData: { commentType: 'qa_comments' | 'tvr_comments', commentText: string }): Promise<ApiResponse<any>> {
+    return this.request('POST', `/user-profile/${userId}/profile-comments`, commentData);
+  }
+
+  async updateProfileComment(userId: string, commentId: string, commentData: { commentText: string }): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/user-profile/${userId}/profile-comments/${commentId}`, commentData);
+  }
+
+  async deleteProfileComment(userId: string, commentId: string): Promise<ApiResponse<any>> {
+    return this.request('DELETE', `/user-profile/${userId}/profile-comments/${commentId}`);
+  }
+
   // SMS Management
   async getUserSmsHistory(userId: string): Promise<ApiResponse<any>> {
     return this.request('GET', `/user-profile/${userId}/sms-history`);

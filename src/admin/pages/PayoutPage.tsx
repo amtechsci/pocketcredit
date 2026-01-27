@@ -12,7 +12,8 @@ import {
   AlertCircle,
   RefreshCw,
   Eye,
-  ArrowRight
+  ArrowRight,
+  MessageSquare
 } from 'lucide-react';
 
 interface ReadyForDisbursementLoan {
@@ -40,6 +41,16 @@ interface ReadyForDisbursementLoan {
   } | null;
 }
 
+interface ProfileComment {
+  id: number;
+  comment_type: 'qa_comments' | 'tvr_comments';
+  comment_text: string;
+  created_by: string;
+  created_at: string;
+  created_by_name?: string;
+  created_by_email?: string;
+}
+
 export function PayoutPage() {
   const navigate = useNavigate();
   const [loans, setLoans] = useState<ReadyForDisbursementLoan[]>([]);
@@ -47,10 +58,38 @@ export function PayoutPage() {
   const [disbursingId, setDisbursingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [userComments, setUserComments] = useState<{ [userId: string]: ProfileComment[] }>({});
+  const [loadingComments, setLoadingComments] = useState<{ [userId: string]: boolean }>({});
+  const [expandedComments, setExpandedComments] = useState<{ [userId: string]: boolean }>({});
 
   useEffect(() => {
     fetchReadyForDisbursementLoans();
   }, []);
+
+  // Fetch comments for all users
+  useEffect(() => {
+    const fetchAllComments = async () => {
+      for (const loan of loans) {
+        const userId = loan.user.id;
+        if (!userComments[userId] && !loadingComments[userId]) {
+          setLoadingComments(prev => ({ ...prev, [userId]: true }));
+          try {
+            const response = await adminApiService.getProfileComments(userId);
+            if (response.status === 'success' && response.data) {
+              setUserComments(prev => ({ ...prev, [userId]: response.data }));
+            }
+          } catch (error) {
+            console.error(`Error fetching comments for user ${userId}:`, error);
+          } finally {
+            setLoadingComments(prev => ({ ...prev, [userId]: false }));
+          }
+        }
+      }
+    };
+    if (loans.length > 0) {
+      fetchAllComments();
+    }
+  }, [loans]);
 
   const fetchReadyForDisbursementLoans = async () => {
     try {
@@ -267,6 +306,45 @@ export function PayoutPage() {
                           <Eye className="w-3 h-3" />
                           View Profile
                         </button>
+                        {/* Profile Comments */}
+                        <div className="mt-2 pt-2 border-t border-gray-200">
+                          {loadingComments[loan.user.id] ? (
+                            <span className="text-xs text-gray-400">Loading comments...</span>
+                          ) : userComments[loan.user.id] && userComments[loan.user.id].length > 0 ? (
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 text-xs">
+                                <MessageSquare className="w-3 h-3 text-indigo-600" />
+                                <span className="text-gray-700">
+                                  QA: {userComments[loan.user.id].filter(c => c.comment_type === 'qa_comments').length} | 
+                                  TVR: {userComments[loan.user.id].filter(c => c.comment_type === 'tvr_comments').length}
+                                </span>
+                              </div>
+                              {expandedComments[loan.user.id] && (
+                                <div className="mt-2 p-2 bg-gray-50 rounded border border-gray-200 text-xs space-y-2">
+                                  {userComments[loan.user.id].map((comment) => (
+                                    <div key={comment.id} className="border-b border-gray-200 pb-2 last:border-0">
+                                      <div className="font-semibold text-gray-700 mb-1">
+                                        {comment.comment_type === 'qa_comments' ? 'QA' : 'TVR'} Comment
+                                      </div>
+                                      <div className="text-gray-600 mb-1">{comment.comment_text}</div>
+                                      <div className="text-gray-400 text-xs">
+                                        {comment.created_by_name || comment.created_by_email || 'Unknown'} • {formatDate(comment.created_at)}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <button
+                                onClick={() => setExpandedComments(prev => ({ ...prev, [loan.user.id]: !prev[loan.user.id] }))}
+                                className="text-xs text-indigo-600 hover:text-indigo-800"
+                              >
+                                {expandedComments[loan.user.id] ? 'Hide' : 'Show'} Comments
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400">No comments</span>
+                          )}
+                        </div>
                       </div>
                     </div>
 

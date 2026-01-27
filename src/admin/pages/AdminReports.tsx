@@ -65,13 +65,20 @@ export function AdminReports() {
     }
   };
 
-  const handleDownloadReport = async (reportType: 'disbursal' | 'cleared' | 'settled' | 'default') => {
+  const handleDownloadReport = async (reportType: 'disbursal' | 'cleared' | 'settled' | 'default' | 'bs_repayment' | 'bs_disbursal') => {
     setDownloadingReport(reportType);
     setError(null);
 
     try {
       const token = localStorage.getItem('adminToken');
-      let url = `${getApiBaseUrl()}/api/admin/reports/cibil/${reportType}`;
+      let url = '';
+      
+      // Determine the correct endpoint based on report type
+      if (reportType === 'bs_repayment' || reportType === 'bs_disbursal') {
+        url = `${getApiBaseUrl()}/api/admin/reports/bs/${reportType.replace('bs_', '')}`;
+      } else {
+        url = `${getApiBaseUrl()}/api/admin/reports/cibil/${reportType}`;
+      }
 
       // Add date parameters if provided
       const params = new URLSearchParams();
@@ -103,7 +110,9 @@ export function AdminReports() {
 
       const dateStr = new Date().toISOString().split('T')[0];
       link.href = blobUrl;
-      link.download = `cibil_${reportType}_${dateStr}.csv`;
+      link.download = reportType.startsWith('bs_') 
+        ? `${reportType}_${dateStr}.csv` 
+        : `cibil_${reportType}_${dateStr}.csv`;
       link.style.visibility = 'hidden';
       document.body.appendChild(link);
       link.click();
@@ -177,6 +186,30 @@ export function AdminReports() {
       iconColor: 'text-red-600',
       buttonColor: 'bg-red-600 hover:bg-red-700',
       count: stats?.default_loans || 0
+    },
+    {
+      id: 'bs_disbursal',
+      title: 'BS Disbursal Report',
+      description: 'Loan disbursal data from transaction details',
+      icon: FileSpreadsheet,
+      color: 'orange',
+      bgColor: 'bg-orange-50',
+      borderColor: 'border-orange-200',
+      iconColor: 'text-orange-600',
+      buttonColor: 'bg-orange-600 hover:bg-orange-700',
+      count: 0
+    },
+    {
+      id: 'bs_repayment',
+      title: 'BS Repayment Report',
+      description: 'Loan repayment data from transaction details',
+      icon: FileSpreadsheet,
+      color: 'indigo',
+      bgColor: 'bg-indigo-50',
+      borderColor: 'border-indigo-200',
+      iconColor: 'text-indigo-600',
+      buttonColor: 'bg-indigo-600 hover:bg-indigo-700',
+      count: 0
     }
   ];
 
@@ -186,9 +219,9 @@ export function AdminReports() {
       <div className="bg-white border-b border-gray-200 px-6 py-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">CIBIL Reports</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
             <p className="text-sm text-gray-600 mt-1">
-              Download CIBIL-compliant CSV reports for credit bureau submissions
+              Download CIBIL-compliant and BS (Business Statement) CSV reports
             </p>
           </div>
           <button

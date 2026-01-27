@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -141,6 +141,13 @@ export function UserProfileDetail() {
   const [showSendSmsModal, setShowSendSmsModal] = useState(false);
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
   const [showAddTemplateModal, setShowAddTemplateModal] = useState(false);
+  
+  // Profile Comments State
+  const [profileComments, setProfileComments] = useState<{ qa_comments: any[], tvr_comments: any[] }>({ qa_comments: [], tvr_comments: [] });
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [showAddCommentModal, setShowAddCommentModal] = useState(false);
+  const [editingComment, setEditingComment] = useState<{ id: number, type: 'qa_comments' | 'tvr_comments', text: string } | null>(null);
+  const [commentForm, setCommentForm] = useState({ type: 'qa_comments' as 'qa_comments' | 'tvr_comments', text: '' });
 
   // Account Manager State
   const [showAccountManagerForm, setShowAccountManagerForm] = useState(false);
@@ -787,6 +794,28 @@ export function UserProfileDetail() {
     }
   };
 
+  // Fetch profile comments
+  const fetchProfileComments = useCallback(async () => {
+    if (!params.userId) return;
+    
+    try {
+      setLoadingComments(true);
+      const response = await adminApiService.getProfileComments(params.userId);
+      
+      if (response.status === 'success' && response.data) {
+        const comments = response.data;
+        const qaComments = comments.filter((c: any) => c.comment_type === 'qa_comments');
+        const tvrComments = comments.filter((c: any) => c.comment_type === 'tvr_comments');
+        setProfileComments({ qa_comments: qaComments, tvr_comments: tvrComments });
+      }
+    } catch (error: any) {
+      console.error('Error fetching profile comments:', error);
+      toast.error('Failed to fetch profile comments');
+    } finally {
+      setLoadingComments(false);
+    }
+  }, [params.userId]);
+
   // Fetch validation data when user data is loaded
   useEffect(() => {
     if (userData?.id) {
@@ -845,6 +874,13 @@ export function UserProfileDetail() {
       fetchUserTransactions();
     }
   }, [activeTab, userData?.id]);
+
+  // Load profile comments when tab is active
+  useEffect(() => {
+    if (activeTab === 'profile-comments' && params.userId) {
+      fetchProfileComments();
+    }
+  }, [activeTab, params.userId, fetchProfileComments]);
 
   const fetchUserTransactions = async () => {
     try {
@@ -2192,6 +2228,7 @@ export function UserProfileDetail() {
     { id: 'credit-analytics', label: 'Credit Analytics', icon: TrendingUp },
     { id: 'follow-up', label: 'Follow Up', icon: MessageSquare },
     { id: 'notes', label: 'Note', icon: FileText },
+    { id: 'profile-comments', label: 'Profile Comments', icon: MessageSquare },
     { id: 'sms', label: 'SMS', icon: MessageSquare },
     { id: 'account-manager', label: 'Account Manager', icon: Briefcase },
     { id: 'login-data', label: 'Login Data', icon: Clock },
@@ -7869,6 +7906,230 @@ export function UserProfileDetail() {
     }
   };
 
+  // Handle add comment
+  const handleAddComment = async () => {
+    if (!params.userId || !commentForm.text.trim()) {
+      toast.error('Please enter a comment');
+      return;
+    }
+
+    try {
+      const response = await adminApiService.addProfileComment(params.userId, {
+        commentType: commentForm.type,
+        commentText: commentForm.text.trim()
+      });
+
+      if (response.status === 'success') {
+        toast.success('Comment added successfully');
+        setShowAddCommentModal(false);
+        setCommentForm({ type: 'qa_comments', text: '' });
+        fetchProfileComments();
+      } else {
+        toast.error(response.message || 'Failed to add comment');
+      }
+    } catch (error: any) {
+      console.error('Error adding comment:', error);
+      toast.error('Failed to add comment');
+    }
+  };
+
+  // Handle update comment
+  const handleUpdateComment = async () => {
+    if (!params.userId || !editingComment || !editingComment.text.trim()) {
+      toast.error('Please enter a comment');
+      return;
+    }
+
+    try {
+      const response = await adminApiService.updateProfileComment(
+        params.userId,
+        editingComment.id.toString(),
+        { commentText: editingComment.text.trim() }
+      );
+
+      if (response.status === 'success') {
+        toast.success('Comment updated successfully');
+        setEditingComment(null);
+        fetchProfileComments();
+      } else {
+        toast.error(response.message || 'Failed to update comment');
+      }
+    } catch (error: any) {
+      console.error('Error updating comment:', error);
+      toast.error('Failed to update comment');
+    }
+  };
+
+  // Handle delete comment
+  const handleDeleteComment = async (commentId: number) => {
+    if (!params.userId || !confirm('Are you sure you want to delete this comment?')) {
+      return;
+    }
+
+    try {
+      const response = await adminApiService.deleteProfileComment(
+        params.userId,
+        commentId.toString()
+      );
+
+      if (response.status === 'success') {
+        toast.success('Comment deleted successfully');
+        fetchProfileComments();
+      } else {
+        toast.error(response.message || 'Failed to delete comment');
+      }
+    } catch (error: any) {
+      console.error('Error deleting comment:', error);
+      toast.error('Failed to delete comment');
+    }
+  };
+
+  // Profile Comments Tab
+  const renderProfileCommentsTab = () => (
+    <div className="space-y-6">
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-lg font-semibold text-gray-900">Profile Comments</h3>
+          <button
+            onClick={() => {
+              setCommentForm({ type: 'qa_comments', text: '' });
+              setShowAddCommentModal(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add Comment
+          </button>
+        </div>
+
+        {loadingComments ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+            <span className="ml-2 text-gray-600">Loading comments...</span>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {/* QA Comments Folder */}
+            <div className="border border-gray-200 rounded-lg">
+              <div className="bg-cyan-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                <h4 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-cyan-600" />
+                  QA Comments
+                </h4>
+                <span className="px-2 py-1 bg-cyan-100 text-cyan-800 text-xs font-medium rounded">
+                  {profileComments.qa_comments.length} {profileComments.qa_comments.length === 1 ? 'comment' : 'comments'}
+                </span>
+              </div>
+              <div className="p-4 space-y-4">
+                {profileComments.qa_comments.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <MessageSquare className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                    <p>No QA comments yet</p>
+                  </div>
+                ) : (
+                  profileComments.qa_comments.map((comment: any) => (
+                    <div key={comment.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1">
+                          <p className="text-sm text-gray-900 whitespace-pre-wrap">{comment.comment_text}</p>
+                          <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                            <span>By: {comment.created_by_name || comment.created_by_email || 'Unknown'}</span>
+                            <span>•</span>
+                            <span>{new Date(comment.created_at).toLocaleString('en-IN', { 
+                              day: 'numeric', 
+                              month: 'short', 
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 ml-4">
+                          <button
+                            onClick={() => setEditingComment({ id: comment.id, type: 'qa_comments', text: comment.comment_text })}
+                            className="text-blue-600 hover:text-blue-800"
+                            title="Edit comment"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteComment(comment.id)}
+                            className="text-red-600 hover:text-red-800"
+                            title="Delete comment"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* TVR Comments Folder */}
+            <div className="border border-gray-200 rounded-lg">
+              <div className="bg-purple-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                <h4 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-purple-600" />
+                  TVR Comments
+                </h4>
+                <span className="px-2 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded">
+                  {profileComments.tvr_comments.length} {profileComments.tvr_comments.length === 1 ? 'comment' : 'comments'}
+                </span>
+              </div>
+              <div className="p-4 space-y-4">
+                {profileComments.tvr_comments.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <MessageSquare className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                    <p>No TVR comments yet</p>
+                  </div>
+                ) : (
+                  profileComments.tvr_comments.map((comment: any) => (
+                    <div key={comment.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1">
+                          <p className="text-sm text-gray-900 whitespace-pre-wrap">{comment.comment_text}</p>
+                          <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                            <span>By: {comment.created_by_name || comment.created_by_email || 'Unknown'}</span>
+                            <span>•</span>
+                            <span>{new Date(comment.created_at).toLocaleString('en-IN', { 
+                              day: 'numeric', 
+                              month: 'short', 
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 ml-4">
+                          <button
+                            onClick={() => setEditingComment({ id: comment.id, type: 'tvr_comments', text: comment.comment_text })}
+                            className="text-blue-600 hover:text-blue-800"
+                            title="Edit comment"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteComment(comment.id)}
+                            className="text-red-600 hover:text-red-800"
+                            title="Delete comment"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   // Notes Tab
   const renderNotesTab = () => (
     <div className="space-y-6">
@@ -9911,6 +10172,82 @@ export function UserProfileDetail() {
         )
       }
 
+      {/* Add/Edit Profile Comment Modal */}
+      {(showAddCommentModal || editingComment) && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 border border-gray-200 ring-1 ring-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-lg font-semibold text-gray-900">
+                {editingComment ? 'Edit Comment' : 'Add Comment'}
+              </h4>
+              <button
+                onClick={() => {
+                  setShowAddCommentModal(false);
+                  setEditingComment(null);
+                  setCommentForm({ type: 'qa_comments', text: '' });
+                }}
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Comment Type</label>
+                <select
+                  value={editingComment ? editingComment.type : commentForm.type}
+                  onChange={(e) => {
+                    if (editingComment) {
+                      setEditingComment({ ...editingComment, type: e.target.value as 'qa_comments' | 'tvr_comments' });
+                    } else {
+                      setCommentForm({ ...commentForm, type: e.target.value as 'qa_comments' | 'tvr_comments' });
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="qa_comments">QA Comments</option>
+                  <option value="tvr_comments">TVR Comments</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Comment</label>
+                <textarea
+                  value={editingComment ? editingComment.text : commentForm.text}
+                  onChange={(e) => {
+                    if (editingComment) {
+                      setEditingComment({ ...editingComment, text: e.target.value });
+                    } else {
+                      setCommentForm({ ...commentForm, text: e.target.value });
+                    }
+                  }}
+                  rows={6}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter your comment here..."
+                />
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={editingComment ? handleUpdateComment : handleAddComment}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  {editingComment ? 'Update Comment' : 'Add Comment'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowAddCommentModal(false);
+                    setEditingComment(null);
+                    setCommentForm({ type: 'qa_comments', text: '' });
+                  }}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Send SMS Modal */}
       {
         showSendSmsModal && (
@@ -10895,6 +11232,7 @@ export function UserProfileDetail() {
         {activeTab === 'credit-analytics' && renderCreditAnalyticsTab()}
         {activeTab === 'follow-up' && renderFollowUpTab()}
         {activeTab === 'notes' && renderNotesTab()}
+        {activeTab === 'profile-comments' && renderProfileCommentsTab()}
         {activeTab === 'sms' && renderSmsTab()}
         {activeTab === 'account-manager' && renderAccountManagerTab()}
       </div>

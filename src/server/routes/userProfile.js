@@ -3487,6 +3487,230 @@ router.post('/:userId/notes', authenticateAdmin, async (req, res) => {
   }
 });
 
+// Get profile comments (QA and TVR comments)
+router.get('/:userId/profile-comments', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+    const { commentType } = req.query; // Optional filter: 'qa_comments' or 'tvr_comments'
+
+    let query = `
+      SELECT 
+        upc.id,
+        upc.user_id,
+        upc.comment_type,
+        upc.comment_text,
+        upc.created_by,
+        upc.created_at,
+        upc.updated_at,
+        a.name as created_by_name,
+        a.email as created_by_email
+      FROM user_profile_comments upc
+      LEFT JOIN admins a ON upc.created_by = a.id
+      WHERE upc.user_id = ?
+    `;
+    const params = [userId];
+
+    if (commentType && (commentType === 'qa_comments' || commentType === 'tvr_comments')) {
+      query += ' AND upc.comment_type = ?';
+      params.push(commentType);
+    }
+
+    query += ' ORDER BY upc.created_at DESC';
+
+    const comments = await executeQuery(query, params);
+
+    res.json({
+      status: 'success',
+      data: comments
+    });
+  } catch (error) {
+    console.error('Get profile comments error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch profile comments'
+    });
+  }
+});
+
+// Add profile comment (QA or TVR)
+router.post('/:userId/profile-comments', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+    const { commentType, commentText } = req.body;
+    const adminId = req.admin.id; // From authenticateAdmin middleware
+
+    // Validate comment type
+    if (!commentType || (commentType !== 'qa_comments' && commentType !== 'tvr_comments')) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid comment type. Must be "qa_comments" or "tvr_comments"'
+      });
+    }
+
+    // Validate comment text
+    if (!commentText || commentText.trim().length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Comment text is required'
+      });
+    }
+
+    // Verify user exists
+    const [user] = await executeQuery('SELECT id FROM users WHERE id = ?', [userId]);
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+
+    // Insert comment
+    const result = await executeQuery(
+      `INSERT INTO user_profile_comments (user_id, comment_type, comment_text, created_by)
+       VALUES (?, ?, ?, ?)`,
+      [userId, commentType, commentText.trim(), adminId]
+    );
+
+    // Fetch the created comment with admin details
+    const [newComment] = await executeQuery(
+      `SELECT 
+        upc.id,
+        upc.user_id,
+        upc.comment_type,
+        upc.comment_text,
+        upc.created_by,
+        upc.created_at,
+        upc.updated_at,
+        a.name as created_by_name,
+        a.email as created_by_email
+      FROM user_profile_comments upc
+      LEFT JOIN admins a ON upc.created_by = a.id
+      WHERE upc.id = ?`,
+      [result.insertId]
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Comment added successfully',
+      data: newComment
+    });
+  } catch (error) {
+    console.error('Add profile comment error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to add comment'
+    });
+  }
+});
+
+// Update profile comment
+router.put('/:userId/profile-comments/:commentId', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId, commentId } = req.params;
+    const { commentText } = req.body;
+
+    // Validate comment text
+    if (!commentText || commentText.trim().length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Comment text is required'
+      });
+    }
+
+    // Verify comment exists and belongs to user
+    const [comment] = await executeQuery(
+      'SELECT id FROM user_profile_comments WHERE id = ? AND user_id = ?',
+      [commentId, userId]
+    );
+
+    if (!comment) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Comment not found'
+      });
+    }
+
+    // Update comment
+    await executeQuery(
+      `UPDATE user_profile_comments 
+       SET comment_text = ?, updated_at = NOW()
+       WHERE id = ? AND user_id = ?`,
+      [commentText.trim(), commentId, userId]
+    );
+
+    // Fetch updated comment
+    const [updatedComment] = await executeQuery(
+      `SELECT 
+        upc.id,
+        upc.user_id,
+        upc.comment_type,
+        upc.comment_text,
+        upc.created_by,
+        upc.created_at,
+        upc.updated_at,
+        a.name as created_by_name,
+        a.email as created_by_email
+      FROM user_profile_comments upc
+      LEFT JOIN admins a ON upc.created_by = a.id
+      WHERE upc.id = ?`,
+      [commentId]
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Comment updated successfully',
+      data: updatedComment
+    });
+  } catch (error) {
+    console.error('Update profile comment error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update comment'
+    });
+  }
+});
+
+// Delete profile comment
+router.delete('/:userId/profile-comments/:commentId', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId, commentId } = req.params;
+
+    // Verify comment exists and belongs to user
+    const [comment] = await executeQuery(
+      'SELECT id FROM user_profile_comments WHERE id = ? AND user_id = ?',
+      [commentId, userId]
+    );
+
+    if (!comment) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Comment not found'
+      });
+    }
+
+    // Delete comment
+    await executeQuery(
+      'DELETE FROM user_profile_comments WHERE id = ? AND user_id = ?',
+      [commentId, userId]
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Comment deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete profile comment error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to delete comment'
+    });
+  }
+});
+
 // Send SMS
 router.post('/:userId/sms', authenticateAdmin, async (req, res) => {
   try {

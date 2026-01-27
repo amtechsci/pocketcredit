@@ -9,7 +9,8 @@ import {
     Mail,
     Calendar,
     ArrowLeft,
-    FileCheck
+    FileCheck,
+    MessageSquare
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -29,6 +30,16 @@ interface QAVerificationUser {
     loan_limit: number;
 }
 
+interface ProfileComment {
+    id: number;
+    comment_type: 'qa_comments' | 'tvr_comments';
+    comment_text: string;
+    created_by: string;
+    created_at: string;
+    created_by_name?: string;
+    created_by_email?: string;
+}
+
 export function QAVerificationPage() {
     const navigate = useNavigate();
     const [users, setUsers] = useState<QAVerificationUser[]>([]);
@@ -37,6 +48,9 @@ export function QAVerificationPage() {
     const [currentPage, setCurrentPage] = useState(1);
     const pageSize = 20;
     const [totalUsers, setTotalUsers] = useState(0);
+    const [userComments, setUserComments] = useState<{ [userId: number]: ProfileComment[] }>({});
+    const [loadingComments, setLoadingComments] = useState<{ [userId: number]: boolean }>({});
+    const [expandedComments, setExpandedComments] = useState<{ [userId: number]: boolean }>({});
 
     // Fetch users in QA Verification status
     const fetchUsers = useCallback(async () => {
@@ -65,6 +79,30 @@ export function QAVerificationPage() {
     useEffect(() => {
         fetchUsers();
     }, [fetchUsers]);
+
+    // Fetch comments for all users
+    useEffect(() => {
+        const fetchAllComments = async () => {
+            for (const user of users) {
+                if (!userComments[user.id] && !loadingComments[user.id]) {
+                    setLoadingComments(prev => ({ ...prev, [user.id]: true }));
+                    try {
+                        const response = await adminApiService.getProfileComments(user.id.toString());
+                        if (response.status === 'success' && response.data) {
+                            setUserComments(prev => ({ ...prev, [user.id]: response.data }));
+                        }
+                    } catch (error) {
+                        console.error(`Error fetching comments for user ${user.id}:`, error);
+                    } finally {
+                        setLoadingComments(prev => ({ ...prev, [user.id]: false }));
+                    }
+                }
+            }
+        };
+        if (users.length > 0) {
+            fetchAllComments();
+        }
+    }, [users]);
 
     const handleSearch = (value: string) => {
         setSearchTerm(value);
@@ -169,6 +207,9 @@ export function QAVerificationPage() {
                                             Updated
                                         </th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Comments
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Action
                                         </th>
                                     </tr>
@@ -229,6 +270,50 @@ export function QAVerificationPage() {
                                                         <Calendar className="w-4 h-4 text-gray-400" />
                                                         {formatDate(user.updated_at)}
                                                     </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="text-sm">
+                                                    {loadingComments[user.id] ? (
+                                                        <span className="text-gray-400">Loading...</span>
+                                                    ) : (
+                                                        <div className="space-y-1">
+                                                            {userComments[user.id] && userComments[user.id].length > 0 ? (
+                                                                <>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <MessageSquare className="w-4 h-4 text-cyan-600" />
+                                                                        <span className="text-gray-700">
+                                                                            QA: {userComments[user.id].filter(c => c.comment_type === 'qa_comments').length} | 
+                                                                            TVR: {userComments[user.id].filter(c => c.comment_type === 'tvr_comments').length}
+                                                                        </span>
+                                                                    </div>
+                                                                    {expandedComments[user.id] && (
+                                                                        <div className="mt-2 p-2 bg-gray-50 rounded border border-gray-200 text-xs space-y-2 max-w-xs">
+                                                                            {userComments[user.id].map((comment) => (
+                                                                                <div key={comment.id} className="border-b border-gray-200 pb-2 last:border-0">
+                                                                                    <div className="font-semibold text-gray-700 mb-1">
+                                                                                        {comment.comment_type === 'qa_comments' ? 'QA' : 'TVR'} Comment
+                                                                                    </div>
+                                                                                    <div className="text-gray-600 mb-1">{comment.comment_text}</div>
+                                                                                    <div className="text-gray-400 text-xs">
+                                                                                        {comment.created_by_name || comment.created_by_email || 'Unknown'} • {formatDate(comment.created_at)}
+                                                                                    </div>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                    <button
+                                                                        onClick={() => setExpandedComments(prev => ({ ...prev, [user.id]: !prev[user.id] }))}
+                                                                        className="text-xs text-cyan-600 hover:text-cyan-800"
+                                                                    >
+                                                                        {expandedComments[user.id] ? 'Hide' : 'Show'} Comments
+                                                                    </button>
+                                                                </>
+                                                            ) : (
+                                                                <span className="text-gray-400">No comments</span>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">

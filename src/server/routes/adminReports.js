@@ -506,6 +506,339 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
 });
 
 /**
+ * GET /api/admin/reports/bs/repayment
+ * Generate BS Repayment Report CSV - based on transaction_details
+ */
+router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
+    try {
+        await initializeDatabase();
+        const { from_date, to_date } = req.query;
+
+        const GST_RATE = 0.18;
+        const GST_FACTOR = 1.18;
+        const DAILY_INTEREST_RATE = 0.001; // 0.1% as a decimal
+
+        // Check if transaction_details table exists, otherwise use loan_payments
+        let sql = `
+            SELECT 
+                u.rcid, u.pan_name, u.state_code,
+                l.lid, l.processed_amount, l.p_fee, l.service_charge, l.penality_charge,
+                la.amount AS principal_amount, la.processing_fees, la.pro_fee_per, la.interest_percentage,
+                td.transaction_number, td.transaction_date, td.transaction_flow, td.transaction_amount,
+                l.processed_date AS loan_start_date
+            FROM transaction_details td
+            INNER JOIN loan_apply la ON la.id = td.cllid
+            INNER JOIN user u ON u.id = la.uid
+            INNER JOIN loan l ON l.lid = td.cllid
+            WHERE td.transaction_flow IN ('settlement', 'part', 'renew', 'full', 'preclose')
+        `;
+
+        const params = [];
+        if (from_date && to_date) {
+            sql += ` AND DATE(td.transaction_date) BETWEEN ? AND ?`;
+            params.push(from_date, to_date);
+        }
+
+        sql += ` ORDER BY td.transaction_date DESC`;
+
+        let rows;
+        try {
+            rows = await executeQuery(sql, params);
+        } catch (error) {
+            // If transaction_details doesn't exist, try alternative query using loan_payments
+            console.warn('transaction_details table not found, trying alternative query:', error.message);
+            sql = `
+                SELECT 
+                    CONCAT('PC', LPAD(u.id, 5, '0')) as rcid, 
+                    CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as pan_name,
+                    (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state_code,
+                    la.id as lid, la.disbursal_amount as processed_amount, 
+                    la.processing_fee as p_fee, la.total_interest as service_charge, 
+                    la.processed_penalty as penality_charge,
+                    la.loan_amount AS principal_amount, la.processing_fee as processing_fees, 
+                    la.processing_fee_percent as pro_fee_per, 
+                    COALESCE(la.interest_percent_per_day * 100, 0) as interest_percentage,
+                    lp.transaction_id as transaction_number, lp.payment_date as transaction_date, 
+                    lp.payment_type as transaction_flow, lp.amount as transaction_amount,
+                    la.processed_at AS loan_start_date
+                FROM loan_payments lp
+                INNER JOIN loan_applications la ON la.id = lp.loan_id
+                INNER JOIN users u ON u.id = la.user_id
+                WHERE lp.payment_type IN ('settlement', 'part', 'renew', 'full', 'preclose', 'pre-close')
+            `;
+
+            const params2 = [];
+            if (from_date && to_date) {
+                sql += ` AND DATE(lp.payment_date) BETWEEN ? AND ?`;
+                params2.push(from_date, to_date);
+            }
+            sql += ` ORDER BY lp.payment_date DESC`;
+            rows = await executeQuery(sql, params2);
+        }
+
+        // Get state mapping
+        const stateResult = await executeQuery("SELECT id, state_name FROM state_code");
+        const stateMap = {};
+        stateResult.forEach(state => {
+            stateMap[state.id] = state.state_name;
+        });
+
+        const csvRows = [];
+        const headers = [
+            'CLID', 'Name', 'Ledger Name', 'Reg.Type', 'Master type', 'Voucher No. (or CLLID)',
+            'Loan Process Date', 'Exhausted Days',
+            'Sanctioned Amount', 'Disbursal Amount', 'Narration Journal', 'Reference No. (or Payout ID)',
+            'Mode', 'Status', 'LoanDate', 'Country', 'State', 'Processing fee(%)', 'Processing Fees Collected',
+            'GST Amount on Processing Fees', 'INTEREST (%)', 'LOAN CLOSURE TYPE', 'INTEREST COLLECTED', 'PENALTY', 'GST On PENALTY',
+            'REPAYMENT AMOUNT'
+        ];
+        csvRows.push(headers.map(escapeCSV).join(','));
+
+        for (const row of rows) {
+            const voucher_no = 'CLL' + row.lid;
+            const loan_closure_type = row.transaction_flow;
+
+            const processing_fee_collected = row.transaction_flow === 'part' ? 'P.P' : (row.processing_fees || row.p_fee || 0);
+            const gst_on_processing_fees = row.transaction_flow === 'part' ? 'P.P' : ((row.processing_fees || row.p_fee || 0) * GST_RATE);
+
+            const principal_amt = parseFloat(row.principal_amount) || 0;
+            const disbursed_amount = parseFloat(row.processed_amount) || 0;
+
+            const pf_numeric = isNaN(row.processing_fees) ? (parseFloat(row.p_fee) || 0) : (parseFloat(row.processing_fees) || 0);
+            const gst_inclusive_pf = pf_numeric + (pf_numeric * GST_RATE);
+            const sanctioned_amount = principal_amt + gst_inclusive_pf;
+
+            let interest_collected = 0;
+            let penalty = 0;
+            let gst_on_penalty = 0;
+            let exhausted_days = 0;
+
+            if (row.loan_start_date) {
+                const loan_start_date = new Date(row.loan_start_date);
+                const repayment_date = new Date(row.transaction_date);
+
+                loan_start_date.setHours(0, 0, 0, 0);
+                repayment_date.setHours(0, 0, 0, 0);
+
+                const diffTime = repayment_date - loan_start_date;
+                exhausted_days = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+            }
+
+            const repayment_amt = parseFloat(row.transaction_amount) || 0;
+            const extra_amount = repayment_amt - sanctioned_amount;
+
+            if (extra_amount > 0 && row.loan_start_date) {
+                const calculated_interest = sanctioned_amount * DAILY_INTEREST_RATE * exhausted_days;
+
+                if ((extra_amount > calculated_interest) && (exhausted_days > 30)) {
+                    interest_collected = calculated_interest;
+                    const remainder_for_penalty = extra_amount - calculated_interest;
+
+                    penalty = remainder_for_penalty / GST_FACTOR;
+                    gst_on_penalty = penalty * GST_RATE;
+                } else {
+                    interest_collected = extra_amount;
+                    penalty = 0;
+                    gst_on_penalty = 0;
+                }
+            }
+
+            const loanDate = row.loan_start_date ? new Date(row.loan_start_date).toLocaleDateString('en-GB').replace(/\//g, '-') : '';
+            const transactionDate = row.transaction_date ? new Date(row.transaction_date).toLocaleDateString('en-GB').replace(/\//g, '-') : '';
+
+            const data = [
+                row.rcid || '',
+                row.pan_name || '',
+                '', '', '',
+                voucher_no,
+                loanDate,
+                exhausted_days,
+                sanctioned_amount.toFixed(2),
+                disbursed_amount,
+                'REPAYMENT DONE',
+                row.transaction_number || '',
+                '',
+                'received',
+                transactionDate,
+                'India',
+                (row.state_code ? (stateMap[row.state_code] || stateNameMap[(row.state_code || '').toLowerCase()] || row.state_code) : '') || '',
+                row.pro_fee_per || '',
+                processing_fee_collected === 'P.P' ? 'P.P' : processing_fee_collected.toFixed(2),
+                gst_on_processing_fees === 'P.P' ? 'P.P' : gst_on_processing_fees.toFixed(2),
+                row.interest_percentage || '',
+                loan_closure_type,
+                interest_collected.toFixed(2),
+                penalty.toFixed(2),
+                gst_on_penalty.toFixed(2),
+                repayment_amt.toFixed(2)
+            ];
+
+            csvRows.push(data.map(escapeCSV).join(','));
+        }
+
+        const csvContent = csvRows.join('\n');
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename=bs_repayment_${new Date().toISOString().split('T')[0]}.csv`);
+        res.send(csvContent);
+
+    } catch (error) {
+        console.error('Error generating BS repayment report:', error);
+        res.status(500).json({ status: 'error', message: 'Failed to generate report', error: error.message });
+    }
+});
+
+/**
+ * GET /api/admin/reports/bs/disbursal
+ * Generate BS Disbursal Report CSV - based on transaction_details
+ */
+router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
+    try {
+        await initializeDatabase();
+        const { from_date, to_date } = req.query;
+
+        // Check if transaction_details table exists, otherwise use loan_applications
+        let sql = `
+            SELECT 
+                u.rcid, u.pan_name, u.state_code, 
+                l.lid, la.amount, la.processing_fees, l.processed_amount, l.p_fee, 
+                l.exhausted_period, l.processed_date, la.pro_fee_per
+            FROM loan l 
+            INNER JOIN loan_apply la ON la.id = l.lid 
+            INNER JOIN user u ON u.id = la.uid 
+            WHERE l.status_log IN ('account manager','cleared')
+        `;
+
+        const params = [];
+        if (from_date && to_date) {
+            sql += ` AND DATE(l.processed_date) BETWEEN ? AND ?`;
+            params.push(from_date, to_date);
+        }
+
+        let rows;
+        try {
+            rows = await executeQuery(sql, params);
+        } catch (error) {
+            // If old tables don't exist, use new schema
+            console.warn('Old loan/loan_apply tables not found, trying alternative query:', error.message);
+            sql = `
+                SELECT 
+                    CONCAT('PC', LPAD(u.id, 5, '0')) as rcid,
+                    CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as pan_name,
+                    (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state_code,
+                    la.id as lid, la.loan_amount as amount, la.processing_fee as processing_fees,
+                    la.disbursal_amount as processed_amount, la.processing_fee as p_fee,
+                    la.exhausted_period_days as exhausted_period, la.processed_at as processed_date,
+                    la.processing_fee_percent as pro_fee_per
+                FROM loan_applications la
+                INNER JOIN users u ON u.id = la.user_id
+                WHERE la.status IN ('account_manager', 'cleared')
+            `;
+
+            const params2 = [];
+            if (from_date && to_date) {
+                sql += ` AND DATE(la.processed_at) BETWEEN ? AND ?`;
+                params2.push(from_date, to_date);
+            }
+            rows = await executeQuery(sql, params2);
+        }
+
+        // Get state mapping (both by ID and by name for compatibility)
+        const stateResult = await executeQuery("SELECT id, state_name FROM state_code");
+        const stateMap = {};
+        const stateNameMap = {};
+        stateResult.forEach(state => {
+            stateMap[state.id] = state.state_name;
+            stateNameMap[state.state_name.toLowerCase()] = state.state_name;
+        });
+
+        const csvRows = [];
+        const headers = [
+            'CLID (Account ID)', 'Name', 'Ledger Name', 'Reg.Type', 'Master type', 'Voucher No. (or CLLID)',
+            'Sanctioned Amount', 'Disbursal Amount', 'Reference No. (or Payout ID)', 'Mode', 'Status', 'LoanDate',
+            'Country', 'State', 'Processing fee(%)', 'Tenure', 'Processing Fees Collected', 'GST Amount on Processing Fees',
+            'Check', 'Remarks'
+        ];
+        csvRows.push(headers.map(escapeCSV).join(','));
+
+        for (const row of rows) {
+            const gst = (row.processing_fees || row.p_fee || 0) * 0.18;
+            const totalamount = (row.amount || 0) + (row.processing_fees || row.p_fee || 0) + gst;
+
+            const voucher_no = 'CLL' + row.lid;
+
+            // Try to get transaction number from transaction_details
+            let tno = 0;
+            try {
+                const trnum = await executeQuery(
+                    `SELECT * FROM transaction_details WHERE transaction_flow='creditlab To Customer' AND cllid=?`,
+                    [row.lid]
+                );
+                if (trnum.length > 0) {
+                    tno = trnum[0].transaction_number || 0;
+                }
+            } catch (error) {
+                // If transaction_details doesn't exist, try transactions table
+                try {
+                    const trnum = await executeQuery(
+                        `SELECT reference_number FROM transactions WHERE loan_application_id=? AND transaction_type='loan_disbursement' LIMIT 1`,
+                        [row.lid]
+                    );
+                    if (trnum.length > 0) {
+                        tno = trnum[0].reference_number || 0;
+                    }
+                } catch (e) {
+                    // Ignore
+                }
+            }
+
+            const gst_amount = (row.p_fee || row.processing_fees || 0) * 0.18;
+            let loanDate = '';
+            if (row.processed_date) {
+                const date = new Date(row.processed_date);
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                loanDate = `${day}/${month}/${year}`;
+            }
+
+            const data = [
+                row.rcid || '',
+                row.pan_name || '',
+                '', '', '',
+                voucher_no,
+                totalamount.toFixed(2),
+                row.processed_amount || 0,
+                tno,
+                '',
+                'Disbursed',
+                loanDate,
+                'India',
+                (row.state_code ? (stateMap[row.state_code] || stateNameMap[(row.state_code || '').toLowerCase()] || row.state_code) : '') || '',
+                row.pro_fee_per || '',
+                30,
+                row.p_fee || row.processing_fees || 0,
+                gst_amount.toFixed(2),
+                '',
+                ''
+            ];
+
+            csvRows.push(data.map(escapeCSV).join(','));
+        }
+
+        const csvContent = csvRows.join('\n');
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename=bs_loan_disbursal_file_${new Date().toISOString().split('T')[0]}.csv`);
+        res.send(csvContent);
+
+    } catch (error) {
+        console.error('Error generating BS disbursal report:', error);
+        res.status(500).json({ status: 'error', message: 'Failed to generate report', error: error.message });
+    }
+});
+
+/**
  * GET /api/admin/reports/summary
  * Get report summary/statistics
  */

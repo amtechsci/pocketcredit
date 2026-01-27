@@ -14,7 +14,8 @@ import {
   IndianRupee,
   ArrowUpDown,
   MoreHorizontal,
-  UserPlus
+  UserPlus,
+  MessageSquare
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import { adminApiService } from '../../services/adminApi';
@@ -28,9 +29,10 @@ interface LoanApplication {
   applicantName: string;
   mobile: string;
   email: string;
+  userId?: string; // User ID for fetching comments
   loanAmount: number;
   loanType: 'personal' | 'business';
-  status: 'applied' | 'under_review' | 'follow_up' | 'disbursal' | 'account_manager' | 'cleared' | 'rejected' | 'pending_documents' | 'ready_for_disbursement';
+  status: 'applied' | 'under_review' | 'follow_up' | 'disbursal' | 'account_manager' | 'cleared' | 'rejected' | 'pending_documents' | 'ready_for_disbursement' | 'ready_to_repeat_disbursal';
   applicationDate: string;
   assignedManager: string;
   recoveryOfficer: string;
@@ -54,6 +56,16 @@ interface LoanApplication {
   city: string;
   state: string;
   pincode: string;
+}
+
+interface ProfileComment {
+  id: number;
+  comment_type: 'qa_comments' | 'tvr_comments';
+  comment_text: string;
+  created_by: string;
+  created_at: string;
+  created_by_name?: string;
+  created_by_email?: string;
 }
 
 
@@ -84,6 +96,9 @@ export function LoanApplicationsQueue() {
   const [processingPayouts, setProcessingPayouts] = useState<string[]>([]);
   const [payoutResults, setPayoutResults] = useState<{ success: string[]; failed: Array<{ id: string; error: string }> } | null>(null);
   const [downloadingExcel, setDownloadingExcel] = useState<string | null>(null);
+  const [userComments, setUserComments] = useState<{ [userId: string]: ProfileComment[] }>({});
+  const [loadingComments, setLoadingComments] = useState<{ [userId: string]: boolean }>({});
+  const [expandedComments, setExpandedComments] = useState<{ [userId: string]: boolean }>({});
 
   // Initialize status filter from URL parameters
   useEffect(() => {
@@ -228,6 +243,37 @@ export function LoanApplicationsQueue() {
       };
     }
   }, [searchInput, searchTerm]);
+
+  // Fetch comments for applications with ready_for_disbursement or ready_to_repeat_disbursal status
+  useEffect(() => {
+    const fetchCommentsForReadyLoans = async () => {
+      const readyLoans = applications.filter(app => 
+        (app.status === 'ready_for_disbursement' || app.status === 'ready_to_repeat_disbursal') && 
+        app.userId
+      );
+      
+      for (const loan of readyLoans) {
+        const userId = loan.userId!;
+        if (!userComments[userId] && !loadingComments[userId]) {
+          setLoadingComments(prev => ({ ...prev, [userId]: true }));
+          try {
+            const response = await adminApiService.getProfileComments(userId);
+            if (response.status === 'success' && response.data) {
+              setUserComments(prev => ({ ...prev, [userId]: response.data }));
+            }
+          } catch (error) {
+            console.error(`Error fetching comments for user ${userId}:`, error);
+          } finally {
+            setLoadingComments(prev => ({ ...prev, [userId]: false }));
+          }
+        }
+      }
+    };
+    
+    if (applications.length > 0) {
+      fetchCommentsForReadyLoans();
+    }
+  }, [applications]);
 
   // Fetch stats
   useEffect(() => {
@@ -1034,6 +1080,11 @@ export function LoanApplicationsQueue() {
                     <ArrowUpDown className="w-3 h-3" />
                   </button>
                 </th>
+                {(statusFilter === 'ready_for_disbursement' || statusFilter === 'ready_to_repeat_disbursal') && (
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Comments
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -1165,6 +1216,48 @@ export function LoanApplicationsQueue() {
                       {formatDate(application.applicationDate)}
                     </div>
                   </td>
+                  {(statusFilter === 'ready_for_disbursement' || statusFilter === 'ready_to_repeat_disbursal') && application.userId && (
+                    <td className="px-6 py-4">
+                      <div className="text-sm">
+                        {loadingComments[application.userId] ? (
+                          <span className="text-gray-400 text-xs">Loading...</span>
+                        ) : userComments[application.userId] && userComments[application.userId].length > 0 ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <MessageSquare className="w-4 h-4 text-indigo-600" />
+                              <span className="text-gray-700 text-xs">
+                                QA: {userComments[application.userId].filter(c => c.comment_type === 'qa_comments').length} | 
+                                TVR: {userComments[application.userId].filter(c => c.comment_type === 'tvr_comments').length}
+                              </span>
+                            </div>
+                            {expandedComments[application.userId] && (
+                              <div className="mt-2 p-2 bg-gray-50 rounded border border-gray-200 text-xs space-y-2 max-w-xs">
+                                {userComments[application.userId].map((comment) => (
+                                  <div key={comment.id} className="border-b border-gray-200 pb-2 last:border-0">
+                                    <div className="font-semibold text-gray-700 mb-1">
+                                      {comment.comment_type === 'qa_comments' ? 'QA' : 'TVR'} Comment
+                                    </div>
+                                    <div className="text-gray-600 mb-1">{comment.comment_text}</div>
+                                    <div className="text-gray-400 text-xs">
+                                      {comment.created_by_name || comment.created_by_email || 'Unknown'} • {formatDate(comment.created_at)}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <button
+                              onClick={() => setExpandedComments(prev => ({ ...prev, [application.userId!]: !prev[application.userId!] }))}
+                              className="text-xs text-indigo-600 hover:text-indigo-800"
+                            >
+                              {expandedComments[application.userId] ? 'Hide' : 'Show'} Comments
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-xs">No comments</span>
+                        )}
+                      </div>
+                    </td>
+                  )}
                 </tr>
               );
               })}
