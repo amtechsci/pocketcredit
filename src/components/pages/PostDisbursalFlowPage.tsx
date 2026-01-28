@@ -1673,6 +1673,7 @@ const ConfirmationStep = () => {
 // Bank Confirm Step (for repeat loans)
 const BankConfirmStep = ({ applicationId, onComplete, saving }: StepProps) => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [bankDetails, setBankDetails] = useState<any>(null);
   const [confirming, setConfirming] = useState(false);
@@ -1699,6 +1700,11 @@ const BankConfirmStep = ({ applicationId, onComplete, saving }: StepProps) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAddBankAccount = () => {
+    // Navigate to bank linking page with allowEdit flag to bypass auto-redirect
+    navigate('/link-salary-bank-account?allowEdit=true');
   };
 
   const handleConfirm = async () => {
@@ -1738,6 +1744,10 @@ const BankConfirmStep = ({ applicationId, onComplete, saving }: StepProps) => {
         <p className="text-gray-600 mb-4">
           Please add your bank details before proceeding.
         </p>
+        <Button onClick={handleAddBankAccount} className="bg-blue-600 hover:bg-blue-700">
+          <Plus className="w-4 h-4 mr-2" />
+          Add Bank Details
+        </Button>
       </div>
     );
   }

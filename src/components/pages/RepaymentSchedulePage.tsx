@@ -188,22 +188,32 @@ export const RepaymentSchedulePage = () => {
       }
 
       // Fetch user's completed loans count to determine current stage
-      // Count only 2 EMI loans that are account_manager or cleared and disbursed
+      // Count ALL cleared loans (not just 2 EMI) to determine current loan number
       try {
         const loansResponse = await apiService.getPendingLoanApplications();
         if (loansResponse.success && loansResponse.data?.applications) {
-          // Count 2 EMI loans that are completed (account_manager or cleared) and disbursed
-          const completed2EMILoans = loansResponse.data.applications.filter(
+          // Count all cleared loans (excluding current loan and cancelled loans)
+          const currentLoanId = loanId;
+          console.log(`[Stages] Checking loans - Current Loan ID: ${currentLoanId}, All applications:`, loansResponse.data.applications.map((l: any) => ({ id: l.id, status: l.status })));
+          
+          const clearedLoans = loansResponse.data.applications.filter(
             (app: any) => {
-              const is2EMI = app.plan_snapshot?.emi_count === 2 || 
-                            (app.plan_snapshot?.plan_type === 'multi_emi' && app.plan_snapshot?.emi_count === 2);
-              const isCompleted = app.status === 'account_manager' || app.status === 'cleared';
-              const isDisbursed = app.disbursed_at != null;
-              return is2EMI && isCompleted && isDisbursed;
+              // Exclude current loan and cancelled loans, only count cleared loans
+              // A cleared loan must have been disbursed, so we don't need to check disbursed_at
+              const isCleared = app.status === 'cleared';
+              // Convert both to numbers for comparison to handle string/number mismatch
+              const isNotCurrent = Number(app.id) !== Number(currentLoanId);
+              const shouldCount = isCleared && isNotCurrent;
+              
+              if (isCleared) {
+                console.log(`[Stages] Found cleared loan: ID ${app.id} (type: ${typeof app.id}), Current: ${currentLoanId} (type: ${typeof currentLoanId}), isNotCurrent: ${isNotCurrent}, willCount: ${shouldCount}`);
+              }
+              
+              return shouldCount;
             }
           );
-          setCompletedLoansCount(completed2EMILoans.length);
-          console.log(`[Stages] Completed 2 EMI loans count: ${completed2EMILoans.length}`);
+          setCompletedLoansCount(clearedLoans.length);
+          console.log(`[Stages] Completed loans count: ${clearedLoans.length}`, clearedLoans.map((l: any) => ({ id: l.id, status: l.status, loan_amount: l.loan_amount })));
         }
       } catch (err) {
         console.error('Error fetching completed loans count:', err);
@@ -586,6 +596,12 @@ export const RepaymentSchedulePage = () => {
           // Hide preclose option if first loan is already cleared
           // If completedLoansCount > 0, user has cleared at least one loan, so hide preclose
           if (completedLoansCount > 0) {
+            return null;
+          }
+          
+          // Hide preclose option if first EMI has been paid
+          const firstEmi = repaymentSchedule && repaymentSchedule.length > 0 ? repaymentSchedule[0] : null;
+          if (firstEmi && firstEmi.status === 'paid') {
             return null;
           }
           
@@ -1293,6 +1309,12 @@ export const RepaymentSchedulePage = () => {
           // Hide preclose option if first loan is already cleared
           // If completedLoansCount > 0, user has cleared at least one loan, so hide preclose
           if (completedLoansCount > 0) {
+            return null;
+          }
+          
+          // Hide preclose option if first EMI has been paid
+          const firstEmi = repaymentSchedule && repaymentSchedule.length > 0 ? repaymentSchedule[0] : null;
+          if (firstEmi && firstEmi.status === 'paid') {
             return null;
           }
           
@@ -2030,7 +2052,8 @@ export const RepaymentSchedulePage = () => {
                   const isCurrentStage = idx === 0; // First stage is always current
                   const isUltimateStage = stage.isPremium;
                   const isNextStage = idx === 1 && !isUltimateStage; // Second stage (if not premium) is next
-                  const stageNumber = stage.isPremium ? 0 : stage.index + 1; // Display as 1-based (0 for premium)
+                  // Use currentLoanNumber for current stage, currentLoanNumber + 1 for next stage
+                  const stageNumber = stage.isPremium ? 0 : (isCurrentStage ? currentLoanNumber : (isNextStage ? currentLoanNumber + 1 : stage.index + 1));
                 
                 return (
                   <div key={`${stage.index}-${stage.isPremium}`} className="relative">
@@ -2092,7 +2115,7 @@ export const RepaymentSchedulePage = () => {
                               isCurrentStage ? 'text-blue-100' : 'text-gray-500'
                             }`}>
                               {isCurrentStage 
-                                ? `Your Current limit (${stage.percentage}% of salary)` 
+                                ? `Your Current limit` 
                                 : isUltimateStage 
                                 ? 'Your Ultimate limit (Premium)' 
                                 : `Stage ${stageNumber} limit (${stage.percentage}% of salary)`}
@@ -2101,18 +2124,7 @@ export const RepaymentSchedulePage = () => {
 
                           {/* Right Content */}
                           <div className="text-right flex-shrink-0">
-                            {isCurrentStage ? (
-                              <div className="space-y-2">
-                                <div>
-                                  <div className="text-[10px] text-blue-100 mb-0.5">Loan ID</div>
-                                  <div className="text-sm font-bold">{shortLoanId}</div>
-                                </div>
-                                <div>
-                                  <div className="text-[10px] text-blue-100 mb-0.5">Exhausted days</div>
-                                  <div className="text-lg font-bold">{exhaustedDays}</div>
-                                </div>
-                              </div>
-                            ) : (
+                            {!isCurrentStage && (
                               <div className="mt-1">
                                 <div className="text-[10px] text-gray-500 mb-1">Disbursal in 2 min</div>
                                 <div className="inline-flex items-center gap-1 bg-gray-300 text-gray-600 text-[10px] font-medium px-2 py-1 rounded-full">
