@@ -91,6 +91,29 @@ export const DigilockerKYCPage: React.FC = () => {
       try {
         const response = await apiService.getKYCStatus(checkId);
 
+        // Check if ReKYC is required (admin triggered re-KYC)
+        let rekycRequired = false;
+        if (response.success && response.data && response.data.verification_data) {
+          let verificationData = response.data.verification_data;
+          // Parse if it's a string
+          if (typeof verificationData === 'string') {
+            try {
+              verificationData = JSON.parse(verificationData);
+            } catch (e) {
+              // Ignore parsing errors
+            }
+          }
+          rekycRequired = verificationData?.rekyc_required === true;
+        }
+
+        // If ReKYC is required, show the form even if KYC status is verified
+        if (rekycRequired) {
+          console.log('🔄 ReKYC required by admin - showing KYC form');
+          setChecking(false);
+          toast.info('Please complete KYC verification again as requested');
+          return;
+        }
+
         if (response.success && response.data.kyc_status === 'verified') {
           // KYC verified - check if PAN document exists
           if (applicationId) {

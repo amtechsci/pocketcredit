@@ -151,21 +151,34 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
     try {
       const checkId = applicationId || '0';
       const response = await apiService.getKYCStatus(checkId);
-      if (response.success && response.data && response.data.verification_data) {
-        let verificationData = response.data.verification_data;
-        // Parse if it's a string
-        if (typeof verificationData === 'string') {
-          try {
-            verificationData = JSON.parse(verificationData);
-          } catch (e) {
-            return false;
-          }
+      console.log('[StepGuard] ReKYC check response:', response);
+      
+      if (response.success && response.data) {
+        // Check if kyc_status is 'pending' (which happens when ReKYC is triggered)
+        if (response.data.kyc_status === 'pending') {
+          console.log('[StepGuard] KYC status is pending - checking for ReKYC flag');
         }
-        // Check if rekyc_required flag is true
-        return verificationData.rekyc_required === true;
+        
+        if (response.data.verification_data) {
+          let verificationData = response.data.verification_data;
+          // Parse if it's a string
+          if (typeof verificationData === 'string') {
+            try {
+              verificationData = JSON.parse(verificationData);
+            } catch (e) {
+              console.error('[StepGuard] Error parsing verification_data:', e);
+              return false;
+            }
+          }
+          
+          // Check if rekyc_required flag is true
+          const rekycRequired = verificationData.rekyc_required === true;
+          console.log('[StepGuard] ReKYC required check result:', rekycRequired, 'verificationData:', verificationData);
+          return rekycRequired;
+        }
       }
     } catch (error) {
-      console.error('Error checking ReKYC requirement:', error);
+      console.error('[StepGuard] Error checking ReKYC requirement:', error);
     }
     return false;
   }, []);
@@ -393,15 +406,34 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
       // Special handling for KYC verification - it's user-level, not application-level
       // Allow access to KYC page if:
       // 1. KYC is NOT verified, OR
-      // 2. ReKYC is required (admin triggered re-KYC)
+      // 2. ReKYC is required (admin triggered re-KYC), OR
+      // 3. KYC status is 'pending' (which happens when ReKYC is triggered)
       if (requiredStep === 'kyc-verification') {
         const kycVerified = await checkKYCStatus(null);
         const rekycRequired = await checkReKYCRequired(null);
         
-        if (!kycVerified || rekycRequired) {
-          // KYC not verified OR ReKYC required - allow access to KYC page
-          if (rekycRequired) {
-            console.log('[StepGuard] ReKYC required by admin - allowing access to KYC verification page');
+        // Also check if KYC status is 'pending' (ReKYC sets status to pending)
+        let kycStatusPending = false;
+        try {
+          const checkId = '0';
+          const response = await apiService.getKYCStatus(checkId);
+          if (response.success && response.data) {
+            kycStatusPending = response.data.kyc_status === 'pending';
+            console.log('[StepGuard] KYC status check:', {
+              kyc_status: response.data.kyc_status,
+              kycVerified,
+              rekycRequired,
+              kycStatusPending
+            });
+          }
+        } catch (e) {
+          console.error('[StepGuard] Error checking KYC status for pending:', e);
+        }
+        
+        if (!kycVerified || rekycRequired || kycStatusPending) {
+          // KYC not verified OR ReKYC required OR status is pending - allow access to KYC page
+          if (rekycRequired || kycStatusPending) {
+            console.log('[StepGuard] ReKYC required or status pending - allowing access to KYC verification page');
           } else {
             console.log('[StepGuard] KYC not verified - allowing access to KYC verification page');
           }
@@ -409,7 +441,7 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
             currentStep: 'kyc-verification',
             applicationId: null,
             prerequisites: {
-              kycVerified: kycVerified && !rekycRequired, // Consider KYC not verified if ReKYC is required
+              kycVerified: false, // Always treat as not verified if ReKYC is required or status is pending
               creditAnalyticsCompleted: false,
               employmentCompleted: false,
               bankStatementCompleted: false,
