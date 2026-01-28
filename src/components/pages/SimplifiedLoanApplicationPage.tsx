@@ -79,14 +79,42 @@ export function SimplifiedLoanApplicationPage() {
   useEffect(() => {
     const checkLoanEligibility = async () => {
       try {
-        // Priority-based checks: First check applications for any active loan status
+        // PRIORITY 0: Check if user has any pending/active loans (only cleared or cancelled loans allow new applications)
         try {
           const applicationsResponse = await apiService.getLoanApplications();
           if (applicationsResponse.success && applicationsResponse.data && applicationsResponse.data.applications) {
             const applications = applicationsResponse.data.applications;
 
-            // PRIORITY 1: Check for pending documents
+            // Define statuses that allow new applications (only cleared and cancelled)
+            const allowedStatuses = ['cleared', 'cancelled'];
+            
+            // Check if user has any applications that are NOT cleared or cancelled
+            const hasPendingOrActiveLoan = applications.some((app: any) => {
+              const status = app.status?.toLowerCase() || '';
+              return !allowedStatuses.includes(status);
+            });
+
+            if (hasPendingOrActiveLoan) {
+              // User has pending/active loan - block access to application page
+              console.log('🚫 User has pending/active loan - blocking access to application page');
+              toast.error('You have a pending or active loan application. Please complete it before applying for a new loan.');
+              setCanApply(false);
+              setCheckingEligibility(false);
+              setTimeout(() => navigate('/dashboard'), 2000);
+              return;
+            }
+
+            // All applications are cleared or cancelled - user can apply for new loan
+            console.log('✅ All loans are cleared or cancelled - allowing new application');
+
+            // PRIORITY 1: Check for pending documents (only if there are non-cleared/cancelled apps)
+            // This check is now redundant since we already blocked above, but keeping for safety
             for (const app of applications) {
+              // Skip cleared/cancelled applications
+              if (allowedStatuses.includes(app.status?.toLowerCase() || '')) {
+                continue;
+              }
+              
               try {
                 const validationResponse = await apiService.request('GET', `/validation/user/history?loanApplicationId=${app.id}`, {});
                 if (validationResponse.status === 'success' && validationResponse.data) {
@@ -151,12 +179,6 @@ export function SimplifiedLoanApplicationPage() {
               navigate(`/repayment-schedule?applicationId=${accountManagerApp.id}`);
               return;
             }
-
-            // Don't redirect if loan is cleared - user can apply for new loan
-            const clearedApp = applications.find(
-              (app: any) => app.status === 'cleared'
-            );
-            // Cleared loans allow new applications
           }
         } catch (appError) {
           console.error('Error checking applications:', appError);
