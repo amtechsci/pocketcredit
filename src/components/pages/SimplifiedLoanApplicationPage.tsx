@@ -78,34 +78,50 @@ export function SimplifiedLoanApplicationPage() {
   // Check if user can apply for a new loan and fetch loan limit
   useEffect(() => {
     const checkLoanEligibility = async () => {
+      setCheckingEligibility(true);
+      console.log('🚀 [Application Page] Starting eligibility check...');
       try {
         // PRIORITY 0: Check if user has any pending/active loans (only cleared or cancelled loans allow new applications)
         try {
           const applicationsResponse = await apiService.getLoanApplications();
-          if (applicationsResponse.success && applicationsResponse.data && applicationsResponse.data.applications) {
+          console.log('🔍 Application eligibility check - API response:', applicationsResponse);
+          
+          // Check both success formats (API returns status: 'success')
+          const isSuccess = applicationsResponse.success === true || applicationsResponse.status === 'success';
+          
+          if (isSuccess && applicationsResponse.data && applicationsResponse.data.applications) {
             const applications = applicationsResponse.data.applications;
+            console.log('📋 [Application Page] Applications found:', applications.length, applications.map((app: any) => ({ id: app.id, status: app.status })));
 
             // Define statuses that allow new applications (only cleared and cancelled)
             const allowedStatuses = ['cleared', 'cancelled'];
             
             // Check if user has any applications that are NOT cleared or cancelled
             const hasPendingOrActiveLoan = applications.some((app: any) => {
-              const status = app.status?.toLowerCase() || '';
-              return !allowedStatuses.includes(status);
+              const status = (app.status || '').toLowerCase().trim();
+              const isNotAllowed = !allowedStatuses.includes(status);
+              console.log(`🔍 [Application Page] App ${app.id}: status="${app.status}" (normalized: "${status}"), isNotAllowed=${isNotAllowed}`);
+              if (isNotAllowed) {
+                console.log(`🚫 [Application Page] Found non-allowed status: "${status}" for app ${app.id}`);
+              }
+              return isNotAllowed;
             });
 
+            console.log('🔍 [Application Page] Has pending/active loan?', hasPendingOrActiveLoan, 'Total apps:', applications.length);
+
             if (hasPendingOrActiveLoan) {
-              // User has pending/active loan - block access to application page
-              console.log('🚫 User has pending/active loan - blocking access to application page');
+              // User has pending/active loan - block access to application page IMMEDIATELY
+              console.log('🚫 [Application Page] BLOCKING ACCESS - User has pending/active loan');
               toast.error('You have a pending or active loan application. Please complete it before applying for a new loan.');
               setCanApply(false);
               setCheckingEligibility(false);
-              setTimeout(() => navigate('/dashboard'), 2000);
+              // Redirect immediately, don't wait
+              navigate('/dashboard', { replace: true });
               return;
             }
 
             // All applications are cleared or cancelled - user can apply for new loan
-            console.log('✅ All loans are cleared or cancelled - allowing new application');
+            console.log('✅ [Application Page] All loans are cleared or cancelled - allowing new application');
 
             // PRIORITY 1: Check for pending documents (only if there are non-cleared/cancelled apps)
             // This check is now redundant since we already blocked above, but keeping for safety
@@ -162,11 +178,16 @@ export function SimplifiedLoanApplicationPage() {
             }
 
             // PRIORITY 3: Check for post-disbursal (disbursal, repeat_disbursal, ready_to_repeat_disbursal)
+            // NOTE: This should already be blocked by PRIORITY 0, but keeping for safety
             const disbursalApp = applications.find(
-              (app: any) => app.status === 'disbursal' || app.status === 'repeat_disbursal' || app.status === 'ready_to_repeat_disbursal'
+              (app: any) => {
+                const status = (app.status || '').toLowerCase().trim();
+                return status === 'disbursal' || status === 'repeat_disbursal' || status === 'ready_to_repeat_disbursal';
+              }
             );
             if (disbursalApp) {
-              navigate(`/post-disbursal?applicationId=${disbursalApp.id}`);
+              console.log('🚫 Found post-disbursal loan - redirecting (should have been blocked by PRIORITY 0)');
+              navigate(`/post-disbursal?applicationId=${disbursalApp.id}`, { replace: true });
               return;
             }
 
@@ -181,29 +202,40 @@ export function SimplifiedLoanApplicationPage() {
             }
           }
         } catch (appError) {
-          console.error('Error checking applications:', appError);
-          // Continue to check eligibility
+          console.error('❌ [Application Page] Error checking applications:', appError);
+          // If we can't check applications, block access to be safe
+          console.log('🚫 [Application Page] Error checking applications - blocking access to be safe');
+          toast.error('Unable to verify loan status. Please try again later.');
+          setCanApply(false);
+          setCheckingEligibility(false);
+          navigate('/dashboard', { replace: true });
+          return;
         }
 
+        // Only check dashboard summary if we passed the application check
+        // This is a secondary check - the primary check above should have already blocked access
         const response = await apiService.getDashboardSummary();
         if (response.data && (response.data as any).loan_status) {
           const loanStatus = (response.data as any).loan_status;
-          setCanApply(loanStatus.can_apply);
           
-          // Get user's loan limit
-          const limit = (response.data as any).user?.loan_limit || (response.data as any).summary?.available_credit || 100000;
-          setUserLoanLimit(limit);
-          console.log('User loan limit:', limit);
-          
+          // Double-check: if dashboard says can't apply, enforce it
           if (!loanStatus.can_apply) {
+            console.log('🚫 [Application Page] Dashboard summary indicates user cannot apply');
+            setCanApply(false);
             if (loanStatus.has_pending_application) {
               toast.error('You already have a pending loan application. Please complete it first.');
             } else if (loanStatus.active_loans_count > 0) {
               toast.error('You already have an active loan. Please complete it before applying for a new one.');
             }
-            // Redirect to dashboard after showing message
-            setTimeout(() => navigate('/dashboard'), 2000);
+            setCheckingEligibility(false);
+            navigate('/dashboard', { replace: true });
+            return;
           }
+          
+          // Get user's loan limit
+          const limit = (response.data as any).user?.loan_limit || (response.data as any).summary?.available_credit || 100000;
+          setUserLoanLimit(limit);
+          console.log('User loan limit:', limit);
         }
       } catch (error) {
         console.error('Error checking loan eligibility:', error);
@@ -496,9 +528,16 @@ export function SimplifiedLoanApplicationPage() {
     );
   }
 
-  // Block access if user can't apply
+  // Block access if user can't apply - show loading while redirecting
   if (!canApply) {
-    return null; // Will be redirected by useEffect
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Redirecting to dashboard...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
