@@ -36,6 +36,84 @@ export const DigilockerKYCPage: React.FC = () => {
   const [validatingPan, setValidatingPan] = useState(false);
   const [panValidated, setPanValidated] = useState(false);
 
+  // PRIORITY 0: Check if user has pending/active loans - block KYC access if they do (unless ReKYC is required)
+  useEffect(() => {
+    const checkPendingLoans = async () => {
+      try {
+        const applicationsResponse = await apiService.getLoanApplications();
+        console.log('🔍 [KYC Page] Checking for pending loans - API response:', applicationsResponse);
+        
+        // Check both success formats
+        const isSuccess = applicationsResponse.success === true || applicationsResponse.status === 'success';
+        
+        if (isSuccess && applicationsResponse.data && applicationsResponse.data.applications) {
+          const applications = applicationsResponse.data.applications;
+          console.log('📋 [KYC Page] Applications found:', applications.length, applications.map((app: any) => ({ id: app.id, status: app.status })));
+
+          // Define statuses that allow KYC access (only cleared and cancelled)
+          const allowedStatuses = ['cleared', 'cancelled'];
+          
+          // Check if user has any applications that are NOT cleared or cancelled
+          const hasPendingOrActiveLoan = applications.some((app: any) => {
+            const status = (app.status || '').toLowerCase().trim();
+            const isNotAllowed = !allowedStatuses.includes(status);
+            console.log(`🔍 [KYC Page] App ${app.id}: status="${app.status}" (normalized: "${status}"), isNotAllowed=${isNotAllowed}`);
+            return isNotAllowed;
+          });
+
+          console.log('🔍 [KYC Page] Has pending/active loan?', hasPendingOrActiveLoan);
+
+          if (hasPendingOrActiveLoan) {
+            // Check if ReKYC is required - if yes, allow access
+            try {
+              const checkId = applicationId || '0';
+              const kycResponse = await apiService.getKYCStatus(checkId);
+              let rekycRequired = false;
+              
+              if (kycResponse.success && kycResponse.data && kycResponse.data.verification_data) {
+                let verificationData = kycResponse.data.verification_data;
+                if (typeof verificationData === 'string') {
+                  try {
+                    verificationData = JSON.parse(verificationData);
+                  } catch (e) {
+                    console.warn('Failed to parse verification_data:', e);
+                  }
+                }
+                rekycRequired = verificationData.rekyc_required === true;
+              }
+              
+              console.log('🔍 [KYC Page] ReKYC required?', rekycRequired);
+              
+              // If ReKYC is NOT required, redirect away
+              if (!rekycRequired) {
+                console.log('🚫 [KYC Page] User has pending/active loan and ReKYC not required - redirecting to dashboard');
+                toast.error('You have a pending or active loan application. Please complete it before accessing KYC verification.');
+                navigate('/dashboard', { replace: true });
+                return;
+              } else {
+                console.log('✅ [KYC Page] ReKYC required - allowing access to KYC page');
+              }
+            } catch (kycError) {
+              console.error('Error checking ReKYC status:', kycError);
+              // If we can't check ReKYC, redirect to be safe
+              console.log('🚫 [KYC Page] Error checking ReKYC - redirecting to dashboard');
+              toast.error('Unable to verify KYC status. Please try again later.');
+              navigate('/dashboard', { replace: true });
+              return;
+            }
+          } else {
+            console.log('✅ [KYC Page] All loans are cleared or cancelled - allowing KYC access');
+          }
+        }
+      } catch (error) {
+        console.error('❌ [KYC Page] Error checking pending loans:', error);
+        // On error, allow access (don't block) - let other checks handle it
+      }
+    };
+
+    checkPendingLoans();
+  }, [navigate, applicationId]);
+
   // Check if we should show PAN input from state (when redirected from KYCCheckPage)
   useEffect(() => {
     if (stateShowPanInput) {
