@@ -226,6 +226,42 @@ export const PostDisbursalFlowPage = () => {
       if (appIdParam) {
         appId = parseInt(appIdParam);
         
+        // PRIORITY 0: Check if ReKYC is required - if yes, redirect to KYC page immediately
+        try {
+          const checkId = appId || '0';
+          const kycResponse = await apiService.getKYCStatus(checkId);
+          
+          if (kycResponse.success && kycResponse.data) {
+            let rekycRequired = false;
+            
+            // Check for ReKYC requirement
+            if (kycResponse.data.verification_data) {
+              let verificationData = kycResponse.data.verification_data;
+              if (typeof verificationData === 'string') {
+                try {
+                  verificationData = JSON.parse(verificationData);
+                } catch (e) {
+                  console.warn('Failed to parse verification_data:', e);
+                }
+              }
+              rekycRequired = verificationData?.rekyc_required === true;
+            }
+            
+            console.log('🔍 [Post-Disbursal] ReKYC check:', { rekycRequired });
+            
+            if (rekycRequired) {
+              console.log('🔄 [Post-Disbursal] ReKYC required - redirecting to KYC page');
+              toast.info('ReKYC verification required. Please complete KYC verification first.');
+              setLoading(false);
+              navigate(`/loan-application/kyc-verification?applicationId=${appId}`, { replace: true });
+              return;
+            }
+          }
+        } catch (kycError) {
+          console.error('Error checking ReKYC status:', kycError);
+          // Continue with normal flow if check fails
+        }
+        
         // STRICT GUARD: Verify loan status before allowing access
         // Only 'disbursal' status loans can access this post-disbursal flow
         const response = await apiService.getLoanApplications();
