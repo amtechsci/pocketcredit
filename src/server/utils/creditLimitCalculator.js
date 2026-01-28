@@ -77,7 +77,7 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
       };
     }
 
-    // Count number of 2 EMI loans that have been disbursed
+    // Count number of ALL loans that have been disbursed (any loan type)
     // Status should be 'account_manager' (disbursed) or 'cleared' (fully repaid)
     const loanCountQuery = `
       SELECT COUNT(*) as count
@@ -85,8 +85,6 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
       WHERE user_id = ?
         AND status IN ('account_manager', 'cleared')
         AND disbursed_at IS NOT NULL
-        AND JSON_EXTRACT(plan_snapshot, '$.emi_count') = 2
-        AND JSON_EXTRACT(plan_snapshot, '$.plan_type') = 'multi_emi'
     `;
 
     const loanCountResult = await executeQuery(loanCountQuery, [userId]);
@@ -136,7 +134,7 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
       newLimit = Math.min(calculatedLimit, 45600);
     }
 
-    console.log(`[CreditLimit] User ${userId}: Salary=₹${salary}, Current Limit=₹${currentLimit}, 2EMI Loans=${loanCount}, Next Percentage=${nextPercentage}%, Calculated Exact=₹${calculatedLimitByPercentageExact}, Calculated Rounded=₹${calculatedLimitByPercentage}, Final Limit=₹${newLimit}, Premium=${showPremiumLimit}`);
+    console.log(`[CreditLimit] User ${userId}: Salary=₹${salary}, Current Limit=₹${currentLimit}, Disbursed Loans=${loanCount}, Next Percentage=${nextPercentage}%, Calculated Exact=₹${calculatedLimitByPercentageExact}, Calculated Rounded=₹${calculatedLimitByPercentage}, Final Limit=₹${newLimit}, Premium=${showPremiumLimit}`);
 
     return {
       newLimit,

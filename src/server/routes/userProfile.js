@@ -2938,6 +2938,74 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             console.error(`❌ Error sending emails for loan #${loanIdInt} (non-fatal):`, emailError.message);
             // Continue - email failure shouldn't block the transaction
           }
+
+          // Recalculate and update credit limit after loan disbursement (for ALL loan types)
+          // Credit limit increases when loan is disbursed (not when cleared)
+          try {
+            console.log(`[UserProfile] Recalculating credit limit after loan disbursement for user ${loan.user_id}`);
+            
+            const { calculateCreditLimitFor2EMI, storePendingCreditLimit, checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
+            
+            // Calculate new credit limit (now includes the newly disbursed loan)
+            // This function now counts ALL disbursed loans, not just 2 EMI loans
+            const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
+            
+            if (creditLimitData.newLimit > 0) {
+              // Get user's current credit limit from users table
+              const userLimitQuery = await executeQuery(
+                `SELECT loan_limit FROM users WHERE id = ?`,
+                [loan.user_id]
+              );
+              const currentLimit = userLimitQuery && userLimitQuery.length > 0
+                ? parseFloat(userLimitQuery[0].loan_limit) || 0
+                : 0;
+              
+                console.log(`[UserProfile] Current user limit: ₹${currentLimit}, New calculated limit: ₹${creditLimitData.newLimit}, Loan count: ${creditLimitData.loanCount}, Percentage: ${creditLimitData.percentage}%`);
+                
+                // Cooling period check removed from disbursement - will be checked when loan is cleared
+                
+                // Only store pending limit if it's higher than current limit
+              if (creditLimitData.newLimit > currentLimit) {
+                // Store as pending credit limit (requires user acceptance)
+                await storePendingCreditLimit(loan.user_id, creditLimitData.newLimit, creditLimitData);
+                
+                // Try to send notification (but don't fail if it doesn't work)
+                try {
+                  const notificationService = require('../services/notificationService');
+                  const userQuery = await executeQuery(
+                    `SELECT first_name, last_name, phone, email FROM users WHERE id = ?`,
+                    [loan.user_id]
+                  );
+                  const user = userQuery && userQuery.length > 0 ? userQuery[0] : null;
+                  
+                  if (user) {
+                    // Send SMS and Email notification
+                    const recipientName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Customer';
+                    await notificationService.sendCreditLimitNotification({
+                      userId: loan.user_id,
+                      mobile: user.phone,
+                      email: user.email,
+                      recipientName: recipientName,
+                      newLimit: creditLimitData.newLimit
+                    });
+                    console.log(`[UserProfile] Notification sent for credit limit increase`);
+                  }
+                } catch (notificationError) {
+                  // Don't fail the credit limit increase if notification fails
+                  console.warn(`[UserProfile] Failed to send notification (non-fatal):`, notificationError.message);
+                }
+                
+                console.log(`[UserProfile] Pending credit limit stored (₹${creditLimitData.newLimit}) for user ${loan.user_id} after loan disbursement`);
+              } else {
+                console.log(`[UserProfile] New limit (₹${creditLimitData.newLimit}) is not higher than current limit (₹${currentLimit}), skipping pending limit storage`);
+              }
+            } else {
+              console.warn(`[UserProfile] Could not calculate credit limit for user ${loan.user_id} after loan disbursement - salary may be missing`);
+            }
+          } catch (creditLimitError) {
+            console.error('❌ Error recalculating credit limit after loan disbursement (non-fatal):', creditLimitError);
+            // Don't fail - credit limit update failure shouldn't block loan disbursement
+          }
         } else {
           console.warn(`❌ Loan #${loanIdInt} belongs to user ${loan.user_id}, not requested user ${userId}`);
         }
@@ -2978,6 +3046,24 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
           `, [loanIdInt]);
 
           console.log(`✅ Loan #${loanIdInt} marked as cleared (${txType} received)`);
+
+          // Check if user should be moved to cooling period after clearing this loan
+          // Cooling period triggers when user reaches 32.1% (₹1,50,000) after clearing a loan
+          try {
+            const { calculateCreditLimitFor2EMI, checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
+            
+            // Recalculate credit limit to check if user reached premium limit (32.1%)
+            const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
+            
+            if (creditLimitData.newLimit === 150000 && creditLimitData.percentage === 32.1) {
+              // User has reached premium limit (32.1% = ₹1,50,000) - mark in cooling period
+              await checkAndMarkCoolingPeriod(loan.user_id, loanIdInt, creditLimitData);
+              console.log(`[UserProfile] User ${loan.user_id} moved to cooling period after clearing loan #${loanIdInt} (reached 32.1% = ₹1,50,000)`);
+            }
+          } catch (coolingPeriodError) {
+            console.error('❌ Error checking cooling period after loan clearance (non-fatal):', coolingPeriodError);
+            // Don't fail - cooling period check failure shouldn't block loan clearance
+          }
 
           // Send NOC email to user
           try {
@@ -3113,85 +3199,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             // Don't fail - email failure shouldn't block loan clearance
           }
 
-          // Recalculate and update credit limit for 2 EMI products after loan is cleared
-          try {
-            // Check if this is a 2 EMI product
-            const planSnapshot = loan.plan_snapshot 
-              ? (typeof loan.plan_snapshot === 'string' ? JSON.parse(loan.plan_snapshot) : loan.plan_snapshot)
-              : null;
-            const is2EMIProduct = planSnapshot?.emi_count === 2 && planSnapshot?.plan_type === 'multi_emi';
-            
-            if (is2EMIProduct) {
-              console.log(`[UserProfile] Detected 2 EMI product - recalculating credit limit after loan clearance for user ${loan.user_id}`);
-              
-              const { calculateCreditLimitFor2EMI, storePendingCreditLimit, checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
-              
-              // Calculate new credit limit (now includes the cleared loan)
-              const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
-              
-              if (creditLimitData.newLimit > 0) {
-                // Get user's current credit limit from users table (not loan.loan_limit)
-                const userLimitQuery = await executeQuery(
-                  `SELECT loan_limit FROM users WHERE id = ?`,
-                  [loan.user_id]
-                );
-                const currentLimit = userLimitQuery && userLimitQuery.length > 0
-                  ? parseFloat(userLimitQuery[0].loan_limit) || 0
-                  : 0;
-                
-                console.log(`[UserProfile] Current user limit: ₹${currentLimit}, New calculated limit: ₹${creditLimitData.newLimit}, Loan count: ${creditLimitData.loanCount}, Percentage: ${creditLimitData.percentage}%`);
-                
-                // Check if user reached premium limit (32.1% = ₹1,50,000) and mark in cooling period
-                try {
-                  await checkAndMarkCoolingPeriod(loan.user_id, loanIdInt, creditLimitData);
-                } catch (coolingPeriodError) {
-                  console.error('❌ Error checking cooling period (non-fatal):', coolingPeriodError);
-                  // Don't fail - cooling period check failure shouldn't block loan clearance
-                }
-                
-                // Only store pending limit if it's higher than current limit
-                if (creditLimitData.newLimit > currentLimit) {
-                  // Store as pending credit limit (requires user acceptance)
-                  await storePendingCreditLimit(loan.user_id, creditLimitData.newLimit, creditLimitData);
-                  
-                  // Try to send notification (but don't fail if it doesn't work)
-                  try {
-                    const notificationService = require('../services/notificationService');
-                    const userQuery = await executeQuery(
-                      `SELECT first_name, last_name, phone, email FROM users WHERE id = ?`,
-                      [loan.user_id]
-                    );
-                    const user = userQuery && userQuery.length > 0 ? userQuery[0] : null;
-                    
-                    if (user) {
-                      // Send SMS and Email notification
-                      const recipientName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Customer';
-                      await notificationService.sendCreditLimitNotification({
-                        userId: loan.user_id,
-                        mobile: user.phone,
-                        email: user.email,
-                        recipientName: recipientName,
-                        newLimit: creditLimitData.newLimit
-                      });
-                      console.log(`[UserProfile] Notification sent for credit limit increase`);
-                    }
-                  } catch (notificationError) {
-                    // Don't fail the credit limit increase if notification fails
-                    console.warn(`[UserProfile] Failed to send notification (non-fatal):`, notificationError.message);
-                  }
-                  
-                  console.log(`[UserProfile] Pending credit limit stored (₹${creditLimitData.newLimit}) for user ${loan.user_id} after loan clearance`);
-                } else {
-                  console.log(`[UserProfile] New limit (₹${creditLimitData.newLimit}) is not higher than current limit (₹${currentLimit}), skipping pending limit storage`);
-                }
-              } else {
-                console.warn(`[UserProfile] Could not calculate credit limit for user ${loan.user_id} after loan clearance - salary may be missing`);
-              }
-            }
-          } catch (creditLimitError) {
-            console.error('❌ Error recalculating credit limit after loan clearance (non-fatal):', creditLimitError);
-            // Don't fail - credit limit update failure shouldn't block loan clearance
-          }
+          // Credit limit recalculation removed - now happens on loan disbursement, not on loan clearance
 
           loanStatusUpdated = true;
           newStatus = 'cleared';

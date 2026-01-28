@@ -255,35 +255,34 @@ router.post('/disburse-loan', authenticateAdmin, async (req, res) => {
             // Don't fail the disbursal if partner update fails
         }
 
-        // Step 7: Calculate and update credit limit for 2 EMI products
+        // Step 7: Calculate and update credit limit for ALL loan types
         try {
-            // Check if this is a 2 EMI product
-            let is2EMIProduct = false;
-            if (loan.plan_snapshot) {
-                try {
-                    const planSnapshot = typeof loan.plan_snapshot === 'string' 
-                        ? JSON.parse(loan.plan_snapshot) 
-                        : loan.plan_snapshot;
-                    
-                    const emiCount = planSnapshot.emi_count || 1;
-                    const planType = planSnapshot.plan_type || 'single';
-                    
-                    is2EMIProduct = (emiCount === 2 && planType === 'multi_emi');
-                } catch (parseError) {
-                    console.warn('[Payout] Could not parse plan_snapshot:', parseError);
-                }
-            }
-
-            if (is2EMIProduct) {
-                console.log(`[Payout] Detected 2 EMI product - calculating credit limit for user ${loan.user_id}`);
+            // Calculate credit limit for ALL loan types (not just 2 EMI)
+            console.log(`[Payout] Calculating credit limit after loan disbursement for user ${loan.user_id}`);
+            
+            const { calculateCreditLimitFor2EMI, storePendingCreditLimit, checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
+            const notificationService = require('../services/notificationService');
+            
+            // Calculate new credit limit (this includes the current loan being disbursed)
+            // This function now counts ALL disbursed loans, not just 2 EMI loans
+            const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
+            
+            if (creditLimitData.newLimit > 0) {
+                // Get user's current credit limit
+                const userLimitQuery = await executeQuery(
+                    `SELECT loan_limit FROM users WHERE id = ?`,
+                    [loan.user_id]
+                );
+                const currentLimit = userLimitQuery && userLimitQuery.length > 0
+                    ? parseFloat(userLimitQuery[0].loan_limit) || 0
+                    : 0;
                 
-                const { calculateCreditLimitFor2EMI, storePendingCreditLimit } = require('../utils/creditLimitCalculator');
-                const notificationService = require('../services/notificationService');
+                console.log(`[Payout] Current user limit: ₹${currentLimit}, New calculated limit: ₹${creditLimitData.newLimit}, Loan count: ${creditLimitData.loanCount}, Percentage: ${creditLimitData.percentage}%`);
                 
-                // Calculate new credit limit (this includes the current loan being disbursed)
-                const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
+                // Cooling period check removed from disbursement - will be checked when loan is cleared
                 
-                if (creditLimitData.newLimit > 0) {
+                // Only store pending limit if it's higher than current limit
+                if (creditLimitData.newLimit > currentLimit) {
                     // Store as pending credit limit (requires user acceptance)
                     await storePendingCreditLimit(loan.user_id, creditLimitData.newLimit, creditLimitData);
                     
@@ -299,10 +298,10 @@ router.post('/disburse-loan', authenticateAdmin, async (req, res) => {
                     
                     console.log(`[Payout] Pending credit limit stored (₹${creditLimitData.newLimit}) and notifications sent for user ${loan.user_id}`);
                 } else {
-                    console.warn(`[Payout] Could not calculate credit limit for user ${loan.user_id} - salary may be missing`);
+                    console.log(`[Payout] New limit (₹${creditLimitData.newLimit}) is not higher than current limit (₹${currentLimit}), skipping pending limit storage`);
                 }
             } else {
-                console.log(`[Payout] Loan ${loanApplicationId} is not a 2 EMI product - skipping credit limit update`);
+                console.warn(`[Payout] Could not calculate credit limit for user ${loan.user_id} - salary may be missing`);
             }
         } catch (creditLimitError) {
             console.error('[Payout] Error updating credit limit (non-fatal):', creditLimitError);

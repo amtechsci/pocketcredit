@@ -17,7 +17,6 @@ import {
   Clock,
   AlertCircle,
   Download,
-  Wallet,
   CreditCard as CreditCardIcon,
   Home,
   Phone,
@@ -775,24 +774,6 @@ export function DynamicDashboardPage() {
                 </div>
               </div>
             )}
-            <div className="bg-white/10 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Wallet className="w-5 h-5" />
-                <p className="text-blue-100 text-sm">Available Credit</p>
-              </div>
-              <p className="text-3xl font-bold">{formatCurrency(summary.available_credit)}</p>
-              <p className="text-xs text-blue-200">Pre-approved</p>
-            </div>
-            {dashboardData?.financial?.salary_range_display && userData.employment_type !== 'student' && (
-              <div className="bg-white/10 rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <TrendingUp className="w-5 h-5" />
-                  <p className="text-blue-100 text-sm">Salary Range</p>
-                </div>
-                <p className="text-3xl font-bold">{dashboardData.financial.salary_range_display}</p>
-                <p className="text-xs text-blue-200">Monthly Income</p>
-              </div>
-            )}
             {/* Hide loan stats for students */}
             {userData.employment_type !== 'student' && activeLoansForDisplay.length > 0 && (
               <>
@@ -857,18 +838,6 @@ export function DynamicDashboardPage() {
                     </a>
                   </p>
                 </div>
-              </div>
-            )}
-            <div className="bg-white/10 rounded-lg p-3">
-              <p className="text-blue-100 text-xs">Available Credit</p>
-              <p className="text-xl font-bold">{formatCurrency(summary.available_credit)}</p>
-              <p className="text-xs text-blue-200">Pre-approved</p>
-            </div>
-            {dashboardData?.financial?.salary_range_display && (
-              <div className="bg-white/10 rounded-lg p-3">
-                <p className="text-blue-100 text-xs">Salary Range</p>
-                <p className="text-xl font-bold">{dashboardData.financial.salary_range_display}</p>
-                <p className="text-xs text-blue-200">Monthly Income</p>
               </div>
             )}
           </div>
