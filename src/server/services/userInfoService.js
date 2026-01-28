@@ -340,12 +340,14 @@ async function saveUserInfoFromPANAPI(userId, panData, panNumber) {
     // Prepare additional details
     const additionalDetails = {
       pan: panNumber.toUpperCase(),
+      pan_status: panData.pan_status || null,
       first_name: panData.first_name || null,
       middle_name: panData.middle_name || null,
       last_name: panData.last_name || null,
       pan_type: panData.pan_type || null,
       aadhaar_number: panData.aadhaar_number || null,
       aadhaar_linked: panData.aadhaar_linked || false,
+      aadhaar_seeding_status: panData.aadhaar_seeding_status || null,
       address: panData.address || null
     };
 

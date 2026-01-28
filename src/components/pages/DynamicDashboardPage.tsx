@@ -697,8 +697,10 @@ export function DynamicDashboardPage() {
   // Check if user has any active or pending loans
   const hasActiveOrPendingLoans = () => {
     const hasActiveLoans = active_loans && active_loans.length > 0;
-    // Filter out cleared loans from pendingApplications when checking if user can apply
-    const activePendingApps = pendingApplications?.filter((app: any) => app.status !== 'cleared') || [];
+    // Filter out cleared and cancelled loans from pendingApplications when checking if user can apply
+    const activePendingApps = pendingApplications?.filter((app: any) => 
+      app.status !== 'cleared' && app.status !== 'cancelled'
+    ) || [];
     const hasPendingApplications = activePendingApps.length > 0;
 
 

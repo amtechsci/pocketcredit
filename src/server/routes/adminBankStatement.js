@@ -1071,7 +1071,7 @@ router.post('/:userId/update-decision', authenticateAdmin, async (req, res) => {
 /**
  * POST /api/admin/bank-statement/:userId/add-new
  * Add new statement - creates a new statement record and starts Digitap upload process
- * This endpoint creates a new statement entry and calls Digitap Start Upload API
+ * This endpoint creates a new statement entry and calls Digitap Start Upload API for admin to upload
  */
 router.post('/:userId/add-new', authenticateAdmin, async (req, res) => {
   try {
@@ -1229,6 +1229,7 @@ router.post('/:userId/add-new', authenticateAdmin, async (req, res) => {
 
     res.json({
       success: true,
+      status: 'success',
       message: 'New statement created and upload URL generated successfully',
       data: {
         uploadUrl: uploadUrl,
@@ -1245,6 +1246,98 @@ router.post('/:userId/add-new', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to create new statement and start upload process'
+    });
+  }
+});
+
+/**
+ * POST /api/admin/bank-statement/:userId/add-new-from-user
+ * Reset bank statement status to allow user to upload again
+ * This endpoint resets existing statements and allows the user to upload via account aggregator (online) or manual (offline) mode
+ */
+router.post('/:userId/add-new-from-user', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+    const adminId = req.admin?.id;
+
+    if (!adminId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Admin authentication required'
+      });
+    }
+
+    // Check if user exists
+    const users = await executeQuery(
+      'SELECT id FROM users WHERE id = ?',
+      [userId]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Get existing statements
+    const existingStatements = await executeQuery(
+      `SELECT id, status, verification_status FROM user_bank_statements WHERE user_id = ?`,
+      [userId]
+    );
+
+    // Reset all existing statements to allow new upload
+    // Set status to 'pending' and verification_status to 'not_started' so user can upload again
+    if (existingStatements.length > 0) {
+      await executeQuery(
+        `UPDATE user_bank_statements 
+         SET status = 'pending',
+             verification_status = 'not_started',
+             user_status = NULL,
+             request_id = NULL,
+             txn_id = NULL,
+             digitap_url = NULL,
+             expires_at = NULL,
+             updated_at = NOW()
+         WHERE user_id = ?`,
+        [userId]
+      );
+      console.log(`✅ Reset ${existingStatements.length} existing statement(s) for user ${userId}`);
+    }
+
+    // Log activity
+    try {
+      await logActivity({
+        userId: userId,
+        action: 'bank_statement_reset_for_user_upload',
+        details: {
+          adminId: adminId,
+          resetStatements: existingStatements.length,
+          message: 'Bank statement status reset. User can now upload via account aggregator or manual mode.'
+        },
+        adminId: adminId
+      });
+    } catch (logError) {
+      console.warn('Failed to log activity:', logError);
+    }
+
+    console.log(`✅ Bank statement status reset for user ${userId}. User can now upload via account aggregator or manual mode.`);
+
+    res.json({
+      success: true,
+      status: 'success',
+      message: 'Bank statement status reset successfully. User can now upload via account aggregator (online) or manual (offline) mode.',
+      data: {
+        resetStatements: existingStatements.length,
+        userCanUpload: true
+      }
+    });
+  } catch (error) {
+    console.error('Add new from user error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reset bank statement status'
     });
   }
 });

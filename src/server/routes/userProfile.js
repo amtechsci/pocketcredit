@@ -3764,6 +3764,80 @@ router.post('/:userId/sms', authenticateAdmin, async (req, res) => {
  * POST /api/admin/user-profile/:userId/refetch-kyc
  * Refetch KYC data from Digilocker and process documents
  */
+/**
+ * POST /api/admin/user-profile/:userId/trigger-rekyc
+ * Trigger re-KYC for a user (admin action)
+ */
+router.post('/:userId/trigger-rekyc', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+
+    console.log('🔄 Admin triggering re-KYC for user:', userId);
+
+    // Update kyc_verifications table to set status to pending and add rekyc flag
+    const kycRecords = await executeQuery(
+      `SELECT id FROM kyc_verifications 
+       WHERE user_id = ? 
+       ORDER BY created_at DESC 
+       LIMIT 1`,
+      [userId]
+    );
+
+    if (kycRecords.length > 0) {
+      // Update existing KYC record
+      await executeQuery(
+        `UPDATE kyc_verifications 
+         SET kyc_status = 'pending',
+             verification_data = JSON_SET(
+               COALESCE(verification_data, '{}'),
+               '$.rekyc_required', true,
+               '$.rekyc_requested_at', NOW()
+             ),
+             updated_at = NOW()
+         WHERE id = ?`,
+        [kycRecords[0].id]
+      );
+    } else {
+      // Create new KYC record with rekyc flag
+      await executeQuery(
+        `INSERT INTO kyc_verifications 
+         (user_id, kyc_status, verification_data, created_at, updated_at) 
+         VALUES (?, 'pending', ?, NOW(), NOW())`,
+        [userId, JSON.stringify({ rekyc_required: true, rekyc_requested_at: new Date().toISOString() })]
+      );
+    }
+
+    // Update users table to mark KYC as not completed
+    await executeQuery(
+      `UPDATE users 
+       SET kyc_completed = 0, 
+           updated_at = NOW() 
+       WHERE id = ?`,
+      [userId]
+    );
+
+    console.log('✅ Re-KYC triggered successfully for user:', userId);
+
+    res.json({
+      status: 'success',
+      message: 'Re-KYC has been triggered. User will need to complete KYC again.',
+      data: {
+        userId: userId,
+        rekyc_required: true
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error triggering re-KYC:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to trigger re-KYC',
+      error: error.message
+    });
+  }
+});
+
 router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();

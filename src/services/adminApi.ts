@@ -670,6 +670,10 @@ class AdminApiService {
     return this.request('POST', `/bank-statement/${userId}/add-new`, options || {});
   }
 
+  async addNewBankStatementFromUser(userId: string): Promise<ApiResponse<any>> {
+    return this.request('POST', `/bank-statement/${userId}/add-new-from-user`);
+  }
+
   async completeBankStatementUpload(userId: string): Promise<ApiResponse<any>> {
     return this.request('POST', `/bank-statement/${userId}/complete-upload`);
   }
@@ -778,6 +782,10 @@ class AdminApiService {
     workExperience?: number | null;
   }): Promise<ApiResponse<any>> {
     return this.request('PUT', `/user-profile/${userId}/employment-info`, data);
+  }
+
+  async triggerReKYC(userId: string): Promise<ApiResponse<{ userId: string; rekyc_required: boolean }>> {
+    return this.request('POST', `/user-profile/${userId}/trigger-rekyc`, {});
   }
 
   // Activity Logs Methods

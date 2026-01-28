@@ -111,6 +111,45 @@ const ACCOUNT_MANAGER_RESPONSE_OPTIONS = [
   "Wantedly not repaying the loan", "Commitment date"
 ];
 
+const INDIAN_STATES = [
+  'Andhra Pradesh',
+  'Arunachal Pradesh',
+  'Assam',
+  'Bihar',
+  'Chhattisgarh',
+  'Goa',
+  'Gujarat',
+  'Haryana',
+  'Himachal Pradesh',
+  'Jharkhand',
+  'Karnataka',
+  'Kerala',
+  'Madhya Pradesh',
+  'Maharashtra',
+  'Manipur',
+  'Meghalaya',
+  'Mizoram',
+  'Nagaland',
+  'Odisha',
+  'Punjab',
+  'Rajasthan',
+  'Sikkim',
+  'Tamil Nadu',
+  'Telangana',
+  'Tripura',
+  'Uttar Pradesh',
+  'Uttarakhand',
+  'West Bengal',
+  'Andaman and Nicobar Islands',
+  'Chandigarh',
+  'Dadra and Nagar Haveli and Daman and Diu',
+  'Delhi',
+  'Jammu and Kashmir',
+  'Ladakh',
+  'Lakshadweep',
+  'Puducherry'
+];
+
 export function UserProfileDetail() {
   const navigate = useNavigate();
   const params = useParams();
@@ -173,6 +212,7 @@ export function UserProfileDetail() {
   const [error, setError] = useState<string | null>(null);
   const [downloadingExcel, setDownloadingExcel] = useState(false);
   const [refetchingKYC, setRefetchingKYC] = useState(false);
+  const [triggeringReKYC, setTriggeringReKYC] = useState(false);
 
   // Form state for modals
   const [basicInfoForm, setBasicInfoForm] = useState({
@@ -1085,25 +1125,33 @@ export function UserProfileDetail() {
   };
 
   const handleAddressInfoSubmit = async () => {
-    // Validation
-    if (!addressInfoForm.address_line1 || !addressInfoForm.city || !addressInfoForm.state || !addressInfoForm.pincode) {
-      toast.error('Please fill in all required fields (Address Line 1, City, State, Pincode)');
+    // Validation for Present Address
+    if (!addressInfoForm.address_line1 || !addressInfoForm.state || !addressInfoForm.pincode) {
+      toast.error('Please fill in all required fields (First Line of address, State, PIN CODE)');
       return;
     }
 
     if (addressInfoForm.pincode.length !== 6) {
-      toast.error('Pincode must be 6 digits');
+      toast.error('PIN CODE must be 6 digits');
       return;
     }
+
+    // Set default values for fields not in the form
+    const addressData = {
+      ...addressInfoForm,
+      city: addressInfoForm.city || '', // City can be empty for present address
+      country: addressInfoForm.country || 'India',
+      address_type: 'current' // Present address is always 'current' type
+    };
 
     try {
       let response;
       if (editingAddressId) {
         // Update existing address
-        response = await adminApiService.updateUserAddress(params.userId!, editingAddressId, addressInfoForm);
+        response = await adminApiService.updateUserAddress(params.userId!, editingAddressId, addressData);
       } else {
         // Add new address
-        response = await adminApiService.addUserAddress(params.userId!, addressInfoForm);
+        response = await adminApiService.addUserAddress(params.userId!, addressData);
       }
 
       if (response.status === 'success') {
@@ -2259,6 +2307,37 @@ export function UserProfileDetail() {
     }
   };
 
+  const handleTriggerReKYC = async () => {
+    if (!params.userId) {
+      toast.error('User ID not found');
+      return;
+    }
+
+    if (!confirm('Are you sure you want to trigger re-KYC for this user? The user will need to complete KYC again.')) {
+      return;
+    }
+
+    setTriggeringReKYC(true);
+    try {
+      const response = await adminApiService.triggerReKYC(params.userId);
+      if (response.status === 'success') {
+        toast.success('Re-KYC triggered successfully. User will need to complete KYC again.');
+        // Refresh user data
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success' && profileResponse.data) {
+          setUserData(profileResponse.data);
+        }
+      } else {
+        toast.error(response.message || 'Failed to trigger re-KYC');
+      }
+    } catch (error: any) {
+      console.error('Error triggering re-KYC:', error);
+      toast.error(error.response?.data?.message || 'Error triggering re-KYC');
+    } finally {
+      setTriggeringReKYC(false);
+    }
+  };
+
   const renderKYCTab = () => {
     const kycData = getUserData('kycVerification');
     const kycDocs = getUserData('kycDocuments', []);
@@ -2324,6 +2403,28 @@ export function UserProfileDetail() {
     const verificationData = getVerificationData();
     const isVerified = ['verified', 'completed', 'success'].includes(kycData?.status?.toLowerCase());
     const hasTransactionId = kycData?.verification_data?.transactionId;
+    
+    // Check if re-KYC is required
+    let rekycRequired = false;
+    const rawVerificationData = kycData?.verification_data;
+    if (rawVerificationData) {
+      try {
+        const parsed = typeof rawVerificationData === 'string' ? JSON.parse(rawVerificationData) : rawVerificationData;
+        rekycRequired = parsed.rekyc_required === true;
+      } catch (e) {
+        // Ignore parsing errors
+      }
+    }
+    
+    // Determine display status
+    let displayStatus = kycData?.status?.toUpperCase() || 'NOT VERIFIED';
+    let statusColor = 'bg-yellow-100 text-yellow-800';
+    if (rekycRequired && !isVerified) {
+      displayStatus = 'ReKYC Pending';
+      statusColor = 'bg-orange-100 text-orange-800';
+    } else if (isVerified) {
+      statusColor = 'bg-green-100 text-green-800';
+    }
 
     return (
       <div className="space-y-6">
@@ -2332,6 +2433,16 @@ export function UserProfileDetail() {
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-semibold text-gray-900">KYC Verification Details</h3>
             <div className="flex items-center gap-3">
+              {canEditUsers && (
+                <button
+                  onClick={handleTriggerReKYC}
+                  disabled={triggeringReKYC}
+                  className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw className={`w-4 h-4 ${triggeringReKYC ? 'animate-spin' : ''}`} />
+                  {triggeringReKYC ? 'Triggering...' : 'ReKYC'}
+                </button>
+              )}
               {hasTransactionId && (
                 <button
                   onClick={handleRefetchKYC}
@@ -2342,9 +2453,8 @@ export function UserProfileDetail() {
                   {refetchingKYC ? 'Refetching...' : 'Refetch KYC Data'}
                 </button>
               )}
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${isVerified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                }`}>
-                {kycData?.status?.toUpperCase() || 'NOT VERIFIED'}
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusColor}`}>
+                {displayStatus}
               </span>
             </div>
           </div>
@@ -2632,6 +2742,7 @@ export function UserProfileDetail() {
                 const userInfoRecords = userData?.userInfoRecords || [];
                 const aadharInfo = userInfoRecords.find((r: any) => r.source === 'digilocker');
                 const panInfo = userInfoRecords.find((r: any) => r.source === 'pan_api');
+                const panDetails = panInfo?.additionalDetails || {};
                 return (
                   <>
                     {aadharInfo?.name && (
@@ -2686,6 +2797,85 @@ export function UserProfileDetail() {
                 <span className="text-gray-500">Education:</span>
                 <span className="ml-2 text-gray-900">{latestEmployment.education || getUserData('personalInfo.education') || 'N/A'}</span>
               </div>
+              
+              {/* PAN API Details Section */}
+              {(() => {
+                const userInfoRecords = userData?.userInfoRecords || [];
+                const panInfo = userInfoRecords.find((r: any) => r.source === 'pan_api');
+                const panDetails = panInfo?.additionalDetails || {};
+                
+                if (!panInfo || Object.keys(panDetails).length === 0) {
+                  return null;
+                }
+                
+                return (
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <h4 className="text-xs font-semibold text-gray-700 mb-2">PAN API Details:</h4>
+                    <div className="space-y-1.5 text-sm">
+                      {panDetails.pan && (
+                        <div>
+                          <span className="text-gray-500">Pan:</span>
+                          <span className="ml-2 text-gray-900 font-medium">{panDetails.pan}</span>
+                        </div>
+                      )}
+                      {panDetails.pan_status && (
+                        <div>
+                          <span className="text-gray-500">Pan Status:</span>
+                          <span className="ml-2 text-gray-900 font-medium capitalize">{panDetails.pan_status}</span>
+                        </div>
+                      )}
+                      {panInfo.name && (
+                        <div>
+                          <span className="text-gray-500">Fullname:</span>
+                          <span className="ml-2 text-gray-900 font-medium">{panInfo.name}</span>
+                        </div>
+                      )}
+                      {panDetails.first_name && (
+                        <div>
+                          <span className="text-gray-500">First Name:</span>
+                          <span className="ml-2 text-gray-900">{panDetails.first_name}</span>
+                        </div>
+                      )}
+                      {panDetails.middle_name && (
+                        <div>
+                          <span className="text-gray-500">Middle Name:</span>
+                          <span className="ml-2 text-gray-900">{panDetails.middle_name}</span>
+                        </div>
+                      )}
+                      {panDetails.last_name && (
+                        <div>
+                          <span className="text-gray-500">Last Name:</span>
+                          <span className="ml-2 text-gray-900">{panDetails.last_name}</span>
+                        </div>
+                      )}
+                      {panDetails.aadhaar_seeding_status && (
+                        <div>
+                          <span className="text-gray-500">Aadhaar Seeding Status:</span>
+                          <span className="ml-2 text-gray-900 font-medium">{panDetails.aadhaar_seeding_status}</span>
+                        </div>
+                      )}
+                      {panDetails.aadhaar_number && (
+                        <div>
+                          <span className="text-gray-500">Aadhaar Number:</span>
+                          <span className="ml-2 text-gray-900 font-medium">
+                            {panDetails.aadhaar_number.length > 8 
+                              ? `XXXX${panDetails.aadhaar_number.slice(-4)}`
+                              : panDetails.aadhaar_number}
+                          </span>
+                        </div>
+                      )}
+                      {panDetails.aadhaar_linked !== undefined && panDetails.aadhaar_linked !== null && (
+                        <div>
+                          <span className="text-gray-500">Aadhaar Linked:</span>
+                          <span className="ml-2 text-gray-900 font-medium">
+                            {panDetails.aadhaar_linked ? 'true' : 'false'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
@@ -2949,62 +3139,167 @@ export function UserProfileDetail() {
           </div>
         </div>
 
-        {/* Addresses - Compact Cards */}
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+        {/* Addresses - Permanent and Present */}
+        <div className="space-y-4">
+          {/* Permanent Address Section */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-3">
               <MapPin className="w-4 h-4" />
-              Addresses ({allAddresses.length})
+              Permanent Address
             </h3>
-            {canEditUsers && (
-              <button
-                onClick={() => {
-                  setAddressInfoForm({
-                    address_line1: '',
-                    address_line2: '',
-                    city: '',
-                    state: '',
-                    pincode: '',
-                    country: 'India',
-                    address_type: 'current',
-                    is_primary: false
-                  });
-                  setEditingAddressId(null);
-                  setShowAddressModal(true);
-                }}
-                className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1"
-              >
-                <UserPlus className="w-3 h-3" />
-                Add
-              </button>
-            )}
-          </div>
-          {allAddresses.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {allAddresses.map((addr: any, idx: number) => (
-                <div key={addr.id || idx} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                  <div className="flex items-start justify-between mb-2">
-                    <span className="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
-                      {addr.is_primary ? 'Primary' : addr.source || 'Address'}
-                    </span>
-                    {addr.source && (
-                      <span className="text-xs text-gray-500">{addr.source}</span>
-                    )}
-                  </div>
-                  <div className="text-xs space-y-1 text-gray-700">
-                    {addr.address_line1 && <div>{addr.address_line1}</div>}
-                    {addr.address_line2 && <div>{addr.address_line2}</div>}
-                    <div>
-                      {[addr.city, addr.state, addr.pincode].filter(Boolean).join(', ')}
+            {(() => {
+              // Filter API addresses (digilocker, pan_api, etc.)
+              const apiSources = ['digilocker', 'pan_api', 'digitap'];
+              const permanentAddresses = allAddresses.filter((addr: any) => 
+                addr.source && apiSources.includes(addr.source.toLowerCase())
+              );
+              
+              return permanentAddresses.length > 0 ? (
+                <div className="space-y-3">
+                  {permanentAddresses.map((addr: any, idx: number) => (
+                    <div key={addr.id || idx} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                      <div className="flex items-start justify-between mb-2">
+                        <span className="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-0.5 rounded capitalize">
+                          {addr.source === 'digilocker' ? 'Aadhar Address' : 
+                           addr.source === 'pan_api' ? 'PAN API Address' : 
+                           addr.source || 'API Address'}
+                        </span>
+                      </div>
+                      <div className="text-xs space-y-1 text-gray-700">
+                        {addr.address_line1 && <div>{addr.address_line1}</div>}
+                        {addr.address_line2 && <div>{addr.address_line2}</div>}
+                        <div>
+                          {[addr.city, addr.state, addr.pincode].filter(Boolean).join(', ')}
+                        </div>
+                        {addr.country && addr.country !== 'India' && <div>{addr.country}</div>}
+                      </div>
                     </div>
-                    {addr.country && addr.country !== 'India' && <div>{addr.country}</div>}
-                  </div>
+                  ))}
                 </div>
-              ))}
+              ) : (
+                <p className="text-sm text-gray-500">No permanent addresses found</p>
+              );
+            })()}
+          </div>
+
+          {/* Present Address Section */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <MapPin className="w-4 h-4" />
+                Present Address
+              </h3>
+              {canEditUsers && (
+                <button
+                  onClick={() => {
+                    setAddressInfoForm({
+                      address_line1: '',
+                      address_line2: '',
+                      city: '',
+                      state: '',
+                      pincode: '',
+                      country: 'India',
+                      address_type: 'current',
+                      is_primary: false
+                    });
+                    setEditingAddressId(null);
+                    setShowAddressModal(true);
+                  }}
+                  className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1"
+                >
+                  <UserPlus className="w-3 h-3" />
+                  {(() => {
+                    const apiSources = ['digilocker', 'pan_api', 'digitap'];
+                    const presentAddresses = allAddresses.filter((addr: any) => 
+                      !addr.source || !apiSources.includes(addr.source.toLowerCase())
+                    );
+                    return presentAddresses.length > 0 ? 'Edit' : 'Add';
+                  })()}
+                </button>
+              )}
             </div>
-          ) : (
-            <p className="text-sm text-gray-500">No addresses found</p>
-          )}
+            {(() => {
+              // Filter manual addresses (user entered or admin entered)
+              const apiSources = ['digilocker', 'pan_api', 'digitap'];
+              const presentAddresses = allAddresses.filter((addr: any) => 
+                !addr.source || !apiSources.includes(addr.source.toLowerCase())
+              );
+              
+              if (presentAddresses.length > 0) {
+                const presentAddr = presentAddresses[0]; // Show first present address
+                return (
+                  <div className="space-y-3">
+                    <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            First Line of address
+                          </label>
+                          <div className="text-sm text-gray-900 bg-white border border-gray-300 rounded px-3 py-2">
+                            {presentAddr.address_line1 || 'N/A'}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            Second line of address
+                          </label>
+                          <div className="text-sm text-gray-900 bg-white border border-gray-300 rounded px-3 py-2">
+                            {presentAddr.address_line2 || 'N/A'}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            PIN CODE
+                          </label>
+                          <div className="text-sm text-gray-900 bg-white border border-gray-300 rounded px-3 py-2">
+                            {presentAddr.pincode || 'N/A'}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            State name
+                          </label>
+                          <div className="text-sm text-gray-900 bg-white border border-gray-300 rounded px-3 py-2">
+                            {presentAddr.state || 'N/A'}
+                          </div>
+                        </div>
+                      </div>
+                      {canEditUsers && (
+                        <div className="mt-3 pt-3 border-t border-gray-200">
+                          <button
+                            onClick={() => {
+                              setAddressInfoForm({
+                                address_line1: presentAddr.address_line1 || '',
+                                address_line2: presentAddr.address_line2 || '',
+                                city: presentAddr.city || '',
+                                state: presentAddr.state || '',
+                                pincode: presentAddr.pincode || '',
+                                country: presentAddr.country || 'India',
+                                address_type: 'current',
+                                is_primary: presentAddr.is_primary || false
+                              });
+                              setEditingAddressId(presentAddr.id);
+                              setShowAddressModal(true);
+                            }}
+                            className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1"
+                          >
+                            <Edit className="w-3 h-3" />
+                            Edit Present Address
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              } else {
+                return (
+                  <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                    <p className="text-sm text-gray-500">No present address found. Click "Add" to add one.</p>
+                  </div>
+                );
+              }
+            })()}
+          </div>
         </div>
 
 
@@ -3617,9 +3912,7 @@ export function UserProfileDetail() {
         // Call Add New Statement API to create new statement and get upload URL
         const response = await adminApiService.addNewBankStatement(params.userId);
         if (response.status === 'success' && response.data?.uploadUrl) {
-          toast.success('New statement created. Redirecting to Digitap...');
-          // Redirect admin to Digitap upload URL
-          window.open(response.data.uploadUrl, '_blank');
+          toast.success('New statement created successfully.');
           // Refresh statement data to get updated status
           await fetchBankStatement();
         } else {
@@ -3628,6 +3921,31 @@ export function UserProfileDetail() {
       } catch (error: any) {
         console.error('Add new statement error:', error);
         toast.error(error.message || 'Failed to create new statement');
+      } finally {
+        setVerifyingStatement(false);
+      }
+    };
+
+    const handleAddNewFromUser = async () => {
+      if (!params.userId) {
+        toast.error('User ID not found');
+        return;
+      }
+
+      setVerifyingStatement(true);
+      try {
+        // Call Add New From User API to reset status and allow user to upload
+        const response = await adminApiService.addNewBankStatementFromUser(params.userId);
+        if (response.status === 'success' || response.success === true) {
+          toast.success('Bank statement status reset. User can now upload via account aggregator (online) or manual (offline) mode.');
+          // Refresh statement data to get updated status
+          await fetchBankStatement();
+        } else {
+          toast.error(response.message || 'Failed to reset bank statement status');
+        }
+      } catch (error: any) {
+        console.error('Add new from user error:', error);
+        toast.error(error.message || 'Failed to reset bank statement status');
       } finally {
         setVerifyingStatement(false);
       }
@@ -3815,23 +4133,42 @@ export function UserProfileDetail() {
               <h4 className="text-md font-semibold text-gray-900">Bank Statement Verification</h4>
               <p className="text-sm text-gray-500 mt-1">Add and manage bank statements for verification</p>
             </div>
-            <Button
-              onClick={handleAddNewStatement}
-              disabled={verifyingStatement}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
-              {verifyingStatement ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add New Statement
-                </>
-              )}
-            </Button>
+            <div className="flex gap-3">
+              <Button
+                onClick={handleAddNewFromUser}
+                disabled={verifyingStatement}
+                className="bg-orange-600 hover:bg-orange-700"
+              >
+                {verifyingStatement ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add New from user
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={handleAddNewStatement}
+                disabled={verifyingStatement}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {verifyingStatement ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add New Statement
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -8859,7 +9196,7 @@ export function UserProfileDetail() {
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
             <div className="flex items-center justify-between mb-4">
               <h4 className="text-lg font-semibold text-gray-900">
-                {editingAddressId ? 'Edit Address' : 'Add New Address'}
+                {editingAddressId ? 'Edit Present Address' : 'Add Present Address'}
               </h4>
               <button
                 onClick={() => {
@@ -8873,92 +9210,58 @@ export function UserProfileDetail() {
             </div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Address Type</label>
-                <select
-                  value={addressInfoForm.address_type}
-                  onChange={(e) => setAddressInfoForm({ ...addressInfoForm, address_type: e.target.value as 'current' | 'permanent' | 'office' })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="current">Current</option>
-                  <option value="permanent">Permanent</option>
-                  <option value="office">Office</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Address Line 1 <span className="text-red-500">*</span></label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  First Line of address <span className="text-red-500">*</span>
+                </label>
                 <textarea
                   value={addressInfoForm.address_line1}
                   onChange={(e) => setAddressInfoForm({ ...addressInfoForm, address_line1: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   rows={3}
-                  placeholder="Enter address line 1"
+                  placeholder="Enter first line of address"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Address Line 2</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Second line of address
+                </label>
                 <textarea
                   value={addressInfoForm.address_line2}
                   onChange={(e) => setAddressInfoForm({ ...addressInfoForm, address_line2: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   rows={2}
-                  placeholder="Enter address line 2 (optional)"
+                  placeholder="Enter second line of address (optional)"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">City <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    value={addressInfoForm.city}
-                    onChange={(e) => setAddressInfoForm({ ...addressInfoForm, city: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter city"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">State <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    value={addressInfoForm.state}
-                    onChange={(e) => setAddressInfoForm({ ...addressInfoForm, state: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter state"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Pincode <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    value={addressInfoForm.pincode}
-                    onChange={(e) => setAddressInfoForm({ ...addressInfoForm, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter 6-digit pincode"
-                    maxLength={6}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
-                  <input
-                    type="text"
-                    value={addressInfoForm.country}
-                    onChange={(e) => setAddressInfoForm({ ...addressInfoForm, country: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter country"
-                  />
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  PIN CODE <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={addressInfoForm.pincode}
+                  onChange={(e) => setAddressInfoForm({ ...addressInfoForm, pincode: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter 6-digit PIN CODE"
+                  maxLength={6}
+                />
               </div>
               <div>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={addressInfoForm.is_primary}
-                    onChange={(e) => setAddressInfoForm({ ...addressInfoForm, is_primary: e.target.checked })}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm font-medium text-gray-700">Set as primary address</span>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  State name <span className="text-red-500">*</span>
                 </label>
+                <select
+                  value={addressInfoForm.state}
+                  onChange={(e) => setAddressInfoForm({ ...addressInfoForm, state: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select State</option>
+                  {INDIAN_STATES.map((state) => (
+                    <option key={state} value={state}>
+                      {state}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="flex gap-3 pt-4">
                 <button

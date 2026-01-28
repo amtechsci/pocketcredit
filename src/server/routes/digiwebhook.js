@@ -305,11 +305,15 @@ router.get('/', async (req, res) => {
         }
       })(); // Immediately invoked async function - runs in background
 
-      // Update KYC status to verified
+      // Update KYC status to verified and clear rekyc_required flag
       await executeQuery(
         `UPDATE kyc_verifications 
          SET kyc_status = 'verified', 
-             verified_at = NOW(), 
+             verified_at = NOW(),
+             verification_data = JSON_SET(
+               COALESCE(verification_data, '{}'),
+               '$.rekyc_required', false
+             ),
              updated_at = NOW() 
          WHERE id = ?`,
         [kycRecord.id]
@@ -519,7 +523,11 @@ router.post('/', async (req, res) => {
       await executeQuery(
         `UPDATE kyc_verifications 
          SET kyc_status = 'verified', 
-             verified_at = NOW(), 
+             verified_at = NOW(),
+             verification_data = JSON_SET(
+               COALESCE(verification_data, '{}'),
+               '$.rekyc_required', false
+             ),
              updated_at = NOW() 
          WHERE id = ?`,
         [kycRecord.id]

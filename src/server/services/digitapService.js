@@ -283,19 +283,21 @@ async function validatePANDetails(panNumber, clientRefNum = null) {
       return {
         success: true,
         data: {
-          name: result.fullname || '',
+          name: result.fullname || result.name || '',
           first_name: result.first_name || '',
           middle_name: result.middle_name || '',
           last_name: result.last_name || '',
           dob: convertedDOB || result.dob || null,
           gender: result.gender ? result.gender.toLowerCase() : null,
           pan: result.pan || panNumber,
-          aadhaar_number: result.aadhaar_number || null,
-          aadhaar_linked: result.aadhaar_linked || false,
+          pan_status: result.pan_status || result.status || result.panStatus || null,
+          aadhaar_number: result.aadhaar_number || result.aadhaarNumber || null,
+          aadhaar_linked: result.aadhaar_linked !== undefined ? result.aadhaar_linked : (result.aadhaarLinked !== undefined ? result.aadhaarLinked : false),
+          aadhaar_seeding_status: result.aadhaar_seeding_status || result.aadhaar_seeding || result.aadhaarSeedingStatus || result.aadhaarSeeding || null,
           address: addressArray,
           mobile: result.mobile || null,
           email: result.email || null,
-          pan_type: result.pan_type || null
+          pan_type: result.pan_type || result.panType || null
         }
       };
     } else {
