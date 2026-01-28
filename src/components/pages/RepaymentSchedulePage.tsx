@@ -2053,7 +2053,8 @@ export const RepaymentSchedulePage = () => {
                   const isUltimateStage = stage.isPremium;
                   const isNextStage = idx === 1 && !isUltimateStage; // Second stage (if not premium) is next
                   // Use currentLoanNumber for current stage, currentLoanNumber + 1 for next stage
-                  const stageNumber = stage.isPremium ? 0 : (isCurrentStage ? currentLoanNumber : (isNextStage ? currentLoanNumber + 1 : stage.index + 1));
+                  // Premium stage is always stage 07
+                  const stageNumber = stage.isPremium ? 7 : (isCurrentStage ? currentLoanNumber : (isNextStage ? currentLoanNumber + 1 : stage.index + 1));
                 
                 return (
                   <div key={`${stage.index}-${stage.isPremium}`} className="relative">
@@ -2091,7 +2092,7 @@ export const RepaymentSchedulePage = () => {
                               <span className={`text-xs font-bold ${
                                 isCurrentStage ? 'text-blue-100' : 'text-gray-500'
                               }`}>
-                                {isUltimateStage ? 'Stage Premium' : `Stage ${String(stageNumber).padStart(2, '0')}`}
+                                {`Stage ${String(stageNumber).padStart(2, '0')}`}
                               </span>
                               {isCurrentStage && (
                                 <span className="flex items-center gap-1 text-[10px] font-semibold bg-orange-500 text-white px-2 py-0.5 rounded-full">
@@ -2101,9 +2102,6 @@ export const RepaymentSchedulePage = () => {
                               )}
                               {isNextStage && (
                                 <span className="text-[10px] font-medium text-gray-500">Next</span>
-                              )}
-                              {isUltimateStage && !isCurrentStage && (
-                                <span className="text-[10px] font-medium text-gray-500">Ultimate</span>
                               )}
                             </div>
                             <div className={`text-xl sm:text-2xl font-bold mb-0.5 ${
@@ -2117,8 +2115,8 @@ export const RepaymentSchedulePage = () => {
                               {isCurrentStage 
                                 ? `Your Current limit` 
                                 : isUltimateStage 
-                                ? 'Your Ultimate limit (Premium)' 
-                                : `Stage ${stageNumber} limit (${stage.percentage}% of salary)`}
+                                ? 'Personal loan with 24 tenure' 
+                                : `Stage ${stageNumber} limit`}
                             </div>
                           </div>
 
