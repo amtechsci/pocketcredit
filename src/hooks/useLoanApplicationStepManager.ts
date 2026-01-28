@@ -146,6 +146,30 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
     return false;
   }, []);
 
+  // Check if ReKYC is required - admin may have triggered re-KYC
+  const checkReKYCRequired = useCallback(async (applicationId?: number | string | null) => {
+    try {
+      const checkId = applicationId || '0';
+      const response = await apiService.getKYCStatus(checkId);
+      if (response.success && response.data && response.data.verification_data) {
+        let verificationData = response.data.verification_data;
+        // Parse if it's a string
+        if (typeof verificationData === 'string') {
+          try {
+            verificationData = JSON.parse(verificationData);
+          } catch (e) {
+            return false;
+          }
+        }
+        // Check if rekyc_required flag is true
+        return verificationData.rekyc_required === true;
+      }
+    } catch (error) {
+      console.error('Error checking ReKYC requirement:', error);
+    }
+    return false;
+  }, []);
+
   // Check credit analytics completion status
   const checkCreditAnalyticsStatus = useCallback(async (_applicationId: number) => {
     try {
@@ -367,17 +391,25 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
 
     try {
       // Special handling for KYC verification - it's user-level, not application-level
-      // Allow access to KYC page ONLY if KYC is NOT verified, regardless of loan application status
+      // Allow access to KYC page if:
+      // 1. KYC is NOT verified, OR
+      // 2. ReKYC is required (admin triggered re-KYC)
       if (requiredStep === 'kyc-verification') {
         const kycVerified = await checkKYCStatus(null);
-        if (!kycVerified) {
-          // KYC not verified - allow access to KYC page
-          console.log('[StepGuard] KYC not verified - allowing access to KYC verification page');
+        const rekycRequired = await checkReKYCRequired(null);
+        
+        if (!kycVerified || rekycRequired) {
+          // KYC not verified OR ReKYC required - allow access to KYC page
+          if (rekycRequired) {
+            console.log('[StepGuard] ReKYC required by admin - allowing access to KYC verification page');
+          } else {
+            console.log('[StepGuard] KYC not verified - allowing access to KYC verification page');
+          }
           setStatus({
             currentStep: 'kyc-verification',
             applicationId: null,
             prerequisites: {
-              kycVerified: false,
+              kycVerified: kycVerified && !rekycRequired, // Consider KYC not verified if ReKYC is required
               creditAnalyticsCompleted: false,
               employmentCompleted: false,
               bankStatementCompleted: false,
@@ -391,8 +423,8 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
           isValidatingRef.current = false;
           return;
         } else {
-          // KYC is already verified - redirect to next step or application creation
-          console.log('[StepGuard] KYC already verified - redirecting to next step');
+          // KYC is already verified and no ReKYC required - redirect to next step or application creation
+          console.log('[StepGuard] KYC already verified and no ReKYC required - redirecting to next step');
           let applicationId = getApplicationId();
           if (!applicationId) {
             applicationId = await fetchLatestApplication();
@@ -524,54 +556,58 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
           const kycVerified = await checkKYCStatus(null);
           const isLoanApplicationRoute = location.pathname.startsWith('/loan-application/') || location.pathname === '/application';
           
-          // Special case: If user is on KYC page and KYC is already verified, redirect to application
-          if (requiredStep === 'kyc-verification' && kycVerified) {
-            console.log('[StepGuard] KYC already verified, redirecting to application creation');
-            setStatus({
-              currentStep: 'application',
-              applicationId: null,
-              prerequisites: {
-                kycVerified: true,
-                creditAnalyticsCompleted: false,
-                employmentCompleted: false,
-                bankStatementCompleted: false,
-                bankDetailsCompleted: false,
-                referencesCompleted: false,
-                documentsNeeded: false
-              },
-              loading: false,
-              error: null
-            });
-            if (!skipRedirect && !hasRedirectedRef.current) {
-              hasRedirectedRef.current = true;
-              navigate(STEP_ROUTES['application'], { replace: true });
+          // Special case: If user is on KYC page, check both KYC status and ReKYC requirement
+          if (requiredStep === 'kyc-verification') {
+            const rekycRequired = await checkReKYCRequired(null);
+            if (kycVerified && !rekycRequired) {
+              // KYC verified and no ReKYC required - redirect to application
+              console.log('[StepGuard] KYC already verified and no ReKYC required, redirecting to application creation');
+              setStatus({
+                currentStep: 'application',
+                applicationId: null,
+                prerequisites: {
+                  kycVerified: true,
+                  creditAnalyticsCompleted: false,
+                  employmentCompleted: false,
+                  bankStatementCompleted: false,
+                  bankDetailsCompleted: false,
+                  referencesCompleted: false,
+                  documentsNeeded: false
+                },
+                loading: false,
+                error: null
+              });
+              if (!skipRedirect && !hasRedirectedRef.current) {
+                hasRedirectedRef.current = true;
+                navigate(STEP_ROUTES['application'], { replace: true });
+              }
+              isValidatingRef.current = false;
+              return;
+            } else if (!kycVerified || rekycRequired) {
+              // KYC not verified OR ReKYC required - allow access to KYC page
+              if (rekycRequired) {
+                console.log('[StepGuard] ReKYC required by admin, allowing access to KYC page');
+              } else {
+                console.log('[StepGuard] KYC not verified, allowing access to KYC page');
+              }
+              setStatus({
+                currentStep: 'kyc-verification',
+                applicationId: null,
+                prerequisites: {
+                  kycVerified: kycVerified && !rekycRequired, // Consider KYC not verified if ReKYC is required
+                  creditAnalyticsCompleted: false,
+                  employmentCompleted: false,
+                  bankStatementCompleted: false,
+                  bankDetailsCompleted: false,
+                  referencesCompleted: false,
+                  documentsNeeded: false
+                },
+                loading: false,
+                error: null
+              });
+              isValidatingRef.current = false;
+              return;
             }
-            isValidatingRef.current = false;
-            return;
-          }
-          
-          // For new users: Allow application creation first, KYC will be required after
-          // Only redirect to KYC if user is explicitly trying to access KYC page
-          if (requiredStep === 'kyc-verification' && !kycVerified) {
-            // User is on KYC page and KYC not verified - allow access
-            console.log('[StepGuard] KYC not verified, allowing access to KYC page');
-            setStatus({
-              currentStep: 'kyc-verification',
-              applicationId: null,
-              prerequisites: {
-                kycVerified: false,
-                creditAnalyticsCompleted: false,
-                employmentCompleted: false,
-                bankStatementCompleted: false,
-                bankDetailsCompleted: false,
-                referencesCompleted: false,
-                documentsNeeded: false
-              },
-              loading: false,
-              error: null
-            });
-            isValidatingRef.current = false;
-            return;
           }
           
           // Default: Redirect to application creation (new users apply first)
@@ -626,7 +662,7 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
         documentsNeeded: docStatus.needed
       };
 
-      const currentStep = determineCurrentStep(prerequisites, !!applicationId);
+      const currentStep = determineCurrentStep(prerequisites);
 
       // Only update status if something actually changed to prevent unnecessary re-renders
       setStatus(prev => {

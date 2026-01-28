@@ -1033,6 +1033,7 @@ class ApiService {
     kyc_status: string;
     kyc_method: string | null;
     verified_at: string | null;
+    verification_data?: any; // Can be object or string, contains rekyc_required flag
   }>> {
     return this.request('GET', `/digilocker/kyc-status/${applicationId}`);
   }
