@@ -317,10 +317,38 @@ export function DynamicDashboardPage() {
             // Don't redirect - let user stay on dashboard
           }
 
-          // PRIORITY 5: Check for under_review or submitted status
+          // PRIORITY 5: Check for applications that need user action (incomplete steps)
+          // User should complete all steps before application goes to admin review
+          const incompleteApp = applications.find(
+            (app: any) => {
+              // Check if app has incomplete steps that user needs to complete
+              const step = app.current_step;
+              // If step is references, user needs to complete references first
+              if (step === 'references' || step === 'bank-details' || step === 'bank_details') {
+                return true;
+              }
+              return false;
+            }
+          );
+          if (incompleteApp) {
+            const step = incompleteApp.current_step;
+            console.log(`📋 Found incomplete application at step: ${step}`);
+            
+            if (step === 'references') {
+              navigate('/user-references');
+              return;
+            } else if (step === 'bank-details' || step === 'bank_details') {
+              navigate(`/loan-application/steps?applicationId=${incompleteApp.id}`);
+              return;
+            }
+          }
+
+          // PRIORITY 6: Check for under_review or submitted status (only if step is complete)
           // NOTE: ready_to_repeat_disbursal should NOT redirect here - it's handled in PRIORITY 3
           const underReviewApp = applications.find(
-            (app: any) => (app.status === 'under_review' || app.status === 'submitted') && app.status !== 'ready_to_repeat_disbursal'
+            (app: any) => (app.status === 'under_review' || app.status === 'submitted') && 
+                          app.status !== 'ready_to_repeat_disbursal' &&
+                          (app.current_step === 'complete' || !app.current_step)
           );
           if (underReviewApp) {
             navigate('/application-under-review');

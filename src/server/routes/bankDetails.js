@@ -236,11 +236,13 @@ router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
       [bankDetailsId, application_id]
     );
 
-    // Update loan application status and step
+    // Update loan application step to references (keep status as submitted - user needs to complete references first)
+    // Status will be set to 'submitted' for admin review AFTER references are saved
     await executeQuery(
-      'UPDATE loan_applications SET status = ?, current_step = ? WHERE id = ?',
-      ['under_review', 'references', application_id]
+      'UPDATE loan_applications SET current_step = ?, updated_at = NOW() WHERE id = ?',
+      ['references', application_id]
     );
+    console.log(`✅ Updated loan application ${application_id} step to 'references' - user needs to complete references`);
 
     res.json({
       success: true,

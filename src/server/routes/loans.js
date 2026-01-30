@@ -131,12 +131,28 @@ router.get('/:applicationId', requireAuth, async (req, res) => {
         [userId]
       );
       
-      const hasRequiredReferences = userReferences && userReferences.length > 0 && userReferences[0].ref_count === 3;
-      const hasAlternateData = userAlternateData && userAlternateData.length > 0 && 
-        userAlternateData[0].alternate_mobile && userAlternateData[0].company_name && userAlternateData[0].company_email;
+      const hasRequiredReferences = userReferences && userReferences.length > 0 && userReferences[0].ref_count >= 3;
+      const hasAlternateData = userAlternateData && userAlternateData.length > 0 && userAlternateData[0].alternate_mobile;
       
-      if (loanWithBank && loanWithBank.length > 0 && hasRequiredReferences && hasAlternateData) {
-        currentStep = 'completed';
+      // Check if current_step is already set in the database (use it as source of truth)
+      const appWithStep = await executeQuery(
+        'SELECT current_step FROM loan_applications WHERE id = ?',
+        [applicationId]
+      );
+      const dbCurrentStep = appWithStep && appWithStep.length > 0 ? appWithStep[0].current_step : null;
+      
+      // If database has a step, use it; otherwise compute from state
+      if (dbCurrentStep === 'complete' || dbCurrentStep === 'completed') {
+        currentStep = 'complete';
+      } else if (dbCurrentStep === 'references') {
+        // Check if user actually completed references
+        if (hasRequiredReferences && hasAlternateData) {
+          currentStep = 'complete';
+        } else {
+          currentStep = 'references';
+        }
+      } else if (loanWithBank && loanWithBank.length > 0 && hasRequiredReferences && hasAlternateData) {
+        currentStep = 'complete';
       } else if (loanWithBank && loanWithBank.length > 0) {
         currentStep = 'references';
       } else {

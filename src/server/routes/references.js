@@ -147,6 +147,35 @@ router.post('/', requireAuth, async (req, res) => {
     );
     console.log('✅ Updated user alternate data for user:', userId);
 
+    // After references saved, update loan application status to 'submitted' for admin review
+    // This marks that user has completed all required steps
+    try {
+      const applications = await executeQuery(
+        `SELECT id, status, current_step FROM loan_applications 
+         WHERE user_id = ? AND status NOT IN ('cleared', 'cancelled', 'account_manager', 'overdue')
+         ORDER BY created_at DESC LIMIT 1`,
+        [userId]
+      );
+
+      if (applications && applications.length > 0) {
+        const application = applications[0];
+        // Only update if application is in a pre-review status and step is at references or later
+        if (['pending', 'in_progress', 'submitted'].includes(application.status) || 
+            ['bank-details', 'references'].includes(application.current_step)) {
+          await executeQuery(
+            `UPDATE loan_applications 
+             SET status = 'submitted', current_step = 'complete', updated_at = NOW() 
+             WHERE id = ?`,
+            [application.id]
+          );
+          console.log(`✅ Updated loan application ${application.id} to 'submitted' status - ready for admin review`);
+        }
+      }
+    } catch (stepError) {
+      console.warn('⚠️ Could not update loan application status after references saved:', stepError.message);
+      // Don't fail - references are already saved
+    }
+
     console.log('✅ Successfully saved references:', {
       referencesCount: insertedRefs.length,
       alternateMobile: alternate_mobile
