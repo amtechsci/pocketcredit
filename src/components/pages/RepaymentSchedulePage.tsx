@@ -566,10 +566,9 @@ export const RepaymentSchedulePage = () => {
       <div className="container mx-auto px-4 py-4 sm:py-6 max-w-5xl">
         {/* Header Message */}
         <div className="text-center mb-6 sm:mb-8">
-          <h5 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-2">
-          Get upto ₹{formatCurrency(headerLimit).replace('₹', '')}
-          </h5>
-          <p className="text-xs sm:text-sm text-gray-500"> by closing this loan. Clear your loan fast to unlock higher limits</p>
+          <b className="text-lg sm:text-2xl md:text-3xl font-bold text-gray-900 mb-2">
+          Get upto ₹1.50 Lakh </b>
+          <p className="text-xs sm:text-sm text-gray-500">on your <b className="text-blue-600">7<sup>th</sup></b> loan. Clear your loan fast to unlock higher limits</p>
         </div>
 
         {/* Loan Cleared Success Message */}
@@ -724,7 +723,7 @@ export const RepaymentSchedulePage = () => {
                         <div className="flex items-center gap-2 mb-1">
                           <h3 className="text-sm font-semibold text-gray-900">Preclose it today</h3>
                           <p className="text-xs text-gray-600">
-                            Now & save interest: {formatCurrency(precloseAmount)}
+                            & save interest: {formatCurrency(precloseAmount)}
                           </p>
                         </div>
                         <p className="text-[10px] text-gray-500 italic mb-1">
@@ -1479,7 +1478,7 @@ export const RepaymentSchedulePage = () => {
                             <h3 className="text-sm font-semibold text-gray-900">Preclose it today</h3>
                             <p className="text-xs text-gray-600">
                               {interestSaved > 0 ? (
-                                <>Now & save interest: {formatCurrency(interestSaved)}</>
+                                <>& save interest: {formatCurrency(interestSaved)}</>
                               ) : (
                                 <>Now & save interest: {formatCurrency(precloseAmount)}</>
                               )}
