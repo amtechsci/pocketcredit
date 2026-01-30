@@ -473,6 +473,64 @@ router.post('/validate-pan', requireAuth, checkHoldStatus, async (req, res) => {
 // UAN Basic V3 API Routes (Synchronous)
 
 /**
+ * GET /api/digitap/uan/stored
+ * Get previously stored UAN data for the user
+ */
+router.get('/uan/stored', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+
+    // Check for existing UAN data in uan_passbook_requests table (has full response)
+    const existingRequest = await executeQuery(`
+      SELECT response_data FROM uan_passbook_requests 
+      WHERE user_id = ? AND status = 'success'
+      ORDER BY created_at DESC LIMIT 1
+    `, [userId]);
+
+    if (existingRequest.length > 0 && existingRequest[0].response_data) {
+      let uanData = existingRequest[0].response_data;
+      
+      // Parse if it's a string
+      if (typeof uanData === 'string') {
+        try {
+          uanData = JSON.parse(uanData);
+        } catch (e) {
+          console.error('Error parsing UAN data:', e);
+          return res.json({
+            success: false,
+            message: 'No UAN data found'
+          });
+        }
+      }
+
+      return res.json({
+        success: true,
+        data: uanData
+      });
+    }
+
+    return res.json({
+      success: false,
+      message: 'No UAN data found'
+    });
+  } catch (error) {
+    console.error('Error fetching stored UAN data:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch UAN data'
+    });
+  }
+});
+
+/**
  * POST /api/digitap/uan/basic
  * Get UAN Basic information (synchronous API)
  */
@@ -617,6 +675,72 @@ router.post('/uan/basic', requireAuth, async (req, res) => {
 });
 
 // Admin UAN Basic V3 API Routes (for admins to make requests on behalf of users)
+
+/**
+ * GET /api/digitap/uan/admin/stored/:userId
+ * Get previously stored UAN data for a user (Admin version)
+ */
+router.get('/uan/admin/stored/:userId', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required'
+      });
+    }
+
+    const userIdInt = parseInt(userId, 10);
+    if (isNaN(userIdInt)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid User ID format'
+      });
+    }
+
+    // Check for existing UAN data in uan_passbook_requests table (has full response)
+    const existingRequest = await executeQuery(`
+      SELECT response_data FROM uan_passbook_requests 
+      WHERE user_id = ? AND status = 'success'
+      ORDER BY created_at DESC LIMIT 1
+    `, [userIdInt]);
+
+    if (existingRequest.length > 0 && existingRequest[0].response_data) {
+      let uanData = existingRequest[0].response_data;
+      
+      // Parse if it's a string
+      if (typeof uanData === 'string') {
+        try {
+          uanData = JSON.parse(uanData);
+        } catch (e) {
+          console.error('Error parsing UAN data:', e);
+          return res.json({
+            success: false,
+            message: 'No UAN data found'
+          });
+        }
+      }
+
+      return res.json({
+        success: true,
+        data: uanData
+      });
+    }
+
+    return res.json({
+      success: false,
+      message: 'No UAN data found'
+    });
+  } catch (error) {
+    console.error('Error fetching stored UAN data (admin):', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch UAN data'
+    });
+  }
+});
 
 /**
  * POST /api/digitap/uan/admin/basic

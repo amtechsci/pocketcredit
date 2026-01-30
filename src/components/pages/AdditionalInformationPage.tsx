@@ -43,8 +43,8 @@ export const AdditionalInformationPage = () => {
 
       // Check if all required fields are already set
       if (latestUser?.marital_status && latestUser?.spoken_language && latestUser?.work_experience_range) {
-        console.log('✅ Additional information already completed, redirecting to application under review');
-        navigate('/application-under-review', { replace: true });
+        console.log('✅ Additional information already completed, redirecting to references');
+        navigate('/user-references', { replace: true });
         return;
       }
 
@@ -109,7 +109,8 @@ export const AdditionalInformationPage = () => {
         // Refresh user context to update additional info fields
         await refreshUser();
         setTimeout(() => {
-          navigate('/application-under-review');
+          // Navigate to references page after additional info is completed
+          navigate('/user-references');
         }, 1500);
       } else {
         toast.error(response.message || 'Failed to save information');

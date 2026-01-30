@@ -2084,6 +2084,24 @@ class AdminApiService {
       throw error;
     }
   }
+
+  /**
+   * Get stored UAN data for a user (Admin version)
+   */
+  async getStoredUANData(userId: string): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.get(`/api/digitap/uan/admin/stored/${userId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.data;
+    } catch (error: any) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
 }
 
 // Export singleton instance

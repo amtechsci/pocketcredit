@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Loader2, CheckCircle, XCircle, Building2 } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, Building2, Briefcase, User, Calendar, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../services/api';
 import { adminApiService } from '../../services/adminApi';
@@ -14,13 +14,98 @@ interface UANEmploymentInfoProps {
   onDataReceived?: (data: any) => void;
 }
 
+// Helper to extract UAN data from various response structures
+function extractUANData(data: any) {
+  // The data might be the full response or just the result
+  const result = data?.result || data;
+  
+  // Get the first UAN from the array
+  const uanArray = result?.uan || [];
+  const matchingUan = result?.summary?.matching_uan || (uanArray.length > 0 ? uanArray[0] : null);
+  
+  // Get UAN details for the matching UAN
+  const uanDetails = matchingUan ? result?.uan_details?.[matchingUan] : null;
+  const basicDetails = uanDetails?.basic_details || {};
+  const employmentDetails = uanDetails?.employment_details || {};
+  
+  // Get summary data
+  const summary = result?.summary || {};
+  const recentEmployerData = summary?.recent_employer_data || {};
+  
+  return {
+    matchingUan,
+    uanCount: summary?.uan_count,
+    isEmployed: summary?.is_employed,
+    dateOfExitMarked: summary?.date_of_exit_marked,
+    
+    // Basic details
+    name: basicDetails?.name,
+    dateOfBirth: basicDetails?.date_of_birth,
+    mobile: data?.mobile || basicDetails?.mobile,
+    gender: basicDetails?.gender,
+    aadhaarVerificationStatus: basicDetails?.aadhaar_verification_status,
+    
+    // Employment details (prefer recent_employer_data, fallback to uan_details)
+    establishmentId: recentEmployerData?.establishment_id || employmentDetails?.establishment_id,
+    establishmentName: recentEmployerData?.establishment_name || employmentDetails?.establishment_name,
+    dateOfJoining: recentEmployerData?.date_of_joining || employmentDetails?.date_of_joining,
+    dateOfExit: recentEmployerData?.date_of_exit || employmentDetails?.date_of_exit,
+    memberId: recentEmployerData?.member_id || employmentDetails?.member_id,
+  };
+}
+
 export function UANEmploymentInfo({ aadharLinkedMobile, userId, onDataReceived }: UANEmploymentInfoProps) {
   // Determine if we're in admin mode (userId provided means admin is making request on behalf of user)
   const isAdminMode = !!userId;
   const [mobile, setMobile] = useState('');
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [responseData, setResponseData] = useState<any>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  
+  // Ref to track if callback has been called (to prevent infinite loops)
+  const callbackCalledRef = useRef(false);
+  
+  // Call onDataReceived when responseData changes (only once)
+  useEffect(() => {
+    if (responseData && onDataReceived && !callbackCalledRef.current) {
+      callbackCalledRef.current = true;
+      onDataReceived(responseData);
+    }
+  }, [responseData, onDataReceived]);
+
+  // Load stored UAN data on mount
+  useEffect(() => {
+    let isMounted = true;
+    
+    const loadStoredUANData = async () => {
+      try {
+        let response;
+        if (isAdminMode && userId) {
+          response = await adminApiService.getStoredUANData(String(userId));
+        } else {
+          response = await apiService.getStoredUANData();
+        }
+        
+        if (isMounted && response.success && response.data) {
+          setResponseData(response.data);
+        }
+      } catch (error) {
+        console.error('Error loading stored UAN data:', error);
+        // Silently fail - user can enter mobile number
+      } finally {
+        if (isMounted) {
+          setInitialLoading(false);
+        }
+      }
+    };
+
+    loadStoredUANData();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [isAdminMode, userId]);
 
   // Pre-fill mobile number from aadhar_linked_mobile
   useEffect(() => {
@@ -52,16 +137,9 @@ export function UANEmploymentInfo({ aadharLinkedMobile, userId, onDataReceived }
 
       // Check if HTTP response is 200 and result_code is 101 (success)
       if (httpResponseCode === 200 && resultCode === 101) {
-        // Success - data found
-        // The result data might be in response.data.result or directly in response.data
-        const result = response.data.result || response.data;
-        setResponseData(result);
+        // Success - store the full response data
+        setResponseData(response.data);
         toast.success('UAN data retrieved successfully');
-        
-        // Call callback if provided
-        if (onDataReceived) {
-          onDataReceived(result);
-        }
       } else if (httpResponseCode === 200) {
         // API returned 200 but with error result_code (e.g., 103 = No records found)
         const errorMsg = response.data?.message || response.message || 'No records found';
@@ -89,6 +167,9 @@ export function UANEmploymentInfo({ aadharLinkedMobile, userId, onDataReceived }
     setErrorMessage(null);
   };
 
+  // Extract UAN data from response
+  const uanData = responseData ? extractUANData(responseData) : null;
+
   return (
     <Card className="w-full">
       <CardHeader>
@@ -96,12 +177,22 @@ export function UANEmploymentInfo({ aadharLinkedMobile, userId, onDataReceived }
           <Building2 className="w-5 h-5" />
           Employment Info
         </CardTitle>
-        <CardDescription>
-          Retrieve your EPFO passbook using your Aadhaar-linked mobile number
-        </CardDescription>
+        {!responseData && (
+          <CardDescription>
+            Retrieve your EPFO passbook using your Aadhaar-linked mobile number
+          </CardDescription>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
-        {!responseData && !errorMessage && (
+        {/* Initial loading state */}
+        {initialLoading && (
+          <div className="text-center py-4">
+            <Loader2 className="w-6 h-6 animate-spin text-blue-600 mx-auto mb-2" />
+            <p className="text-sm text-gray-500">Checking for existing data...</p>
+          </div>
+        )}
+
+        {!initialLoading && !responseData && !errorMessage && (
           <>
             <div className="space-y-2">
               <Label htmlFor="mobile">Mobile Number</Label>
@@ -148,100 +239,133 @@ export function UANEmploymentInfo({ aadharLinkedMobile, userId, onDataReceived }
           </div>
         )}
 
-        {responseData && (
+        {responseData && uanData && (
           <div className="space-y-4">
-            <div className="flex items-center gap-2 text-green-600">
-              <CheckCircle className="w-5 h-5" />
-              <span className="font-medium">UAN data retrieved successfully!</span>
+            {/* UAN Number - Display prominently */}
+            {uanData.matchingUan && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 text-green-600 mb-2">
+                  <CheckCircle className="w-4 h-4" />
+                  <span className="text-sm font-medium">UAN Data Retrieved</span>
+                </div>
+                <div className="text-xs text-gray-600 mb-1">Universal Account Number (UAN)</div>
+                <div className="text-2xl font-bold text-green-700 font-mono">
+                  {uanData.matchingUan}
+                </div>
+              </div>
+            )}
+
+            {/* Summary Info */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {uanData.uanCount !== undefined && (
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <div className="text-xs text-gray-500">UAN Count</div>
+                  <div className="font-semibold">{uanData.uanCount}</div>
+                </div>
+              )}
+              {uanData.isEmployed !== undefined && (
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <div className="text-xs text-gray-500">Is Employed</div>
+                  <div className={`font-semibold ${uanData.isEmployed ? 'text-green-600' : 'text-red-600'}`}>
+                    {uanData.isEmployed ? 'Yes' : 'No'}
+                  </div>
+                </div>
+              )}
+              {uanData.dateOfExitMarked !== undefined && (
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <div className="text-xs text-gray-500">Date of Exit Marked</div>
+                  <div className="font-semibold">{uanData.dateOfExitMarked ? 'Yes' : 'No'}</div>
+                </div>
+              )}
             </div>
 
-            {/* Employee Details */}
-            {responseData.employee_details && (
-              <div className="bg-gray-50 rounded-lg p-4 space-y-2">
-                <h4 className="font-semibold text-sm">Employee Details</h4>
-                <div className="text-sm space-y-1">
-                  {responseData.employee_details.member_name && (
-                    <div>
-                      <span className="text-gray-500">Name:</span>{' '}
-                      <span className="font-medium">{responseData.employee_details.member_name}</span>
-                    </div>
-                  )}
-                  {responseData.employee_details.father_name && (
-                    <div>
-                      <span className="text-gray-500">Father's Name:</span>{' '}
-                      <span className="font-medium">{responseData.employee_details.father_name}</span>
-                    </div>
-                  )}
-                  {responseData.employee_details.dob && (
-                    <div>
-                      <span className="text-gray-500">Date of Birth:</span>{' '}
-                      <span className="font-medium">{responseData.employee_details.dob}</span>
-                    </div>
-                  )}
-                  {responseData.employee_details.uan && (
-                    <div>
-                      <span className="text-gray-500">UAN:</span>{' '}
-                      <span className="font-medium">{responseData.employee_details.uan}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Establishment Details */}
-            {responseData.est_details && responseData.est_details.length > 0 && (
-              <div className="bg-gray-50 rounded-lg p-4 space-y-4">
-                <h4 className="font-semibold text-sm">Employment History</h4>
-                {responseData.est_details.map((est: any, index: number) => (
-                  <div key={index} className="border-l-2 border-blue-500 pl-4 space-y-2">
-                    <div className="font-medium text-sm">{est.est_name}</div>
-                    <div className="text-xs text-gray-600 space-y-1">
-                      {est.member_id && (
-                        <div>Member ID: {est.member_id}</div>
-                      )}
-                      {est.office && (
-                        <div>Office: {est.office}</div>
-                      )}
-                      {est.doj_epf && (
-                        <div>Date of Joining: {est.doj_epf}</div>
-                      )}
-                      {est.doc_epf && (
-                        <div>Date of Check: {est.doc_epf}</div>
-                      )}
-                    </div>
+            {/* Basic Details */}
+            <div className="bg-gray-50 rounded-lg p-4 space-y-3">
+              <h4 className="font-semibold text-sm flex items-center gap-2">
+                <User className="w-4 h-4" />
+                Basic Details
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                {uanData.name && (
+                  <div>
+                    <span className="text-gray-500">Name:</span>{' '}
+                    <span className="font-medium">{uanData.name}</span>
                   </div>
-                ))}
+                )}
+                {uanData.dateOfBirth && (
+                  <div>
+                    <span className="text-gray-500">Date of Birth:</span>{' '}
+                    <span className="font-medium">{uanData.dateOfBirth}</span>
+                  </div>
+                )}
+                {uanData.mobile && (
+                  <div>
+                    <span className="text-gray-500">Mobile:</span>{' '}
+                    <span className="font-medium">{uanData.mobile}</span>
+                  </div>
+                )}
+                {uanData.gender && (
+                  <div>
+                    <span className="text-gray-500">Gender:</span>{' '}
+                    <span className="font-medium">{uanData.gender}</span>
+                  </div>
+                )}
+                {uanData.aadhaarVerificationStatus !== undefined && (
+                  <div>
+                    <span className="text-gray-500">Aadhaar Verification:</span>{' '}
+                    <span className={`font-medium ${uanData.aadhaarVerificationStatus === 1 ? 'text-green-600' : 'text-orange-600'}`}>
+                      {uanData.aadhaarVerificationStatus === 1 ? 'Verified' : uanData.aadhaarVerificationStatus === 0 ? 'Pending' : 'Not Verified'}
+                    </span>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
 
-            {/* Overall PF Balance */}
-            {responseData.overall_pf_balance && (
-              <div className="bg-blue-50 rounded-lg p-4 space-y-2">
-                <h4 className="font-semibold text-sm">Overall PF Balance</h4>
-                <div className="text-sm space-y-1">
-                  {responseData.overall_pf_balance.current_pf_balance !== undefined && (
+            {/* Employment Details */}
+            {(uanData.establishmentName || uanData.establishmentId) && (
+              <div className="bg-blue-50 rounded-lg p-4 space-y-3">
+                <h4 className="font-semibold text-sm flex items-center gap-2">
+                  <Briefcase className="w-4 h-4" />
+                  Employment Details
+                </h4>
+                <div className="space-y-2 text-sm">
+                  {uanData.establishmentName && (
                     <div>
-                      <span className="text-gray-500">Current PF Balance:</span>{' '}
-                      <span className="font-medium text-blue-600">
-                        ₹{parseFloat(responseData.overall_pf_balance.current_pf_balance).toLocaleString('en-IN')}
-                      </span>
+                      <span className="text-gray-500">Establishment Name:</span>{' '}
+                      <span className="font-medium">{uanData.establishmentName}</span>
                     </div>
                   )}
-                  {responseData.overall_pf_balance.pension_balance !== undefined && (
+                  {uanData.establishmentId && (
                     <div>
-                      <span className="text-gray-500">Pension Balance:</span>{' '}
-                      <span className="font-medium">
-                        ₹{parseFloat(responseData.overall_pf_balance.pension_balance).toLocaleString('en-IN')}
-                      </span>
+                      <span className="text-gray-500">Establishment ID:</span>{' '}
+                      <span className="font-medium font-mono text-xs">{uanData.establishmentId}</span>
                     </div>
                   )}
+                  {uanData.memberId && (
+                    <div>
+                      <span className="text-gray-500">Member ID:</span>{' '}
+                      <span className="font-medium font-mono text-xs">{uanData.memberId}</span>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2 pt-2">
+                    {uanData.dateOfJoining && (
+                      <div className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3 text-gray-400" />
+                        <span className="text-gray-500">Joined:</span>{' '}
+                        <span className="font-medium">{uanData.dateOfJoining}</span>
+                      </div>
+                    )}
+                    {uanData.dateOfExit && (
+                      <div className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3 text-gray-400" />
+                        <span className="text-gray-500">Exit:</span>{' '}
+                        <span className="font-medium">{uanData.dateOfExit}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
-
-            <Button onClick={handleReset} variant="outline" className="w-full">
-              Retrieve Another Passbook
-            </Button>
           </div>
         )}
 

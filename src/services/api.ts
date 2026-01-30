@@ -1693,6 +1693,13 @@ class ApiService {
   async getUANBasic(data: { mobile: string }): Promise<ApiResponse<any>> {
     return this.request('POST', '/digitap/uan/basic', data);
   }
+
+  /**
+   * Get stored UAN data for the user
+   */
+  async getStoredUANData(): Promise<ApiResponse<any>> {
+    return this.request('GET', '/digitap/uan/stored');
+  }
 }
 
 // Export singleton instance

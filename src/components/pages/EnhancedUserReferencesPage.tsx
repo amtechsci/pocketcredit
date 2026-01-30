@@ -308,7 +308,8 @@ export function EnhancedUserReferencesPage({
           if (onComplete) {
             onComplete();
           } else {
-            navigate(-1); // Go back to previous page
+            // Navigate to application under review page after references are saved
+            navigate('/application-under-review');
           }
         }, 100);
       } else {

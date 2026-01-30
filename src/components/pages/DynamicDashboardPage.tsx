@@ -1037,6 +1037,26 @@ export function DynamicDashboardPage() {
                                   state: { applicationId: loan.id }
                                 });
                               }
+                            } else if (loan.status === 'under_review' || loan.status === 'submitted') {
+                              // Check if user has completed references before showing under review page
+                              try {
+                                const refsResponse = await apiService.getUserReferences();
+                                const referencesList = refsResponse.data?.references || [];
+                                const alternateData = refsResponse.data?.alternate_data;
+                                const hasReferences = Array.isArray(referencesList) && referencesList.length >= 3;
+                                const hasAlternateMobile = alternateData?.alternate_mobile ? true : false;
+                                
+                                if (!hasReferences || !hasAlternateMobile) {
+                                  // References not complete - redirect to complete them
+                                  console.log('📋 References pending, redirecting to references page');
+                                  navigate('/user-references');
+                                  return;
+                                }
+                              } catch (refError) {
+                                console.error('Error checking references:', refError);
+                              }
+                              // References complete - go to under review page
+                              navigate('/application-under-review');
                             } else {
                               navigate('/loan-application/kyc-verification', {
                                 state: { applicationId: loan.id }
@@ -1053,7 +1073,9 @@ export function DynamicDashboardPage() {
                               ? 'Continue'
                               : loan.status === 'follow_up'
                                 ? (loanDocumentStatus[loan.id]?.allUploaded ? 'View' : 'Upload Documents')
-                                : 'View'}
+                                : loan.status === 'under_review' || loan.status === 'submitted'
+                                  ? 'View Status'
+                                  : 'View'}
                         </Button>
                       </div>
                     </Card>
@@ -1152,7 +1174,7 @@ export function DynamicDashboardPage() {
                       {loan.status === 'account_manager' && 'Loan is active'}
                     </p>
                     <Button
-                      onClick={() => {
+                      onClick={async () => {
                         console.log('View Details clicked for:', loan.id);
                         if (loan.status === 'account_manager' || loan.status === 'overdue') {
                           navigate(`/repayment-schedule?applicationId=${loan.id}`);
@@ -1162,6 +1184,26 @@ export function DynamicDashboardPage() {
                           navigate('/loan-application/upload-documents', {
                             state: { applicationId: loan.id }
                           });
+                        } else if (loan.status === 'under_review' || loan.status === 'submitted') {
+                          // Check if user has completed references before showing under review page
+                          try {
+                            const refsResponse = await apiService.getUserReferences();
+                            const referencesList = refsResponse.data?.references || [];
+                            const alternateData = refsResponse.data?.alternate_data;
+                            const hasReferences = Array.isArray(referencesList) && referencesList.length >= 3;
+                            const hasAlternateMobile = alternateData?.alternate_mobile ? true : false;
+                            
+                            if (!hasReferences || !hasAlternateMobile) {
+                              // References not complete - redirect to complete them
+                              console.log('📋 References pending, redirecting to references page');
+                              navigate('/user-references');
+                              return;
+                            }
+                          } catch (refError) {
+                            console.error('Error checking references:', refError);
+                          }
+                          // References complete - go to under review page
+                          navigate('/application-under-review');
                         } else {
                           navigate('/loan-application/kyc-verification', {
                             state: { applicationId: loan.id }
@@ -1174,7 +1216,8 @@ export function DynamicDashboardPage() {
                     >
                       {loan.status === 'account_manager' || loan.status === 'overdue' ? 'View Loan' :
                         loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal' ? 'Continue' :
-                          loan.status === 'follow_up' ? 'Upload Documents' : 'View'}
+                          loan.status === 'follow_up' ? 'Upload Documents' :
+                            loan.status === 'under_review' || loan.status === 'submitted' ? 'View Status' : 'View'}
                     </Button>
                   </div>
                 </Card>
