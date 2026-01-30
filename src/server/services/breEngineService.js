@@ -8,7 +8,7 @@
  * 2. Enquiry count > 6 in last 30 days
  * 3. More than 2 accounts with Written_off_Settled_Status (00-17) in last 6 months
  * 4. More than 2 accounts with SuitFiled_WilfulDefault (01, 02, 03) in last 6 months
- * 5. Experian score < 580
+ * 5. Experian score < 450
  */
 
 class BREEngineService {
@@ -389,7 +389,7 @@ class BREEngineService {
   }
 
   /**
-   * BRE RULE 5: Experian score < 580 = REJECT
+   * BRE RULE 5: Experian score < 450 = REJECT
    */
   checkCreditScore(creditReport) {
     try {
@@ -401,26 +401,26 @@ class BREEngineService {
         return {
           passed: false,
           score: null,
-          threshold: 580,
+          threshold: 450,
           reasons: ['Credit score not available in report']
         };
       }
 
-      // RULE: Score < 580 = REJECT
-      const passed = score >= 580;
+      // RULE: Score < 450 = REJECT
+      const passed = score >= 450;
 
       return {
         passed,
         score,
-        threshold: 580,
-        reasons: passed ? [] : [`Credit score (${score}) is below minimum requirement (580)`]
+        threshold: 450,
+        reasons: passed ? [] : [`Credit score (${score}) is below minimum requirement (450)`]
       };
     } catch (error) {
       console.error('BRE: Error checking Credit Score:', error);
       return {
         passed: false,
         score: null,
-        threshold: 580,
+        threshold: 450,
         reasons: ['Error evaluating Credit Score condition'],
         error: error.message
       };

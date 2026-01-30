@@ -461,7 +461,7 @@ router.post('/check', requireAuth, async (req, res) => {
         );
       }
     } else {
-      // If eligible (score > 580), update loan application step to 'employment-details'
+      // If eligible (score > 450), update loan application step to 'employment-details'
       // This allows the user to proceed to the next step
       try {
         const applications = await executeQuery(

@@ -310,10 +310,10 @@ class CreditAnalyticsService {
       negativeIndicators
     };
 
-    // Rule 1: Credit score must be > 580
-    if (creditScore !== null && creditScore <= 580) {
+    // Rule 1: Credit score must be > 450
+    if (creditScore !== null && creditScore <= 450) {
       validation.isEligible = false;
-      validation.reasons.push(`Credit score ${creditScore} is below minimum requirement of 580`);
+      validation.reasons.push(`Credit score ${creditScore} is below minimum requirement of 450`);
     }
 
     // Rule 2: No settlements (to be implemented later)

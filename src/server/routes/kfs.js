@@ -710,48 +710,9 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         // Calculate actual loan term days for APR calculation
         // For Multi-EMI loans, calculate from disbursement date to last EMI date
         // For single payment loans, use actual interest calculation days
+        // NOTE: loanTermDaysForAPR will be calculated AFTER allEmiDates is populated
+        // to use actual EMI dates from processed_due_date when available
         let loanTermDaysForAPR = days;  // Default: use interest calculation days
-
-        if (emiCount > 1) {
-          // Generate last EMI date to calculate actual loan term
-          const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
-          baseDate.setHours(0, 0, 0, 0);
-
-          let lastEmiDate;
-          if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
-            const salaryDate = parseInt(userData.salary_date);
-            if (salaryDate >= 1 && salaryDate <= 31) {
-              // Use firstDueDate as the base (already calculated from plannedTermResult.repaymentDate)
-              // Get last EMI date (emiCount - 1 because first is at index 0)
-              lastEmiDate = getSalaryDateForMonth(firstDueDate, salaryDate, emiCount - 1);
-            } else {
-              // Fallback: use firstDueDate + (emiCount - 1) months
-              lastEmiDate = new Date(firstDueDate);
-              lastEmiDate.setMonth(lastEmiDate.getMonth() + (emiCount - 1));
-            }
-          } else {
-            // For non-salary date Multi-EMI, calculate based on frequency
-            const daysPerEmi = {
-              daily: 1,
-              weekly: 7,
-              biweekly: 14,
-              monthly: 30
-            };
-            const daysBetween = daysPerEmi[planData.emi_frequency] || 30;
-            lastEmiDate = new Date(firstDueDate);
-            if (planData.emi_frequency === 'monthly') {
-              lastEmiDate.setMonth(lastEmiDate.getMonth() + (emiCount - 1));
-            } else {
-              lastEmiDate.setDate(lastEmiDate.getDate() + ((emiCount - 1) * daysBetween));
-            }
-            lastEmiDate.setHours(0, 0, 0, 0);
-          }
-
-          // Calculate actual loan term days from disbursement to last EMI
-          if (lastEmiDate) {
-            loanTermDaysForAPR = Math.ceil((lastEmiDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
-          }
-        }
 
         // For Multi-EMI loans, calculate total interest by summing interest for each EMI period
         // Each EMI period has interest calculated on the outstanding principal for that period
@@ -939,6 +900,40 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               emiDate.setHours(0, 0, 0, 0);
               allEmiDates.push(emiDate);
             }
+          }
+
+          // Calculate loan term days for APR using actual EMI dates
+          if (emiCount > 1 && allEmiDates.length === emiCount) {
+            // Use the last EMI date from allEmiDates (which comes from processed_due_date if available)
+            const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+            baseDate.setHours(0, 0, 0, 0);
+            
+            // Get last EMI date from allEmiDates array
+            const lastEmiDateStr = allEmiDates[allEmiDates.length - 1];
+            let lastEmiDate;
+            
+            if (typeof lastEmiDateStr === 'string') {
+              // Parse date string (YYYY-MM-DD)
+              const [year, month, day] = lastEmiDateStr.split('-').map(Number);
+              lastEmiDate = new Date(year, month - 1, day);
+            } else if (lastEmiDateStr instanceof Date) {
+              lastEmiDate = new Date(lastEmiDateStr);
+            } else {
+              // Fallback: calculate from firstDueDate
+              lastEmiDate = new Date(firstDueDate);
+              if (planData.emi_frequency === 'monthly') {
+                lastEmiDate.setMonth(lastEmiDate.getMonth() + (emiCount - 1));
+              } else {
+                const daysPerEmi = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
+                const daysBetween = daysPerEmi[planData.emi_frequency] || 30;
+                lastEmiDate.setDate(lastEmiDate.getDate() + ((emiCount - 1) * daysBetween));
+              }
+            }
+            lastEmiDate.setHours(0, 0, 0, 0);
+            
+            // Calculate actual loan term days from disbursement to last EMI
+            loanTermDaysForAPR = Math.ceil((lastEmiDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+            console.log(`📅 [APR] Using actual last EMI date: ${formatDateLocal(lastEmiDate)}, loanTermDaysForAPR: ${loanTermDaysForAPR}`);
           }
 
           // Calculate total interest by summing interest for each EMI period
@@ -4554,48 +4549,9 @@ router.get('/:loanId', async (req, res, next) => {
     // Calculate actual loan term days for APR calculation
     // For Multi-EMI loans, calculate from disbursement date to last EMI date
     // For single payment loans, use actual interest calculation days
+    // NOTE: loanTermDaysForAPR will be calculated AFTER allEmiDates is populated
+    // to use actual EMI dates from processed_due_date when available
     let loanTermDaysForAPR = days;  // Default: use interest calculation days
-
-    if (emiCount > 1) {
-      // Generate last EMI date to calculate actual loan term
-      const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
-      baseDate.setHours(0, 0, 0, 0);
-
-      let lastEmiDate;
-      if (planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
-        const salaryDate = parseInt(userData.salary_date);
-        if (salaryDate >= 1 && salaryDate <= 31) {
-          // Use firstDueDate as the base (already calculated from plannedTermResult.repaymentDate)
-          // Get last EMI date (emiCount - 1 because first is at index 0)
-          lastEmiDate = getSalaryDateForMonth(firstDueDate, salaryDate, emiCount - 1);
-        } else {
-          // Fallback: use firstDueDate + (emiCount - 1) months
-          lastEmiDate = new Date(firstDueDate);
-          lastEmiDate.setMonth(lastEmiDate.getMonth() + (emiCount - 1));
-        }
-      } else {
-        // For non-salary date Multi-EMI, calculate based on frequency
-        const daysPerEmi = {
-          daily: 1,
-          weekly: 7,
-          biweekly: 14,
-          monthly: 30
-        };
-        const daysBetween = daysPerEmi[planData.emi_frequency] || 30;
-        lastEmiDate = new Date(firstDueDate);
-        if (planData.emi_frequency === 'monthly') {
-          lastEmiDate.setMonth(lastEmiDate.getMonth() + (emiCount - 1));
-        } else {
-          lastEmiDate.setDate(lastEmiDate.getDate() + ((emiCount - 1) * daysBetween));
-        }
-        lastEmiDate.setHours(0, 0, 0, 0);
-      }
-
-      // Calculate actual loan term days from disbursement to last EMI
-      if (lastEmiDate) {
-        loanTermDaysForAPR = Math.ceil((lastEmiDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
-      }
-    }
 
     // Calculate APR (Annual Percentage Rate)
     // APR = ((All Fees + GST + Interest) / Loan Amount) / Days * 36500
@@ -4852,6 +4808,40 @@ router.get('/:loanId', async (req, res, next) => {
 
           // Reduce outstanding principal for next period
           outstandingPrincipal = Math.round((outstandingPrincipal - principalForThisEmi) * 100) / 100;
+        }
+        
+        // Calculate loan term days for APR using actual EMI dates
+        if (emiCount > 1 && allEmiDates.length === emiCount) {
+          // Use the last EMI date from allEmiDates (which comes from processed_due_date if available)
+          const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+          baseDate.setHours(0, 0, 0, 0);
+          
+          // Get last EMI date from allEmiDates array
+          const lastEmiDateStr = allEmiDates[allEmiDates.length - 1];
+          let lastEmiDate;
+          
+          if (typeof lastEmiDateStr === 'string') {
+            // Parse date string (YYYY-MM-DD)
+            const [year, month, day] = lastEmiDateStr.split('-').map(Number);
+            lastEmiDate = new Date(year, month - 1, day);
+          } else if (lastEmiDateStr instanceof Date) {
+            lastEmiDate = new Date(lastEmiDateStr);
+          } else {
+            // Fallback: calculate from firstDueDate
+            lastEmiDate = new Date(firstDueDate);
+            if (planData.emi_frequency === 'monthly') {
+              lastEmiDate.setMonth(lastEmiDate.getMonth() + (emiCount - 1));
+            } else {
+              const daysPerEmi = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
+              const daysBetween = daysPerEmi[planData.emi_frequency] || 30;
+              lastEmiDate.setDate(lastEmiDate.getDate() + ((emiCount - 1) * daysBetween));
+            }
+          }
+          lastEmiDate.setHours(0, 0, 0, 0);
+          
+          // Calculate actual loan term days from disbursement to last EMI
+          loanTermDaysForAPR = Math.ceil((lastEmiDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+          console.log(`📅 [Admin APR] Using actual last EMI date: ${formatDateLocal(lastEmiDate)}, loanTermDaysForAPR: ${loanTermDaysForAPR}`);
         }
       }
     }

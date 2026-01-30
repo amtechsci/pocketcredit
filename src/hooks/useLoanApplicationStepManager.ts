@@ -208,10 +208,10 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
     try {
       const response = await apiService.getCreditAnalyticsData();
       if (response.status === 'success' && response.data) {
-        // Credit analytics is completed if we have credit data and score > 580 (eligible)
+        // Credit analytics is completed if we have credit data and score > 450 (eligible)
         const creditScore = response.data.credit_score;
         const score = typeof creditScore === 'number' ? creditScore : parseInt(creditScore) || 0;
-        return score > 580; // Eligible means credit analytics is completed
+        return score > 450; // Eligible means credit analytics is completed
       }
     } catch (error: any) {
       // If 404 or no data, credit analytics is not completed

@@ -95,9 +95,9 @@ export const CreditAnalyticsPage = () => {
     const creditScore = creditData.credit_score;
     const score = typeof creditScore === 'number' ? creditScore : parseInt(creditScore) || 0;
 
-    // If score > 580: Eligible, redirect to employment-details after 5 seconds
+    // If score > 450: Eligible, redirect to employment-details after 5 seconds
     // Add a small delay to ensure backend has updated the loan application step
-    if (score > 580) {
+    if (score > 450) {
       // Wait 1 second for backend to update step, then start 5-second countdown (total 6 seconds)
       let redirectTimer: NodeJS.Timeout;
       const delayTimer = setTimeout(() => {
@@ -111,7 +111,7 @@ export const CreditAnalyticsPage = () => {
         if (redirectTimer) clearTimeout(redirectTimer);
       };
     } else {
-      // If score <= 580: Not eligible, user should be on hold, redirect to hold-status
+      // If score <= 450: Not eligible, user should be on hold, redirect to hold-status
       // Backend should have already set user to on_hold
       const timer = setTimeout(() => {
         navigate('/hold-status', { replace: true });
@@ -157,7 +157,7 @@ export const CreditAnalyticsPage = () => {
 
   const creditScore = creditData.credit_score;
   const score = typeof creditScore === 'number' ? creditScore : parseInt(creditScore) || 0;
-  const isEligible = score > 580;
+  const isEligible = score > 450;
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -189,7 +189,7 @@ export const CreditAnalyticsPage = () => {
               </div>
               <h2 className="text-3xl font-bold text-red-600 mb-4">Not Eligible</h2>
               <p className="text-lg text-gray-700 mb-2">Your Experian Credit Score: <span className="font-bold">{score}</span></p>
-              <p className="text-gray-600 mb-6">Your credit score is below the required threshold (580).</p>
+              <p className="text-gray-600 mb-6">Your credit score is below the required threshold (450).</p>
               <p className="text-sm text-gray-500">Redirecting to hold status...</p>
             </>
           )}
