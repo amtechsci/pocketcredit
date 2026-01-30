@@ -497,18 +497,27 @@ router.post('/uan/basic', requireAuth, async (req, res) => {
       });
     }
 
-    // Fetch user's PAN from database
+    // Fetch user's PAN from database (stored as pan_number in users table)
     let userPan = null;
     try {
       const userRows = await executeQuery(`
-        SELECT pan FROM users WHERE id = ?
+        SELECT pan_number FROM users WHERE id = ?
       `, [userId]);
-      if (userRows.length > 0 && userRows[0].pan) {
-        userPan = userRows[0].pan;
+      if (userRows.length > 0 && userRows[0].pan_number) {
+        userPan = userRows[0].pan_number;
       }
+      console.log('User PAN for UAN lookup:', userPan);
     } catch (panError) {
       console.error('Error fetching user PAN:', panError);
       // Continue without PAN
+    }
+
+    // PAN is required for the UAN Basic API
+    if (!userPan) {
+      return res.status(400).json({
+        success: false,
+        message: 'PAN number not found for this user. PAN is required for UAN lookup.'
+      });
     }
 
     const clientRefNum = generateUANClientRefNum(userId);
@@ -651,19 +660,27 @@ router.post('/uan/admin/basic', authenticateAdmin, async (req, res) => {
       });
     }
 
-    // Fetch user's PAN from database
+    // Fetch user's PAN from database (stored as pan_number in users table)
     let userPan = null;
     try {
       const userRows = await executeQuery(`
-        SELECT pan FROM users WHERE id = ?
+        SELECT pan_number FROM users WHERE id = ?
       `, [userIdInt]);
-      if (userRows.length > 0 && userRows[0].pan) {
-        userPan = userRows[0].pan;
+      if (userRows.length > 0 && userRows[0].pan_number) {
+        userPan = userRows[0].pan_number;
       }
       console.log('User PAN for UAN lookup:', userPan);
     } catch (panError) {
       console.error('Error fetching user PAN:', panError);
       // Continue without PAN
+    }
+
+    // PAN is required for the UAN Basic API
+    if (!userPan) {
+      return res.status(400).json({
+        success: false,
+        message: 'PAN number not found for this user. PAN is required for UAN lookup.'
+      });
     }
 
     const clientRefNum = generateUANClientRefNum(userIdInt);

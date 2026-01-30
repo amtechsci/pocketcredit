@@ -408,10 +408,10 @@ function generateUANClientRefNum(userId) {
  * UAN Basic V3 - Synchronous API call
  * @param {string} mobile - Mobile number
  * @param {string} clientRefNum - Client reference number
- * @param {string} pan - PAN number (optional but recommended)
+ * @param {string} pan - PAN number (required for API)
  * @returns {Promise<{success: boolean, data?: object, error?: string}>}
  */
-async function getUANBasic(mobile, clientRefNum, pan = null) {
+async function getUANBasic(mobile, clientRefNum, pan) {
   try {
     if (!mobile) {
       return {
@@ -428,22 +428,35 @@ async function getUANBasic(mobile, clientRefNum, pan = null) {
       };
     }
 
+    // Validate PAN format - PAN is required for this API
+    if (!pan) {
+      return {
+        success: false,
+        error: 'PAN number is required for UAN lookup'
+      };
+    }
+
+    const panUpper = pan.toUpperCase();
+    if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(panUpper)) {
+      return {
+        success: false,
+        error: 'Invalid PAN number format'
+      };
+    }
+
     const authToken = getUANBasicAuthToken();
     console.log(`UAN Basic Auth token configured: ${authToken.substring(0, 20)}...`);
 
     // Use the correct production URL
     const url = 'https://svc.digitap.ai/cv/v3/uan_basic/sync';
 
+    // Build request body with all required fields as per API spec
     const requestBody = {
-      client_ref_num: clientRefNum,
-      mobile: mobile,
-      run_alternate_pan_flow: 0
+      client_ref_num: String(clientRefNum),
+      mobile: String(mobile),
+      run_alternate_pan_flow: 0,
+      pan: panUpper
     };
-
-    // Add PAN if provided
-    if (pan && /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(pan)) {
-      requestBody.pan = pan;
-    }
 
     console.log(`Calling UAN Basic V3 API: ${url}`);
     console.log(`Request body:`, JSON.stringify(requestBody, null, 2));
@@ -452,14 +465,9 @@ async function getUANBasic(mobile, clientRefNum, pan = null) {
     const response = await axios.post(url, requestBody, {
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Basic ${authToken}`,
-        'Accept': 'application/json'
+        'Authorization': `Basic ${authToken}`
       },
-      timeout: 60000, // 60 seconds timeout for sync API
-      validateStatus: function (status) {
-        // Accept status codes 200-299 as success
-        return status >= 200 && status < 300;
-      }
+      timeout: 60000 // 60 seconds timeout for sync API
     });
 
     console.log(`UAN Basic V3 API Response Status: ${response.status}`);
