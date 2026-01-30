@@ -107,9 +107,13 @@ router.post('/', requireAuth, async (req, res) => {
       }
     }
 
-    // Delete existing references for this user
-    await executeQuery('DELETE FROM `references` WHERE user_id = ?', [userId]);
-    console.log('✅ Deleted existing references for user:', userId);
+    // Delete existing user references for this user (but KEEP credit analytics references)
+    // Credit analytics references have relation = 'Self' and are for admin view only
+    await executeQuery(
+      `DELETE FROM \`references\` WHERE user_id = ? AND relation != 'Self' AND name NOT LIKE 'Credit%'`,
+      [userId]
+    );
+    console.log('✅ Deleted existing user references for user:', userId, '(kept credit analytics references)');
 
     // Insert new references
     const insertedRefs = [];
@@ -207,6 +211,7 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 // GET /api/references - Get User References and Alternate Data
+// NOTE: Excludes credit analytics auto-saved references (relation = 'Self') - those are for admin only
 router.get('/', requireAuth, async (req, res) => {
   try {
     await initializeDatabase();
@@ -216,8 +221,15 @@ router.get('/', requireAuth, async (req, res) => {
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
+    // Exclude credit analytics references (relation = 'Self' or name starts with 'Credit')
+    // Those are only for admin view, not for user to edit
     const references = await executeQuery(
-      'SELECT id, user_id, name, phone, relation, status, admin_id, created_at, updated_at FROM `references` WHERE user_id = ? ORDER BY created_at ASC',
+      `SELECT id, user_id, name, phone, relation, status, admin_id, created_at, updated_at 
+       FROM \`references\` 
+       WHERE user_id = ? 
+       AND relation != 'Self' 
+       AND name NOT LIKE 'Credit%'
+       ORDER BY created_at ASC`,
       [userId]
     );
 
