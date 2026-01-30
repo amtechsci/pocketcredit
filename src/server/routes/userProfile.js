@@ -4085,11 +4085,12 @@ router.post('/:userId/reset-selfie-verification', authenticateAdmin, async (req,
 
     console.log('🔄 Admin resetting selfie verification for user:', userId);
 
-    // Reset selfie_verified flag in all loan applications for this user
+    // Reset selfie_verified flag but keep selfie_captured = 1 to indicate admin reset
+    // This prevents auto-completion from other loans when user goes to post-disbursal
     await executeQuery(
       `UPDATE loan_applications 
-       SET selfie_verified = 0, updated_at = NOW() 
-       WHERE user_id = ? AND selfie_verified = 1`,
+       SET selfie_verified = 0, selfie_captured = 1, updated_at = NOW() 
+       WHERE user_id = ? AND status NOT IN ('cleared', 'cancelled')`,
       [userId]
     );
 

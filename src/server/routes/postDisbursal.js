@@ -144,7 +144,12 @@ router.get('/progress/:applicationId', requireAuth, async (req, res) => {
     // Check if user has existing verified selfie from previous loans
     let hasVerifiedSelfie = (progress.selfie_captured && progress.selfie_verified) || false;
     
-    if (!hasVerifiedSelfie) {
+    // Check if admin has reset selfie verification for this specific application
+    // If selfie_captured = 1 but selfie_verified = 0, admin explicitly reset it - don't auto-complete
+    const selfieWasReset = progress.selfie_captured && !progress.selfie_verified;
+    
+    if (!hasVerifiedSelfie && !selfieWasReset) {
+      // Only auto-complete from other loans if admin hasn't reset selfie for this application
       try {
         const existingSelfie = await executeQuery(
           `SELECT selfie_image_url FROM loan_applications 
@@ -177,6 +182,8 @@ router.get('/progress/:applicationId', requireAuth, async (req, res) => {
         console.error('Error checking for existing verified selfie:', selfieCheckError);
         // Continue with current selfie status if check fails
       }
+    } else if (selfieWasReset) {
+      console.log(`🔄 User ${userId} selfie was reset by admin for loan ${applicationId}. Requiring fresh selfie verification.`);
     }
 
     // Check if user has existing references (3+ refs + alternate mobile)
