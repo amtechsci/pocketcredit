@@ -366,72 +366,75 @@ export const RepaymentSchedulePage = () => {
     console.warn('⚠️ processed_at is not available for loan, cannot calculate exhausted days accurately');
   }
 
-  // Exhausted Days Calculation - Priority: last_extension_date + 1 day, Fallback: processed_at
-  // Per rulebook: Use inclusive counting - Math.ceil((end - start) / msPerDay) + 1
-  // First, try to use exhaustedDays from API response (calculated with last_extension_date priority)
+  // Exhausted Days Calculation - Priority: backend API value, Fallback: local calculation
+  // User's logic: if today is 31 and disbursed on 30, today counts as Day 1
+  // Backend uses: calculateDaysBetween(disbursed_at, today) - 1 (excludes disbursal day)
   // Trust backend value - it's the source of truth
   let exhaustedDays = calculations?.interest?.exhaustedDays;
   
-  // If API didn't provide exhaustedDays, calculate locally with priority logic
-  if (exhaustedDays === undefined || exhaustedDays === null) {
-    // PRIORITY 1: Use last_extension_date + 1 day (next day after extension) if extension exists
+  // Helper to extract UTC date from timestamp
+  const extractUTCDate = (timestamp: string): string | null => {
+    if (!timestamp) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(timestamp)) return timestamp;
+    if (timestamp.includes('T')) return timestamp.substring(0, 10);
+    return timestamp.split('T')[0] || null;
+  };
+  
+  // Helper to get today's date string
+  const getTodayStr = (): string => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  };
+  
+  // Helper to calculate days between two date strings (inclusive)
+  const calculateDaysBetween = (startStr: string, endStr: string): number => {
+    const [sy, sm, sd] = startStr.split('-').map(Number);
+    const [ey, em, ed] = endStr.split('-').map(Number);
+    const start = new Date(sy, sm - 1, sd);
+    const end = new Date(ey, em - 1, ed);
+    const diffMs = end.getTime() - start.getTime();
+    return Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1; // +1 for inclusive
+  };
+  
+  // If API returned a value, use it (including 0)
+  if (typeof exhaustedDays === 'number') {
+    console.log('Using exhaustedDays from API response:', exhaustedDays);
+  } 
+  // If API didn't provide exhaustedDays, calculate locally
+  else {
+    const todayStr = getTodayStr();
+    let baseDateStr: string | null = null;
+    
+    // PRIORITY 1: Use last_extension_date if extension exists
     if (loanData.last_extension_date && loanData.extension_count > 0) {
-      const lastExtensionDateStr = loanData.last_extension_date.split('T')[0]; // Get YYYY-MM-DD part
-      const lastExtensionDate = new Date(lastExtensionDateStr + 'T00:00:00');
-      lastExtensionDate.setHours(0, 0, 0, 0);
-      
-      // Add 1 day to get "next day" after extension
-      const nextDayAfterExtension = new Date(lastExtensionDate);
-      nextDayAfterExtension.setDate(nextDayAfterExtension.getDate() + 1);
-      nextDayAfterExtension.setHours(0, 0, 0, 0);
-      
-      // Calculate days from next day after extension to today
-      const diffTime = currentDateMidnight.getTime() - nextDayAfterExtension.getTime();
-      const daysDiff = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-      exhaustedDays = Math.max(1, daysDiff);
-      
-      console.log('Exhausted Days Calculation (using last_extension_date + 1 day):', {
-        last_extension_date: loanData.last_extension_date,
-        lastExtensionDateStr,
-        nextDayAfterExtension: nextDayAfterExtension.toISOString().split('T')[0],
-        currentDate: currentDate.toISOString().split('T')[0],
-        calculatedDays: exhaustedDays
-      });
-    } 
-    // FALLBACK: Use processed_at + 1 day if no extension (interest starts the day after processing)
-    else if (processedDateMidnight) {
-      // Interest starts from the day AFTER processed_at
-      const nextDayAfterProcessed = new Date(processedDateMidnight);
-      nextDayAfterProcessed.setDate(nextDayAfterProcessed.getDate() + 1);
-      nextDayAfterProcessed.setHours(0, 0, 0, 0);
-      
-      // Calculate difference in days using inclusive counting from next day after processed
-      // Formula: Math.ceil((end - start) / msPerDay) + 1
-      const diffTime = currentDateMidnight.getTime() - nextDayAfterProcessed.getTime();
-      const daysDiff = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-      
-      // Exhausted days should be at least 1 if loan was processed today or in the past
-      exhaustedDays = Math.max(1, daysDiff);
-      
-      console.log('Exhausted Days Calculation (using processed_at + 1 day as fallback):', {
-        processed_at: loanData.processed_at,
-        processedDateStr: processedDateMidnight ? loanData.processed_at.split('T')[0] : 'N/A',
-        nextDayAfterProcessed: nextDayAfterProcessed.toISOString().split('T')[0],
-        currentDate: currentDate.toISOString().split('T')[0],
-        calculatedDays: exhaustedDays
-      });
+      baseDateStr = extractUTCDate(loanData.last_extension_date);
+      console.log('Using last_extension_date for exhausted days:', baseDateStr);
+    }
+    // PRIORITY 2: Use disbursed_at
+    else if (loanData.disbursed_at || loanData.processed_at) {
+      baseDateStr = extractUTCDate(loanData.disbursed_at || loanData.processed_at);
+      console.log('Using disbursed_at for exhausted days:', baseDateStr);
     }
     
-    // If still not calculated, default to 1
-    if (!exhaustedDays || exhaustedDays < 1) {
-      exhaustedDays = 1;
+    if (baseDateStr) {
+      // If disbursed today, 0 days of interest
+      if (baseDateStr === todayStr) {
+        exhaustedDays = 0;
+        console.log('Disbursed today, exhaustedDays = 0');
+      } else {
+        // calculateDaysBetween is inclusive, subtract 1 to exclude disbursal day
+        const inclusiveDays = calculateDaysBetween(baseDateStr, todayStr);
+        exhaustedDays = Math.max(0, inclusiveDays - 1);
+        console.log('Exhausted Days Calculation:', { baseDateStr, todayStr, inclusiveDays, exhaustedDays });
+      }
+    } else {
+      // No date available, default to 0
+      exhaustedDays = 0;
     }
-  } else {
-    console.log('Using exhaustedDays from API response (with last_extension_date priority):', exhaustedDays);
   }
   
-  // Ensure exhaustedDays is at least 1
-  exhaustedDays = Math.max(1, exhaustedDays || 1);
+  // Ensure exhaustedDays is a valid number (0 is valid!)
+  exhaustedDays = exhaustedDays ?? 0;
   
   // For due date calculation, still use disbursed_at or processed_at
   const disbursedDate = processedDateMidnight || (loanData.disbursed_at ? new Date(loanData.disbursed_at.split('T')[0] + 'T00:00:00') : new Date());
@@ -568,7 +571,7 @@ export const RepaymentSchedulePage = () => {
         <div className="text-center mb-6 sm:mb-8">
           <b className="text-lg sm:text-2xl md:text-3xl font-bold text-gray-900 mb-2">
           Get upto ₹1.50 Lakh </b>
-          <p className="text-xs sm:text-sm text-gray-500">on your <b className="text-blue-600">7<sup>th</sup></b> loan. Clear your loan fast to unlock higher limits</p>
+          <p className="text-xs sm:text-sm text-gray-500">on your <b className="text-blue-600 text-sm">7<sup>th</sup></b> loan. Clear your loan fast to unlock higher limits</p>
         </div>
 
         {/* Loan Cleared Success Message */}

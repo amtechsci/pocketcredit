@@ -1102,47 +1102,65 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
     // Determine base date for interest calculation
     // PRIORITY 1: Use last_extension_date + 1 day (next day after extension) if extension exists
     // PRIORITY 2: Use processed_at if it exists (regardless of status)
-    // FALLBACK: Use disbursed_at if processed_at is not available
+    // Helper: Convert Date object or timestamp to YYYY-MM-DD string (local time)
+    const toDateString = (value) => {
+      if (!value) return null;
+      // If already YYYY-MM-DD string, return as-is
+      if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        return value;
+      }
+      // If Date object, format to YYYY-MM-DD using local time
+      if (value instanceof Date) {
+        const year = value.getFullYear();
+        const month = String(value.getMonth() + 1).padStart(2, '0');
+        const day = String(value.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+      // Fallback to parseDateToString
+      return parseDateToString(value);
+    };
+    
+    // Get the raw date from database (use processed_at_date or disbursed_at_date from SQL DATE() function)
+    // These are already in local timezone as stored in DB
     let baseDateStr = null;
     
+    // PRIORITY 1: If extension exists, use last_extension_date
     if (loan.last_extension_date && loan.extension_count > 0) {
-      // Extension exists - use last_extension_date + 1 day (next day after extension)
-      const lastExtensionDateStr = parseDateToString(loan.last_extension_date_date || loan.last_extension_date);
-      if (lastExtensionDateStr) {
-        // Add 1 day to last_extension_date to get "next day"
-        const [year, month, day] = lastExtensionDateStr.split('-').map(Number);
-        const nextDayDate = new Date(year, month - 1, day);
-        nextDayDate.setDate(nextDayDate.getDate() + 1);
-        baseDateStr = formatDateToString(nextDayDate);
-        // Using last_extension_date + 1 day
-      }
+      baseDateStr = toDateString(loan.last_extension_date_date) || toDateString(loan.last_extension_date);
+      console.log(`[Exhausted Days] Extension exists, using last_extension_date: ${baseDateStr}`);
     }
     
-    // PRIORITY 2: Use processed_at + 1 day if it exists (interest starts the day after processing)
-    if (!baseDateStr && loan.processed_at) {
-      const processedDateStr = parseDateToString(loan.processed_at_date || loan.processed_at);
-      if (processedDateStr) {
-        // Add 1 day to processed_at - interest starts accruing from the day AFTER processing
-        const [year, month, day] = processedDateStr.split('-').map(Number);
-        const nextDayDate = new Date(year, month - 1, day);
-        nextDayDate.setDate(nextDayDate.getDate() + 1);
-        baseDateStr = formatDateToString(nextDayDate);
-      }
+    // PRIORITY 2: Use processed_at_date (from SQL DATE() function - already local date)
+    // User's logic: if processed on Jan 31 and today is Jan 31, that's Day 1
+    if (!baseDateStr && (loan.processed_at_date || loan.processed_at)) {
+      baseDateStr = toDateString(loan.processed_at_date) || toDateString(loan.processed_at);
+      console.log(`[Exhausted Days] Using processed_at_date: ${baseDateStr}`);
     }
     
-    // FALLBACK: Use disbursed_at if processed_at is not available
-    if (!baseDateStr) {
-      baseDateStr = parseDateToString(loan.disbursed_at_date || loan.disbursed_at);
+    // FALLBACK: Use disbursed_at_date
+    if (!baseDateStr && (loan.disbursed_at_date || loan.disbursed_at)) {
+      baseDateStr = toDateString(loan.disbursed_at_date) || toDateString(loan.disbursed_at);
+      console.log(`[Exhausted Days] Using disbursed_at_date: ${baseDateStr}`);
     }
     
     // Calculate exhausted days from base date to today
+    // calculateDaysBetween is INCLUSIVE: Jan 31 to Jan 31 = 1 day, Jan 31 to Feb 1 = 2 days
+    // This matches user's logic: "if today is 31 we count 31 as 1, 1 feb will be 2"
     if (baseDateStr) {
       const todayStr = getTodayString();
+      console.log(`[Exhausted Days] baseDateStr: ${baseDateStr}, todayStr: ${todayStr}`);
+      
+      // Use inclusive counting directly (no -1 adjustment needed)
       exhaustedDays = calculateDaysBetween(baseDateStr, todayStr);
+      
+      // Ensure at least 0 (in case base date is in the future somehow)
+      exhaustedDays = Math.max(0, exhaustedDays);
+      console.log(`[Exhausted Days] exhaustedDays: ${exhaustedDays}`);
       
       // Calculate interest till today using exhausted days
       if (calculation.interest && calculation.interest.rate_per_day && calculation.principal) {
         interestTillToday = toDecimal2(calculation.principal * calculation.interest.rate_per_day * exhaustedDays);
+        console.log(`[Interest Calculation] principal: ${calculation.principal}, rate_per_day: ${calculation.interest.rate_per_day}, exhaustedDays: ${exhaustedDays}, interestTillToday: ${interestTillToday}`);
       }
     }
     

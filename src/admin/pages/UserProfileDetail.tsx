@@ -6522,16 +6522,54 @@ export function UserProfileDetail() {
                         // Use API-provided value if available (backend calculates with proper inclusive counting)
                         // Otherwise fall back to frontend calculation
                         let interestTillToday = 0;
-                        if (calculation?.interest?.interestTillToday !== undefined && calculation.interest.interestTillToday !== null) {
-                          // Use backend-calculated value (ensures consistency and proper inclusive counting)
+                        // Trust backend value completely (0 is valid - means disbursed today, no interest yet)
+                        if (typeof calculation?.interest?.interestTillToday === 'number') {
                           interestTillToday = calculation.interest.interestTillToday;
+                          console.log(`[Admin Preclose] Using backend interestTillToday: ${interestTillToday}`);
                         } else {
-                          // Fallback: Calculate on frontend (for backward compatibility)
-                          const baseDateForInterest = isProcessed && loan.processed_at
-                            ? parseDateString(loan.processed_at) // Normalize date format (handles timezone issues)
-                            : (disbursedDate ? parseDateString(disbursedDate) : null);
-                          if (baseDateForInterest && calculation?.interest?.rate_per_day) {
-                            interestTillToday = calculateInterestTillDate(principal, calculation.interest.rate_per_day, baseDateForInterest, getCurrentDateString());
+                          // Fallback: Calculate on frontend using same logic as backend
+                          // Extract UTC date from timestamp to avoid timezone issues
+                          const extractUTCDate = (timestamp: string): string | null => {
+                            if (!timestamp) return null;
+                            if (/^\d{4}-\d{2}-\d{2}$/.test(timestamp)) return timestamp;
+                            if (timestamp.includes('T')) return timestamp.substring(0, 10);
+                            return timestamp.split('T')[0] || null;
+                          };
+                          
+                          const getTodayStr = (): string => {
+                            const today = new Date();
+                            return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+                          };
+                          
+                          const calculateDaysBetween = (startStr: string, endStr: string): number => {
+                            const [sy, sm, sd] = startStr.split('-').map(Number);
+                            const [ey, em, ed] = endStr.split('-').map(Number);
+                            const start = new Date(sy, sm - 1, sd);
+                            const end = new Date(ey, em - 1, ed);
+                            const diffMs = end.getTime() - start.getTime();
+                            return Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+                          };
+                          
+                          const todayStr = getTodayStr();
+                          let baseDateStr: string | null = null;
+                          
+                          // Priority: extension date, then disbursed_at
+                          if (loan.last_extension_date && loan.extension_count > 0) {
+                            baseDateStr = extractUTCDate(loan.last_extension_date);
+                          } else if (loan.disbursed_at || loan.processed_at) {
+                            baseDateStr = extractUTCDate(loan.disbursed_at || loan.processed_at);
+                          }
+                          
+                          if (baseDateStr && calculation?.interest?.rate_per_day) {
+                            let exhaustedDays = 0;
+                            if (baseDateStr === todayStr) {
+                              exhaustedDays = 0; // Disbursed today, no interest
+                            } else {
+                              const inclusiveDays = calculateDaysBetween(baseDateStr, todayStr);
+                              exhaustedDays = Math.max(0, inclusiveDays - 1);
+                            }
+                            interestTillToday = Math.round(principal * calculation.interest.rate_per_day * exhaustedDays * 100) / 100;
+                            console.log(`[Admin Preclose] Calculated interestTillToday: ${interestTillToday} (exhaustedDays: ${exhaustedDays})`);
                           }
                         }
 
