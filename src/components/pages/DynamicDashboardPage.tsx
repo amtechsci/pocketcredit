@@ -811,7 +811,7 @@ export function DynamicDashboardPage() {
                 <p className={`text-xs ${getCreditScoreColor(summary.credit_score)}`}>
                   {getCreditScoreCategory(summary.credit_score)} (+25 this month)
                 </p>
-                {summary.experian_score !== null && summary.experian_score !== undefined ? (
+                {summary.experian_score !== null && summary.experian_score !== undefined && summary.experian_score !== '' ? (
                   <div className="mt-2 pt-2 border-t border-white/20">
                     <p className="text-blue-100 text-xs mb-1">Experian Score</p>
                     <p className="text-lg font-semibold">{summary.experian_score}</p>
@@ -877,7 +877,7 @@ export function DynamicDashboardPage() {
                 <p className={`text-xs ${getCreditScoreColor(summary.credit_score)}`}>
                   {getCreditScoreCategory(summary.credit_score)}
                 </p>
-                {summary.experian_score !== null && summary.experian_score !== undefined ? (
+                {summary.experian_score !== null && summary.experian_score !== undefined && summary.experian_score !== '' ? (
                   <div className="mt-2 pt-2 border-t border-white/20">
                     <p className="text-blue-100 text-[10px] mb-1">Experian Score</p>
                     <p className="text-base font-semibold">{summary.experian_score}</p>

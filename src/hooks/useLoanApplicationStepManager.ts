@@ -99,6 +99,26 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
   }, [location]);
 
   // Fetch latest application
+  // Helper function to check if user has pending/active loans
+  const hasPendingOrActiveLoan = useCallback(async (): Promise<boolean> => {
+    try {
+      const response = await apiService.getLoanApplications();
+      const isSuccess = response.success === true || response.status === 'success';
+      if (isSuccess && response.data && response.data.applications) {
+        const applications = response.data.applications;
+        const allowedStatuses = ['cleared', 'cancelled'];
+        return applications.some((app: any) => {
+          const status = (app.status || '').toLowerCase().trim();
+          return !allowedStatuses.includes(status);
+        });
+      }
+      return false;
+    } catch (error) {
+      console.error('[StepGuard] Error checking pending loans:', error);
+      return false; // On error, assume no pending loans to avoid blocking
+    }
+  }, []);
+
   const fetchLatestApplication = useCallback(async () => {
     try {
       const response = await apiService.getLoanApplications();
@@ -455,8 +475,47 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
           isValidatingRef.current = false;
           return;
         } else {
-          // KYC is already verified and no ReKYC required - redirect to next step or application creation
-          console.log('[StepGuard] KYC already verified and no ReKYC required - redirecting to next step');
+          // KYC is already verified and no ReKYC required
+          // Let the KYC page handle PAN check - don't redirect away from KYC page
+          // The KYC page will check for PAN and show input if needed
+          console.log('[StepGuard] KYC already verified and no ReKYC required - letting KYC page handle PAN check');
+          
+          // If user is on KYC page, let the page handle the logic (including PAN check)
+          if (requiredStep === 'kyc-verification') {
+            console.log('[StepGuard] User is on KYC page - letting page handle redirect logic');
+            setStatus({
+              currentStep: 'kyc-verification',
+              applicationId: null,
+              prerequisites: {
+                kycVerified: true,
+                creditAnalyticsCompleted: false,
+                employmentCompleted: false,
+                bankStatementCompleted: false,
+                bankDetailsCompleted: false,
+                referencesCompleted: false,
+                documentsNeeded: false
+              },
+              loading: false,
+              error: null
+            });
+            isValidatingRef.current = false;
+            return;
+          }
+          
+          // Not on KYC page - check for pending loans
+          const hasPendingLoan = await hasPendingOrActiveLoan();
+          if (hasPendingLoan) {
+            console.log('[StepGuard] User has pending/active loan - redirecting to dashboard instead of next step');
+            if (!skipRedirect && !hasRedirectedRef.current) {
+              hasRedirectedRef.current = true;
+              navigate('/dashboard', { replace: true });
+            }
+            isValidatingRef.current = false;
+            return;
+          }
+          
+          // No pending loans - proceed with normal flow
+          console.log('[StepGuard] No pending loans - redirecting to next step');
           let applicationId = getApplicationId();
           if (!applicationId) {
             applicationId = await fetchLatestApplication();
@@ -534,7 +593,7 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
                           requiredStep === 'employment-details' || 
                           requiredStep === 'bank-statement' ||
                           requiredStep === 'bank-details' ||
-                          requiredStep === 'kyc-verification';
+                          (requiredStep as string) === 'kyc-verification';
         
         if (!skipRedirect && isLoanApplicationRoute && requiredStep && requiredStep !== 'application' && 
             location.pathname !== STEP_ROUTES['application'] && !isFlowStep) {
@@ -589,13 +648,14 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
           const isLoanApplicationRoute = location.pathname.startsWith('/loan-application/') || location.pathname === '/application';
           
           // Special case: If user is on KYC page, check both KYC status and ReKYC requirement
-          if (requiredStep === 'kyc-verification') {
+          if ((requiredStep as string) === 'kyc-verification') {
             const rekycRequired = await checkReKYCRequired(null);
             if (kycVerified && !rekycRequired) {
-              // KYC verified and no ReKYC required - redirect to application
-              console.log('[StepGuard] KYC already verified and no ReKYC required, redirecting to application creation');
+              // KYC verified and no ReKYC required
+              // Let the KYC page handle PAN check - don't redirect away
+              console.log('[StepGuard] KYC verified, no ReKYC - letting KYC page handle PAN check');
               setStatus({
-                currentStep: 'application',
+                currentStep: 'kyc-verification',
                 applicationId: null,
                 prerequisites: {
                   kycVerified: true,
@@ -609,10 +669,6 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
                 loading: false,
                 error: null
               });
-              if (!skipRedirect && !hasRedirectedRef.current) {
-                hasRedirectedRef.current = true;
-                navigate(STEP_ROUTES['application'], { replace: true });
-              }
               isValidatingRef.current = false;
               return;
             } else if (!kycVerified || rekycRequired) {
@@ -668,7 +724,7 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
               isLoanApplicationRoute &&
               requiredStep && 
               requiredStep !== 'application' && 
-              requiredStep !== 'kyc-verification' &&
+              (requiredStep as string) !== 'kyc-verification' &&
               location.pathname !== appRoute) {
             if (!hasRedirectedRef.current) {
               hasRedirectedRef.current = true;
@@ -695,6 +751,21 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
       };
 
       const currentStep = determineCurrentStep(prerequisites);
+
+      // If user is on KYC page, let the KYC page handle all redirect logic (including PAN check)
+      // Don't interfere from here - the KYC page will check PAN and redirect appropriately
+      if ((requiredStep as string) === 'kyc-verification') {
+        console.log('[StepGuard] User is on KYC page - letting page handle all checks including PAN');
+        setStatus({
+          currentStep: 'kyc-verification',
+          applicationId,
+          prerequisites,
+          loading: false,
+          error: null
+        });
+        isValidatingRef.current = false;
+        return;
+      }
 
       // Only update status if something actually changed to prevent unnecessary re-renders
       setStatus(prev => {

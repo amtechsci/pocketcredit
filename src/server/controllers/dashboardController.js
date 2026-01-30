@@ -186,6 +186,23 @@ const fetchDashboardData = async (userId) => {
 
   const user = users[0];
   
+  // Get latest experian_score from credit_checks table if not in users table
+  let experianScore = user.experian_score;
+  if (!experianScore || experianScore === 0 || experianScore === null) {
+    const creditCheckQuery = `
+      SELECT credit_score 
+      FROM credit_checks 
+      WHERE user_id = ? 
+      ORDER BY checked_at DESC 
+      LIMIT 1
+    `;
+    const creditChecks = await executeQuery(creditCheckQuery, [userId]);
+    if (creditChecks && creditChecks.length > 0 && creditChecks[0].credit_score) {
+      experianScore = creditChecks[0].credit_score;
+      console.log(`✅ Found experian_score from credit_checks: ${experianScore}`);
+    }
+  }
+  
   // Check if user is deleted
   if (user.status === 'deleted') {
     // Return deleted status - frontend will show message
@@ -431,7 +448,7 @@ const fetchDashboardData = async (userId) => {
     },
     summary: {
       credit_score: user.credit_score || 0,
-      experian_score: user.experian_score || null,
+      experian_score: experianScore || null,
       available_credit: user.loan_limit || availableCredit,
       total_loans: parseInt(stats.total_loans) || 0,
       active_loans: parseInt(stats.active_loans) || 0,

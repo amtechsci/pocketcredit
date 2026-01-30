@@ -41,6 +41,11 @@ export const DigilockerKYCPage: React.FC = () => {
   // Allow access if: KYC is pending OR ReKYC is required (regardless of loan status)
   // If blocked, auto-redirect to dashboard immediately
   useEffect(() => {
+    // Don't run this check if we're not on the KYC page (prevent redirect loops)
+    if (location.pathname !== '/loan-application/kyc-verification') {
+      return;
+    }
+    
     const checkPendingLoansAndKYC = async () => {
       setChecking(true); // Show loading while checking
       try {
@@ -79,8 +84,8 @@ export const DigilockerKYCPage: React.FC = () => {
           return; // Allow access, don't check loan status
         }
         
-        // KYC is verified and ReKYC is NOT required - now check if user has pending loans
-        // If they do, auto-redirect to dashboard immediately
+        // KYC is verified - now check if PAN document exists
+        // If PAN is missing, show PAN input (don't redirect even with pending loan)
         const applicationsResponse = await apiService.getLoanApplications();
         console.log('🔍 [KYC Page] KYC verified, checking for pending loans - API response:', applicationsResponse);
         
@@ -89,6 +94,43 @@ export const DigilockerKYCPage: React.FC = () => {
         if (isSuccess && applicationsResponse.data && applicationsResponse.data.applications) {
           const applications = applicationsResponse.data.applications;
           console.log('📋 [KYC Page] Applications found:', applications.length, applications.map((app: any) => ({ id: app.id, status: app.status })));
+
+          // Get the active application ID for PAN check
+          const activeApp = applications.find((app: any) => {
+            const status = (app.status || '').toLowerCase().trim();
+            return !['cleared', 'cancelled'].includes(status);
+          });
+          
+          const appIdForPanCheck = activeApp?.id || applicationId;
+          
+          // Check if PAN document exists BEFORE redirecting
+          if (appIdForPanCheck) {
+            try {
+              const panCheckResponse = await apiService.checkPanDocument(String(appIdForPanCheck));
+              console.log('🔍 [KYC Page] PAN check response:', panCheckResponse);
+              
+              if (panCheckResponse.success && !panCheckResponse.data?.hasPanDocument) {
+                // PAN is missing - show PAN input (don't redirect)
+                console.log('⚠️ [KYC Page] PAN document missing - showing PAN input');
+                setShowPanInput(true);
+                setApplicationId(String(appIdForPanCheck));
+                setChecking(false);
+                toast.info('Please enter your PAN number to complete verification');
+                return; // Don't redirect - user needs to enter PAN
+              } else {
+                console.log('✅ [KYC Page] PAN document found');
+              }
+            } catch (panError) {
+              console.error('Error checking PAN document:', panError);
+              // If PAN check fails, show manual PAN input
+              console.log('⚠️ [KYC Page] PAN check failed - showing manual PAN input');
+              setShowPanInput(true);
+              setApplicationId(String(appIdForPanCheck));
+              setChecking(false);
+              toast.info('Please enter your PAN number to complete verification');
+              return;
+            }
+          }
 
           // Define statuses that allow KYC access (only cleared and cancelled)
           const allowedStatuses = ['cleared', 'cancelled'];
@@ -104,10 +146,10 @@ export const DigilockerKYCPage: React.FC = () => {
           console.log('🔍 [KYC Page] Has pending/active loan?', hasPendingOrActiveLoan);
 
           if (hasPendingOrActiveLoan) {
-            // User has pending/active loan AND KYC is already verified AND ReKYC is NOT required
-            // Auto-redirect to dashboard immediately
-            console.log('🚫 [KYC Page] AUTO-REDIRECTING - User has pending/active loan and KYC is already verified');
-            toast.error('You have a pending or active loan application. Please complete it first.');
+            // User has pending/active loan AND KYC is already verified AND PAN exists
+            // Auto-redirect to dashboard
+            console.log('🚫 [KYC Page] AUTO-REDIRECTING - User has pending/active loan, KYC verified, and PAN exists');
+            toast.info('Your KYC is complete. Redirecting to dashboard...');
             setChecking(false); // Stop loading
             navigate('/dashboard', { replace: true });
             return;
@@ -126,7 +168,7 @@ export const DigilockerKYCPage: React.FC = () => {
     };
 
     checkPendingLoansAndKYC();
-  }, [navigate, applicationId]);
+  }, [navigate, applicationId, location.pathname]);
 
   // Check if we should show PAN input from state (when redirected from KYCCheckPage)
   useEffect(() => {
@@ -220,7 +262,34 @@ export const DigilockerKYCPage: React.FC = () => {
                   const employmentResponse = await apiService.getEmploymentDetailsStatus();
                   if (employmentResponse.status === 'success' && employmentResponse.data?.completed) {
                     console.log('✅ Employment details completed - skipping PAN requirement');
-                    // Employment completed means user already passed this step - proceed to next
+                    // Employment completed means user already passed this step
+                    // But check for pending loans before redirecting
+                    try {
+                      const applicationsResponse = await apiService.getLoanApplications();
+                      const isSuccess = applicationsResponse.success === true || applicationsResponse.status === 'success';
+                      
+                      if (isSuccess && applicationsResponse.data && applicationsResponse.data.applications) {
+                        const applications = applicationsResponse.data.applications;
+                        const allowedStatuses = ['cleared', 'cancelled'];
+                        const hasPendingOrActiveLoan = applications.some((app: any) => {
+                          const status = (app.status || '').toLowerCase().trim();
+                          return !allowedStatuses.includes(status);
+                        });
+                        
+                        if (hasPendingOrActiveLoan) {
+                          console.log('🚫 [KYC Page] Employment completed but user has pending loan - redirecting to dashboard');
+                          toast.info('KYC already verified. Redirecting to dashboard...');
+                          setTimeout(() => {
+                            navigate('/dashboard', { replace: true });
+                          }, 1000);
+                          return;
+                        }
+                      }
+                    } catch (loanCheckError) {
+                      console.error('Error checking loan status:', loanCheckError);
+                    }
+                    
+                    // No pending loans - proceed to next step
                     toast.success('KYC already verified! Proceeding to next step...');
                     setTimeout(() => {
                       navigate('/loan-application/employment-details', {
@@ -252,6 +321,34 @@ export const DigilockerKYCPage: React.FC = () => {
               toast.info('Please enter your PAN number to complete verification');
               return;
             }
+          }
+          
+          // Before redirecting to next step, check if user has pending/active loans
+          // If they do, redirect to dashboard instead (to avoid loop)
+          try {
+            const applicationsResponse = await apiService.getLoanApplications();
+            const isSuccess = applicationsResponse.success === true || applicationsResponse.status === 'success';
+            
+            if (isSuccess && applicationsResponse.data && applicationsResponse.data.applications) {
+              const applications = applicationsResponse.data.applications;
+              const allowedStatuses = ['cleared', 'cancelled'];
+              const hasPendingOrActiveLoan = applications.some((app: any) => {
+                const status = (app.status || '').toLowerCase().trim();
+                return !allowedStatuses.includes(status);
+              });
+              
+              if (hasPendingOrActiveLoan) {
+                console.log('🚫 [KYC Page] KYC verified but user has pending loan - redirecting to dashboard');
+                toast.info('KYC already verified. Redirecting to dashboard...');
+                setTimeout(() => {
+                  navigate('/dashboard', { replace: true });
+                }, 1000);
+                return;
+              }
+            }
+          } catch (loanCheckError) {
+            console.error('Error checking loan status before redirect:', loanCheckError);
+            // Continue with redirect if check fails
           }
           
           // KYC already completed and PAN exists (or check skipped) - redirect to next step
