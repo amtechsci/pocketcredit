@@ -295,7 +295,33 @@ export function DynamicDashboardPage() {
             }
           }
 
-          // PRIORITY 3: Check for post-disbursal (disbursal, repeat_disbursal, ready_to_repeat_disbursal statuses)
+          // PRIORITY 3: Check if user needs to complete references BEFORE allowing any further action
+          // This ensures references are completed before post-disbursal or any other step
+          try {
+            const refsResponse = await apiService.getUserReferences();
+            const referencesList = refsResponse.data?.references || [];
+            const alternateData = refsResponse.data?.alternate_data;
+            const hasReferences = Array.isArray(referencesList) && referencesList.length >= 3;
+            const hasAlternateMobile = alternateData?.alternate_mobile ? true : false;
+            
+            // If user doesn't have 3 references or alternate mobile, redirect to references page
+            // This applies to any active loan (pre-disbursal, disbursal, etc.)
+            // But NOT for cleared/cancelled/account_manager/overdue loans
+            const activeLoan = applications.find(
+              (app: any) => !['cleared', 'cancelled', 'rejected', 'account_manager', 'overdue'].includes(app.status)
+            );
+            
+            if (activeLoan && (!hasReferences || !hasAlternateMobile)) {
+              console.log(`📋 User missing references (has: ${hasReferences}, count: ${referencesList.length}) or alternate mobile (${hasAlternateMobile}), redirecting to references page`);
+              navigate('/user-references');
+              return;
+            }
+          } catch (refError) {
+            console.error('Error checking references:', refError);
+            // Continue with flow if error checking references
+          }
+
+          // PRIORITY 4: Check for post-disbursal (disbursal, repeat_disbursal, ready_to_repeat_disbursal statuses)
           // NOTE: We no longer automatically redirect - users can navigate freely to dashboard
           // The dashboard will show their post-disbursal loans, and they can navigate to post-disbursal flow when ready
           const disbursalApp = applications.find(
@@ -306,7 +332,7 @@ export function DynamicDashboardPage() {
             // Don't redirect - allow user to stay on dashboard
           }
 
-          // PRIORITY 4: Check for account_manager status
+          // PRIORITY 5: Check for account_manager status
           // Note: We no longer automatically redirect to repayment schedule
           // Users can access dashboard and manually navigate to repayment schedule via buttons
           const accountManagerApp = applications.find(
@@ -317,7 +343,7 @@ export function DynamicDashboardPage() {
             // Don't redirect - let user stay on dashboard
           }
 
-          // PRIORITY 5: Check for applications that need user action (incomplete steps)
+          // PRIORITY 6: Check for applications that need user action (incomplete steps)
           // User should complete all steps before application goes to admin review
           const incompleteApp = applications.find(
             (app: any) => {
@@ -343,7 +369,7 @@ export function DynamicDashboardPage() {
             }
           }
 
-          // PRIORITY 6: Check for under_review or submitted status (only if step is complete)
+          // PRIORITY 7: Check for under_review or submitted status (only if step is complete)
           // NOTE: ready_to_repeat_disbursal should NOT redirect here - it's handled in PRIORITY 3
           const underReviewApp = applications.find(
             (app: any) => (app.status === 'under_review' || app.status === 'submitted') && 

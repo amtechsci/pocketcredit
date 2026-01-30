@@ -646,7 +646,7 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
                 const minDuration = planSnapshot.repayment_days || 15;
                 const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
                 if (daysToNextSalary < minDuration) {
-                  nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+                  nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
                 }
                 
                 // Ensure nextSalaryDate matches the salary date exactly

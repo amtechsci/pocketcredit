@@ -896,7 +896,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDateForEmi)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
               if (daysToNextSalary < minDuration) {
                 console.log(`📅 Days (${daysToNextSalary}) < minDuration (${minDuration}), moving to next month`);
-                nextSalaryDate = getSalaryDateForMonth(baseDateForEmi, salaryDate, 1);
+                nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
                 const extendedDateStr = formatDateToString(nextSalaryDate);
                 const extendedDays = calculateDaysBetween(baseDateStr, extendedDateStr);
                 console.log(`📅 Moved to next month: ${formatDateLocal(nextSalaryDate)}, extendedDays: ${extendedDays}`);
@@ -1163,7 +1163,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDate)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
             if (daysToNextSalary < minDuration) {
               console.log(`📅 Days (${daysToNextSalary}) < minDuration (${minDuration}), moving to next month`);
-              nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+              nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
               const extendedDateStr = formatDateToString(nextSalaryDate);
               const extendedDays = calculateDaysBetween(baseDateStr, extendedDateStr);
               console.log(`📅 Moved to next month: ${formatDateLocal(nextSalaryDate)}, extendedDays: ${extendedDays}`);
@@ -4746,7 +4746,7 @@ router.get('/:loanId', async (req, res, next) => {
           console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDateForEmi)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
           if (daysToNextSalary < minDuration) {
             console.log(`📅 Days (${daysToNextSalary}) < minDuration (${minDuration}), moving to next month`);
-            nextSalaryDate = getSalaryDateForMonth(baseDateForEmi, salaryDate, 1);
+            nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
             const extendedDateStr = formatDateToString(nextSalaryDate);
             const extendedDays = calculateDaysBetween(baseDateStr, extendedDateStr);
             console.log(`📅 Moved to next month: ${formatDateLocal(nextSalaryDate)}, extendedDays: ${extendedDays}`);
@@ -5072,7 +5072,7 @@ router.get('/:loanId', async (req, res, next) => {
             console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDate)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
             if (daysToNextSalary < minDuration) {
               console.log(`📅 Days (${daysToNextSalary}) < minDuration (${minDuration}), moving to next month`);
-              nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+              nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
               const extendedDateStr = formatDateToString(nextSalaryDate);
               const extendedDays = calculateDaysBetween(baseDateStr, extendedDateStr);
               console.log(`📅 Moved to next month: ${formatDateLocal(nextSalaryDate)}, extendedDays: ${extendedDays}`);

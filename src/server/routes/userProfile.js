@@ -2682,7 +2682,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     console.log(`📅 [EMI Calculation] baseDate: ${baseDateStr}, nextSalaryDate: ${nextSalaryDateStr}, daysToNextSalary: ${daysToNextSalary}, minDuration: ${minDuration}`);
                     if (daysToNextSalary < minDuration) {
                       console.log(`📅 [EMI Calculation] Days (${daysToNextSalary}) < minDuration (${minDuration}), moving to next month`);
-                      nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+                      nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
                       const extendedDateStr = formatDateToString(nextSalaryDate);
                       const extendedDays = calculateDaysBetween(baseDateStr, extendedDateStr);
                       console.log(`📅 [EMI Calculation] Extended to: ${extendedDateStr}, days: ${extendedDays}`);
