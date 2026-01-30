@@ -282,21 +282,23 @@ export const PostDisbursalFlowPage = () => {
           // Allowed statuses: 'disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal'
           // ready_to_repeat_disbursal is allowed because user should see post-disbursal completion message
           const allowedStatuses = ['disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal'];
-          if (!allowedStatuses.includes(app.status)) {
-            console.warn(`⛔ Unauthorized access attempt: App ${appId} has status '${app.status}', not one of: ${allowedStatuses.join(', ')}`);
+          const appStatus = app.status as string;
+          if (!allowedStatuses.includes(appStatus)) {
+            console.warn(`⛔ Unauthorized access attempt: App ${appId} has status '${appStatus}', not one of: ${allowedStatuses.join(', ')}`);
             
             // Redirect based on actual status
-            if (app.status === 'account_manager') {
+            if (appStatus === 'account_manager') {
               console.log('➡️ Redirecting to repayment schedule (loan is in account_manager status)');
               toast.info('This loan is already active. Redirecting...');
               setRedirecting(true);
               navigate(`/repayment-schedule?applicationId=${appId}`);
               return;
-            } else if (app.status === 'ready_for_disbursement') {
-              // Regular ready_for_disbursement should show waiting message
-              console.log('➡️ Redirecting to dashboard (loan is ready for disbursement, waiting for admin)');
-              toast.info('Your loan is ready for disbursement. Admin will process it shortly.');
-              navigate('/dashboard');
+            } else if (appStatus === 'ready_for_disbursement') {
+              // Regular ready_for_disbursement - show "loan will disburse shortly" page
+              console.log('✅ Loan is ready for disbursement - showing waiting page');
+              setApplicationId(appId);
+              setCurrentStep(0); // Special step 0 = waiting for disbursement
+              setLoading(false);
               return;
             } else {
               console.log('➡️ Redirecting to dashboard (invalid status for post-disbursal flow)');
@@ -607,8 +609,38 @@ export const PostDisbursalFlowPage = () => {
               </>
             )}
 
-            {/* Fallback if currentStep is not set or invalid */}
-            {!currentStep || (currentStep < 1 || currentStep > 6) ? (
+            {/* Show "loan will disburse shortly" page when status is ready_for_disbursement */}
+            {currentStep === 0 && applicationId ? (
+              <div className="text-center py-12">
+                <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <CheckCircle className="w-12 h-12 text-green-600" />
+                </div>
+                <h2 className="text-3xl font-bold text-gray-900 mb-4">
+                  Your Loan Will Disburse Shortly
+                </h2>
+                <p className="text-lg text-gray-600 mb-8 max-w-2xl mx-auto">
+                  Your loan application has been approved and is ready for disbursement. 
+                  The funds will be transferred to your registered bank account shortly.
+                </p>
+                <div className="bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg max-w-2xl mx-auto mb-8">
+                  <p className="text-sm text-gray-700 mb-2">
+                    <strong>What happens next?</strong>
+                  </p>
+                  <ul className="text-sm text-gray-600 text-left space-y-2">
+                    <li>• Admin will process the disbursement transaction</li>
+                    <li>• Funds will be transferred to your bank account</li>
+                    <li>• You will receive SMS and email confirmation</li>
+                    <li>• Loan documents will be sent to your registered email</li>
+                  </ul>
+                </div>
+                <Button 
+                  onClick={() => navigate('/dashboard')}
+                  className="px-8 py-3"
+                >
+                  Go to Dashboard
+                </Button>
+              </div>
+            ) : !currentStep || (currentStep < 1 || currentStep > 6) ? (
               <div className="text-center py-8">
                 <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
                 <h2 className="text-xl font-semibold mb-2">Loading Step...</h2>

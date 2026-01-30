@@ -246,10 +246,19 @@ export function DynamicDashboardPage() {
             }
           }
 
-          // PRIORITY 2: Check for pre-disbursal statuses (qa_verification, follow_up, ready_for_disbursement, etc.)
-          // NOTE: ready_to_repeat_disbursal should NOT redirect here - it should go to post-disbursal
+          // PRIORITY 2: Check for ready_for_disbursement status - show "loan will disburse shortly" page
+          const readyForDisbursementApp = applications.find(
+            (app: any) => app.status === 'ready_for_disbursement' && app.status !== 'ready_to_repeat_disbursal'
+          );
+          if (readyForDisbursementApp) {
+            console.log('✅ Found ready_for_disbursement loan - redirecting to post-disbursal flow');
+            navigate(`/post-disbursal?applicationId=${readyForDisbursementApp.id}`);
+            return;
+          }
+
+          // PRIORITY 2b: Check for other pre-disbursal statuses (qa_verification, follow_up, etc.)
           const preDisbursalApp = applications.find(
-            (app: any) => app.status === 'qa_verification' || app.status === 'follow_up' || (app.status === 'ready_for_disbursement' && app.status !== 'ready_to_repeat_disbursal')
+            (app: any) => app.status === 'qa_verification' || app.status === 'follow_up'
           );
           if (preDisbursalApp) {
             // Check if it has pending documents first
@@ -288,7 +297,7 @@ export function DynamicDashboardPage() {
             } catch (err) {
               // Continue
             }
-            // If no pending documents, show under review or appropriate page
+            // If no pending documents, show under review page
             if (preDisbursalApp.status === 'follow_up' || preDisbursalApp.status === 'qa_verification') {
               navigate('/application-under-review');
               return;
