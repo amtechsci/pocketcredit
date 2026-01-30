@@ -459,12 +459,12 @@ export function SimplifiedLoanApplicationPage() {
         plan_code: calcData.plan.code,
         plan_type: calcData.plan.type,
         duration_days: calcData.plan.duration_days,
-        repayment_days: calcData.plan.duration_days,
+        repayment_days: calcData.plan.repayment_days || calcData.plan.duration_days, // Use actual plan min duration
         total_duration_days: calcData.plan.duration_days,
         interest_percent_per_day: calcData?.breakdown?.interest_percent_per_day || 0.001,
-        emi_count: calcData?.emi_details?.emi_count || null,
-        emi_frequency: calcData?.emi_details?.emi_frequency || null,
-        calculate_by_salary_date: true, // Assuming this is the default for most plans
+        emi_count: calcData.plan.emi_count || calcData?.emi_details?.emi_count || null,
+        emi_frequency: calcData.plan.emi_frequency || calcData?.emi_details?.emi_frequency || null,
+        calculate_by_salary_date: calcData.plan.calculate_by_salary_date ?? true, // Use actual plan value
         // Include fees with correct percentages from breakdown
         fees: calcData?.breakdown?.fees?.map((fee: any) => ({
           fee_name: fee.name,

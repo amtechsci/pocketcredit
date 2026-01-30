@@ -120,10 +120,11 @@ router.get('/pending', requireAuth, async (req, res) => {
     // If user's current limit already matches or exceeds the pending new limit,
     // it means the limit was already increased, so don't show the modal
     if (currentUserLimit >= finalNewLimit) {
-      // Mark the pending limit as accepted since it was already applied
+      // Delete the pending record since the limit was already applied
+      // (We can't just update to 'accepted' because there may already be an 'accepted' record
+      // for this user, which would violate the unique constraint)
       await executeQuery(
-        `UPDATE pending_credit_limits 
-         SET status = 'accepted', accepted_at = NOW() 
+        `DELETE FROM pending_credit_limits 
          WHERE id = ? AND status = 'pending'`,
         [finalPendingLimit.id]
       );

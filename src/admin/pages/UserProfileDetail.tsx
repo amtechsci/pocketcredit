@@ -6562,13 +6562,12 @@ export function UserProfileDetail() {
                           
                           if (baseDateStr && calculation?.interest?.rate_per_day) {
                             let exhaustedDays = 0;
-                            if (baseDateStr === todayStr) {
-                              exhaustedDays = 0; // Disbursed today, no interest
-                            } else {
-                              const inclusiveDays = calculateDaysBetween(baseDateStr, todayStr);
-                              exhaustedDays = Math.max(0, inclusiveDays - 1);
-                            }
-                            interestTillToday = Math.round(principal * calculation.interest.rate_per_day * exhaustedDays * 100) / 100;
+                            // Use inclusive counting (same as backend)
+                            // Jan 31 to Jan 31 = 1 day, Jan 31 to Feb 1 = 2 days
+                            const inclusiveDays = calculateDaysBetween(baseDateStr, todayStr);
+                            exhaustedDays = Math.max(0, inclusiveDays);
+                            // Don't round - show exact value
+                            interestTillToday = principal * calculation.interest.rate_per_day * exhaustedDays;
                             console.log(`[Admin Preclose] Calculated interestTillToday: ${interestTillToday} (exhaustedDays: ${exhaustedDays})`);
                           }
                         }
@@ -6683,30 +6682,32 @@ export function UserProfileDetail() {
                         let totalInterestFullTenure = 0;
 
                         // Priority 1: Processed interest (frozen at processing time, most reliable)
-                        if (isProcessed && loan.processed_interest !== null && loan.processed_interest !== undefined) {
-                          totalInterestFullTenure = parseFloat(loan.processed_interest) || 0;
+                        // Only use if it's a valid positive number
+                        const processedInterestValue = parseFloat(loan.processed_interest);
+                        if (isProcessed && !isNaN(processedInterestValue) && processedInterestValue > 0) {
+                          totalInterestFullTenure = processedInterestValue;
                         }
-                        // Priority 2: Backend-calculated total_interest (avoids timezone issues)
-                        else if (calculation?.interest?.total_interest !== undefined && calculation?.interest?.total_interest !== null) {
-                          totalInterestFullTenure = parseFloat(calculation.interest.total_interest) || 0;
-                        }
-                        // Priority 3: Sum from EMI schedule (for multi-EMI loans)
+                        // Priority 2: Sum from EMI schedule (for multi-EMI loans) - most accurate for EMI loans
                         else if (calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 1) {
                           totalInterestFullTenure = calculation.repayment.schedule.reduce((sum: number, emi: any) => {
                             return sum + (parseFloat(emi.interest) || 0);
                           }, 0);
                         }
-                        // Priority 4: Use interestTillDate (already calculated earlier)
+                        // Priority 3: Backend-calculated total_interest
+                        else if (calculation?.interest?.total_interest !== undefined && calculation?.interest?.total_interest !== null && parseFloat(calculation.interest.total_interest) > 0) {
+                          totalInterestFullTenure = parseFloat(calculation.interest.total_interest);
+                        }
+                        // Priority 4: Calculation interest amount
+                        else if (calculation?.interest?.amount !== undefined && calculation?.interest?.amount !== null && parseFloat(calculation.interest.amount) > 0) {
+                          totalInterestFullTenure = parseFloat(calculation.interest.amount);
+                        }
+                        // Priority 5: Use interestTillDate (already calculated earlier)
                         else if (interestTillDate > 0) {
                           totalInterestFullTenure = interestTillDate;
                         }
-                        // Priority 5: Calculation interest amount
-                        else if (calculation?.interest?.amount !== undefined && calculation?.interest?.amount !== null) {
-                          totalInterestFullTenure = parseFloat(calculation.interest.amount) || 0;
-                        }
                         // Priority 6: Loan interest field
-                        else if (loan.interest !== undefined && loan.interest !== null) {
-                          totalInterestFullTenure = parseFloat(loan.interest) || 0;
+                        else if (loan.interest !== undefined && loan.interest !== null && parseFloat(loan.interest) > 0) {
+                          totalInterestFullTenure = parseFloat(loan.interest);
                         }
 
                         // Calculate total amount

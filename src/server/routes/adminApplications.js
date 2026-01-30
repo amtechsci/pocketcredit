@@ -636,16 +636,23 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
             // Generate all EMI dates
             const allEmiDates = [];
             
+            console.log(`[EMI Date Calc] Loan #${applicationId}: emi_frequency=${planSnapshot.emi_frequency}, calculate_by_salary_date=${planSnapshot.calculate_by_salary_date}, userSalaryDate=${userSalaryDate}`);
+            
             if (planSnapshot.emi_frequency === 'monthly' && planSnapshot.calculate_by_salary_date && userSalaryDate) {
               // Salary-based monthly EMIs
               const salaryDate = parseInt(userSalaryDate);
               if (salaryDate >= 1 && salaryDate <= 31) {
                 let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
                 
-                // Check if duration is less than minimum days
-                const minDuration = planSnapshot.repayment_days || 15;
+                // Check if duration is less than minimum days (must be at least this many days till first EMI)
+                // For EMI loans, enforce minimum 30 days regardless of plan setting
+                const minDuration = Math.max(planSnapshot.repayment_days || 0, 30);
                 const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+                
+                console.log(`[EMI Date Calc] Loan #${applicationId}: baseDate=${formatDateLocal(baseDate)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
+                
                 if (daysToNextSalary < minDuration) {
+                  console.log(`[EMI Date Calc] Loan #${applicationId}: Skipping to next month (${daysToNextSalary} < ${minDuration})`);
                   nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
                 }
                 
@@ -665,22 +672,38 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
                 for (let i = 0; i < emiCount; i++) {
                   const emiDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, i);
                   allEmiDates.push(formatDateLocal(emiDate)); // Store as YYYY-MM-DD without timezone conversion
-              }
-            } else {
+                }
+                console.log(`[EMI Date Calc] Loan #${applicationId}: Generated salary-based EMI dates: ${JSON.stringify(allEmiDates)}`);
+              } else {
                 console.warn(`⚠️ Invalid salary date (${userSalaryDate}) for loan #${applicationId}, will fall back to non-salary calculation`);
               }
+            } else {
+              console.log(`[EMI Date Calc] Loan #${applicationId}: Not using salary-based calculation (emi_frequency=${planSnapshot.emi_frequency}, calculate_by_salary_date=${planSnapshot.calculate_by_salary_date})`);
             }
             
-            // If salary-based calculation didn't generate dates, use non-salary method
+            // If salary-based calculation didn't generate dates, use non-salary method with min duration check
             if (allEmiDates.length === 0 && emiCount > 1) {
-              const firstDueDate = calculatedValues?.interest?.repayment_date 
+              console.log(`[EMI Date Calc] Loan #${applicationId}: Using fallback method for EMI dates`);
+              
+              // Get the calculated repayment date, but apply min duration check
+              let firstDueDate = calculatedValues?.interest?.repayment_date 
                 ? new Date(calculatedValues.interest.repayment_date)
                 : (() => {
                     const dueDate = new Date(baseDate);
-                    dueDate.setDate(dueDate.getDate() + (planSnapshot.repayment_days || 15));
+                    dueDate.setDate(dueDate.getDate() + (planSnapshot.repayment_days || 30));
                     dueDate.setHours(0, 0, 0, 0);
                     return dueDate;
                   })();
+              
+              // Apply minimum duration check for fallback method too
+              // For EMI loans, enforce minimum 30 days regardless of plan setting
+              const minDuration = Math.max(planSnapshot.repayment_days || 0, 30);
+              const daysToFirstDue = Math.ceil((firstDueDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+              if (daysToFirstDue < minDuration) {
+                // Push to next month
+                firstDueDate.setMonth(firstDueDate.getMonth() + 1);
+                console.log(`[EMI Date Calc] Loan #${applicationId}: Fallback - pushed firstDueDate to next month (${daysToFirstDue} < ${minDuration})`);
+              }
               
               const daysPerEmi = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
               const daysBetween = daysPerEmi[planSnapshot.emi_frequency] || 30;
@@ -729,6 +752,7 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
             
             // Store as JSON array for multi-EMI
             processedDueDate = JSON.stringify(allEmiDates);
+            console.log(`[EMI Date Calc] Loan #${applicationId}: Final processed_due_date = ${processedDueDate}`);
             
             // Create emi_schedule with dates, amounts, and status using REDUCING BALANCE method
             const { formatDateToString, calculateDaysBetween, getTodayString, toDecimal2 } = require('../utils/loanCalculations');

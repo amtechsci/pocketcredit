@@ -277,7 +277,8 @@ router.post('/calculate', requireAuth, async (req, res) => {
           let daysToNextSalary = calculateDaysBetween(startDateStr, nextSalaryDateStr);
           
           // If duration (repayment_days) is set and days to next salary is less than duration, extend to next month
-          const minDuration = plan.repayment_days || 15;
+          // For EMI loans, enforce minimum 30 days regardless of plan setting
+          const minDuration = Math.max(plan.repayment_days || 0, 30);
           console.log(`📅 [EMI Schedule] Next salary date: ${nextSalaryDate.toISOString()}, daysToNextSalary: ${daysToNextSalary}, minDuration: ${minDuration}`);
           
           if (daysToNextSalary < minDuration) {
@@ -396,7 +397,11 @@ router.post('/calculate', requireAuth, async (req, res) => {
           name: plan.plan_name,
           code: plan.plan_code,
           type: plan.plan_type,
-          duration_days: totalDays
+          duration_days: totalDays,
+          repayment_days: plan.repayment_days || totalDays,  // Actual plan min duration
+          calculate_by_salary_date: plan.calculate_by_salary_date === 1 || plan.calculate_by_salary_date === true,
+          emi_count: plan.emi_count || null,
+          emi_frequency: plan.emi_frequency || null
         },
         loan_amount: loanAmount,
         processing_fee: processingFee,

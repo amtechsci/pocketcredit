@@ -2739,7 +2739,8 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
 
                     // Check if duration is less than minimum days
-                    const minDuration = planSnapshot.repayment_days || 15;
+                    // For EMI loans, enforce minimum 30 days regardless of plan setting
+                    const minDuration = Math.max(planSnapshot.repayment_days || 0, 30);
                     // Use calculateDaysBetween for accurate day calculation (inclusive)
                     const baseDateStr = formatDateToString(baseDate);
                     const nextSalaryDateStr = formatDateToString(nextSalaryDate);
