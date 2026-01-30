@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, CheckCircle, XCircle, TrendingUp, AlertCircle } from 'lucide-react';
+import { CheckCircle, TrendingUp, AlertCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { apiService } from '../../services/api';
 import { toast } from 'sonner';
@@ -26,7 +26,6 @@ export function CreditLimitIncreaseModal({
   onAccept
 }: CreditLimitIncreaseModalProps) {
   const [accepting, setAccepting] = useState(false);
-  const [rejecting, setRejecting] = useState(false);
 
   if (!isOpen) return null;
 
@@ -50,27 +49,6 @@ export function CreditLimitIncreaseModal({
     }
   };
 
-  const handleReject = async () => {
-    try {
-      setRejecting(true);
-      const response = await apiService.rejectCreditLimit(pendingLimit.id);
-      
-      if (response.success) {
-        toast.success('Credit limit increase rejected');
-        onClose();
-      } else {
-        toast.error(response.message || 'Failed to reject credit limit increase');
-      }
-    } catch (error: any) {
-      console.error('Error rejecting credit limit:', error);
-      toast.error(error.message || 'Failed to reject credit limit increase');
-    } finally {
-      setRejecting(false);
-    }
-  };
-
-  const increaseAmount = pendingLimit.newLimit - pendingLimit.currentLimit;
-  const increasePercentage = ((increaseAmount / pendingLimit.currentLimit) * 100).toFixed(1);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -81,13 +59,6 @@ export function CreditLimitIncreaseModal({
             <TrendingUp className="w-6 h-6" />
             <h2 className="text-xl font-bold">Credit Limit Increase</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="text-white hover:bg-white/20 rounded-full p-1 transition-colors"
-            disabled={accepting || rejecting}
-          >
-            <X className="w-5 h-5" />
-          </button>
         </div>
 
         {/* Content */}
@@ -118,13 +89,6 @@ export function CreditLimitIncreaseModal({
               </p>
             </div>
 
-            {/* Increase Amount */}
-            <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
-              <p className="text-sm text-green-700">
-                <span className="font-semibold">+₹{increaseAmount.toLocaleString('en-IN')}</span>
-                {' '}({increasePercentage}% increase)
-              </p>
-            </div>
 
             {/* Premium Limit Info */}
             {pendingLimit.isPremiumLimit && pendingLimit.premiumTenure && (
@@ -143,39 +107,14 @@ export function CreditLimitIncreaseModal({
               </div>
             )}
 
-            {/* Additional Info */}
-            {pendingLimit.percentage && (
-              <div className="text-xs text-gray-500 mt-4">
-                Based on {pendingLimit.percentage}% of your salary
-                {pendingLimit.loanCount && ` • ${pendingLimit.loanCount} loan${pendingLimit.loanCount > 1 ? 's' : ''} completed`}
-              </div>
-            )}
           </div>
 
           {/* Actions */}
-          <div className="flex gap-3 pt-4 border-t">
-            <Button
-              variant="outline"
-              onClick={handleReject}
-              disabled={accepting || rejecting}
-              className="flex-1"
-            >
-              {rejecting ? (
-                <>
-                  <XCircle className="w-4 h-4 mr-2 animate-spin" />
-                  Rejecting...
-                </>
-              ) : (
-                <>
-                  <XCircle className="w-4 h-4 mr-2" />
-                  Reject
-                </>
-              )}
-            </Button>
+          <div className="pt-4 border-t">
             <Button
               onClick={handleAccept}
-              disabled={accepting || rejecting}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+              disabled={accepting}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
             >
               {accepting ? (
                 <>

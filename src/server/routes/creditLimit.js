@@ -36,19 +36,118 @@ router.get('/pending', requireAuth, async (req, res) => {
       });
     }
 
+    // Get user's current limit to verify it hasn't already been increased
+    const userQuery = `SELECT loan_limit FROM users WHERE id = ?`;
+    const userResult = await executeQuery(userQuery, [userId]);
+    const currentUserLimit = userResult && userResult.length > 0 
+      ? parseFloat(userResult[0].loan_limit) || 0 
+      : 0;
+
+    // Recalculate the correct new limit using current logic (to handle old pending limits)
+    const recalculatedLimitData = await calculateCreditLimitFor2EMI(userId, null, currentUserLimit);
+    const correctNewLimit = recalculatedLimitData.newLimit;
+    const pendingNewLimit = parseFloat(pendingLimit.new_limit);
+    const storedCurrentLimit = parseFloat(pendingLimit.current_limit);
+
+    // Check if we need to update the pending limit:
+    // 1. If recalculated limit is different (and higher) than stored pending limit
+    // 2. If stored current_limit is outdated (doesn't match user's actual current limit)
+    const needsUpdate = (
+      (correctNewLimit !== pendingNewLimit && correctNewLimit > currentUserLimit) ||
+      (storedCurrentLimit !== currentUserLimit)
+    );
+
+    if (needsUpdate) {
+      // Only update new_limit if it's higher than current user limit
+      const finalNewLimit = correctNewLimit > currentUserLimit ? correctNewLimit : pendingNewLimit;
+      
+      if (finalNewLimit !== pendingNewLimit || storedCurrentLimit !== currentUserLimit) {
+        console.log(`[CreditLimit] Updating pending limit: new_limit ₹${pendingNewLimit} → ₹${finalNewLimit}, current_limit ₹${storedCurrentLimit} → ₹${currentUserLimit}`);
+        
+        // Update the pending limit with the correct recalculated value
+        await executeQuery(
+          `UPDATE pending_credit_limits 
+           SET new_limit = ?, current_limit = ?, percentage = ?, loan_count = ?, salary = ?, 
+               is_premium_limit = ?, premium_tenure = ?, updated_at = NOW()
+           WHERE id = ? AND status = 'pending'`,
+          [
+            finalNewLimit,
+            currentUserLimit, // Update current_limit to match user's actual current limit
+            recalculatedLimitData.percentage || null,
+            recalculatedLimitData.loanCount || null,
+            recalculatedLimitData.salary || null,
+            recalculatedLimitData.showPremiumLimit ? 1 : 0,
+            recalculatedLimitData.premiumTenure || null,
+            pendingLimit.id
+          ]
+        );
+        
+        // Use the updated correct limit
+        const updatedPendingLimit = await getPendingCreditLimit(userId);
+        if (updatedPendingLimit) {
+          return res.json({
+            success: true,
+            hasPendingLimit: true,
+            data: {
+              id: updatedPendingLimit.id,
+              newLimit: parseFloat(updatedPendingLimit.new_limit),
+              currentLimit: parseFloat(updatedPendingLimit.current_limit),
+              percentage: updatedPendingLimit.percentage ? parseFloat(updatedPendingLimit.percentage) : null,
+              loanCount: updatedPendingLimit.loan_count,
+              salary: updatedPendingLimit.salary ? parseFloat(updatedPendingLimit.salary) : null,
+              isPremiumLimit: updatedPendingLimit.is_premium_limit === 1,
+              premiumTenure: updatedPendingLimit.premium_tenure,
+              createdAt: updatedPendingLimit.created_at
+            }
+          });
+        }
+      }
+    }
+
+    // Use the most up-to-date values (may have been updated above)
+    const finalPendingLimit = await getPendingCreditLimit(userId);
+    if (!finalPendingLimit) {
+      return res.json({
+        success: true,
+        hasPendingLimit: false,
+        data: null
+      });
+    }
+
+    const finalNewLimit = parseFloat(finalPendingLimit.new_limit);
+    const finalCurrentLimit = parseFloat(finalPendingLimit.current_limit);
+
+    // If user's current limit already matches or exceeds the pending new limit,
+    // it means the limit was already increased, so don't show the modal
+    if (currentUserLimit >= finalNewLimit) {
+      // Mark the pending limit as accepted since it was already applied
+      await executeQuery(
+        `UPDATE pending_credit_limits 
+         SET status = 'accepted', accepted_at = NOW() 
+         WHERE id = ? AND status = 'pending'`,
+        [finalPendingLimit.id]
+      );
+      
+      return res.json({
+        success: true,
+        hasPendingLimit: false,
+        data: null
+      });
+    }
+
     res.json({
       success: true,
       hasPendingLimit: true,
       data: {
-        id: pendingLimit.id,
-        newLimit: parseFloat(pendingLimit.new_limit),
-        currentLimit: parseFloat(pendingLimit.current_limit),
-        percentage: pendingLimit.percentage ? parseFloat(pendingLimit.percentage) : null,
-        loanCount: pendingLimit.loan_count,
-        salary: pendingLimit.salary ? parseFloat(pendingLimit.salary) : null,
-        isPremiumLimit: pendingLimit.is_premium_limit === 1,
-        premiumTenure: pendingLimit.premium_tenure,
-        createdAt: pendingLimit.created_at
+        id: finalPendingLimit.id,
+        newLimit: finalNewLimit,
+        currentLimit: finalCurrentLimit,
+        percentage: finalPendingLimit.percentage ? parseFloat(finalPendingLimit.percentage) : null,
+        loanCount: finalPendingLimit.loan_count,
+        salary: finalPendingLimit.salary ? parseFloat(finalPendingLimit.salary) : null,
+        isPremiumLimit: finalPendingLimit.is_premium_limit === 1,
+        premiumTenure: finalPendingLimit.premium_tenure,
+        createdAt: finalPendingLimit.created_at
       }
     });
 

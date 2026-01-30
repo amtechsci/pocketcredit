@@ -108,8 +108,8 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
     // Calculate next limit based on next percentage tier
     // First calculate exact value to check premium eligibility
     const calculatedLimitByPercentageExact = Math.round((salary * nextPercentage) / 100);
-    // Round down to nearest 1000 for display (e.g., 11055 -> 11000, 11555 -> 11000)
-    const calculatedLimitByPercentage = Math.floor(calculatedLimitByPercentageExact / 1000) * 1000;
+    // Round down to nearest 100 for display (e.g., 4950 -> 4900, 11555 -> 11500)
+    const calculatedLimitByPercentage = Math.floor(calculatedLimitByPercentageExact / 100) * 100;
 
     // Next limit should be based on current limit AND next percentage calculation
     // Use whichever is higher: current limit or calculated next limit
