@@ -3316,7 +3316,6 @@ export function UserProfileDetail() {
               userId={params.userId}
               onDataReceived={(data) => {
                 console.log('UAN Data received:', data);
-                toast.success('UAN Passbook data retrieved successfully');
                 // Refresh user data to show updated info
                 if (params.userId) {
                   adminApiService.getUserProfile(params.userId).then((response) => {

@@ -139,7 +139,6 @@ export function UANEmploymentInfo({ aadharLinkedMobile, userId, onDataReceived }
       if (httpResponseCode === 200 && resultCode === 101) {
         // Success - store the full response data
         setResponseData(response.data);
-        toast.success('UAN data retrieved successfully');
       } else if (httpResponseCode === 200) {
         // API returned 200 but with error result_code (e.g., 103 = No records found)
         const errorMsg = response.data?.message || response.message || 'No records found';

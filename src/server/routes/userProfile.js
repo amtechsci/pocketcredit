@@ -550,6 +550,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         FROM loan_applications 
         WHERE user_id = ? 
         AND selfie_image_url IS NOT NULL
+        AND selfie_image_url != ''
         ORDER BY updated_at DESC 
         LIMIT 1
       `;
@@ -557,6 +558,13 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
 
       if (selfieResult.length > 0) {
         const selfieRecord = selfieResult[0];
+        
+        console.log('📸 Found selfie record:', {
+          has_url: !!selfieRecord.selfie_image_url,
+          url_preview: selfieRecord.selfie_image_url?.substring(0, 50),
+          verified: selfieRecord.selfie_verified,
+          captured: selfieRecord.selfie_captured
+        });
         
         // Get face match data from kyc_verifications
         let faceMatchData = null;
@@ -576,14 +584,62 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           try {
             // Extract S3 key from URL if it's a full URL, otherwise use as-is
             let s3Key = selfieRecord.selfie_image_url;
+            
+            // Handle different URL formats
             if (s3Key.includes('amazonaws.com')) {
-              // Extract key from URL
-              const urlParts = s3Key.split('/');
-              s3Key = urlParts.slice(3).join('/'); // Remove bucket name and domain
+              // Extract key from full S3 URL
+              // Format: https://bucket-name.s3.region.amazonaws.com/key/path
+              // or: https://s3.region.amazonaws.com/bucket-name/key/path
+              try {
+                const urlObj = new URL(s3Key);
+                // Remove leading slash and bucket name if present
+                if (urlObj.pathname.startsWith('/')) {
+                  const pathParts = urlObj.pathname.substring(1).split('/');
+                  // If first part looks like bucket name, skip it
+                  if (pathParts.length > 1) {
+                    s3Key = pathParts.slice(1).join('/');
+                  } else {
+                    s3Key = pathParts.join('/');
+                  }
+                } else {
+                  s3Key = urlObj.pathname;
+                }
+              } catch (urlParseError) {
+                // If URL parsing fails, try simple string extraction
+                const urlParts = s3Key.split('/');
+                // Find the part after bucket name (usually 3rd or 4th element)
+                const bucketIndex = urlParts.findIndex(part => part.includes('.s3.') || part.includes('amazonaws.com'));
+                if (bucketIndex >= 0 && bucketIndex < urlParts.length - 1) {
+                  s3Key = urlParts.slice(bucketIndex + 1).join('/');
+                } else {
+                  // Fallback: take everything after the domain
+                  const domainIndex = s3Key.indexOf('amazonaws.com/');
+                  if (domainIndex >= 0) {
+                    s3Key = s3Key.substring(domainIndex + 'amazonaws.com/'.length);
+                    // Remove bucket name if it's the first part
+                    const keyParts = s3Key.split('/');
+                    if (keyParts.length > 1) {
+                      s3Key = keyParts.slice(1).join('/');
+                    }
+                  }
+                }
+              }
             }
+            
+            // If s3Key still looks like a full URL, try one more extraction
+            if (s3Key.startsWith('http://') || s3Key.startsWith('https://')) {
+              const urlObj = new URL(s3Key);
+              s3Key = urlObj.pathname.substring(1); // Remove leading slash
+            }
+            
+            console.log('🔑 Extracted S3 key for selfie:', s3Key.substring(0, 100));
+            
+            // Generate presigned URL
             selfieUrl = await getPresignedUrl(s3Key, 3600);
+            console.log('✅ Generated presigned URL for selfie');
           } catch (urlError) {
-            console.error('Error generating presigned URL for selfie:', urlError);
+            console.error('❌ Error generating presigned URL for selfie:', urlError);
+            console.error('Original URL:', selfieRecord.selfie_image_url);
             // Fallback to original URL if presigned URL generation fails
             selfieUrl = selfieRecord.selfie_image_url;
           }
@@ -596,9 +652,18 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           updated_at: selfieRecord.updated_at,
           faceMatch: faceMatchData
         };
+        
+        console.log('✅ Selfie data prepared:', {
+          has_url: !!selfieData.selfie_url,
+          verified: selfieData.selfie_verified,
+          captured: selfieData.selfie_captured
+        });
+      } else {
+        console.log('⚠️ No selfie found for user:', userId);
       }
     } catch (e) {
-      console.error('Error fetching selfie data:', e);
+      console.error('❌ Error fetching selfie data:', e);
+      console.error('Stack:', e.stack);
     }
 
     // Fetch Loan Application Documents for this user

@@ -478,22 +478,48 @@ router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, 
 
     // Upload selfie to S3 first
     const fileName = `selfies/${userId}/${applicationId}-${Date.now()}.jpg`;
-    const s3Url = await uploadToS3(
+    const uploadResult = await uploadToS3(
       req.file.buffer,
       fileName,
       req.file.mimetype,
       { folder: 'loan-selfies' }
     );
 
-    console.log(`📸 Selfie uploaded to S3: ${s3Url}`);
+    if (!uploadResult.success) {
+      throw new Error('Failed to upload selfie to S3');
+    }
 
-    // Update application with selfie URL and mark as captured
-    await executeQuery(
+    // Store the S3 key (not the full URL object)
+    const s3Key = uploadResult.key;
+    
+    console.log(`📸 Selfie uploaded to S3:`, {
+      key: s3Key,
+      success: uploadResult.success
+    });
+
+    // Update application with selfie S3 key and mark as captured
+    const updateResult = await executeQuery(
       `UPDATE loan_applications 
        SET selfie_image_url = ?, selfie_captured = 1, updated_at = NOW() 
        WHERE id = ?`,
-      [s3Url, applicationId]
+      [s3Key, applicationId]
     );
+    
+    // Verify the update was successful
+    const verifyResult = await executeQuery(
+      `SELECT selfie_image_url, selfie_captured FROM loan_applications WHERE id = ?`,
+      [applicationId]
+    );
+    
+    if (verifyResult.length > 0) {
+      console.log(`✅ Selfie saved to database:`, {
+        applicationId,
+        selfie_image_url: verifyResult[0].selfie_image_url,
+        selfie_captured: verifyResult[0].selfie_captured
+      });
+    } else {
+      console.error(`❌ Failed to verify selfie save - application ${applicationId} not found`);
+    }
 
     // Now perform face match verification
     try {
@@ -513,7 +539,7 @@ router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, 
         return res.json({
           success: true,
           data: {
-            selfie_url: s3Url,
+            selfie_url: s3Key,
             message: 'Selfie uploaded successfully. Face verification skipped - no KYC data found.',
             verification: {
               skipped: true,
@@ -624,7 +650,7 @@ router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, 
         return res.json({
           success: true,
           data: {
-            selfie_url: s3Url,
+            selfie_url: s3Key,
             message: 'Selfie uploaded successfully. Face verification skipped - no Digilocker photo found.',
             verification: {
               skipped: true,
@@ -652,7 +678,7 @@ router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, 
           return res.json({
             success: true,
             data: {
-              selfie_url: s3Url,
+              selfie_url: s3Key,
               message: 'Selfie uploaded successfully. Face verification failed - could not download Digilocker photo.',
               verification: {
                 skipped: true,
@@ -703,7 +729,7 @@ router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, 
       res.json({
         success: true,
         data: {
-          selfie_url: s3Url,
+          selfie_url: s3Key,
           message: verificationPassed
             ? 'Selfie verified successfully'
             : 'Face verification failed - please try again',
@@ -723,7 +749,7 @@ router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, 
       res.json({
         success: true,
         data: {
-          selfie_url: s3Url,
+          selfie_url: s3Key,
           message: 'Selfie uploaded but verification failed. Please try again.',
           verification: {
             verified: false,
