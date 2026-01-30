@@ -378,27 +378,21 @@ async function validatePANDetails(panNumber, clientRefNum = null) {
 /**
  * UAN Basic V3 API Functions (Synchronous)
  */
-const DIGITAP_UAN_BASE_URL = process.env.DIGITAP_UAN_BASE_URL || 'https://svcint.digitap.ai/wrap/prod/svc/cv/v3';
 
 /**
- * Get Bearer token for UAN Basic V3 API
- * Uses DIGITAP_UAN_BEARER_TOKEN if available, otherwise falls back to other methods
+ * Get Basic Auth token for UAN Basic V3 API
+ * Uses DIGITAP_UAN_AUTH_TOKEN if available, otherwise uses hardcoded production credentials
  */
-function getUANBearerToken() {
-  // Try DIGITAP_UAN_BEARER_TOKEN first
-  let bearerToken = process.env.DIGITAP_UAN_BEARER_TOKEN;
+function getUANBasicAuthToken() {
+  // Try DIGITAP_UAN_AUTH_TOKEN first (should be base64 encoded credentials)
+  let authToken = process.env.DIGITAP_UAN_AUTH_TOKEN;
   
-  // Fallback to DIGITAP_API_KEY if available
-  if (!bearerToken) {
-    bearerToken = process.env.DIGITAP_API_KEY;
+  // Fallback to production credentials
+  if (!authToken) {
+    authToken = 'MjU4NDU3MjE6bzBHSHVxVnlzZ1VLSjJMTlFDN0JCNDZhbWM1ckJxSDg=';
   }
   
-  // Fallback to DIGILOCKER_AUTH_TOKEN if available
-  if (!bearerToken) {
-    bearerToken = process.env.DIGILOCKER_AUTH_TOKEN;
-  }
-  
-  return bearerToken;
+  return authToken;
 }
 
 /**
@@ -414,9 +408,10 @@ function generateUANClientRefNum(userId) {
  * UAN Basic V3 - Synchronous API call
  * @param {string} mobile - Mobile number
  * @param {string} clientRefNum - Client reference number
+ * @param {string} pan - PAN number (optional but recommended)
  * @returns {Promise<{success: boolean, data?: object, error?: string}>}
  */
-async function getUANBasic(mobile, clientRefNum) {
+async function getUANBasic(mobile, clientRefNum, pan = null) {
   try {
     if (!mobile) {
       return {
@@ -433,34 +428,31 @@ async function getUANBasic(mobile, clientRefNum) {
       };
     }
 
-    const bearerToken = getUANBearerToken();
-    if (!bearerToken) {
-      console.error('DIGITAP_UAN_BEARER_TOKEN is not set. Please configure it in your .env file.');
-      return {
-        success: false,
-        error: 'Bearer token not configured. Please set DIGITAP_UAN_BEARER_TOKEN environment variable.'
-      };
-    }
+    const authToken = getUANBasicAuthToken();
+    console.log(`UAN Basic Auth token configured: ${authToken.substring(0, 20)}...`);
 
-    // Log token info (first 20 chars for debugging, not full token)
-    console.log(`Bearer token configured: ${bearerToken.substring(0, 20)}...`);
-
-    // Use the exact URL provided
-    const url = 'https://svcint.digitap.ai/wrap/prod/svc/cv/v3/uan_basic/sync';
+    // Use the correct production URL
+    const url = 'https://svc.digitap.ai/cv/v3/uan_basic/sync';
 
     const requestBody = {
+      client_ref_num: clientRefNum,
       mobile: mobile,
-      client_ref_num: clientRefNum
+      run_alternate_pan_flow: 0
     };
+
+    // Add PAN if provided
+    if (pan && /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(pan)) {
+      requestBody.pan = pan;
+    }
 
     console.log(`Calling UAN Basic V3 API: ${url}`);
     console.log(`Request body:`, JSON.stringify(requestBody, null, 2));
-    console.log(`Authorization header: Bearer ${bearerToken.substring(0, 20)}...`);
+    console.log(`Authorization header: Basic ${authToken.substring(0, 20)}...`);
 
     const response = await axios.post(url, requestBody, {
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${bearerToken}`,
+        'Authorization': `Basic ${authToken}`,
         'Accept': 'application/json'
       },
       timeout: 60000, // 60 seconds timeout for sync API
@@ -511,16 +503,16 @@ async function getUANBasic(mobile, clientRefNum) {
       
       // If response is HTML, try to extract useful info
       if (typeof error.response.data === 'string' && error.response.data.includes('<html>')) {
-        errorMessage = `API returned ${error.response.status} error. Please check Bearer token configuration.`;
+        errorMessage = `API returned ${error.response.status} error. Please check authentication configuration.`;
         errorData = { html_response: true, status: error.response.status };
       } else if (error.response.data?.message) {
         errorMessage = error.response.data.message;
       } else if (error.response.data?.error_msg) {
         errorMessage = error.response.data.error_msg;
       } else if (error.response.status === 401) {
-        errorMessage = 'Authentication failed. Please check Bearer token.';
+        errorMessage = 'Authentication failed. Please check API credentials.';
       } else if (error.response.status === 500) {
-        errorMessage = 'Internal server error from API. Please verify Bearer token and request format.';
+        errorMessage = 'Internal server error from API. Please verify credentials and request format.';
       }
       
       console.error('Response data:', error.response.data);

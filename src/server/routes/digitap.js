@@ -497,8 +497,22 @@ router.post('/uan/basic', requireAuth, async (req, res) => {
       });
     }
 
+    // Fetch user's PAN from database
+    let userPan = null;
+    try {
+      const userRows = await executeQuery(`
+        SELECT pan FROM users WHERE id = ?
+      `, [userId]);
+      if (userRows.length > 0 && userRows[0].pan) {
+        userPan = userRows[0].pan;
+      }
+    } catch (panError) {
+      console.error('Error fetching user PAN:', panError);
+      // Continue without PAN
+    }
+
     const clientRefNum = generateUANClientRefNum(userId);
-    const result = await getUANBasic(mobile, clientRefNum);
+    const result = await getUANBasic(mobile, clientRefNum, userPan);
 
     // Store transaction in database
     try {
@@ -521,7 +535,7 @@ router.post('/uan/basic', requireAuth, async (req, res) => {
         mobile,
         status,
         resultCode || null,
-        JSON.stringify({ mobile, client_ref_num: clientRefNum }),
+        JSON.stringify({ mobile, client_ref_num: clientRefNum, pan: userPan }),
         JSON.stringify(result.data),
         result.error || null
       ]);
@@ -637,8 +651,23 @@ router.post('/uan/admin/basic', authenticateAdmin, async (req, res) => {
       });
     }
 
+    // Fetch user's PAN from database
+    let userPan = null;
+    try {
+      const userRows = await executeQuery(`
+        SELECT pan FROM users WHERE id = ?
+      `, [userIdInt]);
+      if (userRows.length > 0 && userRows[0].pan) {
+        userPan = userRows[0].pan;
+      }
+      console.log('User PAN for UAN lookup:', userPan);
+    } catch (panError) {
+      console.error('Error fetching user PAN:', panError);
+      // Continue without PAN
+    }
+
     const clientRefNum = generateUANClientRefNum(userIdInt);
-    const result = await getUANBasic(mobile, clientRefNum);
+    const result = await getUANBasic(mobile, clientRefNum, userPan);
 
     // Store transaction in database
     try {
@@ -661,7 +690,7 @@ router.post('/uan/admin/basic', authenticateAdmin, async (req, res) => {
         mobile,
         status,
         resultCode || null,
-        JSON.stringify({ mobile, client_ref_num: clientRefNum }),
+        JSON.stringify({ mobile, client_ref_num: clientRefNum, pan: userPan }),
         JSON.stringify(result.data),
         result.error || null
       ]);
