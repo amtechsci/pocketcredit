@@ -6152,6 +6152,74 @@ export function UserProfileDetail() {
     return principal * ratePerDay * days;
   };
 
+  // Helper function to calculate DPD for EMI loans - uses first EMI due date
+  const calculateDPDForEmiLoan = (loan: any) => {
+    // Try to get calculation from loanCalculations state
+    const loanId = loan.id || loan.loanId;
+    const calculation = loanCalculations[loanId];
+    
+    // Get first EMI due date
+    let firstDueDate: string | null = null;
+    
+    // Priority 1: Check if processed_due_date exists and is an array (multi-EMI)
+    if (loan.processed_due_date) {
+      try {
+        const parsedDueDate = typeof loan.processed_due_date === 'string' 
+          ? JSON.parse(loan.processed_due_date) 
+          : loan.processed_due_date;
+        
+        if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
+          firstDueDate = parsedDueDate[0];
+        } else if (typeof parsedDueDate === 'string') {
+          firstDueDate = parsedDueDate;
+        }
+      } catch (e) {
+        // If not JSON, treat as single date string
+        firstDueDate = loan.processed_due_date;
+      }
+    }
+    
+    // Priority 2: Check calculation repayment schedule
+    if (!firstDueDate && calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 0) {
+      const firstEmi = calculation.repayment.schedule[0];
+      firstDueDate = firstEmi.due_date || firstEmi.dueDate || null;
+    }
+    
+    // Priority 3: Check emi_schedule from loan data
+    if (!firstDueDate && loan.emi_schedule) {
+      try {
+        const parsedSchedule = typeof loan.emi_schedule === 'string' 
+          ? JSON.parse(loan.emi_schedule) 
+          : loan.emi_schedule;
+        
+        if (Array.isArray(parsedSchedule) && parsedSchedule.length > 0) {
+          const firstEmi = parsedSchedule[0];
+          firstDueDate = firstEmi.due_date || firstEmi.dueDate || null;
+        }
+      } catch (e) {
+        console.error('Error parsing emi_schedule for DPD calculation:', e);
+      }
+    }
+    
+    // Priority 4: Fallback to single due date calculation
+    if (!firstDueDate) {
+      const disbursedDate = loan.disbursedDate || loan.disbursed_at;
+      if (disbursedDate && calculation?.interest?.days) {
+        const disbursedDateStr = parseDateString(disbursedDate);
+        const [year, month, day] = disbursedDateStr.split('-').map(Number);
+        const startDate = new Date(year, month - 1, day);
+        const dueDateObj = new Date(startDate.getTime() + ((calculation.interest.days - 1) * 24 * 60 * 60 * 1000));
+        firstDueDate = `${dueDateObj.getFullYear()}-${String(dueDateObj.getMonth() + 1).padStart(2, '0')}-${String(dueDateObj.getDate()).padStart(2, '0')}`;
+      } else if (calculation?.interest?.repayment_date) {
+        firstDueDate = parseDateString(calculation.interest.repayment_date);
+      }
+    }
+    
+    // Calculate DPD using first due date
+    if (!firstDueDate) return 0;
+    return calculateDPD(loan.disbursedDate || loan.disbursed_at || '', firstDueDate);
+  };
+
   // Loans Tab (Account Manager - excludes overdue loans which have their own tab)
   const renderLoansTab = () => {
     let runningLoans = getArray('loans').filter((loan: any) =>
@@ -6681,13 +6749,10 @@ export function UserProfileDetail() {
                         // Pre-close amount: principal + 10% pre-close fee + GST + interest till TODAY
                         // Use same calculation as RepaymentSchedulePage for consistency
                         const preCloseFeePercent = 10;
-                        // Round to 2 decimals: Math.round(value * 100) / 100
                         const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
                         const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
-                        // Round interestTillToday to 2 decimals before summing
-                        const interestTillTodayRounded = Math.round(interestTillToday * 100) / 100;
-                        // Round each component before summing to avoid floating point errors
-                        const preCloseAmount = Math.round((principal + interestTillTodayRounded + preCloseFee + preCloseFeeGST) * 100) / 100;
+                        // Don't round interestTillToday or final amount - match user side calculation exactly
+                        const preCloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
 
                         // Status log
                         const statusLog = `${loan.status} - ${formatDate(loan.statusDate || loan.updatedAt)}`;

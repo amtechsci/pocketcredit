@@ -369,10 +369,11 @@ export const RepaymentSchedulePage = () => {
   // Exhausted Days Calculation - Priority: last_extension_date + 1 day, Fallback: processed_at
   // Per rulebook: Use inclusive counting - Math.ceil((end - start) / msPerDay) + 1
   // First, try to use exhaustedDays from API response (calculated with last_extension_date priority)
-  let exhaustedDays = calculations?.interest?.exhaustedDays || 1;
+  // Trust backend value - it's the source of truth
+  let exhaustedDays = calculations?.interest?.exhaustedDays;
   
   // If API didn't provide exhaustedDays, calculate locally with priority logic
-  if (!calculations?.interest?.exhaustedDays || exhaustedDays === 1) {
+  if (exhaustedDays === undefined || exhaustedDays === null) {
     // PRIORITY 1: Use last_extension_date + 1 day (next day after extension) if extension exists
     if (loanData.last_extension_date && loanData.extension_count > 0) {
       const lastExtensionDateStr = loanData.last_extension_date.split('T')[0]; // Get YYYY-MM-DD part
@@ -397,25 +398,40 @@ export const RepaymentSchedulePage = () => {
         calculatedDays: exhaustedDays
       });
     } 
-    // FALLBACK: Use processed_at if no extension or last_extension_date not available
+    // FALLBACK: Use processed_at + 1 day if no extension (interest starts the day after processing)
     else if (processedDateMidnight) {
-      // Calculate difference in days using inclusive counting
+      // Interest starts from the day AFTER processed_at
+      const nextDayAfterProcessed = new Date(processedDateMidnight);
+      nextDayAfterProcessed.setDate(nextDayAfterProcessed.getDate() + 1);
+      nextDayAfterProcessed.setHours(0, 0, 0, 0);
+      
+      // Calculate difference in days using inclusive counting from next day after processed
       // Formula: Math.ceil((end - start) / msPerDay) + 1
-      const diffTime = currentDateMidnight.getTime() - processedDateMidnight.getTime();
+      const diffTime = currentDateMidnight.getTime() - nextDayAfterProcessed.getTime();
       const daysDiff = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
       
       // Exhausted days should be at least 1 if loan was processed today or in the past
       exhaustedDays = Math.max(1, daysDiff);
       
-      console.log('Exhausted Days Calculation (using processed_at as fallback):', {
+      console.log('Exhausted Days Calculation (using processed_at + 1 day as fallback):', {
         processed_at: loanData.processed_at,
         processedDateStr: processedDateMidnight ? loanData.processed_at.split('T')[0] : 'N/A',
+        nextDayAfterProcessed: nextDayAfterProcessed.toISOString().split('T')[0],
+        currentDate: currentDate.toISOString().split('T')[0],
         calculatedDays: exhaustedDays
       });
+    }
+    
+    // If still not calculated, default to 1
+    if (!exhaustedDays || exhaustedDays < 1) {
+      exhaustedDays = 1;
     }
   } else {
     console.log('Using exhaustedDays from API response (with last_extension_date priority):', exhaustedDays);
   }
+  
+  // Ensure exhaustedDays is at least 1
+  exhaustedDays = Math.max(1, exhaustedDays || 1);
   
   // For due date calculation, still use disbursed_at or processed_at
   const disbursedDate = processedDateMidnight || (loanData.disbursed_at ? new Date(loanData.disbursed_at.split('T')[0] + 'T00:00:00') : new Date());
@@ -627,14 +643,6 @@ export const RepaymentSchedulePage = () => {
             <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
               <CardContent className="p-4 sm:p-6">
                 {/* Preclose Section - Single Row Layout */}
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-                    <h3 className="text-lg sm:text-xl font-bold text-gray-900">Preclose it today</h3>
-                    {shortLoanId !== 'N/A' && (
-                      <span className="text-xs sm:text-sm font-semibold text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
-                        Loan ID: {shortLoanId}
-                      </span>
-                    )}
-                  </div>
                 
                 {/* Calculate preclose amount */}
                 {(() => {
@@ -710,16 +718,19 @@ export const RepaymentSchedulePage = () => {
                 return (
                   <>
                     {/* Single Row Layout: Amount | Due Date | Button */}
-                    <div className="flex flex-col md:flex-row md:items-center gap-4 p-4 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
+                    <div className="flex flex-col md:flex-row md:items-center gap-3 p-3 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
                       {/* Column 1: Preclose Amount with message */}
                       <div className="flex-1">
-                        <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">
-                          Now & save interest: {formatCurrency(precloseAmount)}
-                        </p>
-                        <p className="text-xs sm:text-sm text-gray-500 italic">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="text-sm font-semibold text-gray-900">Preclose it today</h3>
+                          <p className="text-xs text-gray-600">
+                            Now & save interest: {formatCurrency(precloseAmount)}
+                          </p>
+                        </div>
+                        <p className="text-[10px] text-gray-500 italic mb-1">
                           (Available till {lastAvailableDateFormatted || 'N/A'} only)
                         </p>
-                        <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 mt-2">
+                        <h2 className="text-xl sm:text-2xl font-semibold text-gray-900">
                           {formatCurrency(precloseAmount)}
                         </h2>
                       </div>
@@ -727,11 +738,11 @@ export const RepaymentSchedulePage = () => {
                       {/* Column 2: Due Date */}
                       {dueDateObj && (
                         <div className="flex-1">
-                          <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">Due Date</p>
-                          <p className="text-lg sm:text-xl font-semibold text-gray-900 mb-0.5">
+                          <p className="text-xs text-gray-600 mb-0.5 font-medium">Due Date</p>
+                          <p className="text-base sm:text-lg font-semibold text-gray-900 mb-0.5">
                             {dueDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                           </p>
-                          <p className={`text-xs text-gray-600 ${isOverdue ? 'text-red-600' : isDueToday ? 'text-yellow-600' : ''}`}>
+                          <p className={`text-[10px] text-gray-600 ${isOverdue ? 'text-red-600' : isDueToday ? 'text-yellow-600' : ''}`}>
                             {isOverdue ? `Overdue by ${Math.abs(daysRemaining)} days` : isDueToday ? 'Due Today!' : `Due in ${daysRemaining} days`}
                           </p>
                         </div>
@@ -740,7 +751,7 @@ export const RepaymentSchedulePage = () => {
                       {/* Column 3: Repay Now Button */}
                       <div className="flex-shrink-0 w-full md:w-auto">
                         <Button
-                          className="w-full md:w-auto h-12 text-base font-semibold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all"
+                          className="w-full md:w-auto h-10 text-sm font-semibold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all"
                           onClick={async () => {
                             try {
                               toast.loading('Creating payment order...');
@@ -1363,14 +1374,6 @@ export const RepaymentSchedulePage = () => {
             <>
               <Card className="bg-white shadow-xl rounded-2xl overflow-hidden mb-6 border-2 border-blue-100">
                 <CardContent className="p-4 sm:p-6">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-                    <h3 className="text-lg sm:text-xl font-bold text-gray-900">Preclose it today</h3>
-                    {shortLoanId !== 'N/A' && (
-                      <span className="text-xs sm:text-sm font-semibold text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
-                        Loan ID: {shortLoanId}
-                      </span>
-                    )}
-                  </div>
                   
                   {/* Calculate preclose amount: principal + interest till today + post service fee (1 time) + gst */}
                   {(() => {
@@ -1469,20 +1472,23 @@ export const RepaymentSchedulePage = () => {
                   return (
                     <>
                       {/* Single Row Layout: Amount | Due Date | Button */}
-                      <div className="flex flex-col md:flex-row md:items-center gap-4 p-4 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
+                      <div className="flex flex-col md:flex-row md:items-center gap-3 p-3 bg-gradient-to-r from-gray-50 to-blue-50 rounded-xl border-2 border-blue-200">
                         {/* Column 1: Preclose Amount with message */}
                         <div className="flex-1">
-                          <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">
-                            {interestSaved > 0 ? (
-                              <>Now & save interest: {formatCurrency(interestSaved)}</>
-                            ) : (
-                              <>Now & save interest: {formatCurrency(precloseAmount)}</>
-                            )}
-                          </p>
-                          <p className="text-xs sm:text-sm text-gray-500 italic">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h3 className="text-sm font-semibold text-gray-900">Preclose it today</h3>
+                            <p className="text-xs text-gray-600">
+                              {interestSaved > 0 ? (
+                                <>Now & save interest: {formatCurrency(interestSaved)}</>
+                              ) : (
+                                <>Now & save interest: {formatCurrency(precloseAmount)}</>
+                              )}
+                            </p>
+                          </div>
+                          <p className="text-[10px] text-gray-500 italic mb-1">
                             (Available till {lastAvailableDateFormatted || 'N/A'} only)
                           </p>
-                          <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 mt-2">
+                          <h2 className="text-xl sm:text-2xl font-semibold text-gray-900">
                             {formatCurrency(precloseAmount)}
                           </h2>
                         </div>
@@ -1490,11 +1496,11 @@ export const RepaymentSchedulePage = () => {
                         {/* Column 2: Due Date */}
                         {dueDateObj && (
                           <div className="flex-1">
-                            <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">Due Date</p>
-                            <p className="text-lg sm:text-xl font-semibold text-gray-900 mb-0.5">
+                            <p className="text-xs text-gray-600 mb-0.5 font-medium">Due Date</p>
+                            <p className="text-base sm:text-lg font-semibold text-gray-900 mb-0.5">
                               {dueDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                             </p>
-                            <p className={`text-xs text-gray-600 ${isOverdue ? 'text-red-600' : isDueToday ? 'text-yellow-600' : ''}`}>
+                            <p className={`text-[10px] text-gray-600 ${isOverdue ? 'text-red-600' : isDueToday ? 'text-yellow-600' : ''}`}>
                               {isOverdue ? `Overdue by ${Math.abs(daysRemaining)} days` : isDueToday ? 'Due Today!' : `Due in ${daysRemaining} days`}
                             </p>
                           </div>
@@ -1503,7 +1509,7 @@ export const RepaymentSchedulePage = () => {
                         {/* Column 3: Repay Now Button */}
                         <div className="flex-shrink-0 w-full md:w-auto">
                           <Button
-                            className="w-full md:w-auto h-12 text-base font-semibold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all"
+                            className="w-full md:w-auto h-10 text-sm font-semibold shadow-lg bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white transition-all"
                             onClick={async () => {
                               try {
                                 toast.loading('Creating payment order...');

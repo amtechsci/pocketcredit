@@ -1099,12 +1099,10 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
     let exhaustedDays = 0;
     let interestTillToday = 0;
     
-    const isProcessed = loan.processed_at && ['account_manager', 'cleared'].includes(loan.status);
-    
     // Determine base date for interest calculation
     // PRIORITY 1: Use last_extension_date + 1 day (next day after extension) if extension exists
-    // PRIORITY 2: Use processed_at if no extension
-    // FALLBACK: Use disbursed_at if neither exists
+    // PRIORITY 2: Use processed_at if it exists (regardless of status)
+    // FALLBACK: Use disbursed_at if processed_at is not available
     let baseDateStr = null;
     
     if (loan.last_extension_date && loan.extension_count > 0) {
@@ -1120,9 +1118,16 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
       }
     }
     
-    // FALLBACK: Use processed_at if no extension or last_extension_date parsing failed
-    if (!baseDateStr && isProcessed) {
-      baseDateStr = parseDateToString(loan.processed_at_date || loan.processed_at);
+    // PRIORITY 2: Use processed_at + 1 day if it exists (interest starts the day after processing)
+    if (!baseDateStr && loan.processed_at) {
+      const processedDateStr = parseDateToString(loan.processed_at_date || loan.processed_at);
+      if (processedDateStr) {
+        // Add 1 day to processed_at - interest starts accruing from the day AFTER processing
+        const [year, month, day] = processedDateStr.split('-').map(Number);
+        const nextDayDate = new Date(year, month - 1, day);
+        nextDayDate.setDate(nextDayDate.getDate() + 1);
+        baseDateStr = formatDateToString(nextDayDate);
+      }
     }
     
     // FALLBACK: Use disbursed_at if processed_at is not available
