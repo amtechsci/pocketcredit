@@ -478,8 +478,8 @@ export const RepaymentSchedulePage = () => {
   // NOTE: Stages show percentage-based limits WITHOUT cap (backend caps at 45600, but stages show theoretical limits)
   const calculateLimitForPercentage = (percentage: number) => {
     // First calculate percentage: (salary * percentage) / 100
-    // Then round down to nearest 1000 (e.g., 11055 -> 11000, 11555 -> 11000)
-    const calculatedLimit = Math.floor(((monthlySalary * percentage) / 100) / 1000) * 1000;
+    // Then round down to nearest 100 (e.g., 4950 -> 4900, 11555 -> 11500)
+    const calculatedLimit = Math.floor(((monthlySalary * percentage) / 100) / 100) * 100;
     // DO NOT apply cap here - stages show theoretical percentage-based limits
     return calculatedLimit;
   };
@@ -500,8 +500,8 @@ export const RepaymentSchedulePage = () => {
   
   // Calculate next limit for display (stages show percentage-based limits, not capped)
   // First calculate percentage: (salary * percentage) / 100
-  // Then round down to nearest 1000 for display (e.g., 11055 -> 11000)
-  const nextStageLimitUncapped = nextPercentage ? Math.floor(((monthlySalary * nextPercentage) / 100) / 1000) * 1000 : null;
+  // Then round down to nearest 100 for display (e.g., 4950 -> 4900, 11555 -> 11500)
+  const nextStageLimitUncapped = nextPercentage ? Math.floor(((monthlySalary * nextPercentage) / 100) / 100) * 100 : null;
   // For stages, show the uncapped limit (backend will cap at 45600, but stages show theoretical)
   const nextStageLimit = nextStageLimitUncapped;
   
@@ -2025,34 +2025,30 @@ export const RepaymentSchedulePage = () => {
           <CardContent className="p-3 sm:p-5">
             <div className="space-y-3">
               {(() => {
-                // Show only: Current, Next, and Premium stages
-                const stagesToShow: Array<{index: number, percentage: number, limit: number, isPremium: boolean}> = [];
+                // Get current loan amount (the loan they just took)
+                const currentLoanAmount = loanData?.loan_amount || loanData?.sanctioned_amount || 0;
                 
-                // Always show current stage
+                // Show only: Current, Next, and Premium stages
+                const stagesToShow: Array<{index: number, percentage: number, limit: number, isPremium: boolean, isLoanAmount?: boolean}> = [];
+                
+                // Always show current stage - show current loan amount
                 stagesToShow.push({
                   index: currentStageIndex,
                   percentage: currentPercentage,
-                  limit: currentStageLimit,
-                  isPremium: false
+                  limit: currentLoanAmount,
+                  isPremium: false,
+                  isLoanAmount: true
                 });
                 
-                // Show next stage if it exists and is not premium
-                // Next stage should show if: it exists, limit is calculated, and it's not the last tier
-                if (nextPercentage !== null && nextStageLimitUncapped !== null && nextStageIndex < percentageMultipliers.length) {
-                  // Only skip next stage if it would exceed 45600 (then go straight to premium)
-                  // But still show it if it's a valid next stage
-                  const wouldExceedMax = nextStageLimitUncapped > 45600;
-                  
-                  // Show next stage unless it exceeds max (then premium is next)
-                  if (!wouldExceedMax) {
-                    stagesToShow.push({
-                      index: nextStageIndex,
-                      percentage: nextPercentage,
-                      limit: nextStageLimitUncapped,
-                      isPremium: false
-                    });
-                  }
-                }
+                // Show next stage - show current limit (after increase)
+                // Always show current limit as stage 2
+                stagesToShow.push({
+                  index: nextStageIndex,
+                  percentage: nextPercentage || 0,
+                  limit: currentLimit,
+                  isPremium: false,
+                  isLoanAmount: false
+                });
                 
                 // Always show premium/ultimate stage
                 stagesToShow.push({
@@ -2128,16 +2124,18 @@ export const RepaymentSchedulePage = () => {
                               isCurrentStage ? 'text-blue-100' : 'text-gray-500'
                             }`}>
                               {isCurrentStage 
-                                ? `Your Current limit` 
+                                ? `Current loan amount` 
                                 : isUltimateStage 
                                 ? 'Personal loan with 24 months tenure' 
+                                : isNextStage
+                                ? `Current limit`
                                 : `Stage ${stageNumber} limit`}
                             </div>
                           </div>
 
                           {/* Right Content */}
                           <div className="text-right flex-shrink-0">
-                            {!isCurrentStage && (
+                            {!isCurrentStage && !isNextStage && (
                               <div className="mt-1">
                                 <div className="text-[10px] text-gray-500 mb-1">Disbursal in 2 min</div>
                                 <div className="inline-flex items-center gap-1 bg-gray-300 text-gray-600 text-[10px] font-medium px-2 py-1 rounded-full">
