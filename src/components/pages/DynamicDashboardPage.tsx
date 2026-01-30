@@ -159,7 +159,7 @@ export function DynamicDashboardPage() {
   const totalOutstandingAmount = useMemo(() => {
     return activeLoansForDisplay.reduce((total, loan) => {
       // Only count outstanding amount for loans that have been disbursed (account_manager status)
-      if (loan.status === 'account_manager') {
+      if (loan.status === 'account_manager' || loan.status === 'overdue') {
         const outstanding = loan.outstanding_amount || loan.total_outstanding || 0;
         return total + (typeof outstanding === 'number' ? outstanding : parseFloat(String(outstanding)) || 0);
       }
@@ -310,7 +310,7 @@ export function DynamicDashboardPage() {
           // Note: We no longer automatically redirect to repayment schedule
           // Users can access dashboard and manually navigate to repayment schedule via buttons
           const accountManagerApp = applications.find(
-            (app: any) => app.status === 'account_manager'
+            (app: any) => app.status === 'account_manager' || app.status === 'overdue'
           );
           if (accountManagerApp) {
             console.log('✅ Found account_manager loan, allowing dashboard access. User can navigate to repayment schedule via buttons.');
@@ -892,10 +892,12 @@ export function DynamicDashboardPage() {
                                   loan.status === 'ready_to_repeat_disbursal' ? 'bg-green-100 text-green-800' :
                                     loan.status === 'repeat_disbursal' ? 'bg-orange-100 text-orange-800' :
                                       loan.status === 'account_manager' ? 'bg-emerald-100 text-emerald-800' :
+                                      loan.status === 'overdue' ? 'bg-red-100 text-red-800' :
                                         'bg-gray-100 text-gray-800'
                             }`}
                         >
                           {loan.status === 'account_manager' ? 'Active' :
+                          loan.status === 'overdue' ? 'Overdue' :
                             loan.status === 'repeat_disbursal' ? 'Repeat Disbursal' :
                               loan.status === 'ready_to_repeat_disbursal' ? 'Ready for Repeat Disbursal' :
                                 loan.status.replace('_', ' ')}
@@ -918,11 +920,12 @@ export function DynamicDashboardPage() {
                           {loan.status === 'ready_to_repeat_disbursal' && 'Ready for repeat disbursal'}
                           {loan.status === 'repeat_disbursal' && 'Repeat disbursal in progress'}
                           {loan.status === 'account_manager' && 'Loan is active'}
+                          {loan.status === 'overdue' && 'Loan is overdue'}
                         </p>
                         <Button
                           onClick={async () => {
                             console.log('View Details clicked for:', loan.id);
-                            if (loan.status === 'account_manager') {
+                            if (loan.status === 'account_manager' || loan.status === 'overdue') {
                               navigate(`/repayment-schedule?applicationId=${loan.id}`);
                             } else if (loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal') {
                               navigate(`/post-disbursal?applicationId=${loan.id}`);
@@ -1088,7 +1091,7 @@ export function DynamicDashboardPage() {
                     <Button
                       onClick={() => {
                         console.log('View Details clicked for:', loan.id);
-                        if (loan.status === 'account_manager') {
+                        if (loan.status === 'account_manager' || loan.status === 'overdue') {
                           navigate(`/repayment-schedule?applicationId=${loan.id}`);
                         } else if (loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal') {
                           navigate(`/post-disbursal?applicationId=${loan.id}`);
@@ -1106,7 +1109,7 @@ export function DynamicDashboardPage() {
                       size="sm"
                       className="text-xs whitespace-nowrap w-full"
                     >
-                      {loan.status === 'account_manager' ? 'View Loan' :
+                      {loan.status === 'account_manager' || loan.status === 'overdue' ? 'View Loan' :
                         loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal' ? 'Continue' :
                           loan.status === 'follow_up' ? 'Upload Documents' : 'View'}
                     </Button>
@@ -1244,7 +1247,7 @@ export function DynamicDashboardPage() {
                     <div className="grid gap-4">
                       {allLoans.map((loan) => {
                         const isCleared = loan.status === 'cleared';
-                        const isActive = loan.status === 'account_manager';
+                        const isActive = loan.status === 'account_manager' || loan.status === 'overdue';
                         const isApplied = ['submitted', 'under_review', 'follow_up', 'qa_verification'].includes(loan.status);
 
                         return (
@@ -1632,6 +1635,7 @@ export function DynamicDashboardPage() {
                 <Badge
                   className={`text-base px-6 py-2 ${selectedLoanDetails.status === 'cleared' ? 'bg-green-500 text-white' :
                     selectedLoanDetails.status === 'account_manager' ? 'bg-blue-500 text-white' :
+                    selectedLoanDetails.status === 'overdue' ? 'bg-red-500 text-white' :
                       'bg-yellow-500 text-white'
                     }`}
                 >
@@ -1640,7 +1644,7 @@ export function DynamicDashboardPage() {
               </div>
 
               {/* Loan Amount Card - Only show for account_manager and cleared loans */}
-              {(selectedLoanDetails.status === 'account_manager' || selectedLoanDetails.status === 'cleared') && (
+              {(selectedLoanDetails.status === 'account_manager' || selectedLoanDetails.status === 'overdue' || selectedLoanDetails.status === 'cleared') && (
                 <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
                   <CardContent className="p-6 text-center">
                     <p className="text-sm text-gray-600 mb-2">Loan Amount</p>
@@ -1678,7 +1682,7 @@ export function DynamicDashboardPage() {
                     </p>
                   </div>
                 )}
-                {selectedLoanDetails.status === 'account_manager' && selectedLoanDetails.disbursed_at && (
+                {(selectedLoanDetails.status === 'account_manager' || selectedLoanDetails.status === 'overdue') && selectedLoanDetails.disbursed_at && (
                   <div className="bg-blue-50 rounded-lg p-4">
                     <p className="text-xs text-blue-700 mb-1">Disbursed On</p>
                     <p className="text-sm font-semibold text-blue-900">
@@ -1703,7 +1707,7 @@ export function DynamicDashboardPage() {
                 </div>
               )}
 
-              {selectedLoanDetails.status === 'account_manager' && (
+              {(selectedLoanDetails.status === 'account_manager' || selectedLoanDetails.status === 'overdue') && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <div className="flex items-start gap-3">
                     <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
@@ -1733,7 +1737,7 @@ export function DynamicDashboardPage() {
 
               {/* Action Buttons */}
               <div className="flex gap-3 pt-4 border-t">
-                {selectedLoanDetails.status === 'account_manager' && (
+                {(selectedLoanDetails.status === 'account_manager' || selectedLoanDetails.status === 'overdue') && (
                   <Button
                     onClick={() => {
                       setShowLoanDetailsModal(false);

@@ -55,6 +55,7 @@ export function EnhancedUserReferencesPage({
     alternate_mobile: ''
   });
 
+  // Credit analytics mobile numbers
   useEffect(() => {
     if (!isAuthenticated) {
       navigate('/auth');
@@ -102,6 +103,7 @@ export function EnhancedUserReferencesPage({
       setLoading(false);
     }
   };
+
 
   const handleReferenceChange = (index: number, field: keyof ReferenceData, value: string) => {
     const newReferences = [...references];
@@ -163,9 +165,18 @@ export function EnhancedUserReferencesPage({
   };
 
   const validateForm = () => {
+    console.log('🔍 Starting form validation...');
+    console.log('🔍 References:', references);
+    console.log('🔍 Alternate mobile:', alternateData.alternate_mobile);
+    
     // Validate all 3 references are filled
     for (let i = 0; i < 3; i++) {
       if (!references[i].name.trim() || !references[i].phone.trim() || !references[i].relation) {
+        console.error(`❌ Validation failed: Reference ${i + 1} missing fields`, {
+          name: references[i].name,
+          phone: references[i].phone,
+          relation: references[i].relation
+        });
         toast.error(`Please fill all fields for Reference ${i + 1}`);
         return false;
       }
@@ -173,12 +184,14 @@ export function EnhancedUserReferencesPage({
       // Validate phone format
       const phoneRegex = /^[6-9]\d{9}$/;
       if (!phoneRegex.test(references[i].phone)) {
+        console.error(`❌ Validation failed: Reference ${i + 1} invalid phone format`, references[i].phone);
         toast.error(`Invalid phone number format for Reference ${i + 1}`);
         return false;
       }
 
       // Check if reference phone is user's own number
       if (user?.phone && references[i].phone === user.phone) {
+        console.error(`❌ Validation failed: Reference ${i + 1} is user's own number`);
         toast.error(`Reference ${i + 1}: Cannot use your own registered phone number`);
         return false;
       }
@@ -229,22 +242,38 @@ export function EnhancedUserReferencesPage({
     // Final check: all numbers should be unique
     const uniquePhones = new Set(allPhones);
     if (uniquePhones.size !== allPhones.length) {
+      console.error('❌ Validation failed: Duplicate phone numbers detected');
       toast.error('All phone numbers must be unique. Please check for duplicates.');
       return false;
     }
 
+    console.log('✅ Form validation passed!');
     return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    console.log('🔔 Form submitted - Starting validation');
+    
     if (!validateForm()) {
+      console.log('❌ Form validation failed');
       return;
     }
 
+    console.log('✅ Form validation passed');
+    console.log('📤 Preparing to save references:', {
+      references: references.map(ref => ({
+        name: ref.name,
+        phone: ref.phone,
+        relation: ref.relation
+      })),
+      alternate_mobile: alternateData.alternate_mobile
+    });
+
     setSaving(true);
     try {
+      console.log('🌐 Calling apiService.saveUserReferences...');
       const response = await apiService.saveUserReferences({
         references: references.map(ref => ({
           name: ref.name,
@@ -254,8 +283,25 @@ export function EnhancedUserReferencesPage({
         alternate_mobile: alternateData.alternate_mobile
       });
 
-      if (response.data) {
-        toast.success('References saved successfully!');
+      console.log('✅ Save references response received:', response);
+      console.log('✅ Response structure:', {
+        hasSuccess: !!response.success,
+        hasStatus: !!response.status,
+        hasData: !!response.data,
+        hasMessage: !!response.message,
+        fullResponse: response
+      });
+
+      // Handle multiple response formats:
+      // 1. { success: true, data: {...} }
+      // 2. { status: 'success', data: {...} }
+      // 3. { success: true, message: '...', data: {...} }
+      // 4. Just check if success is true or status is success
+      const isSuccess = response.success === true || response.status === 'success';
+      
+      if (isSuccess) {
+        toast.success(response.message || 'References saved successfully!');
+        console.log('✅ References saved successfully!');
 
         // Add a small delay to allow React to finish state updates before navigation
         setTimeout(() => {
@@ -266,11 +312,14 @@ export function EnhancedUserReferencesPage({
           }
         }, 100);
       } else {
-        toast.error('Failed to save references');
+        const errorMsg = response.message || 'Failed to save references';
+        console.error('❌ Save references failed:', response);
+        toast.error(errorMsg);
       }
     } catch (error: any) {
       console.error('Error saving references:', error);
-      toast.error(error.message || 'Failed to save references');
+      const errorMsg = error.response?.data?.message || error.message || 'Failed to save references';
+      toast.error(errorMsg);
     } finally {
       setSaving(false);
     }
@@ -316,6 +365,7 @@ export function EnhancedUserReferencesPage({
           </div>
         </div>
       )}
+
 
       <form onSubmit={handleSubmit} className="space-y-8">
         {/* Reference Numbers Section */}
@@ -509,6 +559,14 @@ export function EnhancedUserReferencesPage({
             <Button
               type="submit"
               disabled={saving || loading}
+              onClick={(e) => {
+                console.log('🔘 Submit button clicked');
+                // Let the form's onSubmit handle it, but log for debugging
+                if (saving || loading) {
+                  console.log('⚠️ Button is disabled, preventing submission');
+                  e.preventDefault();
+                }
+              }}
               className="px-12 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
             >
               {saving ? (

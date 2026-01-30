@@ -376,6 +376,38 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
          WHERE id = ?`,
         [userStatus, holdUntilDate, userId]
       );
+      
+      // When user is put on hold via cancel action, cancel ALL their active loans (not just the one being cancelled)
+      const cancellableStatuses = ['submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal', 'qa_verification'];
+      const allActiveLoans = await executeQuery(
+        `SELECT id, status, application_number FROM loan_applications 
+         WHERE user_id = ? 
+         AND status IN (${cancellableStatuses.map(() => '?').join(',')})
+         AND status != 'account_manager' 
+         AND status != 'overdue'
+         AND status != 'cleared'
+         AND status != 'cancelled'`,
+        [userId, ...cancellableStatuses]
+      );
+      
+      if (allActiveLoans && allActiveLoans.length > 0) {
+        for (const loan of allActiveLoans) {
+          // Skip if this loan is already being cancelled in the current action
+          if (loan.id !== actualLoanId && loan.id !== loanApplicationId) {
+            await executeQuery(
+              `UPDATE loan_applications 
+               SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP 
+               WHERE id = ?`,
+              [loan.id]
+            );
+            console.log(`✅ Auto-cancelled loan #${loan.id} (${loan.application_number}) - User put on hold via cancel action`);
+          }
+        }
+        const otherLoansCount = allActiveLoans.filter(l => l.id !== actualLoanId && l.id !== loanApplicationId).length;
+        if (otherLoansCount > 0) {
+          console.log(`✅ Auto-cancelled ${otherLoansCount} additional loan(s) for user ${userId} due to hold status`);
+        }
+      }
     } else if (actionType === 'not_process') {
       // Not process: Hold permanently (lifetime hold)
       await executeQuery(
@@ -385,6 +417,31 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
         [userId]
       );
       console.log(`✅ User ${userId} marked as NOT PROCESS (permanent hold)`);
+      
+      // Automatically cancel all active/submitted loans for this user
+      const cancellableStatuses = ['submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal', 'qa_verification'];
+      const activeLoans = await executeQuery(
+        `SELECT id, status, application_number FROM loan_applications 
+         WHERE user_id = ? 
+         AND status IN (${cancellableStatuses.map(() => '?').join(',')})
+         AND status != 'account_manager' 
+         AND status != 'overdue'
+         AND status != 'cleared'`,
+        [userId, ...cancellableStatuses]
+      );
+      
+      if (activeLoans && activeLoans.length > 0) {
+        for (const loan of activeLoans) {
+          await executeQuery(
+            `UPDATE loan_applications 
+             SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP 
+             WHERE id = ?`,
+            [loan.id]
+          );
+          console.log(`✅ Auto-cancelled loan #${loan.id} (${loan.application_number}) - User put on hold`);
+        }
+        console.log(`✅ Auto-cancelled ${activeLoans.length} loan(s) for user ${userId} due to hold status`);
+      }
     } else if (actionType === 're_process') {
       // Re-process: Hold for 45 days (cooling period)
       const holdUntilDate = new Date();
@@ -397,6 +454,31 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
         [holdUntilDate, userId]
       );
       console.log(`✅ User ${userId} marked as RE-PROCESS (45-day hold until ${holdUntilDate.toISOString()})`);
+      
+      // Automatically cancel all active/submitted loans for this user
+      const cancellableStatuses = ['submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal', 'qa_verification'];
+      const activeLoans = await executeQuery(
+        `SELECT id, status, application_number FROM loan_applications 
+         WHERE user_id = ? 
+         AND status IN (${cancellableStatuses.map(() => '?').join(',')})
+         AND status != 'account_manager' 
+         AND status != 'overdue'
+         AND status != 'cleared'`,
+        [userId, ...cancellableStatuses]
+      );
+      
+      if (activeLoans && activeLoans.length > 0) {
+        for (const loan of activeLoans) {
+          await executeQuery(
+            `UPDATE loan_applications 
+             SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP 
+             WHERE id = ?`,
+            [loan.id]
+          );
+          console.log(`✅ Auto-cancelled loan #${loan.id} (${loan.application_number}) - User put on hold`);
+        }
+        console.log(`✅ Auto-cancelled ${activeLoans.length} loan(s) for user ${userId} due to hold status`);
+      }
     } else if (actionType === 'unhold') {
       // Unhold: Move from hold to active status
       await executeQuery(

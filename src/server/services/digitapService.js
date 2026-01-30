@@ -375,8 +375,173 @@ async function validatePANDetails(panNumber, clientRefNum = null) {
   }
 }
 
+/**
+ * UAN Basic V3 API Functions (Synchronous)
+ */
+const DIGITAP_UAN_BASE_URL = process.env.DIGITAP_UAN_BASE_URL || 'https://svcint.digitap.ai/wrap/prod/svc/cv/v3';
+
+/**
+ * Get Bearer token for UAN Basic V3 API
+ * Uses DIGITAP_UAN_BEARER_TOKEN if available, otherwise falls back to other methods
+ */
+function getUANBearerToken() {
+  // Try DIGITAP_UAN_BEARER_TOKEN first
+  let bearerToken = process.env.DIGITAP_UAN_BEARER_TOKEN;
+  
+  // Fallback to DIGITAP_API_KEY if available
+  if (!bearerToken) {
+    bearerToken = process.env.DIGITAP_API_KEY;
+  }
+  
+  // Fallback to DIGILOCKER_AUTH_TOKEN if available
+  if (!bearerToken) {
+    bearerToken = process.env.DIGILOCKER_AUTH_TOKEN;
+  }
+  
+  return bearerToken;
+}
+
+/**
+ * Generate client reference number for UAN API
+ */
+function generateUANClientRefNum(userId) {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 8);
+  return `ent-${userId}-${timestamp}-${random}`;
+}
+
+/**
+ * UAN Basic V3 - Synchronous API call
+ * @param {string} mobile - Mobile number
+ * @param {string} clientRefNum - Client reference number
+ * @returns {Promise<{success: boolean, data?: object, error?: string}>}
+ */
+async function getUANBasic(mobile, clientRefNum) {
+  try {
+    if (!mobile) {
+      return {
+        success: false,
+        error: 'Mobile number is required'
+      };
+    }
+
+    // Validate mobile number format
+    if (!/^[6-9]\d{9}$/.test(mobile)) {
+      return {
+        success: false,
+        error: 'Invalid mobile number format. Must be 10 digits starting with 6-9.'
+      };
+    }
+
+    const bearerToken = getUANBearerToken();
+    if (!bearerToken) {
+      console.error('DIGITAP_UAN_BEARER_TOKEN is not set. Please configure it in your .env file.');
+      return {
+        success: false,
+        error: 'Bearer token not configured. Please set DIGITAP_UAN_BEARER_TOKEN environment variable.'
+      };
+    }
+
+    // Log token info (first 20 chars for debugging, not full token)
+    console.log(`Bearer token configured: ${bearerToken.substring(0, 20)}...`);
+
+    // Use the exact URL provided
+    const url = 'https://svcint.digitap.ai/wrap/prod/svc/cv/v3/uan_basic/sync';
+
+    const requestBody = {
+      mobile: mobile,
+      client_ref_num: clientRefNum
+    };
+
+    console.log(`Calling UAN Basic V3 API: ${url}`);
+    console.log(`Request body:`, JSON.stringify(requestBody, null, 2));
+    console.log(`Authorization header: Bearer ${bearerToken.substring(0, 20)}...`);
+
+    const response = await axios.post(url, requestBody, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${bearerToken}`,
+        'Accept': 'application/json'
+      },
+      timeout: 60000, // 60 seconds timeout for sync API
+      validateStatus: function (status) {
+        // Accept status codes 200-299 as success
+        return status >= 200 && status < 300;
+      }
+    });
+
+    console.log(`UAN Basic V3 API Response Status: ${response.status}`);
+    console.log(`UAN Basic V3 API Response:`, JSON.stringify(response.data, null, 2));
+
+    if (response.status === 200) {
+      const resultCode = response.data?.result_code;
+      const httpResponseCode = response.data?.http_response_code || response.status;
+      
+      // Check if result is successful (101) - UAN Basic V3 returns result_code 101 for success
+      if (resultCode === 101) {
+        return {
+          success: true,
+          data: response.data
+        };
+      } else {
+        // API returned 200 but with error result_code (e.g., 103 = No records found)
+        return {
+          success: false,
+          error: response.data?.message || 'No records found',
+          data: response.data,
+          result_code: resultCode
+        };
+      }
+    } else {
+      return {
+        success: false,
+        error: response.data?.message || 'Failed to get UAN data',
+        data: response.data
+      };
+    }
+  } catch (error) {
+    console.error('UAN Basic V3 API Error:', error.message);
+    console.error('Error status:', error.response?.status);
+    console.error('Error headers:', error.response?.headers);
+    
+    if (error.response) {
+      // Try to parse HTML response or get JSON error
+      let errorMessage = 'Internal Server Error';
+      let errorData = error.response.data;
+      
+      // If response is HTML, try to extract useful info
+      if (typeof error.response.data === 'string' && error.response.data.includes('<html>')) {
+        errorMessage = `API returned ${error.response.status} error. Please check Bearer token configuration.`;
+        errorData = { html_response: true, status: error.response.status };
+      } else if (error.response.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.response.data?.error_msg) {
+        errorMessage = error.response.data.error_msg;
+      } else if (error.response.status === 401) {
+        errorMessage = 'Authentication failed. Please check Bearer token.';
+      } else if (error.response.status === 500) {
+        errorMessage = 'Internal server error from API. Please verify Bearer token and request format.';
+      }
+      
+      console.error('Response data:', error.response.data);
+      return {
+        success: false,
+        error: errorMessage,
+        data: errorData,
+        status: error.response.status
+      };
+    }
+    return {
+      success: false,
+      error: error.message || 'Network error occurred'
+    };
+  }
+}
+
 module.exports = {
   fetchUserPrefillData,
-  validatePANDetails
+  validatePANDetails,
+  getUANBasic,
+  generateUANClientRefNum
 };
 

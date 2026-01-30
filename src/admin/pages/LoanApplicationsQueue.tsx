@@ -103,7 +103,7 @@ export function LoanApplicationsQueue() {
   // Initialize status filter from URL parameters
   useEffect(() => {
     const statusFromUrl = searchParams.get('status');
-    if (statusFromUrl && ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'cleared', 'rejected', 'ready_for_disbursement', 'repeat_disbursal', 'ready_to_repeat_disbursal'].includes(statusFromUrl)) {
+    if (statusFromUrl && ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'overdue', 'cleared', 'rejected', 'ready_for_disbursement', 'repeat_disbursal', 'ready_to_repeat_disbursal'].includes(statusFromUrl)) {
       setStatusFilter(statusFromUrl);
     }
   }, [searchParams]);
@@ -343,6 +343,7 @@ export function LoanApplicationsQueue() {
       disbursal: 'Disbursal',
       ready_for_disbursement: 'Ready for Disbursement',
       account_manager: 'Account Manager',
+      overdue: 'Overdue',
       cleared: 'Cleared',
       rejected: 'Rejected',
       pending_documents: 'Pending Documents'
@@ -793,6 +794,26 @@ export function LoanApplicationsQueue() {
                 title="Download Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'account_manager' ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleStatusFilter('overdue')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  statusFilter === 'overdue'
+                    ? 'bg-red-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                Overdue <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'overdue' ? 'bg-red-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.overdueApplications || 0}</span>
+              </button>
+              <button
+                onClick={() => handleExportExcel('overdue')}
+                disabled={downloadingExcel === 'overdue'}
+                className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                title="Download Excel"
+              >
+                <Download className={`w-4 h-4 ${downloadingExcel === 'overdue' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
             <div className="flex items-center gap-1">

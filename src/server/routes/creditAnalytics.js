@@ -418,6 +418,31 @@ router.post('/check', requireAuth, async (req, res) => {
       );
 
       console.log(`🚫 User ${userId} held for 45 days. Reason: ${holdReason}`);
+      
+      // Automatically cancel all active/submitted loans for this user
+      const cancellableStatuses = ['submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal', 'qa_verification'];
+      const activeLoans = await executeQuery(
+        `SELECT id, status, application_number FROM loan_applications 
+         WHERE user_id = ? 
+         AND status IN (${cancellableStatuses.map(() => '?').join(',')})
+         AND status != 'account_manager' 
+         AND status != 'overdue'
+         AND status != 'cleared'`,
+        [userId, ...cancellableStatuses]
+      );
+      
+      if (activeLoans && activeLoans.length > 0) {
+        for (const loan of activeLoans) {
+          await executeQuery(
+            `UPDATE loan_applications 
+             SET status = 'cancelled', updated_at = NOW() 
+             WHERE id = ?`,
+            [loan.id]
+          );
+          console.log(`✅ Auto-cancelled loan #${loan.id} (${loan.application_number}) - User put on hold via credit check`);
+        }
+        console.log(`✅ Auto-cancelled ${activeLoans.length} loan(s) for user ${userId} due to hold status`);
+      }
 
       // Update credit check with BRE data if available
       if (breEvaluationResult && !breEvaluationResult.passed && creditCheckId) {
@@ -466,6 +491,56 @@ router.post('/check', requireAuth, async (req, res) => {
         // Don't fail the credit check if step update fails, but log it
         console.warn('⚠️  Could not update loan application step after credit check:', stepUpdateError.message);
       }
+    }
+
+    // Auto-save credit analytics mobile numbers as references (silent - no user notification)
+    try {
+      const { extractContactDetails } = require('../utils/creditReportParser');
+      const contacts = extractContactDetails(creditReportResponse);
+      
+      if (contacts.mobileNumbers && contacts.mobileNumbers.length > 0) {
+        // Get user's phone to exclude
+        const userData = await executeQuery('SELECT phone FROM users WHERE id = ?', [userId]);
+        const userPhone = userData.length > 0 ? userData[0].phone : null;
+        
+        // Get existing references to avoid duplicates
+        const existingRefs = await executeQuery(
+          'SELECT phone FROM `references` WHERE user_id = ?',
+          [userId]
+        );
+        const existingPhones = new Set(existingRefs.map(ref => ref.phone));
+        
+        // Filter valid mobile numbers
+        const phoneRegex = /^[6-9]\d{9}$/;
+        const validMobiles = contacts.mobileNumbers.filter(mobile => {
+          const phone = String(mobile).trim();
+          return phoneRegex.test(phone) && phone !== userPhone && !existingPhones.has(phone);
+        });
+        
+        // Save valid mobile numbers as references
+        let savedCount = 0;
+        for (const mobile of validMobiles) {
+          try {
+            await executeQuery(
+              'INSERT INTO `references` (user_id, name, phone, relation, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
+              [userId, 'Credit', mobile, 'Self']
+            );
+            savedCount++;
+          } catch (insertError) {
+            // Ignore duplicate errors, continue with others
+            if (!insertError.message.includes('Duplicate')) {
+              console.error('Error inserting credit analytics reference:', insertError.message);
+            }
+          }
+        }
+        
+        if (savedCount > 0) {
+          console.log(`📱 Auto-saved ${savedCount} credit analytics references for user ${userId}`);
+        }
+      }
+    } catch (refError) {
+      // Don't fail the credit check if reference save fails
+      console.error('⚠️ Error auto-saving credit analytics references:', refError.message);
     }
 
     res.json({

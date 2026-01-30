@@ -534,8 +534,8 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                         if (loanDetails.length > 0) {
                             const loan = loanDetails[0];
                             
-                            // Only check for cleared status if loan is in account_manager status
-                            if (loan.status === 'account_manager') {
+                            // Only check for cleared status if loan is in account_manager or overdue status
+                            if (loan.status === 'account_manager' || loan.status === 'overdue') {
                                 // Calculate total payments made for this loan
                                 const totalPaymentsResult = await executeQuery(
                                     `SELECT COALESCE(SUM(amount), 0) as total_paid 
@@ -1021,6 +1021,23 @@ router.post('/webhook', async (req, res) => {
         const orderId = order.order_id;
         const orderAmount = order.order_amount;
         
+        // Extract bank reference number from payment object
+        // Cashfree provides bank reference in various fields: payment_message, payment_utr, bank_reference_number, utr
+        const bankReferenceNumber = payment?.payment_message || 
+                                   payment?.payment_utr || 
+                                   payment?.bank_reference_number || 
+                                   payment?.utr || 
+                                   payment?.reference_number ||
+                                   null;
+        
+        console.log(`💰 Bank reference number extracted: ${bankReferenceNumber || 'Not found'} (from payment object)`, {
+            payment_message: payment?.payment_message,
+            payment_utr: payment?.payment_utr,
+            bank_reference_number: payment?.bank_reference_number,
+            utr: payment?.utr,
+            reference_number: payment?.reference_number
+        });
+        
         // Determine order status from webhook
         // Cashfree webhook doesn't include order_status directly
         // We need to derive it from payment_status or webhook type
@@ -1084,7 +1101,7 @@ router.post('/webhook', async (req, res) => {
                                 // Check if transaction already exists for this order to avoid duplicates
                                 const existingTransaction = await executeQuery(
                                     `SELECT id FROM transactions WHERE reference_number = ? AND loan_application_id = ? AND transaction_type LIKE 'loan_extension_%'`,
-                                    [orderId, paymentOrder.loan_id]
+                                    [bankReferenceNumber || orderId, paymentOrder.loan_id]
                                 );
                                 
                                 if (existingTransaction.length > 0) {
@@ -1094,7 +1111,7 @@ router.post('/webhook', async (req, res) => {
                                     const { approveExtension } = require('../utils/extensionApproval');
                                     const approvalResult = await approveExtension(
                                         paymentOrder.extension_id,
-                                        orderId, // Use orderId as reference number
+                                        bankReferenceNumber || orderId, // Use bank reference number if available, otherwise fallback to orderId
                                         null // No admin ID for auto-approval
                                     );
 
@@ -1302,7 +1319,7 @@ router.post('/webhook', async (req, res) => {
                                                 transactionType,
                                                 orderAmount,
                                                 `${paymentType === 'pre-close' || paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} via Cashfree - Order: ${orderId}, App: ${applicationNumber}`,
-                                                orderId,
+                                                bankReferenceNumber || orderId, // Use bank reference number if available, otherwise fallback to orderId
                                                 systemAdminId  // created_by = system admin for automated payments
                                             ]
                                         );
@@ -1630,7 +1647,29 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                    cashfreeStatus.data?.order?.order_status;
         const paymentReceived = cashfreeStatus.paymentReceived || (cashfreeOrderStatus === 'PAID');
         
+        // Extract bank reference number from Cashfree API response
+        // Check in payments array (if available) or payment object
+        const cashfreeData = cashfreeStatus.data || {};
+        const payments = cashfreeData.payments || cashfreeData.payment || [];
+        const paymentData = Array.isArray(payments) && payments.length > 0 ? payments[0] : (payments || cashfreeData.payment || {});
+        
+        const bankReferenceNumber = paymentData?.payment_message || 
+                                   paymentData?.payment_utr || 
+                                   paymentData?.bank_reference_number || 
+                                   paymentData?.utr || 
+                                   paymentData?.reference_number ||
+                                   cashfreeData?.payment_message ||
+                                   cashfreeData?.payment_utr ||
+                                   null;
+        
         console.log(`💰 Cashfree order status: ${cashfreeOrderStatus}, Payment received: ${paymentReceived}`);
+        console.log(`💰 Bank reference number from API: ${bankReferenceNumber || 'Not found'}`, {
+            payment_message: paymentData?.payment_message || cashfreeData?.payment_message,
+            payment_utr: paymentData?.payment_utr || cashfreeData?.payment_utr,
+            bank_reference_number: paymentData?.bank_reference_number,
+            utr: paymentData?.utr,
+            reference_number: paymentData?.reference_number
+        });
 
         // If Cashfree shows payment is PAID, process it regardless of DB status
         // This handles cases where payment was successful but processing failed
@@ -1730,7 +1769,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                                     transactionType,
                                                     paymentOrder.amount,
                                                     `${paymentType === 'pre-close' || paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} via Cashfree - Order: ${orderId}, App: ${applicationNumber}`,
-                                                    orderId,
+                                                    bankReferenceNumber || orderId, // Use bank reference number from API if available, otherwise fallback to orderId
                                                     systemAdminId  // created_by = system admin for automated payments
                                                 ]
                                             );
@@ -1876,7 +1915,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                                         `UPDATE transactions 
                                                          SET description = CONCAT(description, ' - Loan cleared')
                                                          WHERE reference_number = ? AND loan_application_id = ?`,
-                                                        [orderId, paymentOrder.loan_id]
+                                                        [bankReferenceNumber || orderId, paymentOrder.loan_id]
                                                     );
                                                 } catch (txnUpdateErr) {
                                                     console.warn(`⚠️ Could not update transaction description (non-fatal)`);
@@ -1923,7 +1962,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                 // Check if transaction already exists for this order to avoid duplicates
                                 const existingTransaction = await executeQuery(
                                     `SELECT id FROM transactions WHERE reference_number = ? AND loan_application_id = ? AND transaction_type LIKE 'loan_extension_%'`,
-                                    [orderId, paymentOrder.loan_id]
+                                    [bankReferenceNumber || orderId, paymentOrder.loan_id]
                                 );
                                 
                                 if (existingTransaction.length > 0) {
@@ -1933,7 +1972,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                         const { approveExtension } = require('../utils/extensionApproval');
                                         const approvalResult = await approveExtension(
                                             paymentOrder.extension_id,
-                                            orderId,
+                                            bankReferenceNumber || orderId, // Use bank reference number if available, otherwise fallback to orderId
                                             null
                                         );
                                         console.log('✅ Extension auto-approved:', approvalResult);

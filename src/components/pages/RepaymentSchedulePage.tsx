@@ -62,7 +62,7 @@ export const RepaymentSchedulePage = () => {
         fetchLoanData(parseInt(appId), false);
       }
     } else {
-      // Try to find loan with account_manager status
+      // Try to find loan with account_manager or overdue status
       fetchUserLoan();
     }
   }, [isAuthenticated, searchParams, navigate]);
@@ -72,7 +72,7 @@ export const RepaymentSchedulePage = () => {
       const response = await apiService.getPendingLoanApplications();
       if (response.success && response.data?.applications) {
         const accountManagerLoan = response.data.applications.find(
-          (app: any) => app.status === 'account_manager'
+          (app: any) => app.status === 'account_manager' || app.status === 'overdue'
         );
         if (accountManagerLoan) {
           fetchLoanData(accountManagerLoan.id);
@@ -599,12 +599,7 @@ export const RepaymentSchedulePage = () => {
             return null;
           }
           
-          // Hide preclose option if first EMI has been paid
-          const firstEmi = repaymentSchedule && repaymentSchedule.length > 0 ? repaymentSchedule[0] : null;
-          if (firstEmi && firstEmi.status === 'paid') {
-            return null;
-          }
-          
+          // Note: For single payment plans, we don't check first EMI status since there are no EMIs
           // Calculate DPD (Days Past Due Date) to determine if Pre-close button should be shown
           // Pre-close button shall be available till DPD = -6 only (6 days before due date)
           const dueDate = kfsData.repayment?.first_due_date || loanData.processed_due_date;
@@ -1312,11 +1307,31 @@ export const RepaymentSchedulePage = () => {
             return null;
           }
           
-          // Hide preclose option if first EMI has been paid
+          // Hide preclose option ONLY if first EMI has been explicitly paid
+          // Check if first EMI exists and has status 'paid'
           const firstEmi = repaymentSchedule && repaymentSchedule.length > 0 ? repaymentSchedule[0] : null;
-          if (firstEmi && firstEmi.status === 'paid') {
+          const isFirstEmiPaid = firstEmi && firstEmi.status === 'paid';
+          
+          console.log('[Preclose] Multi-EMI check:', {
+            hasRepaymentSchedule: !!repaymentSchedule,
+            scheduleLength: repaymentSchedule?.length,
+            firstEmi: firstEmi ? { 
+              instalment_no: firstEmi.instalment_no, 
+              status: firstEmi.status,
+              statusType: typeof firstEmi.status,
+              due_date: firstEmi.due_date 
+            } : null,
+            isFirstEmiPaid: isFirstEmiPaid
+          });
+          
+          // Only hide if first EMI exists AND status is explicitly 'paid'
+          // If status is undefined, null, or anything else, allow preclose
+          if (isFirstEmiPaid) {
+            console.log('[Preclose] Hiding preclose because first EMI status is "paid"');
             return null;
           }
+          
+          console.log('[Preclose] First EMI check passed - first EMI not paid, showing preclose option');
           
           // Calculate DPD (Days Past Due Date) using first EMI's due date
           // Pre-close button shall be available till DPD = -6 only (6 days before first EMI due date)
@@ -2115,7 +2130,7 @@ export const RepaymentSchedulePage = () => {
                               {isCurrentStage 
                                 ? `Your Current limit` 
                                 : isUltimateStage 
-                                ? 'Personal loan with 24 tenure' 
+                                ? 'Personal loan with 24 months tenure' 
                                 : `Stage ${stageNumber} limit`}
                             </div>
                           </div>

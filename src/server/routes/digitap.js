@@ -2,8 +2,9 @@ const express = require('express');
 const router = express.Router();
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
+const { authenticateAdmin } = require('../middleware/auth');
 const { checkHoldStatus } = require('../middleware/checkHoldStatus');
-const { fetchUserPrefillData, validatePANDetails } = require('../services/digitapService');
+const { fetchUserPrefillData, validatePANDetails, getUANBasic, generateUANClientRefNum } = require('../services/digitapService');
 const { saveUserInfoFromPANAPI, saveAddressFromPANAPI } = require('../services/userInfoService');
 const { compareNames } = require('../utils/nameComparison');
 
@@ -465,6 +466,269 @@ router.post('/validate-pan', requireAuth, checkHoldStatus, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to validate PAN'
+    });
+  }
+});
+
+// UAN Basic V3 API Routes (Synchronous)
+
+/**
+ * POST /api/digitap/uan/basic
+ * Get UAN Basic information (synchronous API)
+ */
+router.post('/uan/basic', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+    const { mobile } = req.body;
+
+    if (!mobile) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mobile number is required'
+      });
+    }
+
+    // Validate mobile number format
+    if (!/^[6-9]\d{9}$/.test(mobile)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid mobile number format. Must be 10 digits starting with 6-9.'
+      });
+    }
+
+    const clientRefNum = generateUANClientRefNum(userId);
+    const result = await getUANBasic(mobile, clientRefNum);
+
+    // Store transaction in database
+    try {
+      const resultCode = result.data?.result_code;
+      let status = 'failed';
+      if (resultCode === 101) {
+        status = 'success';
+      } else if (resultCode === 103) {
+        status = 'no_records';
+      }
+
+      await executeQuery(`
+        INSERT INTO uan_passbook_requests 
+        (user_id, client_ref_num, txn_id, mobile, status, result_code, request_data, response_data, error_message, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      `, [
+        userId,
+        clientRefNum,
+        result.data?.request_id || null,
+        mobile,
+        status,
+        resultCode || null,
+        JSON.stringify({ mobile, client_ref_num: clientRefNum }),
+        JSON.stringify(result.data),
+        result.error || null
+      ]);
+
+      // If successful, also save to user_info_records for easy access
+      if (resultCode === 101 && result.data?.result) {
+        try {
+          const existingRecord = await executeQuery(`
+            SELECT id FROM user_info_records 
+            WHERE user_id = ? AND source = 'uan_passbook'
+            ORDER BY id DESC LIMIT 1
+          `, [userId]);
+
+          const recordData = {
+            employee_details: result.data.result.employee_details,
+            est_details: result.data.result.est_details,
+            overall_pf_balance: result.data.result.overall_pf_balance,
+            request_id: result.data.request_id,
+            timestamp: new Date().toISOString()
+          };
+
+          if (existingRecord.length > 0) {
+            await executeQuery(`
+              UPDATE user_info_records 
+              SET additional_details = ?, updated_at = NOW()
+              WHERE id = ?
+            `, [
+              JSON.stringify(recordData),
+              existingRecord[0].id
+            ]);
+          } else {
+            await executeQuery(`
+              INSERT INTO user_info_records 
+              (user_id, source, additional_details, created_at, updated_at)
+              VALUES (?, 'uan_passbook', ?, NOW(), NOW())
+            `, [
+              userId,
+              JSON.stringify(recordData)
+            ]);
+          }
+        } catch (saveError) {
+          console.error('Error saving UAN data to user_info_records:', saveError);
+          // Continue even if save fails
+        }
+      }
+    } catch (dbError) {
+      console.error('Error storing UAN request:', dbError);
+      // Continue even if storage fails
+    }
+
+    if (result.success) {
+      res.json({
+        success: true,
+        data: result.data
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: result.error || 'Failed to get UAN data',
+        data: result.data
+      });
+    }
+  } catch (error) {
+    console.error('Error getting UAN Basic:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get UAN data'
+    });
+  }
+});
+
+// Admin UAN Basic V3 API Routes (for admins to make requests on behalf of users)
+
+/**
+ * POST /api/digitap/uan/admin/basic
+ * Get UAN Basic information (Admin version - synchronous API)
+ */
+router.post('/uan/admin/basic', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId, mobile } = req.body;
+
+    console.log('Admin UAN Basic request:', { userId, mobile });
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required'
+      });
+    }
+
+    // Convert userId to integer if it's a string
+    const userIdInt = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+    if (isNaN(userIdInt)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid User ID format'
+      });
+    }
+
+    if (!mobile) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mobile number is required'
+      });
+    }
+
+    // Validate mobile number format
+    if (!/^[6-9]\d{9}$/.test(mobile)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid mobile number format. Must be 10 digits starting with 6-9.'
+      });
+    }
+
+    const clientRefNum = generateUANClientRefNum(userIdInt);
+    const result = await getUANBasic(mobile, clientRefNum);
+
+    // Store transaction in database
+    try {
+      const resultCode = result.data?.result_code;
+      let status = 'failed';
+      if (resultCode === 101) {
+        status = 'success';
+      } else if (resultCode === 103) {
+        status = 'no_records';
+      }
+
+      await executeQuery(`
+        INSERT INTO uan_passbook_requests 
+        (user_id, client_ref_num, txn_id, mobile, status, result_code, request_data, response_data, error_message, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      `, [
+        userIdInt,
+        clientRefNum,
+        result.data?.request_id || null,
+        mobile,
+        status,
+        resultCode || null,
+        JSON.stringify({ mobile, client_ref_num: clientRefNum }),
+        JSON.stringify(result.data),
+        result.error || null
+      ]);
+
+      // If successful, also save to user_info_records for easy access
+      if (resultCode === 101 && result.data?.result) {
+        try {
+          const existingRecord = await executeQuery(`
+            SELECT id FROM user_info_records 
+            WHERE user_id = ? AND source = 'uan_passbook'
+            ORDER BY id DESC LIMIT 1
+          `, [userIdInt]);
+
+          const recordData = {
+            employee_details: result.data.result.employee_details,
+            est_details: result.data.result.est_details,
+            overall_pf_balance: result.data.result.overall_pf_balance,
+            request_id: result.data.request_id,
+            timestamp: new Date().toISOString()
+          };
+
+          if (existingRecord.length > 0) {
+            await executeQuery(`
+              UPDATE user_info_records 
+              SET additional_details = ?, updated_at = NOW()
+              WHERE id = ?
+            `, [
+              JSON.stringify(recordData),
+              existingRecord[0].id
+            ]);
+          } else {
+            await executeQuery(`
+              INSERT INTO user_info_records 
+              (user_id, source, additional_details, created_at, updated_at)
+              VALUES (?, 'uan_passbook', ?, NOW(), NOW())
+            `, [
+              userIdInt,
+              JSON.stringify(recordData)
+            ]);
+          }
+        } catch (saveError) {
+          console.error('Error saving UAN data to user_info_records:', saveError);
+          // Continue even if save fails
+        }
+      }
+    } catch (dbError) {
+      console.error('Error storing UAN request:', dbError);
+      // Continue even if storage fails
+    }
+
+    if (result.success) {
+      res.json({
+        success: true,
+        data: result.data
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: result.error || 'Failed to get UAN data',
+        data: result.data
+      });
+    }
+  } catch (error) {
+    console.error('Error getting UAN Basic (admin):', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get UAN data'
     });
   }
 });

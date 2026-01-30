@@ -339,9 +339,9 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     const latestApplication = applications && applications.length > 0 ? applications[0] : null;
     const profileStatus = latestApplication ? latestApplication.status : (user.status || 'active');
 
-    // Get assigned account manager if status is account_manager
+    // Get assigned account manager if status is account_manager or overdue
     let assignedManager = null;
-    if (profileStatus === 'account_manager' && latestApplication?.approved_by) {
+    if ((profileStatus === 'account_manager' || profileStatus === 'overdue') && latestApplication?.approved_by) {
       const manager = await executeQuery('SELECT name FROM admins WHERE id = ?', [latestApplication.approved_by]);
       if (manager && manager.length > 0) {
         assignedManager = manager[0].name;
@@ -539,6 +539,66 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       }));
     } catch (e) {
       console.error('Error fetching KYC documents:', e);
+    }
+
+    // Fetch Selfie Verification Data
+    let selfieData = null;
+    try {
+      // Get latest selfie from loan_applications
+      const selfieQuery = `
+        SELECT selfie_image_url, selfie_verified, selfie_captured, updated_at
+        FROM loan_applications 
+        WHERE user_id = ? 
+        AND selfie_image_url IS NOT NULL
+        ORDER BY updated_at DESC 
+        LIMIT 1
+      `;
+      const selfieResult = await executeQuery(selfieQuery, [userId]);
+
+      if (selfieResult.length > 0) {
+        const selfieRecord = selfieResult[0];
+        
+        // Get face match data from kyc_verifications
+        let faceMatchData = null;
+        if (kycData && kycData.verification_data) {
+          const verificationData = typeof kycData.verification_data === 'string' 
+            ? JSON.parse(kycData.verification_data) 
+            : kycData.verification_data;
+          
+          if (verificationData && verificationData.faceMatch) {
+            faceMatchData = verificationData.faceMatch;
+          }
+        }
+
+        // Generate presigned URL for selfie image
+        let selfieUrl = null;
+        if (selfieRecord.selfie_image_url) {
+          try {
+            // Extract S3 key from URL if it's a full URL, otherwise use as-is
+            let s3Key = selfieRecord.selfie_image_url;
+            if (s3Key.includes('amazonaws.com')) {
+              // Extract key from URL
+              const urlParts = s3Key.split('/');
+              s3Key = urlParts.slice(3).join('/'); // Remove bucket name and domain
+            }
+            selfieUrl = await getPresignedUrl(s3Key, 3600);
+          } catch (urlError) {
+            console.error('Error generating presigned URL for selfie:', urlError);
+            // Fallback to original URL if presigned URL generation fails
+            selfieUrl = selfieRecord.selfie_image_url;
+          }
+        }
+
+        selfieData = {
+          selfie_url: selfieUrl || selfieRecord.selfie_image_url,
+          selfie_verified: selfieRecord.selfie_verified === 1,
+          selfie_captured: selfieRecord.selfie_captured === 1,
+          updated_at: selfieRecord.updated_at,
+          faceMatch: faceMatchData
+        };
+      }
+    } catch (e) {
+      console.error('Error fetching selfie data:', e);
     }
 
     // Fetch Loan Application Documents for this user
@@ -1043,6 +1103,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       bankStatementRecords: bankStatementRecords, // All bank statement records
       kycVerification: kycData,
       kycDocuments: kycDocuments,
+      selfieData: selfieData, // Selfie verification data
       userInfoRecords: userInfoRecords, // Multi-source of truth data
       loginHistory: loginHistory, // User login history from database
       duplicateChecks: duplicateChecks, // Duplicate account checks
@@ -2411,7 +2472,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
       if (loanCheck.length > 0) {
         const loanStatus = loanCheck[0].status;
-        if (loanStatus === 'account_manager' || loanStatus === 'cleared') {
+        if (loanStatus === 'account_manager' || loanStatus === 'overdue' || loanStatus === 'cleared') {
           console.log(`⚠️ Loan #${loan_application_id} already in ${loanStatus} status. Skipping status update but will check PDFs and emails.`);
           skipStatusUpdate = true;
 
@@ -2592,7 +2653,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
               if (isMultiEmi) {
                 // Multi-EMI: Generate all EMI dates and store as JSON array
-                const { getNextSalaryDate, getSalaryDateForMonth } = require('../utils/loanCalculations');
+                const { getNextSalaryDate, getSalaryDateForMonth, formatDateToString, calculateDaysBetween } = require('../utils/loanCalculations');
                 const { executeQuery: execQuery } = require('../config/database');
 
                 // Get user salary date
@@ -2614,9 +2675,17 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
                     // Check if duration is less than minimum days
                     const minDuration = planSnapshot.repayment_days || 15;
-                    const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
+                    // Use calculateDaysBetween for accurate day calculation (inclusive)
+                    const baseDateStr = formatDateToString(baseDate);
+                    const nextSalaryDateStr = formatDateToString(nextSalaryDate);
+                    const daysToNextSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
+                    console.log(`📅 [EMI Calculation] baseDate: ${baseDateStr}, nextSalaryDate: ${nextSalaryDateStr}, daysToNextSalary: ${daysToNextSalary}, minDuration: ${minDuration}`);
                     if (daysToNextSalary < minDuration) {
+                      console.log(`📅 [EMI Calculation] Days (${daysToNextSalary}) < minDuration (${minDuration}), moving to next month`);
                       nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+                      const extendedDateStr = formatDateToString(nextSalaryDate);
+                      const extendedDays = calculateDaysBetween(baseDateStr, extendedDateStr);
+                      console.log(`📅 [EMI Calculation] Extended to: ${extendedDateStr}, days: ${extendedDays}`);
                     }
 
                     // Ensure nextSalaryDate matches the salary date exactly
@@ -2680,7 +2749,8 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 processedDueDate = JSON.stringify(allEmiDates);
 
                 // Create emi_schedule with dates, amounts, and status using REDUCING BALANCE method
-                const { formatDateToString, calculateDaysBetween, getTodayString, toDecimal2 } = require('../utils/loanCalculations');
+                // formatDateToString and calculateDaysBetween are already imported above
+                const { getTodayString, toDecimal2 } = require('../utils/loanCalculations');
                 const emiSchedule = [];
 
                 // Validate processedAmount is valid before calculation
@@ -3203,6 +3273,244 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
           loanStatusUpdated = true;
           newStatus = 'cleared';
+        } else {
+          console.warn(`❌ Loan #${loanIdInt} belongs to user ${loan.user_id}, not requested user ${userId}`);
+        }
+      } else {
+        console.warn(`⚠️ Loan #${loanIdInt} not found`);
+      }
+    }
+
+    // Handle emi_payment transaction type - mark next unpaid EMI as paid
+    if (txType === 'emi_payment' && loan_application_id) {
+      const loanIdInt = parseInt(loan_application_id);
+      const userIdInt = parseInt(userId);
+
+      console.log(`💳 Processing EMI payment for loan #${loanIdInt}, user #${userIdInt}`);
+
+      // Get loan with emi_schedule
+      const loans = await executeQuery(
+        'SELECT id, user_id, status, emi_schedule, plan_snapshot FROM loan_applications WHERE id = ?',
+        [loanIdInt]
+      );
+
+      if (loans.length > 0) {
+        const loan = loans[0];
+        
+        // Check ownership
+        if (loan.user_id == userIdInt || loan.user_id == userId) {
+          console.log(`✅ Loan ownership confirmed. Current status: ${loan.status}`);
+
+          // Parse emi_schedule
+          let emiSchedule = loan.emi_schedule;
+          if (typeof emiSchedule === 'string') {
+            try {
+              emiSchedule = JSON.parse(emiSchedule);
+            } catch (parseError) {
+              console.error('❌ Error parsing emi_schedule:', parseError);
+              emiSchedule = null;
+            }
+          }
+
+          if (emiSchedule && Array.isArray(emiSchedule)) {
+            // Find the first unpaid EMI
+            const unpaidEmiIndex = emiSchedule.findIndex(emi => emi.status !== 'paid');
+            
+            if (unpaidEmiIndex !== -1) {
+              const emiNumber = unpaidEmiIndex + 1;
+              console.log(`📌 Found unpaid EMI #${emiNumber} - marking as paid`);
+              
+              // Mark this EMI as paid
+              emiSchedule[unpaidEmiIndex].status = 'paid';
+              emiSchedule[unpaidEmiIndex].paid_date = new Date().toISOString().split('T')[0];
+              
+              // Update emi_schedule in database
+              await executeQuery(
+                'UPDATE loan_applications SET emi_schedule = ?, updated_at = NOW() WHERE id = ?',
+                [JSON.stringify(emiSchedule), loanIdInt]
+              );
+              
+              console.log(`✅ EMI #${emiNumber} marked as paid in emi_schedule`);
+
+              // Check if all EMIs are now paid
+              const allEmisPaid = emiSchedule.every(emi => emi.status === 'paid');
+              const totalEmis = emiSchedule.length;
+              const paidEmis = emiSchedule.filter(emi => emi.status === 'paid').length;
+              
+              console.log(`📊 EMI status: ${paidEmis}/${totalEmis} paid. All paid: ${allEmisPaid}`);
+
+              if (allEmisPaid) {
+                // All EMIs paid - treat like full_payment: clear loan, send NOC, etc.
+                console.log(`💰 All ${totalEmis} EMIs paid - clearing loan and sending NOC`);
+
+                // Update loan status to cleared
+                await executeQuery(`
+                  UPDATE loan_applications 
+                  SET 
+                    status = 'cleared',
+                    updated_at = NOW()
+                  WHERE id = ?
+                `, [loanIdInt]);
+
+                console.log(`✅ Loan #${loanIdInt} marked as cleared (all EMIs paid)`);
+
+                // Check if user should be moved to cooling period after clearing this loan
+                try {
+                  const { calculateCreditLimitFor2EMI, checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
+                  
+                  const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
+                  
+                  if (creditLimitData.newLimit === 150000 && creditLimitData.percentage === 32.1) {
+                    await checkAndMarkCoolingPeriod(loan.user_id, loanIdInt, creditLimitData);
+                    console.log(`[UserProfile] User ${loan.user_id} moved to cooling period after clearing loan #${loanIdInt} (reached 32.1% = ₹1,50,000)`);
+                  }
+                } catch (coolingPeriodError) {
+                  console.error('❌ Error checking cooling period after loan clearance (non-fatal):', coolingPeriodError);
+                }
+
+                // Send NOC email to user
+                try {
+                  const emailService = require('../services/emailService');
+                  const pdfService = require('../services/pdfService');
+
+                  // Get loan details for NOC
+                  const loanDetails = await executeQuery(`
+                    SELECT 
+                      la.*,
+                      DATE(la.disbursed_at) as disbursed_at_date,
+                      u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
+                      u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
+                    FROM loan_applications la
+                    INNER JOIN users u ON la.user_id = u.id
+                    WHERE la.id = ?
+                  `, [loanIdInt]);
+
+                  if (loanDetails && loanDetails.length > 0) {
+                    const loanDetail = loanDetails[0];
+                    const recipientEmail = loanDetail.personal_email || loanDetail.official_email || loanDetail.email;
+                    const recipientName = `${loanDetail.first_name || ''} ${loanDetail.last_name || ''}`.trim() || 'User';
+
+                    if (recipientEmail) {
+                      const formatDate = (dateString) => {
+                        if (!dateString || dateString === 'N/A') return 'N/A';
+                        try {
+                          if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+                            const [year, month, day] = dateString.split('-');
+                            return `${day}-${month}-${year}`;
+                          }
+                          if (typeof dateString === 'string' && dateString.includes('T')) {
+                            const datePart = dateString.split('T')[0];
+                            if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+                              const [year, month, day] = datePart.split('-');
+                              return `${day}-${month}-${year}`;
+                            }
+                          }
+                          if (typeof dateString === 'string' && dateString.includes(' ')) {
+                            const datePart = dateString.split(' ')[0];
+                            if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+                              const [year, month, day] = datePart.split('-');
+                              return `${day}-${month}-${year}`;
+                            }
+                          }
+                          const date = new Date(dateString);
+                          const day = String(date.getDate()).padStart(2, '0');
+                          const month = String(date.getMonth() + 1).padStart(2, '0');
+                          const year = date.getFullYear();
+                          return `${day}-${month}-${year}`;
+                        } catch {
+                          return dateString;
+                        }
+                      };
+
+                      const borrowerName = recipientName;
+                      const applicationNumber = loanDetail.application_number || loanIdInt;
+                      const shortLoanId = applicationNumber && applicationNumber !== 'N/A'
+                        ? `PLL${String(applicationNumber).slice(-4)}`
+                        : `PLL${String(loanIdInt).padStart(4, '0').slice(-4)}`;
+                      const todayDate = formatDate(new Date().toISOString());
+
+                      const htmlContent = `
+                        <div style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; line-height: 1.6; background-color: white;">
+                          <div style="padding: 32px;">
+                            <div style="text-align: center; margin-bottom: 16px; border-bottom: 1px solid #000; padding-bottom: 8px;">
+                              <h2 style="font-weight: bold; margin-bottom: 4px; font-size: 14pt;">
+                                SPHEETI FINTECH PRIVATE LIMITED
+                              </h2>
+                              <p style="font-size: 12px; margin-bottom: 4px;">
+                                CIN: U65929MH2018PTC306088 | RBI Registration no: N-13.02361
+                              </p>
+                              <p style="font-size: 12px; margin-bottom: 8px;">
+                                Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI, MAHARASHTRA, 421001
+                              </p>
+                            </div>
+                            <div style="text-align: center; margin-bottom: 24px;">
+                              <h1 style="font-weight: bold; font-size: 13pt; text-transform: uppercase;">
+                                NO DUES CERTIFICATE
+                              </h1>
+                            </div>
+                            <div style="margin-bottom: 16px;">
+                              <p style="font-size: 12px;"><strong>Date :</strong> ${todayDate}</p>
+                            </div>
+                            <div style="margin-bottom: 16px;">
+                              <p style="font-size: 12px;"><strong>Name of the Customer:</strong> ${borrowerName}</p>
+                            </div>
+                            <div style="margin-bottom: 16px;">
+                              <p style="font-size: 12px;"><strong>Sub: No Dues Certificate for Loan ID - ${shortLoanId}</strong></p>
+                            </div>
+                            <div style="margin-bottom: 16px;">
+                              <p style="font-weight: bold;">Dear Sir/Madam,</p>
+                            </div>
+                            <div style="margin-bottom: 24px; text-align: justify;">
+                              <p>This letter is to confirm that Spheeti Fintech Private Limited has received payment for the aforesaid loan ID and no amount is outstanding and payable by you to the Company under the aforesaid loan ID.</p>
+                            </div>
+                            <div style="margin-top: 32px;">
+                              <p style="margin-bottom: 4px; font-weight: bold;">Thanking you,</p>
+                              <p style="font-weight: bold;">On behalf of Spheeti Fintech Private Limited</p>
+                            </div>
+                          </div>
+                        </div>
+                      `;
+
+                      // Generate PDF
+                      const filename = `No_Dues_Certificate_${applicationNumber}.pdf`;
+                      const pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
+                      let pdfBuffer = Buffer.isBuffer(pdfResult) ? pdfResult : (pdfResult.buffer || pdfResult);
+                      if (!Buffer.isBuffer(pdfBuffer) && pdfBuffer instanceof Uint8Array) {
+                        pdfBuffer = Buffer.from(pdfBuffer);
+                      }
+
+                      // Send email
+                      await emailService.sendNOCEmail({
+                        loanId: loanIdInt,
+                        recipientEmail: recipientEmail,
+                        recipientName: recipientName,
+                        loanData: {
+                          application_number: applicationNumber,
+                          loan_amount: loanDetail.loan_amount || loanDetail.sanctioned_amount || 0
+                        },
+                        pdfBuffer: pdfBuffer,
+                        pdfFilename: filename,
+                        sentBy: null
+                      });
+
+                      console.log(`✅ NOC email sent successfully to ${recipientEmail} for loan #${loanIdInt} (all EMIs paid)`);
+                    }
+                  }
+                } catch (nocEmailError) {
+                  console.error('❌ Error sending NOC email (non-fatal):', nocEmailError);
+                }
+
+                loanStatusUpdated = true;
+                newStatus = 'cleared';
+              } else {
+                console.log(`ℹ️ EMI #${emiNumber} paid. ${paidEmis}/${totalEmis} EMIs completed. Loan not yet fully paid.`);
+              }
+            } else {
+              console.log('ℹ️ All EMIs already paid for this loan');
+            }
+          } else {
+            console.warn('⚠️ Could not find valid emi_schedule for loan');
+          }
         } else {
           console.warn(`❌ Loan #${loanIdInt} belongs to user ${loan.user_id}, not requested user ${userId}`);
         }
@@ -3768,6 +4076,52 @@ router.post('/:userId/sms', authenticateAdmin, async (req, res) => {
   }
 });
 
+// Reset selfie verification - allows user to redo selfie verification
+router.post('/:userId/reset-selfie-verification', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+    const adminId = req.admin?.id;
+
+    console.log('🔄 Admin resetting selfie verification for user:', userId);
+
+    // Reset selfie_verified flag in all loan applications for this user
+    await executeQuery(
+      `UPDATE loan_applications 
+       SET selfie_verified = 0, updated_at = NOW() 
+       WHERE user_id = ? AND selfie_verified = 1`,
+      [userId]
+    );
+
+    // Log activity
+    try {
+      await logActivity({
+        userId: userId,
+        action: 'selfie_verification_reset',
+        details: {
+          adminId: adminId,
+          reason: 'Admin requested selfie re-verification'
+        },
+        adminId: adminId
+      });
+    } catch (logError) {
+      console.warn('Failed to log activity:', logError);
+    }
+
+    res.json({
+      status: 'success',
+      message: 'Selfie verification reset successfully. User will need to complete selfie verification again.'
+    });
+
+  } catch (error) {
+    console.error('Reset selfie verification error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to reset selfie verification'
+    });
+  }
+});
+
 /**
  * POST /api/admin/user-profile/:userId/refetch-kyc
  * Refetch KYC data from Digilocker and process documents
@@ -4082,6 +4436,72 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
       message: 'Failed to refetch KYC data from Digilocker',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined,
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// Get E-NACH subscriptions for a user
+router.get('/:userId/enach-subscriptions', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+
+    // Get all E-NACH subscriptions for this user
+    const subscriptions = await executeQuery(`
+      SELECT 
+        es.id,
+        es.user_id,
+        es.loan_application_id,
+        es.subscription_id,
+        es.cf_subscription_id,
+        es.plan_id,
+        es.status,
+        es.mandate_status,
+        es.subscription_session_id,
+        es.cashfree_response,
+        es.authorization_url,
+        DATE_FORMAT(es.initialized_at, '%Y-%m-%d %H:%i:%s') as initialized_at,
+        DATE_FORMAT(es.authorized_at, '%Y-%m-%d %H:%i:%s') as authorized_at,
+        DATE_FORMAT(es.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+        DATE_FORMAT(es.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at,
+        la.application_number,
+        la.short_loan_id
+      FROM enach_subscriptions es
+      LEFT JOIN loan_applications la ON es.loan_application_id = la.id
+      WHERE es.user_id = ?
+      ORDER BY es.created_at DESC
+    `, [userId]);
+
+    // Parse cashfree_response JSON for each subscription
+    const subscriptionsWithParsedData = subscriptions.map(sub => {
+      let cashfreeResponse = null;
+      try {
+        if (sub.cashfree_response) {
+          cashfreeResponse = typeof sub.cashfree_response === 'string'
+            ? JSON.parse(sub.cashfree_response)
+            : sub.cashfree_response;
+        }
+      } catch (e) {
+        console.error('Error parsing cashfree_response for subscription:', sub.id, e);
+      }
+
+      return {
+        ...sub,
+        cashfreeResponse
+      };
+    });
+
+    res.json({
+      status: 'success',
+      data: subscriptionsWithParsedData
+    });
+
+  } catch (error) {
+    console.error('Get E-NACH subscriptions error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch E-NACH subscriptions',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

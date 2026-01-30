@@ -33,11 +33,14 @@ import {
   UserPlus,
   HelpCircle,
   Upload,
-  Loader2
+  Loader2,
+  Camera,
+  CheckCircle2
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import { adminApiService } from '../../services/adminApi';
 import { toast } from 'sonner';
+import { UANEmploymentInfo } from '../../components/pages/UANEmploymentInfo';
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '../../components/ui/tooltip';
 import { Button } from '../../components/ui/button';
 import {
@@ -199,6 +202,10 @@ export function UserProfileDetail() {
   });
   const [submittingAccountManager, setSubmittingAccountManager] = useState(false);
 
+  // E-NACH Subscriptions State
+  const [enachSubscriptions, setEnachSubscriptions] = useState<any[]>([]);
+  const [loadingEnach, setLoadingEnach] = useState(false);
+
   const { canEditUsers, currentUser } = useAdmin();
 
   // Debug admin context (commented out to reduce console noise)
@@ -213,6 +220,7 @@ export function UserProfileDetail() {
   const [downloadingExcel, setDownloadingExcel] = useState(false);
   const [refetchingKYC, setRefetchingKYC] = useState(false);
   const [triggeringReKYC, setTriggeringReKYC] = useState(false);
+  const [resettingSelfie, setResettingSelfie] = useState(false);
 
   // Form state for modals
   const [basicInfoForm, setBasicInfoForm] = useState({
@@ -318,10 +326,7 @@ export function UserProfileDetail() {
 
   const transactionTypeOptions = [
     { value: 'loan_disbursement', label: 'Loan Disbursement' },
-    { value: '1st_emi_paid', label: '1st EMI paid' },
-    { value: '2nd_emi_paid', label: '2nd EMI paid' },
-    { value: '3rd_emi_paid', label: '3rd EMI paid' },
-    { value: '4th_emi_paid', label: '4th EMI paid' },
+    { value: 'emi_payment', label: 'EMI Payment' },
     { value: 'loan_extension_1st', label: 'Loan extension 1st' },
     { value: 'loan_extension_2nd', label: 'Loan extension 2nd' },
     { value: 'loan_extension_3rd', label: 'Loan extension 3rd' },
@@ -519,14 +524,14 @@ export function UserProfileDetail() {
   const submitValidationAction = async () => {
     if (!selectedAction || !userData?.id) return;
 
-    // Check if user has any loan in account_manager status
+    // Check if user has any loan in account_manager or overdue status
     const loans = getArray('loans');
-    const accountManagerLoans = loans ? loans.filter((loan: any) => loan.status === 'account_manager') : [];
+    const accountManagerLoans = loans ? loans.filter((loan: any) => ['account_manager', 'overdue'].includes(loan.status)) : [];
 
-    // Block certain actions if user has loans in account_manager status
+    // Block certain actions if user has loans in account_manager or overdue status
     const blockedActions = ['not_process', 're_process', 'delete', 'cancel', 'process'];
     if (blockedActions.includes(selectedAction) && accountManagerLoans.length > 0) {
-      alert(`Cannot perform "${selectedAction}" action. User has loan(s) in account_manager status. Loans in account_manager status cannot be modified.`);
+      alert(`Cannot perform "${selectedAction}" action. User has loan(s) in account_manager or overdue status. Loans in account_manager or overdue status cannot be modified.`);
       return;
     }
 
@@ -686,6 +691,30 @@ export function UserProfileDetail() {
       fetchUserProfile();
     }
   }, [params.userId]);
+
+  // Fetch E-NACH subscriptions when tab is active
+  useEffect(() => {
+    const fetchEnachSubscriptions = async () => {
+      if (activeTab === 'enach' && params.userId && !loadingEnach) {
+        try {
+          setLoadingEnach(true);
+          const response = await adminApiService.getEnachSubscriptions(params.userId);
+          if (response.status === 'success' && response.data) {
+            setEnachSubscriptions(response.data);
+          } else {
+            setEnachSubscriptions([]);
+          }
+        } catch (err) {
+          console.error('Error fetching E-NACH subscriptions:', err);
+          setEnachSubscriptions([]);
+        } finally {
+          setLoadingEnach(false);
+        }
+      }
+    };
+
+    fetchEnachSubscriptions();
+  }, [activeTab, params.userId]);
 
   // Fetch all loan plans for selection
   useEffect(() => {
@@ -873,7 +902,7 @@ export function UserProfileDetail() {
         loansToFetch = getArray('loans'); // Fetch all loans, no status filter
       } else if (activeTab === 'loans') {
         loansToFetch = getArray('loans').filter((loan: any) =>
-          ['account_manager', 'cleared'].includes(loan.status)
+          ['account_manager', 'overdue', 'cleared'].includes(loan.status)
         );
       }
 
@@ -974,7 +1003,7 @@ export function UserProfileDetail() {
           return lId && (lId.toString() === loanId.toString() || parseInt(lId.toString()) === loanId);
         });
         const isRepeatDisbursal = loan?.status === 'repeat_disbursal' || loan?.status === 'ready_to_repeat_disbursal';
-        const isFinalStatus = (loan?.status === 'account_manager' || loan?.status === 'cleared') && !isRepeatDisbursal;
+        const isFinalStatus = (loan?.status === 'account_manager' || loan?.status === 'overdue' || loan?.status === 'cleared') && !isRepeatDisbursal;
         const isAlreadyDisbursed = (loan?.disbursed_at && isFinalStatus) || isFinalStatus;
         const loanAmount = loan?.loan_amount || loan?.amount || loan?.principalAmount || 0;
         const storedDisbursalAmount = loan?.disbursal_amount || loan?.disbursalAmount;
@@ -1251,7 +1280,7 @@ export function UserProfileDetail() {
           l.loanId?.toString() === transactionForm.loanApplicationId
         );
 
-        if (loan && (loan.status === 'account_manager' || loan.status === 'cleared')) {
+        if (loan && (loan.status === 'account_manager' || loan.status === 'overdue' || loan.status === 'cleared')) {
           alert(`Cannot disburse this loan. Loan is already in "${loan.status}" status. The loan has already been disbursed.`);
           return;
         }
@@ -2281,6 +2310,7 @@ export function UserProfileDetail() {
     { id: 'account-manager', label: 'Account Manager', icon: Briefcase },
     { id: 'login-data', label: 'Login Data', icon: Clock },
     { id: 'accounts', label: 'Accounts', icon: Wallet },
+    { id: 'enach', label: 'E-NACH', icon: CreditCard },
   ];
 
   const handleRefetchKYC = async () => {
@@ -2335,6 +2365,37 @@ export function UserProfileDetail() {
       toast.error(error.response?.data?.message || 'Error triggering re-KYC');
     } finally {
       setTriggeringReKYC(false);
+    }
+  };
+
+  const handleResetSelfieVerification = async () => {
+    if (!params.userId) {
+      toast.error('User ID not found');
+      return;
+    }
+
+    if (!confirm('Are you sure you want to reset selfie verification? The user will need to complete selfie verification again.')) {
+      return;
+    }
+
+    setResettingSelfie(true);
+    try {
+      const response = await adminApiService.resetSelfieVerification(params.userId);
+      if (response.status === 'success') {
+        toast.success('Selfie verification reset successfully. User will need to complete selfie verification again.');
+        // Refresh user data
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success' && profileResponse.data) {
+          setUserData(profileResponse.data);
+        }
+      } else {
+        toast.error(response.message || 'Failed to reset selfie verification');
+      }
+    } catch (error: any) {
+      console.error('Error resetting selfie verification:', error);
+      toast.error(error.response?.data?.message || 'Error resetting selfie verification');
+    } finally {
+      setResettingSelfie(false);
     }
   };
 
@@ -2585,6 +2646,116 @@ export function UserProfileDetail() {
             <div className="text-center py-8 bg-gray-50 rounded-lg border border-dashed border-gray-300">
               <FileText className="w-10 h-10 text-gray-400 mx-auto mb-2" />
               <p className="text-sm text-gray-500">No KYC documents found.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Selfie Verification Card */}
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900">Selfie Verification</h3>
+            {canEditUsers && getUserData('selfieData')?.selfie_verified && (
+              <button
+                onClick={handleResetSelfieVerification}
+                disabled={resettingSelfie}
+                className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className={`w-4 h-4 ${resettingSelfie ? 'animate-spin' : ''}`} />
+                {resettingSelfie ? 'Resetting...' : 'Re-request Selfie'}
+              </button>
+            )}
+          </div>
+
+          {!getUserData('selfieData') ? (
+            <div className="text-center py-8 bg-gray-50 rounded-lg border border-dashed border-gray-300">
+              <Camera className="w-10 h-10 text-gray-400 mx-auto mb-2" />
+              <p className="text-sm text-gray-500">No selfie verification data available.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-col md:flex-row gap-6">
+                {/* Selfie Image */}
+                {getUserData('selfieData')?.selfie_url && (
+                  <div className="flex-shrink-0">
+                    <div className="w-48 h-48 rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                      <img
+                        src={getUserData('selfieData')?.selfie_url}
+                        alt="Selfie"
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23f3f4f6" width="200" height="200"/%3E%3Ctext fill="%239ca3af" font-family="sans-serif" font-size="14" x="50%25" y="50%25" text-anchor="middle" dy=".3em"%3EImage not available%3C/text%3E%3C/svg%3E';
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Verification Details */}
+                <div className="flex-grow space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-500 mb-1">Verification Status</label>
+                      <div className="flex items-center gap-2">
+                        {getUserData('selfieData')?.selfie_verified ? (
+                          <>
+                            <CheckCircle2 className="w-5 h-5 text-green-600" />
+                            <p className="text-gray-900 font-medium">Verified</p>
+                          </>
+                        ) : (
+                          <>
+                            <XCircle className="w-5 h-5 text-red-600" />
+                            <p className="text-gray-900 font-medium">Not Verified</p>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {getUserData('selfieData')?.faceMatch?.confidence !== undefined && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-500 mb-1">Match Percentage</label>
+                        <div className="flex items-center gap-2">
+                          <p className="text-gray-900 font-semibold text-lg">
+                            {getUserData('selfieData')?.faceMatch?.confidence?.toFixed(1) || '0.0'}%
+                          </p>
+                          {getUserData('selfieData')?.faceMatch?.match ? (
+                            <CheckCircle2 className="w-5 h-5 text-green-600" />
+                          ) : (
+                            <XCircle className="w-5 h-5 text-red-600" />
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {getUserData('selfieData')?.faceMatch?.success !== undefined && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-500 mb-1">Face Match Result</label>
+                        <p className={`font-medium ${getUserData('selfieData')?.faceMatch?.match ? 'text-green-600' : 'text-red-600'}`}>
+                          {getUserData('selfieData')?.faceMatch?.match ? 'Match' : 'No Match'}
+                        </p>
+                      </div>
+                    )}
+
+                    {getUserData('selfieData')?.updated_at && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-500 mb-1">Last Updated</label>
+                        <p className="text-gray-900">{formatDate(getUserData('selfieData')?.updated_at)}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Face Match Details */}
+                  {getUserData('selfieData')?.faceMatch?.details && (
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <details className="cursor-pointer">
+                        <summary className="text-sm text-blue-600 hover:text-blue-800 font-medium">View Face Match Details</summary>
+                        <pre className="mt-2 bg-gray-50 p-4 rounded text-xs overflow-auto max-h-60 border border-gray-200">
+                          {JSON.stringify(getUserData('selfieData')?.faceMatch?.details, null, 2)}
+                        </pre>
+                      </details>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -3136,6 +3307,26 @@ export function UserProfileDetail() {
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* UAN Employment Info */}
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <UANEmploymentInfo 
+              aadharLinkedMobile={userData?.aadharLinkedMobile}
+              userId={params.userId}
+              onDataReceived={(data) => {
+                console.log('UAN Data received:', data);
+                toast.success('UAN Passbook data retrieved successfully');
+                // Refresh user data to show updated info
+                if (params.userId) {
+                  adminApiService.getUserProfile(params.userId).then((response) => {
+                    if (response.status === 'success' && response.data) {
+                      setUserData(response.data);
+                    }
+                  });
+                }
+              }}
+            />
           </div>
         </div>
 
@@ -5203,6 +5394,138 @@ export function UserProfileDetail() {
     }
   };
 
+  // E-NACH Tab
+  const renderEnachTab = () => {
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">E-NACH Subscriptions</h3>
+              <p className="text-sm text-gray-600 mt-1">All E-NACH mandate subscriptions for this user</p>
+            </div>
+            <button
+              onClick={async () => {
+                if (!params.userId) return;
+                setLoadingEnach(true);
+                try {
+                  const response = await adminApiService.getEnachSubscriptions(params.userId);
+                  if (response.status === 'success' && response.data) {
+                    setEnachSubscriptions(response.data);
+                    toast.success('E-NACH subscriptions refreshed');
+                  }
+                } catch (err) {
+                  console.error('Error refreshing E-NACH subscriptions:', err);
+                  toast.error('Failed to refresh E-NACH subscriptions');
+                } finally {
+                  setLoadingEnach(false);
+                }
+              }}
+              disabled={loadingEnach}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`w-4 h-4 ${loadingEnach ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
+
+          {loadingEnach ? (
+            <div className="text-center py-12">
+              <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-4" />
+              <p className="text-gray-600">Loading E-NACH subscriptions...</p>
+            </div>
+          ) : enachSubscriptions.length === 0 ? (
+            <div className="text-center py-12">
+              <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No E-NACH Subscriptions</h3>
+              <p className="text-gray-600">This user has no E-NACH subscriptions.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan ID</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer Name</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bank</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Account Number</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IFSC</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Account Type</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subscription Status</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Authorization Status</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plan Max Amount</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created At</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Authorized At</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {enachSubscriptions.map((subscription: any) => {
+                    const cashfreeResponse = subscription.cashfreeResponse || {};
+                    const customerDetails = cashfreeResponse.customer_details || {};
+                    const planDetails = cashfreeResponse.plan_details || {};
+                    const authorizationDetails = cashfreeResponse.authorization_details || {};
+                    const paymentMethod = authorizationDetails.payment_method?.enach || {};
+
+                    const getStatusBadge = (status: string) => {
+                      const statusLower = (status || '').toLowerCase();
+                      if (statusLower.includes('active') || statusLower === 'approved') {
+                        return <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>;
+                      } else if (statusLower.includes('pending') || statusLower.includes('approval')) {
+                        return <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">Pending</span>;
+                      } else if (statusLower.includes('failed') || statusLower.includes('rejected')) {
+                        return <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">Failed</span>;
+                      } else {
+                        return <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">{status || 'N/A'}</span>;
+                      }
+                    };
+
+                    return (
+                      <tr key={subscription.id} className="hover:bg-gray-50">
+                        <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {subscription.short_loan_id || subscription.application_number || `App #${subscription.loan_application_id || 'N/A'}`}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {customerDetails.customer_name || 'N/A'}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {customerDetails.customer_bank_code || paymentMethod.account_bank_code || 'N/A'}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 font-mono">
+                          {customerDetails.customer_bank_account_number || paymentMethod.account_number || 'N/A'}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 font-mono">
+                          {customerDetails.customer_bank_ifsc || paymentMethod.account_ifsc || 'N/A'}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {customerDetails.customer_bank_account_type || paymentMethod.account_type || 'N/A'}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm">
+                          {getStatusBadge(cashfreeResponse.subscription_status || subscription.status)}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm">
+                          {getStatusBadge(authorizationDetails.authorization_status)}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {planDetails.plan_max_amount ? `₹${parseFloat(planDetails.plan_max_amount).toLocaleString('en-IN')}` : 'N/A'}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {subscription.created_at ? formatDate(subscription.created_at) : 'N/A'}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {subscription.authorized_at ? formatDate(subscription.authorized_at) : 'N/A'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const fetchLoanCalculation = async (loanId: number) => {
     if (loanCalculations[loanId] || calculationsLoading[loanId]) {
       return; // Already fetched or loading
@@ -5262,8 +5585,8 @@ export function UserProfileDetail() {
     const appliedLoans = getArray('loans'); // Show all loans, no status filter
 
     const handleEdit = (loan: any) => {
-      // Prevent editing if loan has been processed (account_manager or cleared status)
-      if (['account_manager', 'cleared'].includes(loan.status)) {
+      // Prevent editing if loan has been processed (account_manager, overdue, or cleared status)
+      if (['account_manager', 'overdue', 'cleared'].includes(loan.status)) {
         alert('Cannot edit loan details - this loan has been processed and is frozen per the Loan Calculation Rulebook.');
         return;
       }
@@ -5830,11 +6153,20 @@ export function UserProfileDetail() {
     return principal * ratePerDay * days;
   };
 
-  // Loans Tab (Account Manager)
+  // Loans Tab (Account Manager - excludes overdue loans which have their own tab)
   const renderLoansTab = () => {
-    const runningLoans = getArray('loans').filter((loan: any) =>
+    let runningLoans = getArray('loans').filter((loan: any) =>
       ['account_manager', 'cleared'].includes(loan.status)
     );
+
+    // Calculate DPD for each loan and sort by DPD (ascending: negative first, then 0, then positive)
+    runningLoans = runningLoans.map((loan: any) => ({
+      ...loan,
+      calculatedDPD: calculateDPDForEmiLoan(loan)
+    })).sort((a: any, b: any) => {
+      // Sort by DPD: negative values first (most urgent), then 0, then positive
+      return a.calculatedDPD - b.calculatedDPD;
+    });
 
     return (
       <div className="space-y-6">
@@ -6093,8 +6425,9 @@ export function UserProfileDetail() {
                           dueDate = `${dueDateObj.getFullYear()}-${String(dueDateObj.getMonth() + 1).padStart(2, '0')}-${String(dueDateObj.getDate()).padStart(2, '0')}`;
                         }
 
-                        // Calculate DPD (no timezone conversion)
-                        const dpd = dueDate ? calculateDPD(disbursedDate || '', dueDate) : 0;
+                        // Calculate DPD using EMI-based calculation (already calculated during sorting)
+                        // Use the pre-calculated DPD value, or calculate if not available
+                        const dpd = loan.calculatedDPD !== undefined ? loan.calculatedDPD : calculateDPDForEmiLoan(loan);
 
                         // Penalty - use processed value if available, otherwise calculate
                         let penaltyData = { penalty: 0, gst: 0, total: 0 };
@@ -6536,9 +6869,9 @@ export function UserProfileDetail() {
 
   // Validation Tab
   const renderValidationTab = () => {
-    // Check if user has any loan in account_manager status
+    // Check if user has any loan in account_manager or overdue status
     const loans = getArray('loans');
-    const accountManagerLoans = loans ? loans.filter((loan: any) => loan.status === 'account_manager') : [];
+    const accountManagerLoans = loans ? loans.filter((loan: any) => ['account_manager', 'overdue'].includes(loan.status)) : [];
     const hasAccountManagerLoan = accountManagerLoans.length > 0;
 
     // Blocked actions when account_manager loan exists
@@ -6555,7 +6888,7 @@ export function UserProfileDetail() {
           {hasAccountManagerLoan && (
             <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
               <p className="text-sm text-yellow-800">
-                ⚠️ User has loan(s) in account_manager status. Certain actions (Not Process, Re-process, Delete, Cancel, Process) are disabled.
+                ⚠️ User has loan(s) in account_manager or overdue status. Certain actions (Not Process, Re-process, Delete, Cancel, Process) are disabled.
               </p>
             </div>
           )}
@@ -8030,7 +8363,7 @@ export function UserProfileDetail() {
                 onClick={() => {
                   // Pre-select active loan if only one exists or if one is active
                   const loans = getUserData('loans', []);
-                  const activeLoan = loans.find((l: any) => l.status === 'active' || l.status === 'disbursed' || l.status === 'account_manager');
+                  const activeLoan = loans.find((l: any) => l.status === 'active' || l.status === 'disbursed' || l.status === 'account_manager' || l.status === 'overdue');
                   setAccountManagerForm({
                     loanId: activeLoan ? activeLoan.id : (loans.length > 0 ? loans[0].id : ''),
                     customerResponse: '',
@@ -8212,6 +8545,7 @@ export function UserProfileDetail() {
       </div>
     );
   };
+
 
   const handleAccountManagerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -8866,7 +9200,7 @@ export function UserProfileDetail() {
                     </td>
                     <td className="px-3 py-4 whitespace-nowrap">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${transaction.transaction_type === 'loan_disbursement' ? 'bg-purple-100 text-purple-800' :
-                        transaction.transaction_type?.startsWith('emi_paid') ? 'bg-blue-100 text-blue-800' :
+                        transaction.transaction_type === 'emi_payment' || transaction.transaction_type?.startsWith('emi_paid') ? 'bg-blue-100 text-blue-800' :
                           transaction.transaction_type?.startsWith('loan_extension') ? 'bg-indigo-100 text-indigo-800' :
                             transaction.transaction_type === 'settlement' ? 'bg-yellow-100 text-yellow-800' :
                               transaction.transaction_type === 'full_payment' ? 'bg-green-100 text-green-800' :
@@ -8876,12 +9210,14 @@ export function UserProfileDetail() {
                         {transaction.transaction_type?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                       </span>
                     </td>
-                    <td className={`px-3 py-4 whitespace-nowrap text-sm font-semibold ${transaction.transaction_type?.startsWith('emi_paid') ||
+                    <td className={`px-3 py-4 whitespace-nowrap text-sm font-semibold ${transaction.transaction_type === 'emi_payment' ||
+                      transaction.transaction_type?.startsWith('emi_paid') ||
                       transaction.transaction_type?.startsWith('loan_extension') ||
                       ['full_payment', 'part_payment', 'settlement'].includes(transaction.transaction_type) ? 'text-green-600' :
                       ['loan_disbursement'].includes(transaction.transaction_type) ? 'text-red-600' : 'text-gray-900'
                       }`}>
-                      {transaction.transaction_type?.startsWith('emi_paid') ||
+                      {transaction.transaction_type === 'emi_payment' ||
+                        transaction.transaction_type?.startsWith('emi_paid') ||
                         transaction.transaction_type?.startsWith('loan_extension') ||
                         ['full_payment', 'part_payment', 'settlement'].includes(transaction.transaction_type) ? '+' : '-'}
                       {formatCurrency(transaction.amount)}
@@ -10051,7 +10387,7 @@ export function UserProfileDetail() {
                           // For repeat_disbursal loans, ALWAYS recalculate (don't use stored disbursal_amount from previous disbursal)
                           const isRepeatDisbursal = loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal';
                           // Check if loan is already in final status (account_manager/cleared) and not a repeat disbursal
-                          const isFinalStatus = (loan.status === 'account_manager' || loan.status === 'cleared') && !isRepeatDisbursal;
+                          const isFinalStatus = (loan.status === 'account_manager' || loan.status === 'overdue' || loan.status === 'cleared') && !isRepeatDisbursal;
                           const isAlreadyDisbursed = (loan.disbursed_at && isFinalStatus) || isFinalStatus;
 
                           if (isAlreadyDisbursed && !isRepeatDisbursal) {
@@ -10111,10 +10447,10 @@ export function UserProfileDetail() {
                           );
                         })}
                         {/* Show already disbursed loans as disabled */}
-                        {getArray('loans')?.filter((l: any) => l.status === 'account_manager' || l.status === 'cleared').length > 0 && (
+                        {getArray('loans')?.filter((l: any) => l.status === 'account_manager' || l.status === 'overdue' || l.status === 'cleared').length > 0 && (
                           <>
                             <option disabled>─── Already Disbursed (Cannot Select) ───</option>
-                            {getArray('loans')?.filter((l: any) => l.status === 'account_manager' || l.status === 'cleared').map((loan: any) => {
+                            {getArray('loans')?.filter((l: any) => l.status === 'account_manager' || l.status === 'overdue' || l.status === 'cleared').map((loan: any) => {
                               const shortLoanId = loan.shortLoanId || loan.application_number || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
                               return (
                                 <option key={loan.id || loan.loanId} disabled style={{ color: '#999' }}>
@@ -11335,11 +11671,12 @@ export function UserProfileDetail() {
                           getUserData('profileStatus') === 'disbursal' ? 'bg-purple-100 text-purple-800' :
                             getUserData('profileStatus') === 'ready_for_disbursement' ? 'bg-indigo-100 text-indigo-800' :
                               getUserData('profileStatus') === 'account_manager' ? 'bg-green-100 text-green-800' :
+                              getUserData('profileStatus') === 'overdue' ? 'bg-red-100 text-red-800' :
                                 getUserData('profileStatus') === 'cleared' ? 'bg-gray-100 text-gray-800' :
                                   getUserData('profileStatus') === 'hold' || getUserData('status') === 'on_hold' ? 'bg-red-100 text-red-800' :
                                     'bg-gray-100 text-gray-800'
                       }`}>
-                      {getUserData('profileStatus') === 'account_manager' && getUserData('assignedManager')
+                      {(getUserData('profileStatus') === 'account_manager' || getUserData('profileStatus') === 'overdue') && getUserData('assignedManager')
                         ? `Account Manager: ${getUserData('assignedManager')}`
                         : getUserData('profileStatus')?.replace(/_/g, ' ').toUpperCase() || 'ACTIVE'}
                     </span>
@@ -11540,6 +11877,7 @@ export function UserProfileDetail() {
         {activeTab === 'reference' && renderReferenceTab()}
         {activeTab === 'login-data' && renderLoginDataTab()}
         {activeTab === 'accounts' && renderAccountsTab()}
+        {activeTab === 'enach' && renderEnachTab()}
         {activeTab === 'applied-loans' && renderAppliedLoansTab()}
         {activeTab === 'loans' && renderLoansTab()}
         {activeTab === 'transactions' && renderTransactionsTab()}

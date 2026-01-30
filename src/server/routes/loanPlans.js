@@ -1,7 +1,7 @@
 const express = require('express');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
-const { calculateCompleteLoanValues, getNextSalaryDate, getSalaryDateForMonth } = require('../utils/loanCalculations');
+const { calculateCompleteLoanValues, getNextSalaryDate, getSalaryDateForMonth, formatDateToString, calculateDaysBetween } = require('../utils/loanCalculations');
 const router = express.Router();
 
 /**
@@ -271,8 +271,10 @@ router.post('/calculate', requireAuth, async (req, res) => {
           // Get next salary date
           let nextSalaryDate = getNextSalaryDate(startDate, salaryDate);
           
-          // Calculate days from today to next salary date (INCLUSIVE)
-          let daysToNextSalary = Math.ceil((nextSalaryDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+          // Calculate days from start date to next salary date (INCLUSIVE) using accurate calculation
+          const startDateStr = formatDateToString(startDate);
+          const nextSalaryDateStr = formatDateToString(nextSalaryDate);
+          let daysToNextSalary = calculateDaysBetween(startDateStr, nextSalaryDateStr);
           
           // If duration (repayment_days) is set and days to next salary is less than duration, extend to next month
           const minDuration = plan.repayment_days || 15;
@@ -281,7 +283,9 @@ router.post('/calculate', requireAuth, async (req, res) => {
           if (daysToNextSalary < minDuration) {
             // Move to next month's salary date
             nextSalaryDate = getSalaryDateForMonth(startDate, salaryDate, 1);
-            console.log(`📅 [EMI Schedule] Extended to next month: ${nextSalaryDate.toISOString()}`);
+            const extendedDateStr = formatDateToString(nextSalaryDate);
+            const extendedDays = calculateDaysBetween(startDateStr, extendedDateStr);
+            console.log(`📅 [EMI Schedule] Extended to next month: ${nextSalaryDate.toISOString()}, extendedDays: ${extendedDays}`);
           }
           
           startDate = nextSalaryDate;

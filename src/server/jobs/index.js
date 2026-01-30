@@ -8,6 +8,7 @@
 const cronManager = require('../services/cronManager');
 const cronLogger = require('../services/cronLogger');
 const { calculateLoanInterestAndPenalty } = require('./loanCalculationJob');
+const { updateOverdueLoans } = require('./updateOverdueLoans');
 
 /**
  * Register all scheduled jobs
@@ -21,6 +22,15 @@ async function registerJobs() {
   // Skips loans that were already calculated today to reduce load
   cronManager.everyHours(4, 'loan-calculation', async () => {
     await calculateLoanInterestAndPenalty();
+  }, {
+    timezone: 'Asia/Kolkata', // IST
+    runOnInit: false // Don't run on server start
+  });
+
+  // Overdue Loans Update Job - Runs daily at 00:01 IST
+  // Moves loans from 'account_manager' to 'overdue' status when DPD > 5
+  cronManager.daily('00:01', 'update-overdue-loans', async () => {
+    await updateOverdueLoans();
   }, {
     timezone: 'Asia/Kolkata', // IST
     runOnInit: false // Don't run on server start

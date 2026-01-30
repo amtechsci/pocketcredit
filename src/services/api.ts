@@ -172,6 +172,11 @@ class ApiService {
     endpoint: string,
     data?: any
   ): Promise<ApiResponse<T>> {
+    // Log request details for debugging
+    if (endpoint.includes('references')) {
+      console.log(`🌐 API Request: ${method} ${endpoint}`, data);
+    }
+    
     try {
       const response = await this.api.request({
         method,
@@ -179,8 +184,21 @@ class ApiService {
         data,
       });
 
+      if (endpoint.includes('references')) {
+        console.log(`✅ API Response: ${method} ${endpoint}`, response.data);
+      }
+
       return response.data;
     } catch (error: any) {
+      if (endpoint.includes('references')) {
+        console.error(`❌ API Error: ${method} ${endpoint}`, {
+          message: error.message,
+          response: error.response?.data,
+          status: error.response?.status,
+          config: error.config
+        });
+      }
+      
       if (error.response?.data) {
         return error.response.data;
       }
@@ -1145,6 +1163,32 @@ class ApiService {
   }
 
   /**
+   * Get Credit Analytics Contacts (mobile numbers and emails)
+   */
+  async getCreditAnalyticsContacts(): Promise<ApiResponse<{
+    mobile_numbers: Array<{ value: string; is_primary: boolean }>;
+    emails: Array<{ value: string; is_primary: boolean }>;
+    source: string;
+  }>> {
+    return this.request('GET', '/credit-analytics/contacts');
+  }
+
+  /**
+   * Auto-save credit analytics mobile numbers as references
+   */
+  async saveCreditAnalyticsReferences(mobileNumbers: string[]): Promise<ApiResponse<{
+    saved_count: number;
+    saved_references: Array<{
+      id: number;
+      name: string;
+      phone: string;
+      relation: string;
+    }>;
+  }>> {
+    return this.request('POST', '/references/credit-analytics', { mobile_numbers: mobileNumbers });
+  }
+
+  /**
    * Account Aggregator - Initiate AA flow
    */
   async initiateAccountAggregator(data: {
@@ -1641,6 +1685,13 @@ class ApiService {
 
   async rejectCreditLimit(pendingLimitId: number): Promise<ApiResponse<any>> {
     return this.request('POST', '/credit-limit/reject', { pendingLimitId });
+  }
+
+  /**
+   * UAN Basic V3 API Method (synchronous API)
+   */
+  async getUANBasic(data: { mobile: string }): Promise<ApiResponse<any>> {
+    return this.request('POST', '/digitap/uan/basic', data);
   }
 }
 

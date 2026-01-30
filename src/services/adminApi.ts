@@ -64,6 +64,18 @@ export interface UserDetailData {
   notes: any[];
   kycVerification?: any;
   kycDocuments?: any[];
+  selfieData?: {
+    selfie_url?: string;
+    selfie_verified?: boolean;
+    selfie_captured?: boolean;
+    updated_at?: string;
+    faceMatch?: {
+      success?: boolean;
+      match?: boolean;
+      confidence?: number;
+      details?: any;
+    };
+  };
 }
 
 class AdminApiService {
@@ -293,6 +305,10 @@ class AdminApiService {
 
   async getUserProfile(userId: string): Promise<ApiResponse<UserDetailData>> {
     return this.request<UserDetailData>('GET', `/user-profile/${userId}`);
+  }
+
+  async getEnachSubscriptions(userId: string): Promise<ApiResponse<any>> {
+    return this.request('GET', `/user-profile/${userId}/enach-subscriptions`);
   }
 
   async refetchKYCData(userId: string): Promise<ApiResponse<any>> {
@@ -786,6 +802,10 @@ class AdminApiService {
 
   async triggerReKYC(userId: string): Promise<ApiResponse<{ userId: string; rekyc_required: boolean }>> {
     return this.request('POST', `/user-profile/${userId}/trigger-rekyc`, {});
+  }
+
+  async resetSelfieVerification(userId: string): Promise<ApiResponse<any>> {
+    return this.request('POST', `/user-profile/${userId}/reset-selfie-verification`, {});
   }
 
   // Activity Logs Methods
@@ -2042,6 +2062,24 @@ class AdminApiService {
       });
       return response.data;
     } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
+
+  /**
+   * UAN Basic V3 API Method (Admin version - synchronous API)
+   */
+  async getUANBasic(userId: string, data: { mobile: string }): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.post('/api/digitap/uan/admin/basic', { userId, ...data }, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.data;
+    } catch (error: any) {
       this.handleAuthError(error);
       throw error;
     }

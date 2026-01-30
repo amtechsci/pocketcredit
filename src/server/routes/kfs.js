@@ -889,11 +889,17 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
 
               // Check if duration is less than minimum days
               const minDuration = planData.repayment_days || 15;
-              const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDateForEmi.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+              // Use calculateDaysBetween for accurate day calculation (inclusive)
+              const baseDateStr = formatDateToString(baseDateForEmi);
+              const nextSalaryDateStr = formatDateToString(nextSalaryDate);
+              const daysToNextSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
               console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDateForEmi)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
               if (daysToNextSalary < minDuration) {
+                console.log(`📅 Days (${daysToNextSalary}) < minDuration (${minDuration}), moving to next month`);
                 nextSalaryDate = getSalaryDateForMonth(baseDateForEmi, salaryDate, 1);
-                console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
+                const extendedDateStr = formatDateToString(nextSalaryDate);
+                const extendedDays = calculateDaysBetween(baseDateStr, extendedDateStr);
+                console.log(`📅 Moved to next month: ${formatDateLocal(nextSalaryDate)}, extendedDays: ${extendedDays}`);
               }
 
               // Generate all EMI dates from the first salary date
@@ -1150,11 +1156,17 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
 
             // Check if duration is less than minimum days
             const minDuration = planData.repayment_days || 15;
-            const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+            // Use calculateDaysBetween for accurate day calculation (inclusive)
+            const baseDateStr = formatDateToString(baseDate);
+            const nextSalaryDateStr = formatDateToString(nextSalaryDate);
+            const daysToNextSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
             console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDate)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
             if (daysToNextSalary < minDuration) {
-              nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
-              console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
+              console.log(`📅 Days (${daysToNextSalary}) < minDuration (${minDuration}), moving to next month`);
+              nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+              const extendedDateStr = formatDateToString(nextSalaryDate);
+              const extendedDays = calculateDaysBetween(baseDateStr, extendedDateStr);
+              console.log(`📅 Moved to next month: ${formatDateLocal(nextSalaryDate)}, extendedDays: ${extendedDays}`);
             }
 
             // Generate all EMI dates from the first salary date
@@ -4727,11 +4739,17 @@ router.get('/:loanId', async (req, res, next) => {
 
           // Check if duration is less than minimum days
           const minDuration = planData.repayment_days || 15;
-          const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDateForEmi.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          // Use calculateDaysBetween for accurate day calculation (inclusive)
+          const baseDateStr = formatDateToString(baseDateForEmi);
+          const nextSalaryDateStr = formatDateToString(nextSalaryDate);
+          const daysToNextSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
           console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDateForEmi)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
           if (daysToNextSalary < minDuration) {
+            console.log(`📅 Days (${daysToNextSalary}) < minDuration (${minDuration}), moving to next month`);
             nextSalaryDate = getSalaryDateForMonth(baseDateForEmi, salaryDate, 1);
-            console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
+            const extendedDateStr = formatDateToString(nextSalaryDate);
+            const extendedDays = calculateDaysBetween(baseDateStr, extendedDateStr);
+            console.log(`📅 Moved to next month: ${formatDateLocal(nextSalaryDate)}, extendedDays: ${extendedDays}`);
           }
 
           // Generate all EMI dates from the first salary date
@@ -5047,11 +5065,17 @@ router.get('/:loanId', async (req, res, next) => {
 
             // Check if duration is less than minimum days
             const minDuration = planData.repayment_days || 15;
-            const daysToNextSalary = Math.ceil((nextSalaryDate.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+            // Use calculateDaysBetween for accurate day calculation (inclusive)
+            const baseDateStr = formatDateToString(baseDate);
+            const nextSalaryDateStr = formatDateToString(nextSalaryDate);
+            const daysToNextSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
             console.log(`📅 EMI Date Calculation: baseDate=${formatDateLocal(baseDate)}, nextSalaryDate=${formatDateLocal(nextSalaryDate)}, daysToNextSalary=${daysToNextSalary}, minDuration=${minDuration}`);
             if (daysToNextSalary < minDuration) {
-              nextSalaryDate = getSalaryDateForMonth(nextSalaryDate, salaryDate, 1);
-              console.log(`📅 Moved to next month due to minimum duration: ${formatDateLocal(nextSalaryDate)}`);
+              console.log(`📅 Days (${daysToNextSalary}) < minDuration (${minDuration}), moving to next month`);
+              nextSalaryDate = getSalaryDateForMonth(baseDate, salaryDate, 1);
+              const extendedDateStr = formatDateToString(nextSalaryDate);
+              const extendedDays = calculateDaysBetween(baseDateStr, extendedDateStr);
+              console.log(`📅 Moved to next month: ${formatDateLocal(nextSalaryDate)}, extendedDays: ${extendedDays}`);
             }
 
             // Generate all EMI dates from the first salary date

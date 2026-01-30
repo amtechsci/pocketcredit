@@ -1370,6 +1370,7 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       repeatDisbursalApplications: statusCounts['repeat_disbursal'] || 0,
       readyToRepeatDisbursalApplications: statusCounts['ready_to_repeat_disbursal'] || 0,
       accountManagerApplications: statusCounts['account_manager'] || 0,
+      overdueApplications: statusCounts['overdue'] || 0,
       clearedApplications: statusCounts['cleared'] || 0,
       newApplications: statusCounts['submitted'] || 0, // New applications are typically submitted
       

@@ -5,11 +5,25 @@ const { checkHoldStatus } = require('../middleware/checkHoldStatus');
 const router = express.Router();
 
 // POST /api/references - Save/Update User References and Alternate Data
-router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
+// Note: Removed checkHoldStatus - users should be able to update references even if on hold
+router.post('/', requireAuth, async (req, res) => {
+  console.log('🔔 POST /api/references - Request received');
+  console.log('🔔 Headers:', { 
+    authorization: req.headers.authorization ? 'present' : 'missing',
+    'content-type': req.headers['content-type']
+  });
+  
   try {
     await initializeDatabase();
     const userId = req.userId;
     const { references, alternate_mobile, company_name, company_email } = req.body;
+
+    console.log('📝 Saving references for user:', userId);
+    console.log('📝 Request body:', { 
+      referencesCount: references?.length, 
+      hasAlternateMobile: !!alternate_mobile,
+      references: references 
+    });
 
     // Get user's registered phone number
     const userData = await executeQuery('SELECT phone FROM users WHERE id = ?', [userId]);
@@ -95,16 +109,19 @@ router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
 
     // Delete existing references for this user
     await executeQuery('DELETE FROM `references` WHERE user_id = ?', [userId]);
+    console.log('✅ Deleted existing references for user:', userId);
 
     // Insert new references
     const insertedRefs = [];
     for (const ref of references) {
       const relationship = ref.relationship || ref.relation;
+      console.log('📝 Inserting reference:', { name: ref.name, phone: ref.phone, relation: relationship });
       const result = await executeQuery(
         'INSERT INTO `references` (user_id, name, phone, relation, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
         [userId, ref.name, ref.phone, relationship]
       );
       insertedRefs.push({ id: result.insertId, ...ref, relationship });
+      console.log('✅ Inserted reference with ID:', result.insertId);
     }
 
     // Update user with alternate data (only update company fields if provided)
@@ -128,6 +145,12 @@ router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
       `UPDATE users SET ${updateFields.join(', ')} WHERE id = ?`,
       updateValues
     );
+    console.log('✅ Updated user alternate data for user:', userId);
+
+    console.log('✅ Successfully saved references:', {
+      referencesCount: insertedRefs.length,
+      alternateMobile: alternate_mobile
+    });
 
     res.status(201).json({
       success: true,
@@ -144,8 +167,13 @@ router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error saving user references:', error);
-    res.status(500).json({ success: false, message: 'Internal server error while saving references' });
+    console.error('❌ Error saving user references:', error);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error while saving references',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -256,6 +284,95 @@ router.delete('/:id', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Error deleting user reference:', error);
     res.status(500).json({ success: false, message: 'Internal server error while deleting reference' });
+  }
+});
+
+// POST /api/references/credit-analytics - Auto-save credit analytics mobile numbers as references
+router.post('/credit-analytics', requireAuth, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const userId = req.userId;
+    const { mobile_numbers } = req.body;
+
+    console.log('📱 Auto-saving credit analytics references for user:', userId);
+    console.log('📱 Mobile numbers received:', mobile_numbers);
+
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    if (!mobile_numbers || !Array.isArray(mobile_numbers) || mobile_numbers.length === 0) {
+      return res.status(400).json({ success: false, message: 'No mobile numbers provided' });
+    }
+
+    // Get user's registered phone number to exclude it
+    const userData = await executeQuery('SELECT phone FROM users WHERE id = ?', [userId]);
+    const userPhone = userData.length > 0 ? userData[0].phone : null;
+
+    // Get existing references for this user to avoid duplicates
+    const existingRefs = await executeQuery(
+      'SELECT phone FROM `references` WHERE user_id = ?',
+      [userId]
+    );
+    const existingPhones = new Set(existingRefs.map(ref => ref.phone));
+
+    // Filter valid mobile numbers
+    const phoneRegex = /^[6-9]\d{9}$/;
+    const validMobiles = mobile_numbers.filter(mobile => {
+      const phone = String(mobile).trim();
+      // Must be valid format, not user's own number, not already saved
+      return phoneRegex.test(phone) && phone !== userPhone && !existingPhones.has(phone);
+    });
+
+    console.log('📱 Valid new mobiles to save:', validMobiles);
+
+    if (validMobiles.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No new credit analytics references to save',
+        data: { saved_count: 0, saved_references: [] }
+      });
+    }
+
+    // Insert new credit analytics references
+    const savedRefs = [];
+    for (let i = 0; i < validMobiles.length; i++) {
+      const mobile = validMobiles[i];
+      const name = `Credit Report Contact ${i + 1}`;
+      const relation = 'Self';
+
+      const result = await executeQuery(
+        'INSERT INTO `references` (user_id, name, phone, relation, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
+        [userId, name, mobile, relation]
+      );
+
+      savedRefs.push({
+        id: result.insertId,
+        name,
+        phone: mobile,
+        relation
+      });
+
+      console.log(`✅ Saved credit analytics reference: ${mobile}`);
+    }
+
+    console.log(`✅ Auto-saved ${savedRefs.length} credit analytics references for user ${userId}`);
+
+    res.json({
+      success: true,
+      message: `Successfully saved ${savedRefs.length} credit analytics references`,
+      data: {
+        saved_count: savedRefs.length,
+        saved_references: savedRefs
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error auto-saving credit analytics references:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while saving credit analytics references'
+    });
   }
 });
 

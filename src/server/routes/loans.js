@@ -35,7 +35,7 @@ router.get('/pending', requireAuth, async (req, res) => {
           la.status,
           DATE_FORMAT(la.created_at, '%Y-%m-%d %H:%i:%s') as created_at
         FROM loan_applications la
-        WHERE la.user_id = ? AND la.status IN ('submitted', 'under_review', 'follow_up', 'ready_for_disbursement', 'disbursal', 'account_manager', 'cleared', 'repeat_disbursal', 'ready_to_repeat_disbursal', 'cancelled', 'qa_verification')
+        WHERE la.user_id = ? AND la.status IN ('submitted', 'under_review', 'follow_up', 'ready_for_disbursement', 'disbursal', 'account_manager', 'overdue', 'cleared', 'repeat_disbursal', 'ready_to_repeat_disbursal', 'cancelled', 'qa_verification')
         ORDER BY la.created_at DESC
         LIMIT 10`,
         [userId]

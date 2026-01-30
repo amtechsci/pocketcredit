@@ -30,14 +30,20 @@ function extractContactDetails(creditReport) {
                     if (mobile.startsWith('91') && mobile.length === 12) {
                         mobile = mobile.substring(2);
                     }
-                    if (mobile.length === 10) {
+                    // Only add if it's a valid 10-digit Indian mobile number (starts with 6-9)
+                    if (mobile.length === 10 && /^[6-9]\d{9}$/.test(mobile)) {
                         mobileNumbers.add(mobile);
                     }
                 }
+                // Only extract Telephone_Number if it looks like a mobile number (starts with 6-9)
                 if (phone?.Telephone_Number) {
                     const tel = String(phone.Telephone_Number).replace(/\D/g, '');
                     if (tel.length >= 10) {
-                        mobileNumbers.add(tel.slice(-10));
+                        const last10 = tel.slice(-10);
+                        // Only add if it's a valid 10-digit Indian mobile number (starts with 6-9)
+                        if (/^[6-9]\d{9}$/.test(last10)) {
+                            mobileNumbers.add(last10);
+                        }
                     }
                 }
                 if (phone?.EMailId && phone.EMailId.includes('@')) {
@@ -63,7 +69,8 @@ function extractContactDetails(creditReport) {
                 if (mobile.startsWith('91') && mobile.length === 12) {
                     mobile = mobile.substring(2);
                 }
-                if (mobile.length === 10) {
+                // Only add if it's a valid 10-digit Indian mobile number (starts with 6-9)
+                if (mobile.length === 10 && /^[6-9]\d{9}$/.test(mobile)) {
                     mobileNumbers.add(mobile);
                 }
             }
@@ -79,7 +86,8 @@ function extractContactDetails(creditReport) {
             if (mobile.startsWith('91') && mobile.length === 12) {
                 mobile = mobile.substring(2);
             }
-            if (mobile.length === 10) {
+            // Only add if it's a valid 10-digit Indian mobile number (starts with 6-9)
+            if (mobile.length === 10 && /^[6-9]\d{9}$/.test(mobile)) {
                 mobileNumbers.add(mobile);
             }
         }

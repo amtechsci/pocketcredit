@@ -64,6 +64,7 @@ export function SimplifiedLoanApplicationPage() {
   const [canApply, setCanApply] = useState(true);
   const [checkingEligibility, setCheckingEligibility] = useState(true);
   const [userLoanLimit, setUserLoanLimit] = useState<number>(100000); // Default 1L
+  const [isRepeatCustomer, setIsRepeatCustomer] = useState<boolean>(false);
   const [formData, setFormData] = useState<LoanApplicationData>({
     desiredAmount: 0,
     purpose: '',
@@ -122,6 +123,11 @@ export function SimplifiedLoanApplicationPage() {
 
             // All applications are cleared or cancelled - user can apply for new loan
             console.log('✅ [Application Page] All loans are cleared or cancelled - allowing new application');
+            
+            // Check if user is a repeat customer (has cleared loans)
+            const hasClearedLoan = applications.some((app: any) => app.status === 'cleared');
+            setIsRepeatCustomer(hasClearedLoan);
+            console.log('🔍 [Application Page] Is repeat customer?', hasClearedLoan);
 
             // PRIORITY 1: Check for pending documents (only if there are non-cleared/cancelled apps)
             // This check is now redundant since we already blocked above, but keeping for safety
@@ -255,6 +261,14 @@ export function SimplifiedLoanApplicationPage() {
       navigate('/auth');
     }
   }, [isAuthenticated, navigate]);
+
+  // Auto-set loan amount to max limit for repeat customers
+  useEffect(() => {
+    if (isRepeatCustomer && userLoanLimit > 0 && formData.desiredAmount !== userLoanLimit) {
+      handleInputChange('desiredAmount', userLoanLimit);
+      console.log('✅ [Application Page] Repeat customer - auto-setting loan amount to max limit:', userLoanLimit);
+    }
+  }, [isRepeatCustomer, userLoanLimit]);
 
   // Load user's assigned loan plan (auto-assigned on registration)
   useEffect(() => {
@@ -568,27 +582,42 @@ export function SimplifiedLoanApplicationPage() {
             <div className="space-y-2">
               <Label htmlFor="desiredAmount" className="text-base font-medium">
                 Loan Amount (₹) *
-                <span className="text-sm text-blue-600 ml-2 font-normal">
-                  (Max: ₹{userLoanLimit.toLocaleString()})
-                </span>
+                {!isRepeatCustomer && (
+                  <span className="text-sm text-blue-600 ml-2 font-normal">
+                    (Max: ₹{userLoanLimit.toLocaleString()})
+                  </span>
+                )}
               </Label>
-              <Select 
-                value={formData.desiredAmount && formData.desiredAmount > 0 ? formData.desiredAmount.toString() : undefined} 
-                onValueChange={(value) => handleInputChange('desiredAmount', parseInt(value))}
-              >
-                <SelectTrigger className="h-12 text-base">
-                  <SelectValue placeholder="Select amount" />
-                </SelectTrigger>
-                <SelectContent className="max-h-[300px]">
-                  {generateLoanAmountOptions(userLoanLimit).map((amount) => (
-                    <SelectItem key={amount} value={amount.toString()} className="cursor-pointer">
-                      ₹{amount.toLocaleString('en-IN')}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {!formData.desiredAmount && (
-                <p className="text-xs text-gray-500 mt-1">Click to select a loan amount from the options</p>
+              {isRepeatCustomer ? (
+                // For repeat customers, show only the max loan amount (read-only)
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <p className="text-2xl font-bold text-gray-900">
+                    ₹{userLoanLimit.toLocaleString('en-IN')}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">Maximum loan amount available</p>
+                </div>
+              ) : (
+                // For new customers, show dropdown
+                <>
+                  <Select 
+                    value={formData.desiredAmount && formData.desiredAmount > 0 ? formData.desiredAmount.toString() : undefined} 
+                    onValueChange={(value) => handleInputChange('desiredAmount', parseInt(value))}
+                  >
+                    <SelectTrigger className="h-12 text-base">
+                      <SelectValue placeholder="Select amount" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[300px]">
+                      {generateLoanAmountOptions(userLoanLimit).map((amount) => (
+                        <SelectItem key={amount} value={amount.toString()} className="cursor-pointer">
+                          ₹{amount.toLocaleString('en-IN')}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {!formData.desiredAmount && (
+                    <p className="text-xs text-gray-500 mt-1">Click to select a loan amount from the options</p>
+                  )}
+                </>
               )}
             </div>
 
