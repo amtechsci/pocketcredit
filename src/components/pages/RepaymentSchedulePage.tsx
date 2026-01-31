@@ -1668,24 +1668,12 @@ export const RepaymentSchedulePage = () => {
                                     });
                                   }
                                   
-                                  if (hasPenalty && penaltyTotal > 0) {
-                                    // Calculate base amount (instalment_amount should include penalty, so subtract it)
-                                    const baseAmount = (emi.instalment_amount || 0) - penaltyTotal;
-                                    return (
-                                      <>
-                                        <p className="text-lg sm:text-xl font-bold text-gray-900">
-                                          {formatCurrency(baseAmount)} + <span className="text-red-600">{formatCurrency(penaltyTotal)}</span>
-                                        </p>
-                                        <p className="text-xs text-red-500">Penalty</p>
-                                      </>
-                                    );
-                                  } else {
-                                    return (
-                                      <p className="text-lg sm:text-xl font-bold text-gray-900">
-                                        {formatCurrency(emi.instalment_amount || 0)}
-                                      </p>
-                                    );
-                                  }
+                                  // Show total amount only (no breakdown)
+                                  return (
+                                    <p className="text-lg sm:text-xl font-bold text-gray-900">
+                                      {formatCurrency(emi.instalment_amount || 0)}
+                                    </p>
+                                  );
                                 })()}
                               </div>
                               {emi.status !== 'paid' ? (
@@ -1715,7 +1703,18 @@ export const RepaymentSchedulePage = () => {
                                     // Backend authority: Pass null for amount, backend will calculate based on paymentType
                                     const response = await apiService.createPaymentOrder(loanId, null, paymentType);
                                     
+                                    // Dismiss loading toast first - dismiss all toasts to ensure loading is gone
                                     toast.dismiss(loadingToastId);
+                                    toast.dismiss(); // Dismiss all toasts to be safe
+                                    
+                                    // Log response for debugging
+                                    console.log('[Payment] API Response:', { 
+                                      success: response.success, 
+                                      status: response.status,
+                                      message: response.message,
+                                      hasData: !!response.data,
+                                      paymentSessionId: response.data?.paymentSessionId 
+                                    });
 
                                     if (response.success && response.data?.paymentSessionId) {
                                       toast.success('Opening payment gateway...');
@@ -1746,13 +1745,36 @@ export const RepaymentSchedulePage = () => {
                                         }
                                       }
                                     } else {
-                                      toast.error(response.message || 'Failed to create payment order');
+                                      // Show error message from backend
+                                      // Backend returns { success: false, message: "..." } for validation errors
+                                      // API service returns error.response.data which has { success: false, message: "..." }
+                                      const errorMessage = response.message || 
+                                                          (response as any).error || 
+                                                          'Failed to create payment order';
+                                      console.log('[Payment] Order creation failed - showing error:', { 
+                                        response, 
+                                        errorMessage,
+                                        hasMessage: !!response.message,
+                                        responseKeys: Object.keys(response)
+                                      });
+                                      // Show error immediately after dismissing loading toast
+                                      toast.error(errorMessage, { duration: 6000 });
                                     }
                                   } catch (error: any) {
                                     console.error('Payment error:', error);
-                                    toast.error(error.message || 'Failed to initiate payment');
-                                  } finally {
-                                    toast.dismiss();
+                                    // Dismiss loading toast first - dismiss all toasts to ensure loading is gone
+                                    toast.dismiss(loadingToastId);
+                                    toast.dismiss(); // Dismiss all toasts to be safe
+                                    // Extract error message from various possible locations
+                                    // API service returns error.response.data for 400/500 errors
+                                    // When backend returns 400, axios throws error but API service returns error.response.data
+                                    const errorMessage = error.message || 
+                                                       error.response?.data?.message || 
+                                                       (typeof error === 'object' && error !== null && 'message' in error ? (error as any).message : null) ||
+                                                       'Failed to initiate payment';
+                                    console.log('Extracted error message:', errorMessage);
+                                    // Show error immediately after dismissing loading toast
+                                    toast.error(errorMessage, { duration: 6000 });
                                   }
                                 }}
                               >
