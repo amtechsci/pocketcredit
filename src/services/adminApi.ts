@@ -2052,38 +2052,38 @@ class AdminApiService {
 
   // Cron Management
   async getCronStatus(): Promise<ApiResponse<any>> {
-    return this.request('/cron/status');
+    return this.request('GET', '/cron/status');
   }
 
   async getCronTaskStatus(taskName: string): Promise<ApiResponse<any>> {
-    return this.request(`/cron/task/${taskName}`);
+    return this.request('GET', `/cron/task/${taskName}`);
   }
 
   async runCronTask(taskName: string): Promise<ApiResponse<any>> {
-    return this.request(`/cron/task/${taskName}/run`, 'POST');
+    return this.request('POST', `/cron/task/${taskName}/run`);
   }
 
   async enableCronTask(taskName: string): Promise<ApiResponse<any>> {
-    return this.request(`/cron/task/${taskName}/enable`, 'POST');
+    return this.request('POST', `/cron/task/${taskName}/enable`);
   }
 
   async disableCronTask(taskName: string): Promise<ApiResponse<any>> {
-    return this.request(`/cron/task/${taskName}/disable`, 'POST');
+    return this.request('POST', `/cron/task/${taskName}/disable`);
   }
 
   async getCronLogs(): Promise<ApiResponse<any>> {
-    return this.request('/cron/logs');
+    return this.request('GET', '/cron/logs');
   }
 
   async getCronLogByDate(date: string): Promise<ApiResponse<any>> {
-    return this.request(`/cron/logs/${date}`);
+    return this.request('GET', `/cron/logs/${date}`);
   }
 
   async deleteCronLogs(days?: number, date?: string): Promise<ApiResponse<any>> {
     const params = new URLSearchParams();
     if (days) params.append('days', days.toString());
     if (date) params.append('date', date);
-    return this.request(`/cron/logs?${params.toString()}`, 'DELETE');
+    return this.request('DELETE', `/cron/logs?${params.toString()}`);
   }
 
   // QA Verification Users (loans pending QA verification)
