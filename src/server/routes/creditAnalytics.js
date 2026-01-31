@@ -594,7 +594,8 @@ router.get('/status', requireAuth, async (req, res) => {
       data: {
         completed: creditCheck.length > 0,
         credit_score: creditCheck.length > 0 ? creditCheck[0].credit_score : null,
-        is_eligible: creditCheck.length > 0 ? creditCheck[0].is_eligible : null,
+        // Convert tinyint(1) to proper boolean (0/1 -> false/true)
+        is_eligible: creditCheck.length > 0 ? (creditCheck[0].is_eligible === 1 || creditCheck[0].is_eligible === true) : null,
         checked_at: creditCheck.length > 0 ? creditCheck[0].checked_at : null
       }
     });
@@ -701,11 +702,15 @@ router.get('/data', requireAuth, async (req, res) => {
       }
     }
 
+    // Convert tinyint(1) to proper boolean (0/1 -> false/true)
+    const isEligible = creditData.is_eligible === 1 || creditData.is_eligible === true;
+    
     res.json({
       status: 'success',
       message: 'Credit analytics data retrieved successfully',
       data: {
         ...creditData,
+        is_eligible: isEligible,
         pdf_url: pdfUrl
       }
     });

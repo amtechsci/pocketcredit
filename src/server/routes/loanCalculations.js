@@ -68,41 +68,53 @@ const authenticateLoanAccess = async (req, res, next) => {
       [decoded.id]
     );
 
-    if (users.length > 0 && (users[0].status === 'active' || users[0].status === 'on_hold')) {
-      // User access - verify loan belongs to user
-      const loanId = parseInt(req.params.loanId);
-      if (isNaN(loanId)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid loan ID'
-        });
-      }
+    if (users.length > 0) {
+      const userStatus = users[0].status;
+      // Allow access for active, on_hold, account_manager, and qa_verification status users
+      if (userStatus === 'active' || userStatus === 'on_hold' || userStatus === 'account_manager' || userStatus === 'qa_verification') {
+        // User access - verify loan belongs to user
+        const loanId = parseInt(req.params.loanId);
+        if (isNaN(loanId)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid loan ID'
+          });
+        }
 
-      const loans = await executeQuery(
-        'SELECT user_id FROM loan_applications WHERE id = ?',
-        [loanId]
-      );
+        const loans = await executeQuery(
+          'SELECT user_id FROM loan_applications WHERE id = ?',
+          [loanId]
+        );
 
-      if (!loans || loans.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: 'Loan not found'
-        });
-      }
+        if (!loans || loans.length === 0) {
+          return res.status(404).json({
+            success: false,
+            message: 'Loan not found'
+          });
+        }
 
-      if (loans[0].user_id !== users[0].id) {
+        if (loans[0].user_id !== users[0].id) {
+          return res.status(403).json({
+            success: false,
+            message: 'Access denied. You can only access your own loans.'
+          });
+        }
+
+        req.user = users[0];
+        req.userId = users[0].id;
+        return next();
+      } else {
+        // User exists but status is not allowed
+        console.log(`[Loan Calculations Auth] User ${decoded.id} has status '${userStatus}' which is not allowed`);
         return res.status(403).json({
           success: false,
-          message: 'Access denied. You can only access your own loans.'
+          message: `Access denied. User status '${userStatus}' is not allowed.`
         });
       }
-
-      req.user = users[0];
-      req.userId = users[0].id;
-      return next();
     }
 
     // Neither admin nor valid user
+    console.log(`[Loan Calculations Auth] User ${decoded.id} not found in database`);
     return res.status(403).json({
       success: false,
       message: 'Access denied'

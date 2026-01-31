@@ -32,10 +32,16 @@ export const CreditAnalyticsPage = () => {
           try {
             const checkResponse = await apiService.performCreditCheck();
             if (checkResponse.status === 'success') {
+              // Handle both boolean and number (0/1) formats from database
+              const isEligible = checkResponse.data?.is_eligible === true || 
+                                (typeof checkResponse.data?.is_eligible === 'number' && checkResponse.data?.is_eligible === 1);
+              const onHold = checkResponse.data?.on_hold === true || 
+                            (typeof checkResponse.data?.on_hold === 'number' && checkResponse.data?.on_hold === 1);
+              
               // Check if user is on hold due to BRE conditions
-              if (checkResponse.data?.on_hold) {
-                const holdReason = checkResponse.data.hold_reason || 'Application held due to credit evaluation';
-                const breReasons = checkResponse.data.bre_evaluation?.reasons || [];
+              if (onHold || !isEligible) {
+                const holdReason = checkResponse.data?.hold_reason || 'Application held due to credit evaluation';
+                const breReasons = checkResponse.data?.bre_evaluation?.reasons || [];
                 
                 toast.error(holdReason);
                 
@@ -52,6 +58,9 @@ export const CreditAnalyticsPage = () => {
                 }, 3000);
                 return;
               }
+              
+              // Credit check passed - show success message
+              toast.success('Credit check passed! Proceeding...');
               
               // Fetch the newly created credit data
               const dataResponse = await apiService.getCreditAnalyticsData();

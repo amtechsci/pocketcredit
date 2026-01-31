@@ -360,8 +360,12 @@ export const EmploymentDetailsPage: React.FC = () => {
 
           // Backend returns 'is_eligible' not 'eligible' - check both for compatibility
           // Type assertion needed because TypeScript interface doesn't match backend response
+          // Handle both boolean and number (0/1) formats from database
           const responseData = creditCheckResponse.data as any;
-          const isEligible = responseData?.is_eligible ?? responseData?.eligible ?? false;
+          const isEligible = responseData?.is_eligible === true || 
+                            (typeof responseData?.is_eligible === 'number' && responseData?.is_eligible === 1) ||
+                            responseData?.eligible === true || 
+                            (typeof responseData?.eligible === 'number' && responseData?.eligible === 1);
 
           if (creditCheckResponse.status === 'success' && isEligible) {
             toast.success('Eligibility verified! Proceeding to next step...');

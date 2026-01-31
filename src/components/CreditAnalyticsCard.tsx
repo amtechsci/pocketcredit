@@ -67,7 +67,10 @@ export function CreditAnalyticsCard({ userKycCompleted }: CreditAnalyticsCardPro
         if (responseData?.already_checked) {
           toast.info('Credit check already performed. Refreshing data...');
         } else {
-          toast.success(responseData?.is_eligible ? 'Credit check passed!' : 'Credit check completed');
+          // Handle both boolean and number (0/1) formats from database
+          const isEligible = responseData?.is_eligible === true || 
+                            (typeof responseData?.is_eligible === 'number' && responseData?.is_eligible === 1);
+          toast.success(isEligible ? 'Credit check passed!' : 'Credit check completed');
         }
         // Refresh credit data
         await fetchCreditData();

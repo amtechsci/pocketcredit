@@ -417,16 +417,12 @@ export const RepaymentSchedulePage = () => {
     }
     
     if (baseDateStr) {
-      // If disbursed today, 0 days of interest
-      if (baseDateStr === todayStr) {
-        exhaustedDays = 0;
-        console.log('Disbursed today, exhaustedDays = 0');
-      } else {
-        // calculateDaysBetween is inclusive, subtract 1 to exclude disbursal day
-        const inclusiveDays = calculateDaysBetween(baseDateStr, todayStr);
-        exhaustedDays = Math.max(0, inclusiveDays - 1);
-        console.log('Exhausted Days Calculation:', { baseDateStr, todayStr, inclusiveDays, exhaustedDays });
-      }
+      // Backend uses inclusive counting: Jan 31 to Jan 31 = 1 day, Jan 31 to Feb 1 = 2 days
+      // This matches user's logic: "if today is 31 we count 31 as 1, 1 feb will be 2"
+      // Use inclusive counting directly (no -1 adjustment needed) to match backend
+      const inclusiveDays = calculateDaysBetween(baseDateStr, todayStr);
+      exhaustedDays = Math.max(0, inclusiveDays);
+      console.log('Exhausted Days Calculation:', { baseDateStr, todayStr, inclusiveDays, exhaustedDays });
     } else {
       // No date available, default to 0
       exhaustedDays = 0;
@@ -1292,9 +1288,41 @@ export const RepaymentSchedulePage = () => {
                     const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
                     
                     // Use interestTillToday from API (backend authority - calculated with last_extension_date priority)
-                    const interestTillToday = calculations?.interest?.interestTillToday || 0;
+                    let interestTillToday = calculations?.interest?.interestTillToday || 0;
                     
-                    if (!interestTillToday) {
+                    // Fallback calculation if API didn't provide it
+                    if (!interestTillToday && exhaustedDays > 0) {
+                      // Try multiple sources for interest rate
+                      const ratePerDay = calculations?.interest?.rate_per_day 
+                        || planData.interest_percent_per_day 
+                        || loanData?.interest_percent_per_day
+                        || (calculations?.interest?.amount && calculations?.interest?.days ? calculations.interest.amount / (calculations.interest.days * principal) : null)
+                        || 0.001; // Default fallback: 0.1% per day
+                      
+                      if (ratePerDay && principal) {
+                        interestTillToday = Math.round(principal * ratePerDay * exhaustedDays * 100) / 100;
+                        console.log('⚠️ Calculated interestTillToday as fallback:', { 
+                          principal, 
+                          ratePerDay, 
+                          exhaustedDays, 
+                          interestTillToday,
+                          sources: {
+                            fromCalculations: calculations?.interest?.rate_per_day,
+                            fromPlanData: planData.interest_percent_per_day,
+                            fromLoanData: loanData?.interest_percent_per_day
+                          }
+                        });
+                      } else {
+                        console.warn('⚠️ interestTillToday not available from API and cannot calculate fallback (missing rate or principal)', {
+                          principal,
+                          ratePerDay,
+                          exhaustedDays,
+                          calculations: calculations?.interest,
+                          planData: planData.interest_percent_per_day,
+                          loanData: loanData?.interest_percent_per_day
+                        });
+                      }
+                    } else if (!interestTillToday) {
                       console.warn('⚠️ interestTillToday not available from API for preclose calculation');
                     }
                     

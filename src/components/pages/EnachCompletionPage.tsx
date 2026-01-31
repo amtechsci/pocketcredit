@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,6 +29,7 @@ export const EnachCompletionPage = () => {
   const [loading, setLoading] = useState(false);
   const [pollAttempts, setPollAttempts] = useState(0);
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const redirectInitiatedRef = useRef(false); // Prevent multiple redirects
 
   const MAX_POLL_ATTEMPTS = 60; // Poll for up to 5 minutes (60 * 5 seconds)
   const POLL_INTERVAL = 5000; // Check every 5 seconds
@@ -61,31 +62,45 @@ export const EnachCompletionPage = () => {
       return;
     }
 
-    // Start polling immediately
-    checkStatus();
-  }, []);
+    // Start polling immediately - but only if we have subscription ID
+    // If we only have appId, the checkStatus function will fetch subscription first
+    if (subId || appId) {
+      // Use setTimeout to ensure state is set before checking
+      setTimeout(() => {
+        checkStatus();
+      }, 100);
+    }
+  }, [searchParams]);
 
   // Polling effect
   useEffect(() => {
-    if (!polling || !subscriptionId) return;
+    if (!polling || !subscriptionId || redirectInitiatedRef.current) return;
 
     const interval = setInterval(() => {
-      checkStatus();
+      if (!redirectInitiatedRef.current) {
+        checkStatus();
+      }
     }, POLL_INTERVAL);
 
     return () => clearInterval(interval);
   }, [polling, subscriptionId]);
 
   const checkStatus = async () => {
+    // Prevent checking if redirect already initiated
+    if (redirectInitiatedRef.current) {
+      return;
+    }
+
     if (!subscriptionId) {
       // If no subscription ID but we have application ID, try to get subscription
       if (applicationId) {
         try {
           const subResponse = await apiService.getEnachSubscription(applicationId);
           if (subResponse.success && subResponse.data?.subscription_id) {
-            setSubscriptionId(subResponse.data.subscription_id);
+            const foundSubId = subResponse.data.subscription_id;
+            setSubscriptionId(foundSubId);
             // Check status with the found subscription ID
-            await checkStatusWithId(subResponse.data.subscription_id);
+            await checkStatusWithId(foundSubId);
             return;
           }
         } catch (err) {
@@ -121,8 +136,15 @@ export const EnachCompletionPage = () => {
           mandateStatus === 'APPROVED' ||
           mandateStatus === 'SUCCESS'
         ) {
-          // Success! Stop polling and redirect
+          // Prevent multiple redirects
+          if (redirectInitiatedRef.current) {
+            return;
+          }
+          
+          // Success! Stop polling and redirect immediately
+          redirectInitiatedRef.current = true;
           setPolling(false);
+          
           if (subscriptionStatus === 'BANK_APPROVAL_PENDING') {
             toast.success('✅ eNACH mandate approved! Waiting for bank confirmation (24 hours). Redirecting...');
           } else {
@@ -132,14 +154,16 @@ export const EnachCompletionPage = () => {
           // Store success in session
           sessionStorage.setItem('enach_completed', 'true');
           
-          // Redirect to post-disbursal flow
-          setTimeout(() => {
-            if (applicationId) {
-              navigate(`/post-disbursal?applicationId=${applicationId}&enach=complete&subscription_id=${subId}`);
-            } else {
-              navigate('/post-disbursal');
-            }
-          }, 1500);
+          // Redirect immediately - use replace to prevent back button issues
+          const redirectPath = applicationId 
+            ? `/post-disbursal?applicationId=${applicationId}&enach=complete&subscription_id=${subId}`
+            : '/post-disbursal';
+          
+          // Use immediate navigation - don't wait for animation frame
+          // This ensures redirect happens even if component re-renders
+          console.log(`[eNACH] Redirecting to: ${redirectPath}`);
+          navigate(redirectPath, { replace: true });
+          
           return;
         }
 

@@ -487,11 +487,11 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
 
     // Check if user already has an uploaded bank statement
     const existing = await executeQuery(
-      'SELECT id, user_status FROM user_bank_statements WHERE user_id = ?',
+      'SELECT id, status FROM user_bank_statements WHERE user_id = ?',
       [userId]
     );
 
-    if (existing.length > 0 && existing[0].user_status === 'verified') {
+    if (existing.length > 0 && existing[0].status === 'completed') {
       return res.json({
         success: false,
         message: 'Bank statement already uploaded and verified. Please contact support to update.'
@@ -542,14 +542,13 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
 
     console.log(`✅ Bank statement uploaded: S3 Key: ${s3Key}`);
 
-    // Store in database with user_status = 'uploaded' and verification_status = 'not_started'
-    // Set status = 'completed' for manual uploads so step manager recognizes it as complete
+    // Store in database with status = 'completed' for manual uploads so step manager recognizes it as complete
     // No Digitap API calls - admin will trigger verification
     // Store S3 key in file_path (will be converted to presigned URL when needed)
     await executeQuery(
       `INSERT INTO user_bank_statements 
-       (user_id, client_ref_num, mobile_number, bank_name, status, user_status, verification_status, file_path, file_name, file_size, upload_method, created_at) 
-       VALUES (?, ?, ?, ?, 'completed', 'uploaded', 'not_started', ?, ?, ?, 'manual', NOW())
+       (user_id, client_ref_num, mobile_number, bank_name, status, file_path, file_name, file_size, upload_method, created_at) 
+       VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, 'manual', NOW())
        ON DUPLICATE KEY UPDATE 
        client_ref_num = VALUES(client_ref_num),
        file_path = VALUES(file_path), 
@@ -557,8 +556,6 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
        file_size = VALUES(file_size), 
        upload_method = VALUES(upload_method),
        status = 'completed',
-       user_status = 'uploaded',
-       verification_status = 'not_started',
        updated_at = NOW()`,
       [userId, clientRefNum, mobileNumber, bank_name || null, s3Key, req.file.originalname, req.file.size]
     );
@@ -665,7 +662,7 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     }
 
     const statements = await executeQuery(
-      `SELECT client_ref_num, request_id, txn_id, status, user_status, verification_status, file_name, report_data, digitap_url, expires_at, transaction_data, upload_method, created_at, updated_at 
+      `SELECT client_ref_num, request_id, txn_id, status, file_name, report_data, digitap_url, expires_at, transaction_data, upload_method, created_at, updated_at 
        FROM user_bank_statements 
        WHERE user_id = ? 
        ORDER BY created_at DESC LIMIT 1`,
@@ -705,12 +702,10 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     }
 
     // Bank statement is considered "has statement" if:
-    // 1. status === 'completed' (online mode - Digitap verified)
-    // 2. user_status === 'uploaded' or 'under_review' or 'verified' (manual upload)
+    // 1. status === 'completed' (online mode - Digitap verified or manual upload)
+    // 2. upload_method === 'manual' (manual upload)
     const hasStatement = statement.status === 'completed' ||
-      statement.user_status === 'uploaded' ||
-      statement.user_status === 'under_review' ||
-      statement.user_status === 'verified';
+      statement.upload_method === 'manual';
     let reportJustFetched = false;
 
     // Extract txn_id from transaction_data if not already in statement.txn_id
@@ -731,10 +726,7 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     }
 
     // Check if this is a manual upload - skip Digitap API calls for manual uploads
-    const isManualUpload = statement.upload_method === 'manual' ||
-      statement.user_status === 'uploaded' ||
-      statement.user_status === 'under_review' ||
-      statement.user_status === 'verified';
+    const isManualUpload = statement.upload_method === 'manual';
 
     // If status is completed but report_data is empty, fetch it from Digitap
     // BUT skip this for manual uploads - they don't have Digitap transactions
@@ -808,7 +800,7 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
     } else if (isManualUpload) {
       // Manual upload - skip Digitap API call
       console.log('📊 Manual upload detected - skipping Digitap report fetch');
-      console.log(`   Upload method: ${statement.upload_method}, User status: ${statement.user_status}`);
+      console.log(`   Upload method: ${statement.upload_method}, Status: ${statement.status}`);
     }
 
     // Parse transaction_data safely (might be string or object)
@@ -829,8 +821,8 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
       data: {
         hasStatement,
         status: statement.status,
-        userStatus: statement.user_status || statement.status, // Use user_status if available, fallback to status
-        verificationStatus: statement.verification_status || 'not_started',
+        userStatus: statement.status, // Use status as userStatus
+        verificationStatus: 'not_started', // Default verification status
         clientRefNum: statement.client_ref_num,
         requestId: statement.request_id,
         fileName: statement.file_name,
@@ -878,7 +870,7 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
     const userId = req.userId;
 
     const statements = await executeQuery(
-      `SELECT client_ref_num, txn_id, status, report_data, transaction_data, user_status, s3_key, upload_method
+      `SELECT client_ref_num, txn_id, status, report_data, transaction_data, upload_method, file_path
        FROM user_bank_statements 
        WHERE user_id = ? 
        ORDER BY created_at DESC LIMIT 1`,
@@ -895,11 +887,8 @@ router.post('/fetch-bank-report', requireAuth, async (req, res) => {
     const statement = statements[0];
 
     // Check if this is a manual upload
-    // Manual uploads have: upload_method = 'manual' OR user_status = 'uploaded' OR no client_ref_num
+    // Manual uploads have: upload_method = 'manual' OR no client_ref_num
     const isManualUpload = statement.upload_method === 'manual' ||
-      statement.user_status === 'uploaded' ||
-      statement.user_status === 'under_review' ||
-      statement.user_status === 'verified' ||
       (!statement.client_ref_num && !statement.txn_id);
 
     // If it's a manual upload and we have report_data, return it

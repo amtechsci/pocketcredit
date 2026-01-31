@@ -12000,14 +12000,23 @@ export function UserProfileDetail() {
                             {emiDate !== 'N/A' ? formatDate(emiDate) : 'N/A'}
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap">
-                            <div className="text-sm font-semibold text-gray-900">
-                              {formatCurrencyWithDecimals(emiAmount)}
-                            </div>
-                            {hasPenalty && (
-                              <div className="text-xs text-red-600 mt-1">
-                                <div>Penalty: ₹{(emi.penalty_base || 0).toFixed(2)}</div>
-                                <div>GST: ₹{(emi.penalty_gst || 0).toFixed(2)}</div>
-                                <div className="font-semibold">Total Penalty: ₹{(emi.penalty_total || 0).toFixed(2)}</div>
+                            {hasPenalty ? (
+                              <div>
+                                <div className="text-sm text-gray-700">
+                                  Base EMI: {formatCurrencyWithDecimals(emiAmount - (emi.penalty_total || 0))}
+                                </div>
+                                <div className="text-xs text-red-600 mt-1">
+                                  <div>Penalty: ₹{(emi.penalty_base || 0).toFixed(2)}</div>
+                                  <div>GST: ₹{(emi.penalty_gst || 0).toFixed(2)}</div>
+                                  <div className="font-semibold">Total Penalty: ₹{(emi.penalty_total || 0).toFixed(2)}</div>
+                                </div>
+                                <div className="text-sm font-semibold text-gray-900 mt-1">
+                                  Total: {formatCurrencyWithDecimals(emiAmount)}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-sm font-semibold text-gray-900">
+                                {formatCurrencyWithDecimals(emiAmount)}
                               </div>
                             )}
                           </td>
@@ -12038,19 +12047,20 @@ export function UserProfileDetail() {
                         <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-900">
                           {formatCurrencyWithDecimals(
                             selectedLoanEmiSchedule.reduce((sum: number, emi: any) => {
-                              // Calculate total for each EMI: base amount + penalty
-                              // instalment_amount should include penalty, but if not available or doesn't include it,
-                              // we need to add penalty_total to the base emi_amount
+                              // instalment_amount already includes penalty (calculated in loanCalculations.js)
+                              // So we should just use instalment_amount if available, otherwise emi_amount
                               const instalmentAmount = parseFloat(emi.instalment_amount || 0);
                               const emiAmount = parseFloat(emi.emi_amount || 0);
-                              const penaltyTotal = parseFloat(emi.penalty_total || 0);
                               
-                              // If instalment_amount exists and is greater than emi_amount, it likely includes penalty
-                              if (instalmentAmount > 0 && instalmentAmount >= emiAmount) {
+                              // Always use instalment_amount if available (it includes penalty)
+                              // Only fallback to emi_amount if instalment_amount is not available
+                              if (instalmentAmount > 0) {
                                 return sum + instalmentAmount;
                               } else {
-                                // Otherwise, add penalty to base EMI amount
-                                return sum + emiAmount + penaltyTotal;
+                                // If instalment_amount is not available, use emi_amount
+                                // Note: emi_amount might not include penalty, but we can't add it here
+                                // because we don't know if it's already included or not
+                                return sum + emiAmount;
                               }
                             }, 0)
                           )}

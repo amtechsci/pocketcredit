@@ -59,7 +59,10 @@ export const CreditCheckPage: React.FC = () => {
           
           if (response.data.completed) {
             // Credit check already done
-            if (response.data.is_eligible) {
+            // Handle both boolean and number (0/1) formats from database
+            const isEligible = response.data.is_eligible === true || 
+                              (typeof response.data.is_eligible === 'number' && response.data.is_eligible === 1);
+            if (isEligible) {
               toast.success('Credit check already completed! Proceeding to bank statement...');
               setTimeout(() => {
                 navigate(`/loan-application/bank-statement?applicationId=${applicationId}`);
@@ -93,15 +96,19 @@ export const CreditCheckPage: React.FC = () => {
     try {
       const response = await apiService.performCreditCheck();
 
-      if (response.status === 'success' && response.data) {
+        if (response.status === 'success' && response.data) {
+        // Handle both boolean and number (0/1) formats from database
+        const isEligible = response.data.is_eligible === true || 
+                          (typeof response.data.is_eligible === 'number' && response.data.is_eligible === 1);
+        
         setCreditData({
           completed: true,
           credit_score: response.data.credit_score,
-          is_eligible: response.data.is_eligible,
+          is_eligible: isEligible,
           checked_at: new Date().toISOString()
         });
 
-        if (response.data.is_eligible) {
+        if (isEligible) {
           toast.success(`Credit check passed! Your score: ${response.data.credit_score}`);
           setTimeout(() => {
             navigate(`/loan-application/bank-statement?applicationId=${applicationId}`);
