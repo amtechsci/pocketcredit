@@ -1172,6 +1172,149 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
       calculation.interest.interestTillToday = interestTillToday;
     }
     
+    // Calculate penalty for ALL loans (single payment and multi-EMI)
+    // For multi-EMI, sum up penalty from schedule; for single payment, calculate based on due date
+    let penaltyBase = 0;
+    let penaltyGST = 0;
+    let penaltyTotal = 0;
+    let daysPastDue = 0;
+    
+    // Get late fee structure for penalty calculation
+    let lateFeeStructure = null;
+    try {
+      if (loan.late_fee_structure) {
+        lateFeeStructure = typeof loan.late_fee_structure === 'string' 
+          ? JSON.parse(loan.late_fee_structure) 
+          : loan.late_fee_structure;
+      } else if (planSnapshot && planSnapshot.late_fee_structure) {
+        lateFeeStructure = typeof planSnapshot.late_fee_structure === 'string'
+          ? JSON.parse(planSnapshot.late_fee_structure)
+          : planSnapshot.late_fee_structure;
+      }
+    } catch (e) {
+      console.error('⚠️ [Loan Calculations] Error parsing late_fee_structure for penalty:', e);
+    }
+    
+    // Calculate penalty based on loan type
+    if (calculation.repayment?.schedule && calculation.repayment.schedule.length > 1) {
+      // Multi-EMI: Sum penalty from overdue EMIs in schedule
+      for (const emi of calculation.repayment.schedule) {
+        if (emi.status !== 'paid' && emi.penalty_total && parseFloat(emi.penalty_total) > 0) {
+          penaltyBase += parseFloat(emi.penalty_base || 0);
+          penaltyGST += parseFloat(emi.penalty_gst || 0);
+          penaltyTotal += parseFloat(emi.penalty_total || 0);
+          
+          // Calculate DPD for the first overdue EMI
+          if (daysPastDue === 0 && emi.due_date) {
+            const todayStr = getTodayString();
+            const emiDateStr = typeof emi.due_date === 'string' ? emi.due_date.split('T')[0] : formatDateToString(emi.due_date);
+            if (emiDateStr < todayStr) {
+              daysPastDue = calculateDaysBetween(emiDateStr, todayStr) - 1; // Exclude today
+              daysPastDue = Math.max(0, daysPastDue);
+            }
+          }
+        }
+      }
+    } else {
+      // Single payment: Calculate penalty based on due date
+      let dueDate = null;
+      if (loan.processed_due_date) {
+        dueDate = typeof loan.processed_due_date === 'string' 
+          ? loan.processed_due_date.split('T')[0] 
+          : formatDateToString(loan.processed_due_date);
+      } else if (calculation.interest?.repayment_date) {
+        dueDate = typeof calculation.interest.repayment_date === 'string'
+          ? calculation.interest.repayment_date.split('T')[0]
+          : formatDateToString(calculation.interest.repayment_date);
+      }
+      
+      if (dueDate) {
+        const todayStr = getTodayString();
+        if (dueDate < todayStr) {
+          // Loan is overdue - calculate days past due
+          daysPastDue = calculateDaysBetween(dueDate, todayStr) - 1; // Exclude today
+          daysPastDue = Math.max(1, daysPastDue); // At least 1 day if overdue
+          
+          // Calculate penalty using late_fee_structure
+          const principal = calculation.principal || parseFloat(loan.loan_amount || 0);
+          
+          if (lateFeeStructure && Array.isArray(lateFeeStructure) && lateFeeStructure.length > 0) {
+            // Use late_fee_structure tiers
+            const sortedTiers = [...lateFeeStructure].sort((a, b) => {
+              const orderA = a.tier_order !== undefined ? a.tier_order : (a.days_overdue_start || 0);
+              const orderB = b.tier_order !== undefined ? b.tier_order : (b.days_overdue_start || 0);
+              return orderA - orderB;
+            });
+            
+            for (const tier of sortedTiers) {
+              const startDay = tier.days_overdue_start || 0;
+              const endDay = tier.days_overdue_end !== null && tier.days_overdue_end !== undefined 
+                ? tier.days_overdue_end 
+                : null;
+              
+              if (daysPastDue < startDay) continue;
+              
+              const feeValue = parseFloat(tier.fee_value || tier.penalty_percent || 0);
+              if (feeValue <= 0) continue;
+              
+              if (startDay === endDay || (startDay === 1 && endDay === 1)) {
+                if (daysPastDue >= startDay) {
+                  penaltyBase += principal * (feeValue / 100);
+                }
+              } else if (endDay === null || endDay === undefined) {
+                if (daysPastDue >= startDay) {
+                  const daysInTier = daysPastDue - startDay + 1;
+                  penaltyBase += principal * (feeValue / 100) * daysInTier;
+                }
+              } else {
+                if (daysPastDue >= startDay) {
+                  const tierStartDay = startDay;
+                  const tierEndDay = Math.min(endDay, daysPastDue);
+                  const daysInTier = Math.max(0, tierEndDay - tierStartDay + 1);
+                  if (daysInTier > 0) {
+                    penaltyBase += principal * (feeValue / 100) * daysInTier;
+                  }
+                }
+              }
+            }
+            
+            penaltyBase = toDecimal2(penaltyBase);
+            const gstPercent = lateFeeStructure[0]?.gst_percent || 18;
+            penaltyGST = toDecimal2(penaltyBase * (gstPercent / 100));
+            penaltyTotal = toDecimal2(penaltyBase + penaltyGST);
+          } else {
+            // Fallback: Use default penalty structure (5% day 1, 1% days 2-10, 0.6% days 11-120)
+            let penaltyPercent = 0;
+            if (daysPastDue === 1) {
+              penaltyPercent = 5;
+            } else if (daysPastDue >= 2 && daysPastDue <= 10) {
+              penaltyPercent = 5 + (1 * (daysPastDue - 1));
+            } else if (daysPastDue >= 11 && daysPastDue <= 120) {
+              penaltyPercent = 5 + 9 + (0.6 * (daysPastDue - 10));
+            }
+            penaltyBase = toDecimal2(principal * penaltyPercent / 100);
+            penaltyGST = toDecimal2(penaltyBase * 0.18);
+            penaltyTotal = toDecimal2(penaltyBase + penaltyGST);
+          }
+        }
+      }
+    }
+    
+    // Add penalty to calculation response
+    calculation.penalty = {
+      days_past_due: daysPastDue,
+      penalty_base: penaltyBase,
+      penalty_gst: penaltyGST,
+      penalty_total: penaltyTotal
+    };
+    
+    // Add penalty to total repayable if overdue
+    if (penaltyTotal > 0) {
+      calculation.total_with_penalty = toDecimal2((calculation.total?.repayable || calculation.total_repayable || 0) + penaltyTotal);
+    } else {
+      calculation.total_with_penalty = calculation.total?.repayable || calculation.total_repayable || 0;
+    }
+    
     res.json({
       success: true,
       data: {

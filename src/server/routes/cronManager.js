@@ -129,5 +129,186 @@ router.get('/task/:name', authenticateAdmin, async (req, res) => {
     }
   });
 
+/**
+ * GET /api/admin/cron/logs
+ * Get list of available log files
+ */
+router.get('/logs', authenticateAdmin, async (req, res) => {
+  try {
+    const fs = require('fs').promises;
+    const path = require('path');
+    const logDir = path.join(__dirname, '../../log');
+    
+    // Get all log files
+    const files = await fs.readdir(logDir);
+    const logFiles = files
+      .filter(file => file.startsWith('cron_') && file.endsWith('.log'))
+      .map(file => {
+        // Extract date from filename: cron_YYYYMMDD.log
+        const dateStr = file.replace('cron_', '').replace('.log', '');
+        const year = dateStr.substring(0, 4);
+        const month = dateStr.substring(4, 6);
+        const day = dateStr.substring(6, 8);
+        const date = new Date(`${year}-${month}-${day}`);
+        
+        return {
+          filename: file,
+          date: `${year}-${month}-${day}`,
+          displayDate: date.toLocaleDateString('en-IN', { 
+            year: 'numeric', 
+            month: 'short', 
+            day: 'numeric' 
+          })
+        };
+      })
+      .sort((a, b) => b.date.localeCompare(a.date)); // Sort by date descending
+    
+    res.json({
+      success: true,
+      data: logFiles
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get log files',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/admin/cron/logs/:date
+ * Get log entries for a specific date (YYYY-MM-DD format)
+ */
+router.get('/logs/:date', authenticateAdmin, async (req, res) => {
+  try {
+    const { date } = req.params;
+    const fs = require('fs').promises;
+    const path = require('path');
+    const logDir = path.join(__dirname, '../../log');
+    
+    // Convert YYYY-MM-DD to YYYYMMDD
+    const dateStr = date.replace(/-/g, '');
+    const logFilePath = path.join(logDir, `cron_${dateStr}.log`);
+    
+    try {
+      const logContent = await fs.readFile(logFilePath, 'utf8');
+      const lines = logContent.trim().split('\n').filter(line => line.trim());
+      
+      // Parse JSON log entries
+      const entries = lines.map((line, index) => {
+        try {
+          return JSON.parse(line);
+        } catch (e) {
+          return {
+            timestamp: new Date().toISOString(),
+            level: 'INFO',
+            message: line,
+            parseError: true
+          };
+        }
+      });
+      
+      res.json({
+        success: true,
+        data: {
+          date,
+          entries,
+          totalEntries: entries.length
+        }
+      });
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return res.json({
+          success: true,
+          data: {
+            date,
+            entries: [],
+            totalEntries: 0
+          }
+        });
+      }
+      throw error;
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to read log file',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * DELETE /api/admin/cron/logs
+ * Delete old log files
+ * Query params:
+ *   - days: Delete logs older than N days (default: 30)
+ *   - date: Delete logs for specific date (YYYY-MM-DD)
+ */
+router.delete('/logs', authenticateAdmin, async (req, res) => {
+  try {
+    const { days, date } = req.query;
+    const fs = require('fs').promises;
+    const path = require('path');
+    const logDir = path.join(__dirname, '../../log');
+    
+    let deletedFiles = [];
+    
+    if (date) {
+      // Delete specific date log
+      const dateStr = date.replace(/-/g, '');
+      const logFilePath = path.join(logDir, `cron_${dateStr}.log`);
+      
+      try {
+        await fs.unlink(logFilePath);
+        deletedFiles.push(`cron_${dateStr}.log`);
+      } catch (error) {
+        if (error.code !== 'ENOENT') {
+          throw error;
+        }
+      }
+    } else {
+      // Delete logs older than N days
+      const daysToKeep = parseInt(days) || 30;
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+      
+      const files = await fs.readdir(logDir);
+      const logFiles = files.filter(file => file.startsWith('cron_') && file.endsWith('.log'));
+      
+      for (const file of logFiles) {
+        // Extract date from filename
+        const dateStr = file.replace('cron_', '').replace('.log', '');
+        const year = dateStr.substring(0, 4);
+        const month = dateStr.substring(4, 6);
+        const day = dateStr.substring(6, 8);
+        const fileDate = new Date(`${year}-${month}-${day}`);
+        
+        if (fileDate < cutoffDate) {
+          const logFilePath = path.join(logDir, file);
+          await fs.unlink(logFilePath);
+          deletedFiles.push(file);
+        }
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `Deleted ${deletedFiles.length} log file(s)`,
+      data: {
+        deletedFiles,
+        count: deletedFiles.length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete log files',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
 

@@ -2050,6 +2050,42 @@ class AdminApiService {
     }
   }
 
+  // Cron Management
+  async getCronStatus(): Promise<ApiResponse<any>> {
+    return this.request('/cron/status');
+  }
+
+  async getCronTaskStatus(taskName: string): Promise<ApiResponse<any>> {
+    return this.request(`/cron/task/${taskName}`);
+  }
+
+  async runCronTask(taskName: string): Promise<ApiResponse<any>> {
+    return this.request(`/cron/task/${taskName}/run`, 'POST');
+  }
+
+  async enableCronTask(taskName: string): Promise<ApiResponse<any>> {
+    return this.request(`/cron/task/${taskName}/enable`, 'POST');
+  }
+
+  async disableCronTask(taskName: string): Promise<ApiResponse<any>> {
+    return this.request(`/cron/task/${taskName}/disable`, 'POST');
+  }
+
+  async getCronLogs(): Promise<ApiResponse<any>> {
+    return this.request('/cron/logs');
+  }
+
+  async getCronLogByDate(date: string): Promise<ApiResponse<any>> {
+    return this.request(`/cron/logs/${date}`);
+  }
+
+  async deleteCronLogs(days?: number, date?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    if (days) params.append('days', days.toString());
+    if (date) params.append('date', date);
+    return this.request(`/cron/logs?${params.toString()}`, 'DELETE');
+  }
+
   // QA Verification Users (loans pending QA verification)
   async getQAVerificationUsers(page: number = 1, limit: number = 20, search: string = ''): Promise<ApiResponse<any>> {
     try {

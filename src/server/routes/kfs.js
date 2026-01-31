@@ -849,7 +849,8 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               let nextSalaryDate = getNextSalaryDate(baseDateForEmi, salaryDate);
 
               // Check if duration is less than minimum days
-              const minDuration = planData.repayment_days || 15;
+              // For EMI loans, enforce minimum 30 days regardless of plan setting
+              const minDuration = Math.max(planData.repayment_days || 0, 30);
               // Use calculateDaysBetween for accurate day calculation (inclusive)
               const baseDateStr = formatDateToString(baseDateForEmi);
               const nextSalaryDateStr = formatDateToString(nextSalaryDate);
@@ -1150,7 +1151,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
 
             // Check if duration is less than minimum days
-            const minDuration = planData.repayment_days || 15;
+            const minDuration = Math.max(planData.repayment_days || 0, 30);
             // Use calculateDaysBetween for accurate day calculation (inclusive)
             const baseDateStr = formatDateToString(baseDate);
             const nextSalaryDateStr = formatDateToString(nextSalaryDate);
@@ -1626,7 +1627,7 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
         if (isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
           // Multi-EMI with salary date: Calculate all EMI dates
           let firstDueDate = getNextSalaryDate(baseDate, salaryDate);
-          const minDuration = planSnapshot.repayment_days || 15;
+          const minDuration = Math.max(planSnapshot.repayment_days || 0, 30);
           const firstDueDateStr = formatDateToString(firstDueDate);
           const daysToFirstSalary = calculateDaysBetween(processedAtStr, firstDueDateStr);
 
@@ -1644,7 +1645,7 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
         } else if (!isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
           // Single payment with salary date
           const nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
-          const minDuration = planSnapshot.repayment_days || 15;
+          const minDuration = Math.max(planSnapshot.repayment_days || 0, 30);
           const nextSalaryDateStr = formatDateToString(nextSalaryDate);
           const daysToSalary = calculateDaysBetween(processedAtStr, nextSalaryDateStr);
 
@@ -2297,7 +2298,7 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         if (isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
           // Multi-EMI with salary date: Calculate all EMI dates
           let firstDueDate = getNextSalaryDate(baseDate, salaryDate);
-          const minDuration = planSnapshot.repayment_days || 15;
+          const minDuration = Math.max(planSnapshot.repayment_days || 0, 30);
           const firstDueDateStr = formatDateToString(firstDueDate);
           const daysToFirstSalary = calculateDaysBetween(processedAtStr, firstDueDateStr);
 
@@ -2315,7 +2316,7 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
         } else if (!isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
           // Single payment with salary date
           const nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
-          const minDuration = planSnapshot.repayment_days || 15;
+          const minDuration = Math.max(planSnapshot.repayment_days || 0, 30);
           const nextSalaryDateStr = formatDateToString(nextSalaryDate);
           const daysToSalary = calculateDaysBetween(processedAtStr, nextSalaryDateStr);
 
@@ -4694,7 +4695,7 @@ router.get('/:loanId', async (req, res, next) => {
           let nextSalaryDate = getNextSalaryDate(baseDateForEmi, salaryDate);
 
           // Check if duration is less than minimum days
-          const minDuration = planData.repayment_days || 15;
+          const minDuration = Math.max(planData.repayment_days || 0, 30);
           // Use calculateDaysBetween for accurate day calculation (inclusive)
           const baseDateStr = formatDateToString(baseDateForEmi);
           const nextSalaryDateStr = formatDateToString(nextSalaryDate);
@@ -5054,7 +5055,7 @@ router.get('/:loanId', async (req, res, next) => {
             let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
 
             // Check if duration is less than minimum days
-            const minDuration = planData.repayment_days || 15;
+            const minDuration = Math.max(planData.repayment_days || 0, 30);
             // Use calculateDaysBetween for accurate day calculation (inclusive)
             const baseDateStr = formatDateToString(baseDate);
             const nextSalaryDateStr = formatDateToString(nextSalaryDate);

@@ -921,87 +921,26 @@ export const RepaymentSchedulePage = () => {
               <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Pay on Due Date</h3>
               
               {(() => {
-                // Replicate exact calculation logic from Admin User Profile Detail page
+                // Use values from API - all calculations done in backend
                 const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
                 
                 // Check if loan is processed
                 const isProcessed = loanData.processed_at || loanData.processedDate;
-                const disbursedDate = loanData.disbursed_at || loanData.disbursedDate;
                 
-                // PRIORITY 1: Use calculation API value (most accurate, uses correct date handling)
-                // PRIORITY 2: Use database total_repayable (may be outdated if calculated before date fix)
-                // PRIORITY 3: Calculate manually as fallback
+                // Get penalty from API (calculated in backend)
+                const penaltyTotal = calculations.penalty?.penalty_total || 0;
+                
+                // Get total amount from API (includes penalty if overdue)
+                // PRIORITY 1: Use total_with_penalty from API (most accurate)
+                // PRIORITY 2: Fallback to total.repayable + penalty
                 let totalAmount = 0;
-                const calcTotalAmount = calculations.total?.repayable || calculations.total_amount || calculations.total_repayable || 0;
-                const dbTotalRepayable = loanData.total_repayable ? parseFloat(loanData.total_repayable) : 0;
-                
-                // Use calculation API value first (most accurate), then database value, then calculate
-                if (calcTotalAmount && calcTotalAmount > principal) {
-                  totalAmount = calcTotalAmount;
-                  console.log('✅ Using calculation API total:', calcTotalAmount);
-                } else if (dbTotalRepayable && dbTotalRepayable > principal) {
-                  totalAmount = dbTotalRepayable;
-                  console.log('⚠️ Using database total (may be outdated):', dbTotalRepayable);
+                if (calculations.total_with_penalty && calculations.total_with_penalty > 0) {
+                  totalAmount = calculations.total_with_penalty;
+                  console.log('✅ Using API total_with_penalty:', totalAmount);
                 } else {
-                  // PRIORITY 2: Fallback to calculation if backend value not available
-                  // Post service fee - use processed value if available, otherwise calculate
-                  const postServiceFee = isProcessed && loanData.processed_post_service_fee !== null && loanData.processed_post_service_fee !== undefined
-                    ? parseFloat(loanData.processed_post_service_fee) || 0
-                    : (calculations.totals?.repayableFee || 0);
-                  const postServiceFeeGST = calculations.totals?.repayableFeeGST || 0;
-                  
-                  // Get due date
-                  const dueDate = isProcessed && loanData.processed_due_date
-                    ? loanData.processed_due_date
-                    : (calculations.interest?.repayment_date || null);
-                  
-                  // Calculate DPD (Days Past Due) for penalty calculation
-                  let dpd = 0;
-                  if (dueDate && disbursedDate) {
-                    const dueDateObj = typeof dueDate === 'string' ? new Date(dueDate + 'T00:00:00') : new Date(dueDate);
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0);
-                    dueDateObj.setHours(0, 0, 0, 0);
-                    const diff = Math.ceil((today.getTime() - dueDateObj.getTime()) / (1000 * 60 * 60 * 24));
-                    dpd = diff > 0 ? diff : 0;
-                  }
-                  
-                  // Penalty calculation - use processed value if available, otherwise calculate
-                  let penaltyTotal = 0;
-                  if (isProcessed && loanData.processed_penalty !== null && loanData.processed_penalty !== undefined) {
-                    penaltyTotal = parseFloat(loanData.processed_penalty) || 0;
-                  } else if (dpd > 0) {
-                    // Calculate penalty based on DPD
-                    let penaltyPercent = 0;
-                    if (dpd === 1) {
-                      penaltyPercent = 5; // 5% on first day
-                    } else if (dpd >= 2 && dpd <= 10) {
-                      penaltyPercent = 1 * (dpd - 1); // 1% per day from day 2-10
-                    } else if (dpd >= 11 && dpd <= 120) {
-                      penaltyPercent = 9 + (0.6 * (dpd - 10)); // 9% (days 2-10) + 0.6% per day from day 11-120
-                    }
-                    penaltyTotal = Math.round((principal * penaltyPercent) / 100 * 100) / 100;
-                  }
-                  
-                  // Calculate interest for full tenure (till due date, not till today)
-                  // For multi-EMI loans, sum interest from schedule; for single payment, use calculation.interest.amount
-                  let interestTillDate = 0;
-                  if (kfsData.repayment?.schedule && Array.isArray(kfsData.repayment.schedule) && kfsData.repayment.schedule.length > 1) {
-                    // Multi-EMI loan: Sum interest from all EMI periods in the schedule
-                    interestTillDate = kfsData.repayment.schedule.reduce((sum: number, emi: any) => sum + (emi.interest || 0), 0);
-                  } else {
-                    // Single payment loan: Use the full tenure interest from calculation
-                    // Use processed_interest if available, otherwise use calculation
-                    if (isProcessed && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
-                      interestTillDate = parseFloat(loanData.processed_interest) || 0;
-                    } else {
-                      interestTillDate = calculations?.interest?.amount || 0;
-                    }
-                  }
-                  
-                  // Calculate total amount: principal + post service fee + gst on post service fee + interest balance till due date + penalty if any
-                  // This matches the exact formula from Admin User Profile Detail page (line 4698)
-                  totalAmount = principal + postServiceFee + postServiceFeeGST + interestTillDate + penaltyTotal;
+                  const calcTotalAmount = calculations.total?.repayable || calculations.total_amount || calculations.total_repayable || 0;
+                  totalAmount = calcTotalAmount + penaltyTotal;
+                  console.log('✅ Using API total + penalty:', calcTotalAmount, '+', penaltyTotal, '=', totalAmount);
                 }
                 
                 // Get due date for display
@@ -1032,9 +971,18 @@ export const RepaymentSchedulePage = () => {
                       {/* Column 1: Total Amount */}
                       <div className="flex-1">
                         <p className="text-xs sm:text-sm text-gray-600 mb-1 font-medium">Total Amount</p>
-                        <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900">
-                          {formatCurrency(totalAmount)}
-                        </h2>
+                        {penaltyTotal > 0 ? (
+                          <>
+                            <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900">
+                              {formatCurrency(totalAmount - penaltyTotal)} + <span className="text-red-600">{formatCurrency(penaltyTotal)}</span>
+                            </h2>
+                            <p className="text-xs text-red-600 mt-1">Penalty for late payment</p>
+                          </>
+                        ) : (
+                          <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900">
+                            {formatCurrency(totalAmount)}
+                          </h2>
+                        )}
                       </div>
                       
                       {/* Column 2: Due Date */}
@@ -1717,9 +1665,20 @@ export const RepaymentSchedulePage = () => {
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
-                              <p className="text-lg sm:text-xl font-bold text-gray-900 mr-2">
-                                {formatCurrency(emi.instalment_amount || 0)}
-                              </p>
+                              <div className="text-right mr-2">
+                                {(emi.penalty_total || emi.penalty) && parseFloat(emi.penalty_total || emi.penalty) > 0 && emi.status !== 'paid' ? (
+                                  <>
+                                    <p className="text-lg sm:text-xl font-bold text-gray-900">
+                                      {formatCurrency((emi.instalment_amount || 0) - parseFloat(emi.penalty_total || emi.penalty))} + <span className="text-red-600">{formatCurrency(parseFloat(emi.penalty_total || emi.penalty))}</span>
+                                    </p>
+                                    <p className="text-xs text-red-500">Penalty</p>
+                                  </>
+                                ) : (
+                                  <p className="text-lg sm:text-xl font-bold text-gray-900">
+                                    {formatCurrency(emi.instalment_amount || 0)}
+                                  </p>
+                                )}
+                              </div>
                               {emi.status !== 'paid' ? (
                               <Button
                                 className="bg-blue-600 hover:bg-blue-700 text-white"

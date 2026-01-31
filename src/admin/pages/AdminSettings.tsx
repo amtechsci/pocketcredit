@@ -31,7 +31,12 @@ import {
   Plus,
   Star,
   DollarSign,
-  FileText
+  FileText,
+  Clock,
+  Play,
+  Pause,
+  Calendar,
+  FileX
 } from 'lucide-react';
 
 interface ApiConfig {
@@ -352,6 +357,14 @@ const EmailTestForm: React.FC<{
 export function AdminSettings() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('fee-types');
+  
+  // Cron Management State
+  const [cronStatus, setCronStatus] = useState<any>(null);
+  const [cronLogs, setCronLogs] = useState<any[]>([]);
+  const [selectedLogDate, setSelectedLogDate] = useState<string | null>(null);
+  const [logEntries, setLogEntries] = useState<any[]>([]);
+  const [loadingCron, setLoadingCron] = useState(false);
+  const [deletingLogs, setDeletingLogs] = useState(false);
   const [showTestModal, setShowTestModal] = useState(false);
   const [testingConfig, setTestingConfig] = useState<ApiConfig | null>(null);
   const [userConfig, setUserConfig] = useState<UserConfigData | null>(null);
@@ -668,7 +681,8 @@ export function AdminSettings() {
     { id: 'loan-plans', label: 'Loan Plans', icon: CreditCard, count: 0 },
     { id: 'user-config', label: 'User Config', icon: Settings, count: 0 },
     { id: 'eligibility', label: 'Eligibility Criteria', icon: CheckCircle, count: 0 },
-    { id: 'policies', label: 'Policies', icon: FileText, count: 0 }
+    { id: 'policies', label: 'Policies', icon: FileText, count: 0 },
+    { id: 'cron', label: 'Cron Jobs', icon: Clock, count: 0 }
   ];
 
   const getStatusColor = (status: string) => {
@@ -1772,6 +1786,113 @@ export function AdminSettings() {
     }
   };
 
+  // Cron Management Handlers
+  const fetchCronStatus = async () => {
+    setLoadingCron(true);
+    try {
+      const response = await adminApiService.getCronStatus();
+      if (response.success) {
+        setCronStatus(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching cron status:', error);
+      alert('Failed to fetch cron status');
+    } finally {
+      setLoadingCron(false);
+    }
+  };
+
+  const fetchCronLogs = async () => {
+    try {
+      const response = await adminApiService.getCronLogs();
+      if (response.success) {
+        setCronLogs(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching cron logs:', error);
+      alert('Failed to fetch cron logs');
+    }
+  };
+
+  const handleSelectLogDate = async (date: string) => {
+    setSelectedLogDate(date);
+    try {
+      const response = await adminApiService.getCronLogByDate(date);
+      if (response.success) {
+        setLogEntries(response.data.entries || []);
+      }
+    } catch (error) {
+      console.error('Error fetching log entries:', error);
+      alert('Failed to fetch log entries');
+    }
+  };
+
+  const handleRunCronTask = async (taskName: string) => {
+    if (!confirm(`Are you sure you want to run "${taskName}" now?`)) return;
+    
+    try {
+      const response = await adminApiService.runCronTask(taskName);
+      if (response.success) {
+        alert(response.message || 'Task executed successfully');
+        fetchCronStatus();
+      }
+    } catch (error: any) {
+      alert(error.response?.data?.message || 'Failed to run task');
+    }
+  };
+
+  const handleEnableCronTask = async (taskName: string) => {
+    try {
+      const response = await adminApiService.enableCronTask(taskName);
+      if (response.success) {
+        alert(response.message || 'Task enabled');
+        fetchCronStatus();
+      }
+    } catch (error: any) {
+      alert(error.response?.data?.message || 'Failed to enable task');
+    }
+  };
+
+  const handleDisableCronTask = async (taskName: string) => {
+    if (!confirm(`Are you sure you want to disable "${taskName}"?`)) return;
+    
+    try {
+      const response = await adminApiService.disableCronTask(taskName);
+      if (response.success) {
+        alert(response.message || 'Task disabled');
+        fetchCronStatus();
+      }
+    } catch (error: any) {
+      alert(error.response?.data?.message || 'Failed to disable task');
+    }
+  };
+
+  const handleDeleteOldLogs = async () => {
+    if (!confirm('Are you sure you want to delete logs older than 30 days? This action cannot be undone.')) return;
+    
+    setDeletingLogs(true);
+    try {
+      const response = await adminApiService.deleteCronLogs(30);
+      if (response.success) {
+        alert(`Deleted ${response.data.count} log file(s)`);
+        fetchCronLogs();
+        if (selectedLogDate) {
+          // Check if selected log was deleted
+          const deletedFiles = response.data.deletedFiles || [];
+          const selectedLogFile = `cron_${selectedLogDate.replace(/-/g, '')}.log`;
+          if (deletedFiles.includes(selectedLogFile)) {
+            setSelectedLogDate(null);
+            setLogEntries([]);
+          }
+        }
+      }
+    } catch (error: any) {
+      alert(error.response?.data?.message || 'Failed to delete logs');
+    } finally {
+      setDeletingLogs(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'general') {
       loadGeneralSettings();
@@ -1785,6 +1906,9 @@ export function AdminSettings() {
       loadUserConfig();
     } else if (activeTab === 'eligibility') {
       loadEligibilityConfig();
+    } else if (activeTab === 'cron') {
+      fetchCronStatus();
+      fetchCronLogs();
     }
   }, [activeTab]);
 
@@ -3748,6 +3872,235 @@ export function AdminSettings() {
         {activeTab === 'policies' && (
           <div className="space-y-6">
             <PoliciesManagement hideHeader={true} />
+          </div>
+        )}
+
+        {/* Cron Management Tab */}
+        {activeTab === 'cron' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-gray-900">Cron Job Management</h3>
+                <button
+                  onClick={fetchCronStatus}
+                  disabled={loadingCron}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loadingCron ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+              </div>
+
+              {loadingCron ? (
+                <div className="flex items-center justify-center py-8">
+                  <RefreshCw className="w-6 h-6 text-blue-600 animate-spin" />
+                </div>
+              ) : cronStatus ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className={`w-3 h-3 rounded-full ${cronStatus.isRunning ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                    <span className="text-sm font-medium text-gray-700">
+                      Cron Manager: {cronStatus.isRunning ? 'Running' : 'Stopped'}
+                    </span>
+                    <span className="text-sm text-gray-500">({cronStatus.totalTasks} task(s))</span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Task Name</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Schedule</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Run</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Run Count</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Errors</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {cronStatus.tasks.map((task: any) => (
+                          <tr key={task.name} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                              {task.name}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                              {task.schedule}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                task.enabled 
+                                  ? 'bg-green-100 text-green-800' 
+                                  : 'bg-gray-100 text-gray-800'
+                              }`}>
+                                {task.enabled ? 'Enabled' : 'Disabled'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                              {task.lastRun 
+                                ? new Date(task.lastRun).toLocaleString('en-IN')
+                                : 'Never'
+                              }
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                              {task.runCount || 0}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <span className={`text-sm ${task.errorCount > 0 ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
+                                {task.errorCount || 0}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => handleRunCronTask(task.name)}
+                                  className="text-blue-600 hover:text-blue-800"
+                                  title="Run Now"
+                                >
+                                  <Play className="w-4 h-4" />
+                                </button>
+                                {task.enabled ? (
+                                  <button
+                                    onClick={() => handleDisableCronTask(task.name)}
+                                    className="text-orange-600 hover:text-orange-800"
+                                    title="Disable"
+                                  >
+                                    <Pause className="w-4 h-4" />
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => handleEnableCronTask(task.name)}
+                                    className="text-green-600 hover:text-green-800"
+                                    title="Enable"
+                                  >
+                                    <Play className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  No cron jobs found
+                </div>
+              )}
+            </div>
+
+            {/* Logs Section */}
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-gray-900">Cron Logs</h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleDeleteOldLogs}
+                    disabled={deletingLogs}
+                    className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors disabled:opacity-50"
+                  >
+                    <FileX className="w-4 h-4" />
+                    Delete Logs Older Than 30 Days
+                  </button>
+                  <button
+                    onClick={fetchCronLogs}
+                    className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Refresh Logs
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Log Files List */}
+                <div>
+                  <h4 className="text-sm font-medium text-gray-700 mb-3">Available Log Files</h4>
+                  <div className="border border-gray-200 rounded-lg max-h-96 overflow-y-auto">
+                    {cronLogs.length > 0 ? (
+                      <div className="divide-y divide-gray-200">
+                        {cronLogs.map((log) => (
+                          <button
+                            key={log.filename}
+                            onClick={() => handleSelectLogDate(log.date)}
+                            className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors ${
+                              selectedLogDate === log.date ? 'bg-blue-50 border-l-4 border-blue-500' : ''
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-sm font-medium text-gray-900">{log.displayDate}</p>
+                                <p className="text-xs text-gray-500">{log.filename}</p>
+                              </div>
+                              <Calendar className="w-4 h-4 text-gray-400" />
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="px-4 py-8 text-center text-gray-500 text-sm">
+                        No log files found
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Log Entries */}
+                <div>
+                  <h4 className="text-sm font-medium text-gray-700 mb-3">
+                    Log Entries {selectedLogDate && `(${selectedLogDate})`}
+                  </h4>
+                  <div className="border border-gray-200 rounded-lg max-h-96 overflow-y-auto bg-gray-900">
+                    {logEntries.length > 0 ? (
+                      <div className="p-4 space-y-2 font-mono text-xs">
+                        {logEntries.map((entry, index) => (
+                          <div
+                            key={index}
+                            className={`p-2 rounded ${
+                              entry.level === 'ERROR' 
+                                ? 'bg-red-900/20 text-red-300' 
+                                : entry.level === 'WARN'
+                                ? 'bg-yellow-900/20 text-yellow-300'
+                                : 'text-gray-300'
+                            }`}
+                          >
+                            <div className="flex items-start gap-2">
+                              <span className="text-gray-500">
+                                {new Date(entry.timestamp).toLocaleTimeString('en-IN')}
+                              </span>
+                              <span className={`font-semibold ${
+                                entry.level === 'ERROR' ? 'text-red-400' :
+                                entry.level === 'WARN' ? 'text-yellow-400' :
+                                entry.level === 'INFO' ? 'text-blue-400' :
+                                'text-gray-400'
+                              }`}>
+                                [{entry.level}]
+                              </span>
+                              <span className="flex-1">{entry.message}</span>
+                            </div>
+                            {entry.data && (
+                              <pre className="mt-1 ml-8 text-xs text-gray-400 overflow-x-auto">
+                                {JSON.stringify(entry.data, null, 2)}
+                              </pre>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : selectedLogDate ? (
+                      <div className="px-4 py-8 text-center text-gray-500 text-sm">
+                        No entries for this date
+                      </div>
+                    ) : (
+                      <div className="px-4 py-8 text-center text-gray-500 text-sm">
+                        Select a log file to view entries
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
