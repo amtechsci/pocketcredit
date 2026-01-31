@@ -1220,11 +1220,24 @@ export const RepaymentSchedulePage = () => {
 
         {/* Multi-EMI Plan - Preclose Section */}
         {shouldShowMultiEmi && !isLoanCleared && (() => {
-          // Hide preclose option if first loan is already cleared
-          // If completedLoansCount > 0, user has cleared at least one loan, so hide preclose
-          if (completedLoansCount > 0) {
-            return null;
-          }
+          console.log('[Preclose] Section evaluation:', {
+            shouldShowMultiEmi,
+            isLoanCleared,
+            completedLoansCount,
+            loanStatus: loanData?.status,
+            repaymentScheduleLength: repaymentSchedule?.length
+          });
+          
+          console.log('[Preclose] Initial check:', {
+            shouldShowMultiEmi,
+            isLoanCleared,
+            completedLoansCount,
+            loanStatus: loanData?.status
+          });
+          
+          // Pre-close should be available for each new loan until first EMI is paid
+          // We no longer hide based on completedLoansCount - each loan can be pre-closed
+          // until its first EMI is paid
           
           // Hide preclose option ONLY if first EMI has been explicitly paid
           // Check if first EMI exists and has status 'paid'
@@ -1271,12 +1284,30 @@ export const RepaymentSchedulePage = () => {
             dpd = Math.ceil((today.getTime() - dueDateObj.getTime()) / (1000 * 60 * 60 * 24));
             // Show Pre-close only if DPD <= -6 (at least 6 days before first EMI due date)
             canShowPreClose = dpd <= -6;
+            
+            console.log('[Preclose] DPD calculation:', {
+              firstEmiDueDate,
+              today: today.toISOString().split('T')[0],
+              dpd,
+              canShowPreClose,
+              condition: 'dpd <= -6'
+            });
+          } else {
+            console.log('[Preclose] No firstEmiDueDate found:', {
+              kfsDataRepayment: kfsData?.repayment,
+              firstDueDate: kfsData?.repayment?.first_due_date,
+              scheduleFirstDue: kfsData?.repayment?.schedule?.[0]?.due_date,
+              processedDueDate: loanData?.processed_due_date
+            });
           }
           
           // If DPD condition not met, don't show Pre-close section
           if (!canShowPreClose) {
+            console.log('[Preclose] Hiding preclose because DPD condition not met:', { dpd, canShowPreClose });
             return null;
           }
+          
+          console.log('[Preclose] ✅ All checks passed - showing preclose section');
           
           return (
             <>

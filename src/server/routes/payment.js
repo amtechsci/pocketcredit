@@ -298,8 +298,9 @@ async function calculatePaymentAmount(loan, paymentType) {
     
     // Determine amount based on paymentType
     if (paymentType === 'pre-close') {
-      // Pre-close: Outstanding Balance + Interest Till Today
-      const outstandingBalance = calculateOutstandingBalance(loan);
+      // Pre-close: Principal + Interest Till Today + Pre-close Fee (10% of principal) + GST on Pre-close Fee (18%)
+      // NOTE: Pre-close does NOT include post service fees - those are waived on pre-close
+      const principal = parseFloat(loan.processed_amount || loan.sanctioned_amount || loan.loan_amount || loan.principal_amount || 0);
       
       // Get interest till today from calculation
       const interestTillToday = calculationData.interest?.interestTillToday || 0;
@@ -307,8 +308,17 @@ async function calculatePaymentAmount(loan, paymentType) {
       // For pre-close, also include penalty if overdue
       const penaltyTotal = calculationData.penalty?.penalty_total || 0;
       
-      const precloseAmount = outstandingBalance + interestTillToday + penaltyTotal;
-      console.log(`💰 Pre-close calculation: Outstanding (₹${outstandingBalance}) + Interest Till Today (₹${interestTillToday}) + Penalty (₹${penaltyTotal}) = ₹${precloseAmount}`);
+      // Pre-close fee: 10% of principal
+      const preCloseFeePercent = 10;
+      const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
+      
+      // GST on pre-close fee: 18% of pre-close fee
+      const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
+      
+      // Pre-close amount = Principal + Interest Till Today + Pre-close Fee + GST on Pre-close Fee + Penalty (if any)
+      const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST + penaltyTotal;
+      
+      console.log(`💰 Pre-close calculation: Principal (₹${principal}) + Interest Till Today (₹${interestTillToday}) + Pre-close Fee (₹${preCloseFee}) + GST on Pre-close Fee (₹${preCloseFeeGST}) + Penalty (₹${penaltyTotal}) = ₹${precloseAmount}`);
       
       return precloseAmount;
     } else if (paymentType === 'full_payment') {
