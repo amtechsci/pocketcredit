@@ -884,35 +884,57 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                     });
                 }
             } else if (existingOrder.status === 'PENDING') {
-                // Check if pending order is too old (more than 30 minutes) - create new order
-                const orderAge = Date.now() - new Date(existingOrder.created_at).getTime();
-                const thirtyMinutes = 30 * 60 * 1000;
+                // CRITICAL: Check if existing order amount matches newly calculated amount
+                // If amounts don't match (e.g., penalty was added), create new order with correct amount
+                const existingAmount = parseFloat(existingOrder.amount || 0);
+                const amountDifference = Math.abs(existingAmount - finalAmount);
                 
-                if (orderAge > thirtyMinutes) {
-                    // Mark old order as expired and continue to create new order
+                // If amounts differ by more than 1 paise (0.01), create new order
+                if (amountDifference > 0.01) {
+                    console.warn(`⚠️ [Payment] Existing PENDING order amount (₹${existingAmount}) differs from calculated amount (₹${finalAmount}). Creating new order.`);
+                    // Mark old order as expired due to amount mismatch
                     try {
                         await executeQuery(
-                            `UPDATE payment_orders SET status = 'EXPIRED' WHERE order_id = ?`,
+                            `UPDATE payment_orders SET status = 'EXPIRED', updated_at = NOW() WHERE order_id = ?`,
                             [existingOrder.order_id]
                         );
+                        console.log(`✅ Marked old order ${existingOrder.order_id} as EXPIRED due to amount mismatch`);
                     } catch (updateError) {
                         console.warn('[Payment] Could not mark old order as expired:', updateError);
                     }
-                    // Continue to create new order below
+                    // Continue to create new order below with correct amount
                 } else {
-                    // Return existing pending order if it's recent
-                    return res.json({
-                        success: true,
-                        message: 'Existing payment order found',
-                        data: {
-                            orderId: existingOrder.order_id,
-                            status: 'PENDING',
-                            paymentSessionId: existingOrder.payment_session_id,
-                            checkoutUrl: existingOrder.payment_session_id 
-                                ? `https://payments.cashfree.com/checkout/${existingOrder.payment_session_id}`
-                                : null
+                    // Check if pending order is too old (more than 30 minutes) - create new order
+                    const orderAge = Date.now() - new Date(existingOrder.created_at).getTime();
+                    const thirtyMinutes = 30 * 60 * 1000;
+                    
+                    if (orderAge > thirtyMinutes) {
+                        // Mark old order as expired and continue to create new order
+                        try {
+                            await executeQuery(
+                                `UPDATE payment_orders SET status = 'EXPIRED', updated_at = NOW() WHERE order_id = ?`,
+                                [existingOrder.order_id]
+                            );
+                        } catch (updateError) {
+                            console.warn('[Payment] Could not mark old order as expired:', updateError);
                         }
-                    });
+                        // Continue to create new order below
+                    } else {
+                        // Amount matches and order is recent - return existing pending order
+                        console.log(`✅ Using existing PENDING order ${existingOrder.order_id} with matching amount ₹${existingAmount}`);
+                        return res.json({
+                            success: true,
+                            message: 'Existing payment order found',
+                            data: {
+                                orderId: existingOrder.order_id,
+                                status: 'PENDING',
+                                paymentSessionId: existingOrder.payment_session_id,
+                                checkoutUrl: existingOrder.payment_session_id 
+                                    ? `https://payments.cashfree.com/checkout/${existingOrder.payment_session_id}`
+                                    : null
+                            }
+                        });
+                    }
                 }
             }
         }
