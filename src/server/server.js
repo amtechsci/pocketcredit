@@ -504,10 +504,12 @@ const startServer = async () => {
     await activityProcessor.start();
 
     // Register and start cron jobs
+    console.log('🔄 Initializing Cron Manager...');
     const { registerJobs } = require('./jobs');
     const cronManager = require('./services/cronManager');
     await registerJobs();
     await cronManager.start();
+    console.log('✅ Cron Manager initialized successfully');
 
     // Start the server
     app.listen(PORT, () => {

@@ -57,6 +57,11 @@ class CronLogger {
       const logFilePath = this.getLogFilePath();
       const logEntry = this.formatMessage(level, message, data);
       await fs.appendFile(logFilePath, logEntry, 'utf8');
+      
+      // Also log to console for PM2 visibility (important messages only)
+      if (level === 'INFO' && (message.includes('Cron Manager') || message.includes('Registered') || message.includes('Task'))) {
+        console.log(`[CRON] ${message}`, data || '');
+      }
     } catch (error) {
       // Fallback to console if file write fails
       console.error(`[CRON LOGGER ERROR] Failed to write log:`, error.message);
