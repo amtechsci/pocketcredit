@@ -10,7 +10,9 @@ const path = require('path');
 
 class CronLogger {
   constructor() {
-    this.logDir = path.join(__dirname, '../../log');
+    // Log directory should be in server directory: src/server/log
+    // __dirname is src/server/services, so ../log = src/server/log
+    this.logDir = path.join(__dirname, '../log');
     this.ensureLogDirectory();
   }
 
