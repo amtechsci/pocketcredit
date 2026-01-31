@@ -293,6 +293,14 @@ async function acceptPendingCreditLimit(userId, pendingLimitId) {
     // Update user's credit limit
     await updateUserCreditLimit(userId, pendingLimit.new_limit);
 
+    // Delete any existing 'accepted' records for this user to avoid unique constraint violation
+    // The unique constraint is on (user_id, status) where status='accepted'
+    await executeQuery(
+      `DELETE FROM pending_credit_limits 
+       WHERE user_id = ? AND status = 'accepted'`,
+      [userId]
+    );
+
     // Mark pending limit as accepted
     await executeQuery(
       `UPDATE pending_credit_limits 
