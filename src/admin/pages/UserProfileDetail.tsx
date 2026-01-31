@@ -11983,16 +11983,17 @@ export function UserProfileDetail() {
                       // Use instalment_amount if available (includes penalty), otherwise use emi_amount
                       const emiAmount = parseFloat(emi.instalment_amount || emi.emi_amount || 0);
                       const emiStatus = emi.status || 'pending';
+                      const isPaid = emiStatus === 'paid' || emiStatus === 'completed';
 
-                      // Check if EMI is overdue and has penalty
+                      // Check if EMI is overdue and has penalty (only if not paid)
                       const today = new Date();
                       today.setHours(0, 0, 0, 0);
                       const dueDate = emiDate !== 'N/A' ? new Date(emiDate) : null;
-                      const isOverdue = dueDate && dueDate < today;
-                      const hasPenalty = emi.penalty_total > 0 || emi.penalty_base > 0;
+                      const isOverdue = !isPaid && dueDate && dueDate < today;
+                      const hasPenalty = !isPaid && (emi.penalty_total > 0 || emi.penalty_base > 0);
 
                       return (
-                        <tr key={index} className={`hover:bg-gray-50 ${isOverdue ? 'bg-red-50' : ''}`}>
+                        <tr key={index} className={`hover:bg-gray-50 ${isPaid ? 'bg-green-50' : isOverdue ? 'bg-red-50' : ''}`}>
                           <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
                             {emiNumber}
                           </td>
@@ -12022,7 +12023,7 @@ export function UserProfileDetail() {
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap text-sm">
                             <span
-                              className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${emiStatus === 'paid' || emiStatus === 'completed'
+                              className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${isPaid
                                 ? 'bg-green-100 text-green-800'
                                 : emiStatus === 'overdue' || emiStatus === 'defaulted' || isOverdue
                                   ? 'bg-red-100 text-red-800'
@@ -12031,7 +12032,7 @@ export function UserProfileDetail() {
                                     : 'bg-gray-100 text-gray-800'
                                 }`}
                             >
-                              {isOverdue ? 'Overdue' : (emiStatus.charAt(0).toUpperCase() + emiStatus.slice(1))}
+                              {isPaid ? 'Paid' : (isOverdue ? 'Overdue' : (emiStatus.charAt(0).toUpperCase() + emiStatus.slice(1)))}
                             </span>
                           </td>
                         </tr>
