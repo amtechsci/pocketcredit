@@ -1264,8 +1264,98 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             // Calculate interest for this period
             const interestForPeriod = Math.round(outstandingPrincipal * interestRatePerDay * daysForPeriod * 100) / 100;
 
-            // Calculate installment amount (principal + interest + post service fee + GST)
-            const instalmentAmount = Math.round((principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi) * 100) / 100;
+            // Calculate base installment amount (principal + interest + post service fee + GST)
+            const baseInstalmentAmount = Math.round((principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi) * 100) / 100;
+            
+            // Calculate penalty if EMI is overdue
+            let penaltyBase = 0;
+            let penaltyGST = 0;
+            let penaltyTotal = 0;
+            
+            // Check if EMI is overdue by comparing due_date with today
+            const todayStr = getTodayString();
+            const emiDateStrForCheck = emiDateStrFormatted || formatDateToString(emiDate);
+            
+            if (emiDateStrForCheck < todayStr) {
+              // EMI is overdue - calculate days overdue (exclusive, not including today)
+              const daysOverdueInclusive = calculateDaysBetween(emiDateStrForCheck, todayStr);
+              const daysOverdue = Math.max(1, daysOverdueInclusive - 1); // Exclude today for penalty calculation
+              
+              // Get late_fee_structure for penalty calculation
+              let lateFeeStructure = null;
+              try {
+                if (loan.late_fee_structure) {
+                  lateFeeStructure = typeof loan.late_fee_structure === 'string' 
+                    ? JSON.parse(loan.late_fee_structure) 
+                    : loan.late_fee_structure;
+                } else if (planSnapshot && planSnapshot.late_fee_structure) {
+                  lateFeeStructure = typeof planSnapshot.late_fee_structure === 'string'
+                    ? JSON.parse(planSnapshot.late_fee_structure)
+                    : planSnapshot.late_fee_structure;
+                }
+              } catch (e) {
+                console.error('⚠️ [KFS] Error parsing late_fee_structure for penalty:', e);
+              }
+              
+              // Calculate penalty based on LOAN PRINCIPAL (not EMI principal) - same as loan-calculations.js
+              if (lateFeeStructure && Array.isArray(lateFeeStructure) && lateFeeStructure.length > 0) {
+                // Sort tiers by tier_order or days_overdue_start
+                const sortedTiers = [...lateFeeStructure].sort((a, b) => {
+                  const orderA = a.tier_order !== undefined ? a.tier_order : (a.days_overdue_start || 0);
+                  const orderB = b.tier_order !== undefined ? b.tier_order : (b.days_overdue_start || 0);
+                  return orderA - orderB;
+                });
+                
+                // Calculate penalty based on tiers
+                for (const tier of sortedTiers) {
+                  const startDay = tier.days_overdue_start || 0;
+                  const endDay = tier.days_overdue_end !== null && tier.days_overdue_end !== undefined 
+                    ? tier.days_overdue_end 
+                    : null;
+                  
+                  if (daysOverdue < startDay) continue;
+                  
+                  const feeValue = parseFloat(tier.fee_value || tier.penalty_percent || 0);
+                  if (feeValue <= 0) continue;
+                  
+                  let tierPenalty = 0;
+                  
+                  if (startDay === endDay || (startDay === 1 && endDay === 1)) {
+                    // Single day tier (e.g., "Day 1-1"): apply as one-time percentage
+                    if (daysOverdue >= startDay) {
+                      tierPenalty = principal * (feeValue / 100);
+                    }
+                  } else if (endDay === null || endDay === undefined) {
+                    // Unlimited tier (e.g., "Day 121+"): apply for all days from startDay onwards
+                    if (daysOverdue >= startDay) {
+                      const daysInTier = daysOverdue - startDay + 1;
+                      tierPenalty = principal * (feeValue / 100) * daysInTier;
+                    }
+                  } else {
+                    // Multi-day tier (e.g., "Day 2-10", "Day 11-120"): calculate for applicable days
+                    if (daysOverdue >= startDay) {
+                      const tierStartDay = startDay;
+                      const tierEndDay = Math.min(endDay, daysOverdue);
+                      const daysInTier = Math.max(0, tierEndDay - tierStartDay + 1);
+                      
+                      if (daysInTier > 0) {
+                        tierPenalty = principal * (feeValue / 100) * daysInTier;
+                      }
+                    }
+                  }
+                  
+                  penaltyBase += tierPenalty;
+                }
+                
+                penaltyBase = toDecimal2(penaltyBase);
+                const gstPercent = lateFeeStructure[0]?.gst_percent || 18;
+                penaltyGST = toDecimal2(penaltyBase * (gstPercent / 100));
+                penaltyTotal = toDecimal2(penaltyBase + penaltyGST);
+              }
+            }
+            
+            // Calculate final installment amount (base + penalty)
+            const instalmentAmount = toDecimal2(baseInstalmentAmount + penaltyTotal);
 
             schedule.push({
               instalment_no: i + 1,
@@ -1274,6 +1364,9 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               interest: interestForPeriod,
               post_service_fee: postServiceFeePerEmi,
               gst_on_post_service_fee: postServiceFeeGSTPerEmi,
+              penalty_base: penaltyBase,
+              penalty_gst: penaltyGST,
+              penalty_total: penaltyTotal,
               instalment_amount: instalmentAmount,
               due_date: formatDateLocal(emiDate) // Use local date format without timezone conversion
             });

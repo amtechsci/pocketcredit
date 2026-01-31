@@ -1669,14 +1669,28 @@ export const RepaymentSchedulePage = () => {
                                 {(() => {
                                   // Check for penalty - try multiple possible field names
                                   const penaltyTotal = parseFloat(emi.penalty_total || emi.penalty || 0);
-                                  const hasPenalty = penaltyTotal > 0 && emi.status !== 'paid';
+                                  
+                                  // Also check if EMI is overdue by comparing due_date with today
+                                  let isOverdue = false;
+                                  if (emi.due_date) {
+                                    const dueDate = new Date(emi.due_date);
+                                    dueDate.setHours(0, 0, 0, 0);
+                                    const today = new Date();
+                                    today.setHours(0, 0, 0, 0);
+                                    isOverdue = dueDate < today;
+                                  }
+                                  
+                                  // Show penalty if: penalty exists OR EMI is overdue (even if penalty not yet calculated)
+                                  const hasPenalty = (penaltyTotal > 0 || isOverdue) && emi.status !== 'paid';
                                   
                                   // Debug log for troubleshooting
-                                  if (emi.status === 'overdue' || emi.status === 'pending') {
+                                  if (isOverdue || emi.status === 'overdue' || emi.status === 'pending') {
                                     console.log(`🔍 EMI #${emi.emi_number || emi.instalment_no || index + 1} Penalty Check:`, {
                                       penalty_total: emi.penalty_total,
                                       penalty: emi.penalty,
                                       penaltyTotal,
+                                      isOverdue,
+                                      due_date: emi.due_date,
                                       hasPenalty,
                                       status: emi.status,
                                       instalment_amount: emi.instalment_amount,
@@ -1684,7 +1698,7 @@ export const RepaymentSchedulePage = () => {
                                     });
                                   }
                                   
-                                  if (hasPenalty) {
+                                  if (hasPenalty && penaltyTotal > 0) {
                                     // Calculate base amount (instalment_amount should include penalty, so subtract it)
                                     const baseAmount = (emi.instalment_amount || 0) - penaltyTotal;
                                     return (
