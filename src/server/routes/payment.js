@@ -332,11 +332,90 @@ async function calculatePaymentAmount(loan, paymentType) {
       const schedule = calculationData.repayment?.schedule || [];
       
       if (schedule.length === 0) {
-        // Fallback: calculate from total repayable divided by EMI count
+        // Fallback 1: Try to get EMI amount from loan's emi_schedule JSON column
+        // NOTE: emi_schedule is stored as JSON in loan_applications table, not a separate table
+        try {
+          const { executeQuery } = require('../config/database');
+          
+          // Get emi_schedule JSON from loan_applications table
+          const loanRecords = await executeQuery(
+            `SELECT emi_schedule 
+             FROM loan_applications 
+             WHERE id = ? 
+             LIMIT 1`,
+            [loan.id]
+          );
+          
+          if (loanRecords && loanRecords.length > 0 && loanRecords[0].emi_schedule) {
+            let emiScheduleData = loanRecords[0].emi_schedule;
+            
+            // Parse JSON if it's a string
+            if (typeof emiScheduleData === 'string') {
+              try {
+                emiScheduleData = JSON.parse(emiScheduleData);
+              } catch (parseError) {
+                console.warn(`⚠️ Could not parse emi_schedule JSON: ${parseError.message}`);
+                emiScheduleData = null;
+              }
+            }
+            
+            if (emiScheduleData && Array.isArray(emiScheduleData)) {
+              // Find the EMI by number (emi_number or instalment_no)
+              const emiRecord = emiScheduleData.find(
+                (e) => (e.emi_number === emiNumber || e.instalment_no === emiNumber)
+              );
+              
+              if (emiRecord && emiRecord.emi_amount) {
+                const emiAmount = parseFloat(emiRecord.emi_amount);
+                if (emiAmount > 0) {
+                  console.log(`💰 EMI ${emiNumber} calculation (from loan_applications.emi_schedule JSON): ₹${emiAmount}`);
+                  // NOTE: This amount may not include current penalty if EMI became overdue later
+                  // The repayment schedule from getLoanCalculation is more accurate
+                  return emiAmount;
+                }
+              }
+            }
+          }
+        } catch (dbError) {
+          console.warn(`⚠️ Could not fetch EMI from loan_applications.emi_schedule: ${dbError.message}`);
+        }
+        
+        // Fallback 2: Calculate from loan amount + fees
         const emiCount = parseInt(loan.plan_snapshot ? (typeof loan.plan_snapshot === 'string' ? JSON.parse(loan.plan_snapshot) : loan.plan_snapshot).emi_count : 1) || 1;
+        const processedAmount = parseFloat(loan.processed_amount || loan.loan_amount || 0);
+        
+        if (processedAmount > 0) {
+          // Get fees from calculation data
+          const postServiceFee = calculationData.fees?.post_service_fee || calculationData.post_service_fee || 0;
+          const postServiceFeeGST = calculationData.fees?.post_service_fee_gst || calculationData.post_service_fee_gst || 0;
+          const totalFees = postServiceFee + postServiceFeeGST;
+          
+          // Calculate interest (rough estimate: principal * rate * days / 100)
+          // For first EMI, use 30 days as estimate
+          const interestRatePerDay = parseFloat(loan.interest_percent_per_day || 0.001);
+          const estimatedInterest = processedAmount * interestRatePerDay * 30;
+          
+          // EMI = (Principal + Interest + Fees) / EMI Count
+          const totalAmount = processedAmount + estimatedInterest + totalFees;
+          const emiAmount = totalAmount / emiCount;
+          
+          console.log(`💰 EMI ${emiNumber} calculation (fallback from loan amount): Principal (₹${processedAmount}) + Interest (₹${estimatedInterest}) + Fees (₹${totalFees}) / ${emiCount} = ₹${emiAmount}`);
+          
+          if (emiAmount > 0) {
+            return emiAmount;
+          }
+        }
+        
+        // Fallback 3: Use total repayable divided by EMI count (last resort)
         const totalRepayable = calculationData.total?.repayable || calculationData.total_repayable || 0;
         const emiAmount = totalRepayable / emiCount;
-        console.log(`💰 EMI ${emiNumber} calculation (fallback): Total (₹${totalRepayable}) / ${emiCount} = ₹${emiAmount}`);
+        console.log(`💰 EMI ${emiNumber} calculation (fallback from total repayable): Total (₹${totalRepayable}) / ${emiCount} = ₹${emiAmount}`);
+        
+        // Validate the calculated amount is valid
+        if (emiAmount <= 0 || isNaN(emiAmount)) {
+          throw new Error(`Cannot calculate EMI ${emiNumber} amount: totalRepayable (₹${totalRepayable}) is invalid or emiCount (${emiCount}) is invalid`);
+        }
+        
         return emiAmount;
       }
       
@@ -348,8 +427,39 @@ async function calculatePaymentAmount(loan, paymentType) {
       }
       
       // EMI amount includes principal + interest + post service fee + GST + penalty (if overdue)
-      const emiAmount = emi.instalment_amount || (emi.principal + emi.interest + (emi.post_service_fee || 0) + (emi.gst_on_post_service_fee || 0) + (emi.penalty_total || 0));
-      console.log(`💰 EMI ${emiNumber} calculation: ₹${emiAmount} (Principal: ₹${emi.principal}, Interest: ₹${emi.interest}, Fee: ₹${emi.post_service_fee || 0}, GST: ₹${emi.gst_on_post_service_fee || 0}, Penalty: ₹${emi.penalty_total || 0})`);
+      // PRIORITY: Use instalment_amount if available (includes penalty for overdue EMIs)
+      // FALLBACK: Calculate from components (principal + interest + fees + penalty)
+      let emiAmount = emi.instalment_amount;
+      
+      if (!emiAmount || emiAmount <= 0) {
+        // Calculate from components
+        const principal = emi.principal || 0;
+        const interest = emi.interest || 0;
+        const postServiceFee = emi.post_service_fee || 0;
+        const gstOnPostServiceFee = emi.gst_on_post_service_fee || 0;
+        const penaltyTotal = emi.penalty_total || emi.penalty || 0;
+        
+        emiAmount = principal + interest + postServiceFee + gstOnPostServiceFee + penaltyTotal;
+      }
+      
+      // CRITICAL: If EMI is overdue, ensure penalty is included
+      // Check if penalty_total exists in the EMI data (from dynamic calculation)
+      const penaltyTotal = emi.penalty_total || emi.penalty || 0;
+      
+      // If instalment_amount doesn't include penalty but penalty exists, add it
+      if (penaltyTotal > 0) {
+        const baseAmount = (emi.principal || 0) + (emi.interest || 0) + (emi.post_service_fee || 0) + (emi.gst_on_post_service_fee || 0);
+        // Only add penalty if it's not already included in instalment_amount
+        // We check by comparing: if instalment_amount ≈ baseAmount, then penalty is missing
+        const tolerance = 0.01; // 1 paise tolerance
+        if (Math.abs(emiAmount - baseAmount) < tolerance) {
+          // Penalty is not included, add it
+          emiAmount = emiAmount + penaltyTotal;
+          console.log(`💰 EMI ${emiNumber}: Adding penalty (₹${penaltyTotal}) to base amount (₹${baseAmount}) = ₹${emiAmount}`);
+        }
+      }
+      
+      console.log(`💰 EMI ${emiNumber} calculation: ₹${emiAmount} (Principal: ₹${emi.principal || 0}, Interest: ₹${emi.interest || 0}, Fee: ₹${emi.post_service_fee || 0}, GST: ₹${emi.gst_on_post_service_fee || 0}, Penalty: ₹${penaltyTotal})`);
       
       return emiAmount;
     } else {
@@ -545,6 +655,18 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         
         // Use backend-calculated amount (source of truth)
         const finalAmount = calculatedAmount;
+        
+        // CRITICAL: Validate amount is valid before creating order
+        if (!finalAmount || finalAmount <= 0 || isNaN(finalAmount)) {
+            console.error(`❌ [Payment] Invalid calculated amount for ${finalPaymentType}: ₹${finalAmount}`);
+            return res.status(400).json({
+                success: false,
+                message: `Cannot create payment order: Invalid amount calculated (₹${finalAmount}). Please contact support.`,
+                error: 'INVALID_AMOUNT',
+                calculatedAmount: finalAmount,
+                paymentType: finalPaymentType
+            });
+        }
 
         // Validate sequential EMI payments (only for EMI types, skip for pre-close/full_payment)
         // IMPORTANT: Only check if loan is NOT cleared
