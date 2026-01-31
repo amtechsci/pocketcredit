@@ -395,7 +395,7 @@ router.post('/generate-kyc-url', requireAuth, async (req, res) => {
             } else {
               // If no application_id and column requires it, we need to alter the table
               // For now, throw a more helpful error
-              throw new Error('KYC table requires application_id but it was removed. Please run: ALTER TABLE kyc_verifications MODIFY COLUMN application_id INT NULL;');
+              throw new Error('KYC table requires application_id but it was removed. Please ensure the kyc_verifications table has application_id column as INT NULL.');
             }
           } else {
             throw insertError;

@@ -205,6 +205,14 @@ export function UserProfileDetail() {
   // E-NACH Subscriptions State
   const [enachSubscriptions, setEnachSubscriptions] = useState<any[]>([]);
   const [loadingEnach, setLoadingEnach] = useState(false);
+  const [recheckingStatus, setRecheckingStatus] = useState<{ [key: string]: boolean }>({});
+  const [showChargeEnachModal, setShowChargeEnachModal] = useState(false);
+  const [chargingEnach, setChargingEnach] = useState(false);
+  const [selectedSubscriptionForCharge, setSelectedSubscriptionForCharge] = useState<string | null>(null);
+  const [chargeAmount, setChargeAmount] = useState('');
+  const [chargeHistory, setChargeHistory] = useState<any[]>([]);
+  const [loadingChargeHistory, setLoadingChargeHistory] = useState(false);
+  const [recheckingChargeStatus, setRecheckingChargeStatus] = useState<{ [key: string]: boolean }>({});
 
   const { canEditUsers, currentUser } = useAdmin();
 
@@ -715,6 +723,128 @@ export function UserProfileDetail() {
 
     fetchEnachSubscriptions();
   }, [activeTab, params.userId]);
+
+  // Fetch E-NACH charge history when tab is active
+  useEffect(() => {
+    const fetchChargeHistory = async () => {
+      if (activeTab === 'enach' && params.userId && !loadingChargeHistory) {
+        try {
+          setLoadingChargeHistory(true);
+          const response = await adminApiService.getEnachChargeHistory(params.userId);
+          if (response.status === 'success' && response.data) {
+            setChargeHistory(response.data);
+          } else {
+            setChargeHistory([]);
+          }
+        } catch (err) {
+          console.error('Error fetching E-NACH charge history:', err);
+          setChargeHistory([]);
+        } finally {
+          setLoadingChargeHistory(false);
+        }
+      }
+    };
+
+    fetchChargeHistory();
+  }, [activeTab, params.userId]);
+
+  // Handler to recheck subscription status from Cashfree
+  const handleRecheckStatus = async (subscriptionId: string) => {
+    if (!params.userId) return;
+
+    setRecheckingStatus(prev => ({ ...prev, [subscriptionId]: true }));
+    try {
+      const response = await adminApiService.recheckEnachSubscriptionStatus(params.userId, subscriptionId);
+      if (response.status === 'success') {
+        toast.success('Subscription status updated from Cashfree');
+        // Refresh the subscriptions list
+        const refreshResponse = await adminApiService.getEnachSubscriptions(params.userId);
+        if (refreshResponse.status === 'success' && refreshResponse.data) {
+          setEnachSubscriptions(refreshResponse.data);
+        }
+      } else {
+        toast.error(response.message || 'Failed to recheck subscription status');
+      }
+    } catch (err: any) {
+      console.error('Error rechecking subscription status:', err);
+      toast.error(err.message || 'Failed to recheck subscription status');
+    } finally {
+      setRecheckingStatus(prev => ({ ...prev, [subscriptionId]: false }));
+    }
+  };
+
+  const handleChargeEnach = async () => {
+    if (!params.userId || !selectedSubscriptionForCharge) return;
+
+    // Validate form
+    if (!chargeAmount) {
+      toast.error('Please enter an amount');
+      return;
+    }
+
+    const amount = parseFloat(chargeAmount);
+    if (isNaN(amount) || amount <= 0) {
+      toast.error('Please enter a valid amount greater than 0');
+      return;
+    }
+
+    setChargingEnach(true);
+    try {
+      const response = await adminApiService.chargeEnachSubscription(
+        params.userId,
+        selectedSubscriptionForCharge,
+        amount
+      );
+
+      if (response.status === 'success') {
+        toast.success(`Charge request submitted successfully. Amount: ₹${amount.toLocaleString('en-IN')}`);
+        setShowChargeEnachModal(false);
+        setChargeAmount('');
+        setSelectedSubscriptionForCharge(null);
+        // Refresh the subscriptions list
+        const refreshResponse = await adminApiService.getEnachSubscriptions(params.userId);
+        if (refreshResponse.status === 'success' && refreshResponse.data) {
+          setEnachSubscriptions(refreshResponse.data);
+        }
+        // Refresh charge history
+        const historyResponse = await adminApiService.getEnachChargeHistory(params.userId);
+        if (historyResponse.status === 'success' && historyResponse.data) {
+          setChargeHistory(historyResponse.data);
+        }
+      } else {
+        toast.error(response.message || 'Failed to charge subscription');
+      }
+    } catch (err: any) {
+      console.error('Error charging E-NACH subscription:', err);
+      toast.error(err.message || err.response?.data?.message || 'Failed to charge subscription');
+    } finally {
+      setChargingEnach(false);
+    }
+  };
+
+  const handleRecheckChargeStatus = async (chargeId: string) => {
+    if (!params.userId) return;
+
+    setRecheckingChargeStatus(prev => ({ ...prev, [chargeId]: true }));
+    try {
+      const response = await adminApiService.recheckEnachChargeStatus(params.userId, chargeId);
+      if (response.status === 'success') {
+        toast.success('Payment status updated from Cashfree');
+        // Refresh charge history
+        const historyResponse = await adminApiService.getEnachChargeHistory(params.userId);
+        if (historyResponse.status === 'success' && historyResponse.data) {
+          setChargeHistory(historyResponse.data);
+        }
+      } else {
+        toast.error(response.message || 'Failed to recheck payment status');
+      }
+    } catch (err: any) {
+      console.error('Error rechecking payment status:', err);
+      toast.error(err.message || 'Failed to recheck payment status');
+    } finally {
+      setRecheckingChargeStatus(prev => ({ ...prev, [chargeId]: false }));
+    }
+  };
 
   // Fetch all loan plans for selection
   useEffect(() => {
@@ -5403,29 +5533,31 @@ export function UserProfileDetail() {
               <h3 className="text-lg font-semibold text-gray-900">E-NACH Subscriptions</h3>
               <p className="text-sm text-gray-600 mt-1">All E-NACH mandate subscriptions for this user</p>
             </div>
-            <button
-              onClick={async () => {
-                if (!params.userId) return;
-                setLoadingEnach(true);
-                try {
-                  const response = await adminApiService.getEnachSubscriptions(params.userId);
-                  if (response.status === 'success' && response.data) {
-                    setEnachSubscriptions(response.data);
-                    toast.success('E-NACH subscriptions refreshed');
+            <div className="flex items-center gap-3">
+              <button
+                onClick={async () => {
+                  if (!params.userId) return;
+                  setLoadingEnach(true);
+                  try {
+                    const response = await adminApiService.getEnachSubscriptions(params.userId);
+                    if (response.status === 'success' && response.data) {
+                      setEnachSubscriptions(response.data);
+                      toast.success('E-NACH subscriptions refreshed');
+                    }
+                  } catch (err) {
+                    console.error('Error refreshing E-NACH subscriptions:', err);
+                    toast.error('Failed to refresh E-NACH subscriptions');
+                  } finally {
+                    setLoadingEnach(false);
                   }
-                } catch (err) {
-                  console.error('Error refreshing E-NACH subscriptions:', err);
-                  toast.error('Failed to refresh E-NACH subscriptions');
-                } finally {
-                  setLoadingEnach(false);
-                }
-              }}
-              disabled={loadingEnach}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <RefreshCw className={`w-4 h-4 ${loadingEnach ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
+                }}
+                disabled={loadingEnach}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className={`w-4 h-4 ${loadingEnach ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            </div>
           </div>
 
           {loadingEnach ? (
@@ -5454,7 +5586,8 @@ export function UserProfileDetail() {
                     <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Authorization Status</th>
                     <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plan Max Amount</th>
                     <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created At</th>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Authorized At</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Activated At</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -5466,16 +5599,34 @@ export function UserProfileDetail() {
                     const paymentMethod = authorizationDetails.payment_method?.enach || {};
 
                     const getStatusBadge = (status: string) => {
-                      const statusLower = (status || '').toLowerCase();
-                      if (statusLower.includes('active') || statusLower === 'approved') {
-                        return <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>;
-                      } else if (statusLower.includes('pending') || statusLower.includes('approval')) {
-                        return <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">Pending</span>;
-                      } else if (statusLower.includes('failed') || statusLower.includes('rejected')) {
-                        return <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">Failed</span>;
-                      } else {
-                        return <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">{status || 'N/A'}</span>;
+                      if (!status) return <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">N/A</span>;
+                      
+                      const statusUpper = status.toUpperCase();
+                      const statusDisplay = status.replace(/_/g, ' '); // Replace underscores with spaces for display
+                      
+                      // Determine color based on status
+                      let bgColor = 'bg-gray-100';
+                      let textColor = 'text-gray-800';
+                      
+                      if (statusUpper === 'ACTIVE' || statusUpper === 'APPROVED' || statusUpper === 'AUTHORIZED') {
+                        bgColor = 'bg-green-100';
+                        textColor = 'text-green-800';
+                      } else if (statusUpper.includes('PENDING') || statusUpper === 'INITIALIZED') {
+                        bgColor = 'bg-yellow-100';
+                        textColor = 'text-yellow-800';
+                      } else if (statusUpper.includes('FAILED') || statusUpper.includes('REJECTED') || statusUpper.includes('CANCELLED')) {
+                        bgColor = 'bg-red-100';
+                        textColor = 'text-red-800';
+                      } else if (statusUpper.includes('BANK_APPROVAL')) {
+                        bgColor = 'bg-blue-100';
+                        textColor = 'text-blue-800';
                       }
+                      
+                      return (
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${bgColor} ${textColor}`}>
+                          {statusDisplay}
+                        </span>
+                      );
                     };
 
                     return (
@@ -5502,7 +5653,7 @@ export function UserProfileDetail() {
                           {getStatusBadge(cashfreeResponse.subscription_status || subscription.status)}
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm">
-                          {getStatusBadge(authorizationDetails.authorization_status)}
+                          {getStatusBadge(authorizationDetails.authorization_status || subscription.mandate_status)}
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
                           {planDetails.plan_max_amount ? `₹${parseFloat(planDetails.plan_max_amount).toLocaleString('en-IN')}` : 'N/A'}
@@ -5511,7 +5662,40 @@ export function UserProfileDetail() {
                           {subscription.created_at ? formatDate(subscription.created_at) : 'N/A'}
                         </td>
                         <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {subscription.authorized_at ? formatDate(subscription.authorized_at) : 'N/A'}
+                          {subscription.activated_at ? formatDate(subscription.activated_at) : 'N/A'}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleRecheckStatus(subscription.id)}
+                              disabled={recheckingStatus[subscription.id]}
+                              className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Recheck status from Cashfree API"
+                            >
+                              {recheckingStatus[subscription.id] ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  Checking...
+                                </>
+                              ) : (
+                                <>
+                                  <RefreshCw className="w-3 h-3" />
+                                  Recheck
+                                </>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedSubscriptionForCharge(subscription.id);
+                                setShowChargeEnachModal(true);
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 transition-colors"
+                              title="Charge amount from this subscription"
+                            >
+                              <IndianRupee className="w-3 h-3" />
+                              Charge
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -5521,6 +5705,213 @@ export function UserProfileDetail() {
             </div>
           )}
         </div>
+
+        {/* E-NACH Charge History */}
+        <div className="bg-white rounded-lg border border-gray-200 p-6 mt-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">E-NACH Charge History</h3>
+              <p className="text-sm text-gray-600 mt-1">All charge/deduction requests made on E-NACH subscriptions</p>
+            </div>
+            <button
+              onClick={async () => {
+                if (!params.userId) return;
+                setLoadingChargeHistory(true);
+                try {
+                  const response = await adminApiService.getEnachChargeHistory(params.userId);
+                  if (response.status === 'success' && response.data) {
+                    setChargeHistory(response.data);
+                    toast.success('Charge history refreshed');
+                  }
+                } catch (err) {
+                  console.error('Error refreshing charge history:', err);
+                  toast.error('Failed to refresh charge history');
+                } finally {
+                  setLoadingChargeHistory(false);
+                }
+              }}
+              disabled={loadingChargeHistory}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`w-4 h-4 ${loadingChargeHistory ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
+
+          {loadingChargeHistory ? (
+            <div className="text-center py-12">
+              <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-4" />
+              <p className="text-gray-600">Loading charge history...</p>
+            </div>
+          ) : chargeHistory.length === 0 ? (
+            <div className="text-center py-12">
+              <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No Charge History</h3>
+              <p className="text-gray-600">No charge requests have been made for this user.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment ID</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subscription ID</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">CF Payment ID</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created At</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Error</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {chargeHistory.map((charge: any) => {
+                    const getStatusBadge = (status: string) => {
+                      if (!status) return <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">N/A</span>;
+                      
+                      const statusUpper = status.toUpperCase();
+                      const statusDisplay = status.replace(/_/g, ' ');
+                      
+                      let bgColor = 'bg-gray-100';
+                      let textColor = 'text-gray-800';
+                      
+                      if (statusUpper === 'SUCCESS' || statusUpper === 'COMPLETED') {
+                        bgColor = 'bg-green-100';
+                        textColor = 'text-green-800';
+                      } else if (statusUpper === 'PENDING' || statusUpper === 'PROCESSING' || statusUpper === 'INITIALIZED') {
+                        bgColor = 'bg-yellow-100';
+                        textColor = 'text-yellow-800';
+                      } else if (statusUpper === 'FAILED' || statusUpper === 'REJECTED' || statusUpper === 'CANCELLED') {
+                        bgColor = 'bg-red-100';
+                        textColor = 'text-red-800';
+                      }
+                      
+                      return (
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${bgColor} ${textColor}`}>
+                          {statusDisplay}
+                        </span>
+                      );
+                    };
+
+                    return (
+                      <tr key={charge.id} className="hover:bg-gray-50">
+                        <td className="px-3 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
+                          {charge.payment_id || 'N/A'}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
+                          {charge.subscription_id || 'N/A'}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          ₹{parseFloat(charge.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm">
+                          {getStatusBadge(charge.status)}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
+                          {charge.cf_payment_id || 'N/A'}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {charge.created_at ? formatDate(charge.created_at) : 'N/A'}
+                        </td>
+                        <td className="px-3 py-4 text-sm text-gray-900">
+                          {charge.error_message ? (
+                            <span className="text-red-600 text-xs" title={charge.error_message}>
+                              {charge.error_message.length > 50 
+                                ? `${charge.error_message.substring(0, 50)}...` 
+                                : charge.error_message}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-4 whitespace-nowrap text-sm">
+                          <button
+                            onClick={() => handleRecheckChargeStatus(charge.id)}
+                            disabled={recheckingChargeStatus[charge.id]}
+                            className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Recheck payment status from Cashfree API"
+                          >
+                            {recheckingChargeStatus[charge.id] ? (
+                              <>
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                Checking...
+                              </>
+                            ) : (
+                              <>
+                                <RefreshCw className="w-3 h-3" />
+                                Recheck
+                              </>
+                            )}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Charge E-NACH Modal */}
+        <Dialog open={showChargeEnachModal} onOpenChange={setShowChargeEnachModal}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle>Charge E-NACH Subscription</DialogTitle>
+              <DialogDescription>
+                Deduct an amount from the selected E-NACH subscription. The charge request will be saved to the database.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Amount to Charge (₹) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={chargeAmount}
+                  onChange={(e) => setChargeAmount(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter amount to charge"
+                  disabled={chargingEnach}
+                />
+                <p className="text-xs text-gray-500 mt-1">This amount will be deducted from the customer's bank account via the existing E-NACH mandate</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowChargeEnachModal(false);
+                  setChargeAmount('');
+                  setSelectedSubscriptionForCharge(null);
+                }}
+                disabled={chargingEnach}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleChargeEnach}
+                disabled={chargingEnach || !chargeAmount || parseFloat(chargeAmount) <= 0}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {chargingEnach ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    Charging...
+                  </>
+                ) : (
+                  <>
+                    <IndianRupee className="w-4 h-4 mr-2" />
+                    Charge Amount
+                  </>
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   };
@@ -11647,8 +12038,20 @@ export function UserProfileDetail() {
                         <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-900">
                           {formatCurrencyWithDecimals(
                             selectedLoanEmiSchedule.reduce((sum: number, emi: any) => {
-                              // Use instalment_amount (includes penalty) if available, otherwise emi_amount
-                              return sum + parseFloat(emi.instalment_amount || emi.emi_amount || 0);
+                              // Calculate total for each EMI: base amount + penalty
+                              // instalment_amount should include penalty, but if not available or doesn't include it,
+                              // we need to add penalty_total to the base emi_amount
+                              const instalmentAmount = parseFloat(emi.instalment_amount || 0);
+                              const emiAmount = parseFloat(emi.emi_amount || 0);
+                              const penaltyTotal = parseFloat(emi.penalty_total || 0);
+                              
+                              // If instalment_amount exists and is greater than emi_amount, it likely includes penalty
+                              if (instalmentAmount > 0 && instalmentAmount >= emiAmount) {
+                                return sum + instalmentAmount;
+                              } else {
+                                // Otherwise, add penalty to base EMI amount
+                                return sum + emiAmount + penaltyTotal;
+                              }
                             }, 0)
                           )}
                         </td>

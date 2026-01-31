@@ -1,8 +1,10 @@
 /**
  * Extension Calculation Utilities
  * Handles loan extension eligibility, fee calculations, and date calculations
+ * Uses decimal.js for precise financial calculations
  */
 
+const Decimal = require('decimal.js');
 const { 
   parseDateToString, 
   getTodayString, 
@@ -14,8 +16,9 @@ const {
   toDecimal2
 } = require('./loanCalculations');
 
-const EXTENSION_FEE_RATE = 0.21; // 21% of principal
-const GST_RATE = 0.18; // 18% GST
+// Financial Constants - Use Decimal for precision
+const EXTENSION_FEE_RATE = new Decimal(0.21); // 21% of principal
+const GST_RATE = new Decimal(0.18); // 18% GST
 const MAX_EXTENSIONS = 4;
 const EXTENSION_WINDOW_BEFORE = 5; // Days before due date
 const EXTENSION_WINDOW_AFTER = 15; // Days after due date
@@ -358,11 +361,12 @@ function calculateExtensionFees(loan, extensionDate = null) {
     console.error('⚠️ WARNING: Principal is 0! Extension fee calculation will be incorrect.');
   }
   
-  // Calculate extension fee (21% of principal)
-  const extensionFee = toDecimal2(principal * EXTENSION_FEE_RATE);
+  // Calculate extension fee (21% of principal) using Decimal
+  const principalDecimal = new Decimal(principal);
+  const extensionFee = principalDecimal.mul(EXTENSION_FEE_RATE);
 
-  // Calculate GST (18% of extension fee)
-  const gstAmount = toDecimal2(extensionFee * GST_RATE);
+  // Calculate GST (18% of extension fee) using Decimal
+  const gstAmount = extensionFee.mul(GST_RATE);
 
   // Calculate interest till date
   const processedDateStr = parseDateToString(loan.processed_at);
@@ -373,27 +377,32 @@ function calculateExtensionFees(loan, extensionDate = null) {
 
   // Interest calculation: from processed_at to extensionDate (inclusive)
   const interestDays = calculateDaysBetween(processedDateStr, extensionDate);
-  const interestRatePerDay = parseFloat(loan.processed_interest_percent_per_day || loan.interest_percent_per_day || 0.001);
-  const interestTillDate = toDecimal2(principal * interestRatePerDay * interestDays);
+  const interestRatePerDay = new Decimal(loan.processed_interest_percent_per_day || loan.interest_percent_per_day || 0.001);
+  // Interest = Principal × Interest Rate Per Day × Days
+  const interestTillDate = principalDecimal.mul(interestRatePerDay).mul(interestDays);
+  
+  const extensionFeeNum = toDecimal2(extensionFee);
+  const gstAmountNum = toDecimal2(gstAmount);
+  const interestTillDateNum = toDecimal2(interestTillDate);
   
   console.log(`📊 Extension Fee Details:
     Principal: ₹${principal}
-    Extension Fee (21%): ₹${extensionFee}
-    GST (18%): ₹${gstAmount}
+    Extension Fee (21%): ₹${extensionFeeNum}
+    GST (18%): ₹${gstAmountNum}
     Interest Days: ${interestDays} (from ${processedDateStr} to ${extensionDate})
-    Interest Rate Per Day: ${interestRatePerDay}
-    Interest Till Date: ₹${interestTillDate}`);
+    Interest Rate Per Day: ${interestRatePerDay.toString()}
+    Interest Till Date: ₹${interestTillDateNum}`);
 
-  // Total extension amount
-  const totalExtensionAmount = toDecimal2(extensionFee + gstAmount + interestTillDate);
+  // Total extension amount using Decimal
+  const totalExtensionAmount = extensionFee.plus(gstAmount).plus(interestTillDate);
 
   console.log(`✅ Final Extension Payment: ₹${totalExtensionAmount} (Fee: ₹${extensionFee} + GST: ₹${gstAmount} + Interest: ₹${interestTillDate})`);
 
   return {
-    extensionFee,
-    gstAmount,
-    interestTillDate,
-    totalExtensionAmount,
+    extensionFee: toDecimal2(extensionFee),
+    gstAmount: toDecimal2(gstAmount),
+    interestTillDate: toDecimal2(interestTillDate),
+    totalExtensionAmount: toDecimal2(totalExtensionAmount),
     postServiceFee, // For reference
     interestDays
   };
@@ -492,19 +501,24 @@ function calculateOutstandingBalance(loan) {
     }
   }
 
-  // Calculate GST on post service fee (18% of post service fee)
-  const postServiceFeeGST = toDecimal2(postServiceFee * GST_RATE);
+  // Calculate GST on post service fee (18% of post service fee) using Decimal
+  const postServiceFeeDecimal = new Decimal(postServiceFee);
+  const principalDecimal = new Decimal(principal);
+  const postServiceFeeGST = postServiceFeeDecimal.mul(GST_RATE);
 
   // Outstanding balance = Principal + Post Service Fee + GST on Post Service Fee
-  const outstandingBalance = toDecimal2(principal + postServiceFee + postServiceFeeGST);
+  const outstandingBalance = principalDecimal.plus(postServiceFeeDecimal).plus(postServiceFeeGST);
 
+  const postServiceFeeGSTNum = toDecimal2(postServiceFeeGST);
+  const outstandingBalanceNum = toDecimal2(outstandingBalance);
+  
   console.log(`📊 Outstanding Balance Calculation:
     Principal: ₹${principal}
     Post Service Fee: ₹${postServiceFee} (${emiCount > 1 ? `total for ${emiCount} EMIs` : 'single payment'})
-    GST on Post Service Fee (18%): ₹${postServiceFeeGST}
-    Outstanding Balance: ₹${outstandingBalance}`);
+    GST on Post Service Fee (18%): ₹${postServiceFeeGSTNum}
+    Outstanding Balance: ₹${outstandingBalanceNum}`);
 
-  return outstandingBalance;
+  return outstandingBalanceNum;
 }
 
 module.exports = {

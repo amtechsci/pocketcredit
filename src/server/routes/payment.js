@@ -272,6 +272,98 @@ async function generateAndSendNOCEmail(loanId) {
  * POST /api/payment/create-order
  * Create a payment order for loan repayment
  */
+/**
+ * Calculate payment amount based on paymentType and loan data
+ * Backend authority - determines correct amount from loan calculation
+ * @param {Object} loan - Loan data
+ * @param {string} paymentType - Payment type: 'pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'full_payment'
+ * @returns {Promise<number>} Calculated payment amount
+ */
+async function calculatePaymentAmount(loan, paymentType) {
+  const { getLoanCalculation } = require('../utils/loanCalculations');
+  const { calculateOutstandingBalance, calculateExtensionFees } = require('../utils/extensionCalculations');
+  
+  try {
+    // Get loan calculation (includes repayment schedule for multi-EMI loans)
+    // getLoanCalculation returns { success: true, loanId, status, ...calculation }
+    const calculation = await getLoanCalculation(loan.id);
+    
+    if (!calculation) {
+      throw new Error('Failed to get loan calculation');
+    }
+    
+    // getLoanCalculation returns object with success: true and calculation data
+    // Use calculation directly as it already has all the data we need
+    const calculationData = calculation;
+    
+    // Determine amount based on paymentType
+    if (paymentType === 'pre-close') {
+      // Pre-close: Outstanding Balance + Interest Till Today
+      const outstandingBalance = calculateOutstandingBalance(loan);
+      
+      // Get interest till today from calculation
+      const interestTillToday = calculationData.interest?.interestTillToday || 0;
+      
+      // For pre-close, also include penalty if overdue
+      const penaltyTotal = calculationData.penalty?.penalty_total || 0;
+      
+      const precloseAmount = outstandingBalance + interestTillToday + penaltyTotal;
+      console.log(`💰 Pre-close calculation: Outstanding (₹${outstandingBalance}) + Interest Till Today (₹${interestTillToday}) + Penalty (₹${penaltyTotal}) = ₹${precloseAmount}`);
+      
+      return precloseAmount;
+    } else if (paymentType === 'full_payment') {
+      // Full payment: Total repayable + penalty (if overdue)
+      const totalRepayable = calculationData.total?.repayable || calculationData.total_repayable || 0;
+      const penaltyTotal = calculationData.penalty?.penalty_total || 0;
+      
+      const fullPaymentAmount = totalRepayable + penaltyTotal;
+      console.log(`💰 Full payment calculation: Total Repayable (₹${totalRepayable}) + Penalty (₹${penaltyTotal}) = ₹${fullPaymentAmount}`);
+      
+      return fullPaymentAmount;
+    } else if (paymentType && paymentType.startsWith('emi_')) {
+      // EMI payment: Get amount from repayment schedule
+      const emiNumber = parseInt(paymentType.replace('emi_', '').replace('st', '').replace('nd', '').replace('rd', '').replace('th', ''));
+      
+      if (isNaN(emiNumber) || emiNumber < 1) {
+        throw new Error(`Invalid EMI number in paymentType: ${paymentType}`);
+      }
+      
+      // Get repayment schedule
+      const schedule = calculationData.repayment?.schedule || [];
+      
+      if (schedule.length === 0) {
+        // Fallback: calculate from total repayable divided by EMI count
+        const emiCount = parseInt(loan.plan_snapshot ? (typeof loan.plan_snapshot === 'string' ? JSON.parse(loan.plan_snapshot) : loan.plan_snapshot).emi_count : 1) || 1;
+        const totalRepayable = calculationData.total?.repayable || calculationData.total_repayable || 0;
+        const emiAmount = totalRepayable / emiCount;
+        console.log(`💰 EMI ${emiNumber} calculation (fallback): Total (₹${totalRepayable}) / ${emiCount} = ₹${emiAmount}`);
+        return emiAmount;
+      }
+      
+      // Find the specific EMI in schedule
+      const emi = schedule.find(e => e.emi_number === emiNumber || e.instalment_no === emiNumber);
+      
+      if (!emi) {
+        throw new Error(`EMI ${emiNumber} not found in repayment schedule`);
+      }
+      
+      // EMI amount includes principal + interest + post service fee + GST + penalty (if overdue)
+      const emiAmount = emi.instalment_amount || (emi.principal + emi.interest + (emi.post_service_fee || 0) + (emi.gst_on_post_service_fee || 0) + (emi.penalty_total || 0));
+      console.log(`💰 EMI ${emiNumber} calculation: ₹${emiAmount} (Principal: ₹${emi.principal}, Interest: ₹${emi.interest}, Fee: ₹${emi.post_service_fee || 0}, GST: ₹${emi.gst_on_post_service_fee || 0}, Penalty: ₹${emi.penalty_total || 0})`);
+      
+      return emiAmount;
+    } else {
+      // Default: use total repayable
+      const totalRepayable = calculationData.total?.repayable || calculationData.total_repayable || 0;
+      console.log(`💰 Default payment calculation: Total Repayable = ₹${totalRepayable}`);
+      return totalRepayable;
+    }
+  } catch (error) {
+    console.error('❌ Error calculating payment amount:', error);
+    throw error;
+  }
+}
+
 router.post('/create-order', authenticateToken, async (req, res) => {
     let orderId = null; // Initialize to avoid scope issues in error handling
     
@@ -281,12 +373,15 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         const { loanId, amount, paymentType } = req.body; // paymentType: 'pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', etc.
 
         // Validate input
-        if (!loanId || !amount) {
+        if (!loanId) {
             return res.status(400).json({
                 success: false,
-                message: 'Loan ID and amount are required'
+                message: 'Loan ID is required'
             });
         }
+        
+        // Amount is now optional - backend will calculate it
+        // But we'll validate it if provided to ensure frontend matches backend
 
         // Validate paymentType if provided
         if (paymentType && !['pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'full_payment', 'loan_repayment'].includes(paymentType)) {
@@ -360,49 +455,50 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                 // For single payment loans, use 'full_payment' which will clear immediately
                 finalPaymentType = 'full_payment';
             } else {
-                // Multi-EMI loan: Check if this is a pre-close payment (amount matches pre-close calculation)
-                const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
-                const outstandingBalance = calculateOutstandingBalance(loan);
-                const amountDiff = Math.abs(parseFloat(amount) - outstandingBalance);
+                // Multi-EMI loan: Auto-detect based on paid EMIs
+                // Note: We can't use amount for detection anymore since it's optional
+                // So we'll determine based on which EMIs have been paid
+                const paidEmis = await executeQuery(
+                    `SELECT payment_type 
+                     FROM payment_orders 
+                     WHERE loan_id = ? 
+                     AND payment_type IN ('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th')
+                     AND status = 'PAID'
+                     ORDER BY payment_type`,
+                    [loanId]
+                );
                 
-                if (amountDiff < 10) { // Within ₹10 tolerance
-                    finalPaymentType = 'pre-close';
-                } else {
-                    // Check which EMIs have been paid using payment_orders table
-                    const paidEmis = await executeQuery(
-                        `SELECT payment_type 
-                         FROM payment_orders 
-                         WHERE loan_id = ? 
-                         AND payment_type IN ('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th')
-                         AND status = 'PAID'
-                         ORDER BY payment_type`,
-                        [loanId]
-                    );
-                    
-                    const paidEmiNumbers = paidEmis.map(t => {
-                        if (t.payment_type === 'emi_1st') return 1;
-                        if (t.payment_type === 'emi_2nd') return 2;
-                        if (t.payment_type === 'emi_3rd') return 3;
-                        if (t.payment_type === 'emi_4th') return 4;
-                        return 0;
-                    }).sort((a, b) => a - b);
-                    
-                    // Find next unpaid EMI
-                    let nextEmi = 1;
-                    for (let i = 1; i <= emiCount; i++) {
-                        if (!paidEmiNumbers.includes(i)) {
-                            nextEmi = i;
-                            break;
-                        }
+                const paidEmiNumbers = paidEmis.map(t => {
+                    if (t.payment_type === 'emi_1st') return 1;
+                    if (t.payment_type === 'emi_2nd') return 2;
+                    if (t.payment_type === 'emi_3rd') return 3;
+                    if (t.payment_type === 'emi_4th') return 4;
+                    return 0;
+                }).sort((a, b) => a - b);
+                
+                // Find next unpaid EMI
+                let nextEmi = 1;
+                for (let i = 1; i <= emiCount; i++) {
+                    if (!paidEmiNumbers.includes(i)) {
+                        nextEmi = i;
+                        break;
                     }
-                    
-                    if (nextEmi === 1) finalPaymentType = 'emi_1st';
-                    else if (nextEmi === 2) finalPaymentType = 'emi_2nd';
-                    else if (nextEmi === 3) finalPaymentType = 'emi_3rd';
-                    else if (nextEmi === 4) finalPaymentType = 'emi_4th';
-                    else finalPaymentType = 'loan_repayment'; // Fallback
                 }
+                
+                if (nextEmi === 1) finalPaymentType = 'emi_1st';
+                else if (nextEmi === 2) finalPaymentType = 'emi_2nd';
+                else if (nextEmi === 3) finalPaymentType = 'emi_3rd';
+                else if (nextEmi === 4) finalPaymentType = 'emi_4th';
+                else finalPaymentType = 'loan_repayment'; // Fallback
             }
+        }
+        
+        // Ensure finalPaymentType is set (should never be null/undefined at this point)
+        if (!finalPaymentType) {
+            return res.status(400).json({
+                success: false,
+                message: 'Payment type is required. Please specify paymentType in the request.'
+            });
         }
         
         // CRITICAL: If paymentType was explicitly 'pre-close' or 'full_payment', ensure it's preserved
@@ -413,6 +509,42 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                 finalPaymentType = paymentType;
             }
         }
+        
+        // BACKEND AUTHORITY: Calculate amount from backend based on paymentType
+        // Frontend amount is now optional/deprecated - backend determines the correct amount
+        let calculatedAmount;
+        try {
+            calculatedAmount = await calculatePaymentAmount(loan, finalPaymentType);
+            console.log(`💰 Backend calculated amount for ${finalPaymentType}: ₹${calculatedAmount}`);
+        } catch (calcError) {
+            console.error('❌ Error calculating payment amount from backend:', calcError);
+            // If calculation fails, fall back to frontend amount if provided
+            if (!amount) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to calculate payment amount. Please try again or contact support.',
+                    error: calcError.message
+                });
+            }
+            calculatedAmount = parseFloat(amount);
+            console.warn(`⚠️ Using frontend amount as fallback: ₹${calculatedAmount}`);
+        }
+        
+        // Validate frontend amount if provided (strict validation with 1 paise tolerance)
+        if (amount !== undefined && amount !== null) {
+            const frontendAmount = parseFloat(amount);
+            const amountDiff = Math.abs(frontendAmount - calculatedAmount);
+            
+            // Allow 0.01 (1 paise) tolerance for rounding differences
+            if (amountDiff > 0.01) {
+                console.warn(`⚠️ Frontend amount (₹${frontendAmount}) differs from backend calculated amount (₹${calculatedAmount}) by ₹${amountDiff.toFixed(2)}`);
+                // Still use backend amount, but log the difference
+                // In production, you might want to reject mismatched amounts for security
+            }
+        }
+        
+        // Use backend-calculated amount (source of truth)
+        const finalAmount = calculatedAmount;
 
         // Validate sequential EMI payments (only for EMI types, skip for pre-close/full_payment)
         // IMPORTANT: Only check if loan is NOT cleared
@@ -671,84 +803,6 @@ router.post('/create-order', authenticateToken, async (req, res) => {
         orderId = `LOAN_${loan.application_number}${paymentTypeSuffix}_${Date.now()}`;
 
         // Create payment order in database
-        // First, ensure the table exists (create if it doesn't)
-        try {
-            await executeQuery(`
-                CREATE TABLE IF NOT EXISTS payment_orders (
-                    id INT NOT NULL AUTO_INCREMENT,
-                    order_id VARCHAR(255) NOT NULL,
-                    loan_id INT NOT NULL,
-                    user_id INT NOT NULL,
-                    amount DECIMAL(12, 2) NOT NULL,
-                    payment_type VARCHAR(30) DEFAULT 'loan_repayment',
-                    extension_id INT DEFAULT NULL,
-                    status ENUM('PENDING', 'PAID', 'FAILED', 'CANCELLED', 'EXPIRED') DEFAULT 'PENDING',
-                    payment_session_id VARCHAR(255) DEFAULT NULL,
-                    cashfree_response JSON DEFAULT NULL,
-                    webhook_data JSON DEFAULT NULL,
-                    payment_method VARCHAR(50) DEFAULT NULL,
-                    transaction_id VARCHAR(255) DEFAULT NULL,
-                    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    PRIMARY KEY (id),
-                    UNIQUE KEY unique_order_id (order_id),
-                    KEY idx_loan_id (loan_id),
-                    KEY idx_user_id (user_id),
-                    KEY idx_status (status),
-                    KEY idx_payment_type (payment_type)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            `);
-        } catch (tableError) {
-            // Table might already exist, continue
-            if (!tableError.message.includes('already exists')) {
-                console.warn('[Payment] Table creation warning:', tableError.message);
-            }
-        }
-
-        // Add payment_type column if it doesn't exist (for existing tables)
-        try {
-            // Check if column exists first (MySQL doesn't support IF NOT EXISTS for ADD COLUMN)
-            const [paymentTypeExists] = await executeQuery(`
-                SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS 
-                WHERE TABLE_SCHEMA = DATABASE() 
-                AND TABLE_NAME = 'payment_orders' 
-                AND COLUMN_NAME = 'payment_type'
-            `);
-            if (!paymentTypeExists || paymentTypeExists.cnt === 0) {
-                await executeQuery(`
-                    ALTER TABLE payment_orders 
-                    ADD COLUMN payment_type VARCHAR(30) DEFAULT 'loan_repayment'
-                `);
-            }
-        } catch (alterError) {
-            // Column might already exist
-            if (!alterError.message.includes("Duplicate column")) {
-                console.warn('[Payment] Could not add payment_type column:', alterError.message);
-            }
-        }
-
-        // Add extension_id column if it doesn't exist (for extension payments)
-        try {
-            // Check if column exists first (MySQL doesn't support IF NOT EXISTS for ADD COLUMN)
-            const [extensionIdExists] = await executeQuery(`
-                SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS 
-                WHERE TABLE_SCHEMA = DATABASE() 
-                AND TABLE_NAME = 'payment_orders' 
-                AND COLUMN_NAME = 'extension_id'
-            `);
-            if (!extensionIdExists || extensionIdExists.cnt === 0) {
-                await executeQuery(`
-                    ALTER TABLE payment_orders 
-                    ADD COLUMN extension_id INT DEFAULT NULL
-                `);
-            }
-        } catch (alterError) {
-            // Column already exists, ignore
-            if (!alterError.message.includes("Duplicate column")) {
-                console.warn('[Payment] Could not add extension_id column:', alterError.message);
-            }
-        }
-
         // Insert payment order with payment type
         try {
             // Use finalPaymentType or default to 'loan_repayment'
@@ -757,7 +811,7 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                 `INSERT INTO payment_orders (
             order_id, loan_id, user_id, amount, payment_type, status, created_at
           ) VALUES (?, ?, ?, ?, ?, 'PENDING', NOW())`,
-                [orderId, loanId, userId, amount, orderPaymentType]
+                [orderId, loanId, userId, finalAmount, orderPaymentType]
             );
         } catch (insertError) {
             console.error('[Payment] Failed to insert payment order:', insertError);
@@ -788,7 +842,7 @@ router.post('/create-order', authenticateToken, async (req, res) => {
 
         const orderResult = await cashfreePayment.createOrder({
             orderId,
-            amount,
+            amount: finalAmount, // Use backend-calculated amount
             customerName: loan.name || 'Customer',
             customerEmail: customerEmail, // Use the resolved email
             customerPhone: loan.phone || '9999999999', // Default phone if missing

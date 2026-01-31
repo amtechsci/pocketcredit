@@ -1484,6 +1484,79 @@ router.post('/calculate', authenticateAdmin, async (req, res) => {
 });
 
 /**
+ * POST /api/loan-calculations/emi-calculator
+ * Calculate EMI for calculator component (public endpoint, no auth required for calculator)
+ * Body:
+ *   - loan_amount: number
+ *   - interest_rate: number (annual percentage rate)
+ *   - tenure_months: number
+ */
+router.post('/emi-calculator', async (req, res) => {
+  try {
+    const { loan_amount, interest_rate, tenure_months } = req.body;
+    
+    // Validate inputs
+    if (!loan_amount || interest_rate === undefined || !tenure_months) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: loan_amount, interest_rate, tenure_months'
+      });
+    }
+    
+    const principal = parseFloat(loan_amount);
+    const rate = parseFloat(interest_rate) / 12 / 100; // Monthly interest rate
+    const months = parseInt(tenure_months);
+    
+    if (principal <= 0 || months <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid loan amount or tenure'
+      });
+    }
+    
+    // Use Decimal for precise EMI calculation
+    const Decimal = require('decimal.js');
+    const principalDecimal = new Decimal(principal);
+    const rateDecimal = new Decimal(rate);
+    const monthsDecimal = new Decimal(months);
+    
+    let emi, totalAmount, totalInterest;
+    
+    if (rate === 0) {
+      // Zero interest: simple division
+      emi = principalDecimal.div(monthsDecimal);
+      totalAmount = principalDecimal;
+      totalInterest = new Decimal(0);
+    } else {
+      // Standard EMI formula: EMI = [P × R × (1+R)^N] / [(1+R)^N - 1]
+      const onePlusRate = rateDecimal.plus(1);
+      const onePlusRatePowerN = onePlusRate.pow(monthsDecimal);
+      const numerator = principalDecimal.mul(rateDecimal).mul(onePlusRatePowerN);
+      const denominator = onePlusRatePowerN.minus(1);
+      emi = numerator.div(denominator);
+      totalAmount = emi.mul(monthsDecimal);
+      totalInterest = totalAmount.minus(principalDecimal);
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        emi: parseFloat(emi.toFixed(2)),
+        totalInterest: parseFloat(totalInterest.toFixed(2)),
+        totalAmount: parseFloat(totalAmount.toFixed(2))
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error calculating EMI:', error);
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to calculate EMI'
+    });
+  }
+});
+
+/**
  * GET /api/loan-calculations/:loanId/days
  * Get total days since disbursement
  */

@@ -189,29 +189,7 @@ async function updateUserCreditLimit(userId, newLimit) {
  */
 async function storePendingCreditLimit(userId, newLimit, limitData = {}) {
   try {
-    // Check if pending_credit_limit table exists, if not create it
-    const createTableQuery = `
-      CREATE TABLE IF NOT EXISTS pending_credit_limits (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        new_limit DECIMAL(12,2) NOT NULL,
-        current_limit DECIMAL(12,2) NOT NULL,
-        percentage DECIMAL(5,2),
-        loan_count INT,
-        salary DECIMAL(12,2),
-        is_premium_limit TINYINT(1) DEFAULT 0,
-        premium_tenure INT,
-        status ENUM('pending', 'accepted', 'rejected') DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        accepted_at TIMESTAMP NULL,
-        rejected_at TIMESTAMP NULL,
-        UNIQUE KEY unique_pending_limit (user_id, status),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `;
-
-    await executeQuery(createTableQuery);
+    // Table should exist in database
 
     // Delete any existing pending limit for this user
     await executeQuery(
@@ -253,29 +231,7 @@ async function storePendingCreditLimit(userId, newLimit, limitData = {}) {
  */
 async function getPendingCreditLimit(userId) {
   try {
-    // Ensure table exists first
-    const createTableQuery = `
-      CREATE TABLE IF NOT EXISTS pending_credit_limits (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        new_limit DECIMAL(12,2) NOT NULL,
-        current_limit DECIMAL(12,2) NOT NULL,
-        percentage DECIMAL(5,2),
-        loan_count INT,
-        salary DECIMAL(12,2),
-        is_premium_limit TINYINT(1) DEFAULT 0,
-        premium_tenure INT,
-        status ENUM('pending', 'accepted', 'rejected') DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        accepted_at TIMESTAMP NULL,
-        rejected_at TIMESTAMP NULL,
-        UNIQUE KEY unique_pending_limit (user_id, status),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `;
-
-    await executeQuery(createTableQuery);
+    // Table should exist in database
 
     const query = `
       SELECT * FROM pending_credit_limits
@@ -312,28 +268,7 @@ async function acceptPendingCreditLimit(userId, pendingLimitId) {
 
     const pendingLimit = pending[0];
 
-    // Create credit_limit_history table if it doesn't exist
-    const createHistoryTableQuery = `
-      CREATE TABLE IF NOT EXISTS credit_limit_history (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        old_limit DECIMAL(12,2) NOT NULL,
-        new_limit DECIMAL(12,2) NOT NULL,
-        increase_amount DECIMAL(12,2) NOT NULL,
-        percentage DECIMAL(5,2),
-        loan_count INT,
-        salary DECIMAL(12,2),
-        is_premium_limit TINYINT(1) DEFAULT 0,
-        premium_tenure INT,
-        pending_limit_id INT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (pending_limit_id) REFERENCES pending_credit_limits(id) ON DELETE SET NULL,
-        INDEX idx_user_id (user_id),
-        INDEX idx_created_at (created_at)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `;
-    await executeQuery(createHistoryTableQuery);
+    // Table should exist in database
 
     // Store history BEFORE updating the limit
     const increaseAmount = parseFloat(pendingLimit.new_limit) - parseFloat(pendingLimit.current_limit);
@@ -407,28 +342,7 @@ async function rejectPendingCreditLimit(userId, pendingLimitId) {
  */
 async function getCreditLimitHistory(userId, limit = 10) {
   try {
-    // Ensure table exists first
-    const createHistoryTableQuery = `
-      CREATE TABLE IF NOT EXISTS credit_limit_history (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        old_limit DECIMAL(12,2) NOT NULL,
-        new_limit DECIMAL(12,2) NOT NULL,
-        increase_amount DECIMAL(12,2) NOT NULL,
-        percentage DECIMAL(5,2),
-        loan_count INT,
-        salary DECIMAL(12,2),
-        is_premium_limit TINYINT(1) DEFAULT 0,
-        premium_tenure INT,
-        pending_limit_id INT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (pending_limit_id) REFERENCES pending_credit_limits(id) ON DELETE SET NULL,
-        INDEX idx_user_id (user_id),
-        INDEX idx_created_at (created_at)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `;
-    await executeQuery(createHistoryTableQuery);
+    // Table should exist in database
 
     const query = `
       SELECT 

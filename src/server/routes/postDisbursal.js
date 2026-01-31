@@ -100,7 +100,7 @@ router.get('/progress/:applicationId', requireAuth, async (req, res) => {
           agreement_signed: false,
           current_step: 1
         },
-        warning: 'Database migration required. Please run the migration script.'
+        warning: 'Database schema may be outdated. Please ensure all required columns exist.'
       });
     }
 
@@ -298,10 +298,10 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
 
     // If columns don't exist, return helpful error message
     if (existingColumns.length === 0) {
-      console.error('Post-disbursal columns do not exist. Please run the migration.');
+      console.error('Post-disbursal columns do not exist. Please ensure database schema is up to date.');
       return res.status(500).json({
         success: false,
-        message: 'Database migration required. Please run: node src/server/migrations/add_post_disbursal_status_and_progress.js',
+        message: 'Database schema error: Required columns are missing. Please ensure all required columns exist in the database.',
         error: 'Missing database columns'
       });
     }
@@ -436,7 +436,7 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
     if (error.code === 'ER_BAD_FIELD_ERROR' || error.sqlMessage?.includes('Unknown column')) {
       return res.status(500).json({
         success: false,
-        message: 'Database migration required. Please run the migration script to add post-disbursal columns.',
+        message: 'Database schema error: Required columns are missing. Please ensure all required columns exist in the database.',
         error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }

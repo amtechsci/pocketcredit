@@ -3,7 +3,7 @@ import axios, { AxiosInstance, AxiosResponse } from 'axios';
 
 // Types for API responses
 export interface ApiResponse<T = any> {
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'profile_incomplete';
   success?: boolean;
   message: string;
   data?: T;
@@ -61,7 +61,7 @@ export interface LoanApplication {
   tenure_months: number;
   interest_rate?: number;
   emi_amount?: number;
-  status: 'submitted' | 'under_review' | 'approved' | 'rejected';
+  status: 'submitted' | 'under_review' | 'approved' | 'rejected' | 'pending' | 'in_progress' | 'disbursal' | 'repeat_disbursal' | 'ready_to_repeat_disbursal' | 'ready_for_disbursement' | 'cleared' | 'cancelled' | 'qa_verification' | 'follow_up' | 'account_manager' | 'overdue';
   rejection_reason?: string;
   approved_at?: string;
   disbursed_at?: string;
@@ -79,10 +79,19 @@ export interface LoanApplicationStats {
   total_approved_amount: number;
 }
 
+// Simple in-memory cache for API requests
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+  ttl: number; // Time to live in milliseconds
+}
+
 // API Service Class
 class ApiService {
   private api: AxiosInstance;
   private baseURL: string;
+  private cache: Map<string, CacheEntry<any>> = new Map();
+  private pendingRequests: Map<string, Promise<any>> = new Map();
 
   constructor() {
     // Dynamic API URL based on environment and current host
@@ -166,45 +175,132 @@ class ApiService {
     );
   }
 
-  // Generic API request method
-  private async request<T>(
+  /**
+   * Get cache key for a request
+   */
+  private getCacheKey(method: string, endpoint: string, data?: any): string {
+    const dataStr = data ? JSON.stringify(data) : '';
+    return `${method}:${endpoint}:${dataStr}`;
+  }
+
+  /**
+   * Check if cached entry is still valid
+   */
+  private isCacheValid(key: string): boolean {
+    const entry = this.cache.get(key);
+    if (!entry) return false;
+    return Date.now() - entry.timestamp < entry.ttl;
+  }
+
+  /**
+   * Get cached data if valid
+   */
+  private getCached<T>(key: string): T | null {
+    if (this.isCacheValid(key)) {
+      return this.cache.get(key)!.data as T;
+    }
+    this.cache.delete(key); // Remove expired entry
+    return null;
+  }
+
+  /**
+   * Set cache entry
+   */
+  private setCache<T>(key: string, data: T, ttl: number = 30000): void {
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now(),
+      ttl
+    });
+  }
+
+  // Generic API request method with caching and deduplication
+  async request<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     endpoint: string,
-    data?: any
+    data?: any,
+    options?: {
+      cache?: boolean;
+      cacheTTL?: number; // Time to live in milliseconds
+      skipDeduplication?: boolean;
+    }
   ): Promise<ApiResponse<T>> {
+    const cacheKey = this.getCacheKey(method, endpoint, data);
+    const shouldCache = options?.cache !== false && method === 'GET';
+    const cacheTTL = options?.cacheTTL || 30000; // Default 30 seconds
+
+    // Check cache for GET requests
+    if (shouldCache) {
+      const cached = this.getCached<ApiResponse<T>>(cacheKey);
+      if (cached) {
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`📦 Cache hit: ${method} ${endpoint}`);
+        }
+        return cached;
+      }
+    }
+
+    // Check for pending duplicate requests (deduplication)
+    if (!options?.skipDeduplication && this.pendingRequests.has(cacheKey)) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`🔄 Deduplicating request: ${method} ${endpoint}`);
+      }
+      return this.pendingRequests.get(cacheKey)!;
+    }
+
     // Log request details for debugging
     if (endpoint.includes('references')) {
       console.log(`🌐 API Request: ${method} ${endpoint}`, data);
     }
-    
-    try {
-      const response = await this.api.request({
-        method,
-        url: endpoint,
-        data,
-      });
 
-      if (endpoint.includes('references')) {
-        console.log(`✅ API Response: ${method} ${endpoint}`, response.data);
-      }
-
-      return response.data;
-    } catch (error: any) {
-      if (endpoint.includes('references')) {
-        console.error(`❌ API Error: ${method} ${endpoint}`, {
-          message: error.message,
-          response: error.response?.data,
-          status: error.response?.status,
-          config: error.config
+    // Create request promise
+    const requestPromise = (async () => {
+      try {
+        const response = await this.api.request({
+          method,
+          url: endpoint,
+          data,
         });
-      }
-      
-      if (error.response?.data) {
-        return error.response.data;
-      }
 
-      throw new Error(error.message || 'API request failed');
+        if (endpoint.includes('references')) {
+          console.log(`✅ API Response: ${method} ${endpoint}`, response.data);
+        }
+
+        const result = response.data;
+
+        // Cache successful GET responses
+        if (shouldCache && response.status === 200) {
+          this.setCache(cacheKey, result, cacheTTL);
+        }
+
+        return result;
+      } catch (error: any) {
+        if (endpoint.includes('references')) {
+          console.error(`❌ API Error: ${method} ${endpoint}`, {
+            message: error.message,
+            response: error.response?.data,
+            status: error.response?.status,
+            config: error.config
+          });
+        }
+
+        if (error.response?.data) {
+          return error.response.data;
+        }
+
+        throw new Error(error.message || 'API request failed');
+      } finally {
+        // Remove from pending requests
+        this.pendingRequests.delete(cacheKey);
+      }
+    })();
+
+    // Store pending request for deduplication
+    if (!options?.skipDeduplication) {
+      this.pendingRequests.set(cacheKey, requestPromise);
     }
+
+    return requestPromise;
   }
 
   // Authentication APIs
@@ -250,7 +346,11 @@ class ApiService {
   }
 
   async getUserProfile(): Promise<ApiResponse<{ user: User }>> {
-    return this.request<{ user: User }>('GET', '/auth/profile');
+    // Cache user profile for 60 seconds (longer TTL since it changes less frequently)
+    return this.request<{ user: User }>('GET', '/auth/profile', undefined, {
+      cache: true,
+      cacheTTL: 60000 // 60 seconds
+    });
   }
 
   async getUserApplications() {
@@ -830,6 +930,7 @@ class ApiService {
     };
     summary: {
       credit_score: number;
+      experian_score: number | null;
       available_credit: number;
       total_loans: number;
       active_loans: number;
@@ -875,7 +976,11 @@ class ApiService {
       icon: string;
     }>;
   }>> {
-    return this.request('GET', '/dashboard');
+    // Cache dashboard summary for 30 seconds
+    return this.request('GET', '/dashboard', undefined, {
+      cache: true,
+      cacheTTL: 30000 // 30 seconds
+    });
   }
 
   async getLoanDetails(loanId: number): Promise<ApiResponse<{
@@ -1445,7 +1550,7 @@ class ApiService {
       return response.data;
     } catch (error: any) {
       console.error('Error downloading NOC PDF:', error);
-      
+
       // Try to extract error message from blob response if possible
       if (error.response?.data instanceof Blob) {
         try {
@@ -1456,11 +1561,11 @@ class ApiService {
           throw new Error('Failed to download NOC PDF');
         }
       }
-      
-      const errorMessage = error.response?.data?.message || 
-                          error.response?.data?.error || 
-                          error.message || 
-                          'Failed to download NOC PDF';
+
+      const errorMessage = error.response?.data?.message ||
+        error.response?.data?.error ||
+        error.message ||
+        'Failed to download NOC PDF';
       throw new Error(errorMessage);
     }
   }
@@ -1539,23 +1644,47 @@ class ApiService {
   /**
    * Create payment order for loan repayment
    * @param loanId - Loan application ID
-   * @param amount - Payment amount
-   * @param paymentType - Payment type: 'pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th' (optional)
+   * @param amount - Payment amount (DEPRECATED: Backend will calculate amount based on paymentType)
+   * @param paymentType - Payment type: 'pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'full_payment' (required)
    */
-  async createPaymentOrder(loanId: number, amount: number, paymentType?: string): Promise<ApiResponse<{
+  async createPaymentOrder(loanId: number, amount: number | null, paymentType: string): Promise<ApiResponse<{
     orderId: string;
     paymentSessionId: string;
     checkoutUrl: string;
   }>> {
-    // Always include paymentType in the request body
-    // Use null instead of undefined so it's included in JSON serialization
-    const requestBody = {
+    // Backend authority: amount is now optional/deprecated
+    // Backend will calculate the correct amount based on paymentType
+    // Include amount only if provided (for backward compatibility)
+    const requestBody: any = {
       loanId,
-      amount,
-      paymentType: paymentType || null  // Use null instead of undefined so it's sent in JSON
+      paymentType
     };
+
+    // Include amount only if explicitly provided (for validation/backward compatibility)
+    if (amount !== null && amount !== undefined) {
+      requestBody.amount = amount;
+    }
+
     console.log('[API] createPaymentOrder called with:', { loanId, amount, paymentType, requestBody });
     return this.request('POST', '/payment/create-order', requestBody);
+  }
+
+  /**
+   * Get EMI calculation for calculator component
+   * @param loanAmount - Loan amount
+   * @param interestRate - Annual interest rate (percentage)
+   * @param tenureMonths - Loan tenure in months
+   */
+  async getEMICalculation(loanAmount: number, interestRate: number, tenureMonths: number): Promise<ApiResponse<{
+    emi: number;
+    totalInterest: number;
+    totalAmount: number;
+  }>> {
+    return this.request('POST', '/loan-calculations/emi-calculator', {
+      loan_amount: loanAmount,
+      interest_rate: interestRate,
+      tenure_months: tenureMonths
+    });
   }
 
   /**

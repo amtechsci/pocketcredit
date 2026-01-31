@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { getAuthenticatedRedirect } from './utils/navigation';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
 import { HomePage } from './components/pages/HomePage';
@@ -14,7 +13,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { DynamicDashboardPage as DashboardPage } from './components/pages/DynamicDashboardPage';
 import { HoldStatusPage } from './components/pages/HoldStatusPage';
 import { DeletedStatusPage } from './components/pages/DeletedStatusPage';
-import { AuthOnlyRoute, ProtectedRoute } from './components/ProtectedRoute';
+import { AuthOnlyRoute } from './components/ProtectedRoute';
 import { PayEMIPage } from './components/pages/PayEMIPage';
 import { DynamicLoanDetailsPage as LoanDetailsPage } from './components/pages/DynamicLoanDetailsPage';
 import { DynamicPaymentHistoryPage as PaymentHistoryPage } from './components/pages/DynamicPaymentHistoryPage';
@@ -42,9 +41,10 @@ import { RepaymentSchedulePage } from './components/pages/RepaymentSchedulePage'
 import { PaymentReturnPage } from './components/pages/PaymentReturnPage';
 import { EnachCompletionPage } from './components/pages/EnachCompletionPage';
 import { AccountAggregatorFlow } from './components/pages/AccountAggregatorFlow';
-import { ApplicationFlow } from './components/ApplicationFlow';
 import { CreditScorePage } from './components/pages/CreditScorePage';
 import { StepGuard } from './components/loan-application/StepGuard';
+import { StatusGuard } from './components/StatusGuard';
+import { LoanStatusGuard } from './components/LoanStatusGuard';
 import { ResourcesPage } from './components/pages/ResourcesPage';
 import { ContactPage } from './components/pages/ContactPage';
 import { PrivacyPolicyPage } from './components/pages/PrivacyPolicyPage';
@@ -163,7 +163,6 @@ export default function App() {
     // If on admin subdomain (not localhost), only allow /stpl paths
     if (isAdminSubdomain && !isLocalhost && !location.pathname.startsWith('/stpl')) {
       window.location.href = `https://pocketcredit.in${location.pathname}${location.search}`;
-      return;
     }
 
     // If on main domain (not admin subdomain and not localhost), redirect /stpl to home
@@ -236,9 +235,6 @@ function AppContent() {
       </div>
     );
   }
-
-  // Use centralized navigation utility
-  const getRedirectPath = () => getAuthenticatedRedirect(user);
 
   return (
     <div className="min-h-screen">
@@ -382,11 +378,13 @@ function AppContent() {
 
         <Route path="/loan-application/bank-details" element={
           isAuthenticated ? (
-            <DashboardLayout>
-              <StepGuard step="bank-details">
-                <BankDetailsPage />
-              </StepGuard>
-            </DashboardLayout>
+            <StatusGuard>
+              <DashboardLayout>
+                <StepGuard step="bank-details">
+                  <BankDetailsPage />
+                </StepGuard>
+              </DashboardLayout>
+            </StatusGuard>
           ) : (
             <Navigate to="/auth" replace />
           )
@@ -607,19 +605,19 @@ function AppContent() {
         {/* Dashboard Pages (No Header/Footer) */}
         <Route path="/profile-completion" element={
           isAuthenticated ? (
-            user?.status === 'on_hold' ? (
-              <Navigate to="/hold-status" replace />
-            ) : user?.status === 'active' && user?.profile_completion_step >= 2 && user?.profile_completed ? (
-              <Navigate to="/dashboard" replace />
-            ) : user?.profile_completed ? (
-              <Navigate to="/dashboard" replace />
-            ) : (
-              <DashboardLayout>
-                <ErrorBoundary>
-                  <ProfileCompletionPageSimple />
-                </ErrorBoundary>
-              </DashboardLayout>
-            )
+            <StatusGuard>
+              {user?.status === 'active' && user?.profile_completion_step >= 2 && user?.profile_completed ? (
+                <Navigate to="/dashboard" replace />
+              ) : user?.profile_completed ? (
+                <Navigate to="/dashboard" replace />
+              ) : (
+                <DashboardLayout>
+                  <ErrorBoundary>
+                    <ProfileCompletionPageSimple />
+                  </ErrorBoundary>
+                </DashboardLayout>
+              )}
+            </StatusGuard>
           ) : (
             <Navigate to="/auth" replace />
           )
@@ -627,7 +625,9 @@ function AppContent() {
 
         <Route path="/hold-status" element={
           isAuthenticated ? (
-            <HoldStatusPage />
+            <StatusGuard allowStatusPages>
+              <HoldStatusPage />
+            </StatusGuard>
           ) : (
             <Navigate to="/auth" replace />
           )
@@ -635,21 +635,23 @@ function AppContent() {
 
         <Route path="/deleted-status" element={
           isAuthenticated ? (
-            <DeletedStatusPage />
+            <StatusGuard allowStatusPages>
+              <DeletedStatusPage />
+            </StatusGuard>
           ) : (
             <Navigate to="/auth" replace />
           )
         } />
 
         <Route path="/dashboard" element={
-          isAuthenticated && user?.status === 'deleted' ? (
-            <Navigate to="/deleted-status" replace />
-          ) : isAuthenticated && user?.status === 'on_hold' ? (
-            <Navigate to="/hold-status" replace />
-          ) : isAuthenticated ? (
-            <DashboardLayout>
-              <DashboardPage />
-            </DashboardLayout>
+          isAuthenticated ? (
+            <StatusGuard>
+              <LoanStatusGuard>
+                <DashboardLayout>
+                  <DashboardPage />
+                </DashboardLayout>
+              </LoanStatusGuard>
+            </StatusGuard>
           ) : (
             <Navigate to="/auth" replace />
           )

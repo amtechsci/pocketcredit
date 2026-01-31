@@ -1,43 +1,18 @@
-import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { getAuthenticatedRedirect } from '../utils/navigation';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
   redirectTo?: string;
 }
 
-export function ProtectedRoute({ children, redirectTo = '/dashboard' }: ProtectedRouteProps) {
-  const { isAuthenticated, user } = useAuth();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (isAuthenticated && user) {
-      // User is already logged in, redirect to dashboard
-      navigate(redirectTo, { replace: true });
-    }
-  }, [isAuthenticated, user, navigate, redirectTo]);
-
-  // If user is authenticated, don't render the children (auth page)
-  if (isAuthenticated && user) {
-    return null; // or a loading spinner
-  }
-
-  // If user is not authenticated, show the auth page
-  return <>{children}</>;
-}
-
-// Reverse protected route - only allows access if NOT authenticated
-export function AuthOnlyRoute({ children }: { children: React.ReactNode }) {
+/**
+ * ProtectedRoute - Only allows access if NOT authenticated
+ * Used for public pages like login/auth that should redirect if user is already logged in
+ */
+export function ProtectedRoute({ children, redirectTo }: ProtectedRouteProps) {
   const { isAuthenticated, user, isLoading } = useAuth();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (isAuthenticated && user) {
-      // User is already logged in, redirect to dashboard
-      navigate('/dashboard', { replace: true });
-    }
-  }, [isAuthenticated, user, navigate]);
 
   // Show loading spinner while checking authentication
   if (isLoading) {
@@ -48,18 +23,20 @@ export function AuthOnlyRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // If user is authenticated, don't render the children (auth page)
+  // If user is authenticated, redirect using centralized navigation logic
   if (isAuthenticated && user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Redirecting to dashboard...</p>
-        </div>
-      </div>
-    );
+    const redirectPath = redirectTo || getAuthenticatedRedirect(user);
+    return <Navigate to={redirectPath} replace />;
   }
 
   // If user is not authenticated, show the auth page
   return <>{children}</>;
+}
+
+/**
+ * AuthOnlyRoute - Only allows access if NOT authenticated
+ * Alias for ProtectedRoute for backward compatibility
+ */
+export function AuthOnlyRoute({ children }: { children: React.ReactNode }) {
+  return <ProtectedRoute>{children}</ProtectedRoute>;
 }

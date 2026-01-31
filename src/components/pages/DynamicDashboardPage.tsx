@@ -168,254 +168,25 @@ export function DynamicDashboardPage() {
     }, 0);
   }, [activeLoansForDisplay]);
 
-  // Check if user is on hold and redirect
-  useEffect(() => {
-    if (user && user.status === 'on_hold') {
-      navigate('/hold-status', { replace: true });
-    }
-  }, [user, navigate]);
-
-  // Load dashboard data
+  // Load dashboard data - consolidated to fetch all data in one flow
   const loadDashboardData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // If user is deleted, redirect to deleted status page
-      if (user?.status === 'deleted') {
-        navigate('/deleted-status', { replace: true });
-        return;
-      }
-
-      // If user is on hold, redirect to hold status page
-      if (user?.status === 'on_hold') {
-        navigate('/hold-status', { replace: true });
-        return;
-      }
-
-      // Priority-based routing: Check applications in priority order
-      try {
-        const applicationsResponse = await apiService.getLoanApplications();
-        if (applicationsResponse.success && applicationsResponse.data && applicationsResponse.data.applications) {
-          const applications = applicationsResponse.data.applications;
-
-          // PRIORITY 1: Check for pending documents (need_document action)
-          // Check if any application has pending documents requested by admin
-          for (const app of applications) {
-            try {
-              // Check validation history for need_document actions
-              const validationResponse = await apiService.request('GET', `/validation/user/history?loanApplicationId=${app.id}`, {});
-              if (validationResponse.status === 'success' && validationResponse.data) {
-                const documentActions = validationResponse.data.filter(
-                  (action: any) => action.action_type === 'need_document' && action.loan_application_id === app.id
-                );
-
-                if (documentActions.length > 0) {
-                  const latestAction = documentActions[0];
-                  const documents = latestAction.action_details?.documents || [];
-
-                  // Check if all documents are uploaded
-                  if (documents.length > 0) {
-                    const docsResponse = await apiService.getLoanDocuments(app.id);
-                    if (docsResponse.success || docsResponse.status === 'success') {
-                      const uploadedDocs = docsResponse.data?.documents || [];
-                      const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-                      const allUploaded = documents.every((doc: string) => {
-                        const normalizedDoc = normalize(doc);
-                        return uploadedDocs.some((uploaded: any) => {
-                          const normalizedUploaded = normalize(uploaded.document_name || '');
-                          return normalizedDoc === normalizedUploaded ||
-                            normalizedDoc.includes(normalizedUploaded) ||
-                            normalizedUploaded.includes(normalizedDoc);
-                        });
-                      });
-
-                      if (!allUploaded) {
-                        console.log('📄 Found pending documents, redirecting to upload page');
-                        navigate(`/loan-application/upload-documents?applicationId=${app.id}`);
-                        return;
-                      }
-                    }
-                  }
-                }
-              }
-            } catch (valError) {
-              console.error('Error checking validation history:', valError);
-              // Continue to next check
-            }
-          }
-
-          // PRIORITY 2: Check for ready_for_disbursement status - show "loan will disburse shortly" page
-          const readyForDisbursementApp = applications.find(
-            (app: any) => app.status === 'ready_for_disbursement' && app.status !== 'ready_to_repeat_disbursal'
-          );
-          if (readyForDisbursementApp) {
-            console.log('✅ Found ready_for_disbursement loan - redirecting to post-disbursal flow');
-            navigate(`/post-disbursal?applicationId=${readyForDisbursementApp.id}`);
-            return;
-          }
-
-          // PRIORITY 2b: Check for other pre-disbursal statuses (qa_verification, follow_up, etc.)
-          const preDisbursalApp = applications.find(
-            (app: any) => app.status === 'qa_verification' || app.status === 'follow_up'
-          );
-          if (preDisbursalApp) {
-            // Check if it has pending documents first
-            try {
-              const validationResponse = await apiService.request('GET', `/validation/user/history?loanApplicationId=${preDisbursalApp.id}`, {});
-              if (validationResponse.status === 'success' && validationResponse.data) {
-                const documentActions = validationResponse.data.filter(
-                  (action: any) => action.action_type === 'need_document' && action.loan_application_id === preDisbursalApp.id
-                );
-                if (documentActions.length > 0) {
-                  const latestAction = documentActions[0];
-                  const documents = latestAction.action_details?.documents || [];
-                  if (documents.length > 0) {
-                    // Check if all uploaded
-                    const docsResponse = await apiService.getLoanDocuments(preDisbursalApp.id);
-                    if (docsResponse.success || docsResponse.status === 'success') {
-                      const uploadedDocs = docsResponse.data?.documents || [];
-                      const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
-                      const allUploaded = documents.every((doc: string) => {
-                        const normalizedDoc = normalize(doc);
-                        return uploadedDocs.some((uploaded: any) => {
-                          const normalizedUploaded = normalize(uploaded.document_name || '');
-                          return normalizedDoc === normalizedUploaded ||
-                            normalizedDoc.includes(normalizedUploaded) ||
-                            normalizedUploaded.includes(normalizedDoc);
-                        });
-                      });
-                      if (!allUploaded) {
-                        navigate(`/loan-application/upload-documents?applicationId=${preDisbursalApp.id}`);
-                        return;
-                      }
-                    }
-                  }
-                }
-              }
-            } catch (err) {
-              // Continue
-            }
-            // If no pending documents, show under review page
-            if (preDisbursalApp.status === 'follow_up' || preDisbursalApp.status === 'qa_verification') {
-              navigate('/application-under-review');
-              return;
-            }
-          }
-
-          // PRIORITY 3: Check if user needs to complete references BEFORE allowing any further action
-          // This ensures references are completed before post-disbursal or any other step
-          try {
-            const refsResponse = await apiService.getUserReferences();
-            const referencesList = refsResponse.data?.references || [];
-            const alternateData = refsResponse.data?.alternate_data;
-            const hasReferences = Array.isArray(referencesList) && referencesList.length >= 3;
-            const hasAlternateMobile = alternateData?.alternate_mobile ? true : false;
-            
-            // If user doesn't have 3 references or alternate mobile, redirect to references page
-            // This applies to any active loan (pre-disbursal, disbursal, etc.)
-            // But NOT for cleared/cancelled/account_manager/overdue loans
-            const activeLoan = applications.find(
-              (app: any) => !['cleared', 'cancelled', 'rejected', 'account_manager', 'overdue'].includes(app.status)
-            );
-            
-            if (activeLoan && (!hasReferences || !hasAlternateMobile)) {
-              console.log(`📋 User missing references (has: ${hasReferences}, count: ${referencesList.length}) or alternate mobile (${hasAlternateMobile}), redirecting to references page`);
-              navigate('/user-references');
-              return;
-            }
-          } catch (refError) {
-            console.error('Error checking references:', refError);
-            // Continue with flow if error checking references
-          }
-
-          // PRIORITY 4: Check for post-disbursal (disbursal, repeat_disbursal, ready_to_repeat_disbursal statuses)
-          // NOTE: We no longer automatically redirect - users can navigate freely to dashboard
-          // The dashboard will show their post-disbursal loans, and they can navigate to post-disbursal flow when ready
-          const disbursalApp = applications.find(
-            (app: any) => app.status === 'disbursal' || app.status === 'repeat_disbursal' || app.status === 'ready_to_repeat_disbursal'
-          );
-          if (disbursalApp) {
-            console.log(`✅ Found ${disbursalApp.status} loan - user can access dashboard and navigate to post-disbursal when ready`);
-            // Don't redirect - allow user to stay on dashboard
-          }
-
-          // PRIORITY 5: Check for account_manager status
-          // Note: We no longer automatically redirect to repayment schedule
-          // Users can access dashboard and manually navigate to repayment schedule via buttons
-          const accountManagerApp = applications.find(
-            (app: any) => app.status === 'account_manager' || app.status === 'overdue'
-          );
-          if (accountManagerApp) {
-            console.log('✅ Found account_manager loan, allowing dashboard access. User can navigate to repayment schedule via buttons.');
-            // Don't redirect - let user stay on dashboard
-          }
-
-          // PRIORITY 6: Check for applications that need user action (incomplete steps)
-          // User should complete all steps before application goes to admin review
-          const incompleteApp = applications.find(
-            (app: any) => {
-              // Check if app has incomplete steps that user needs to complete
-              const step = app.current_step;
-              // If step is references, user needs to complete references first
-              if (step === 'references' || step === 'bank-details' || step === 'bank_details') {
-                return true;
-              }
-              return false;
-            }
-          );
-          if (incompleteApp) {
-            const step = incompleteApp.current_step;
-            console.log(`📋 Found incomplete application at step: ${step}`);
-            
-            if (step === 'references') {
-              navigate('/user-references');
-              return;
-            } else if (step === 'bank-details' || step === 'bank_details') {
-              navigate(`/loan-application/steps?applicationId=${incompleteApp.id}`);
-              return;
-            }
-          }
-
-          // PRIORITY 7: Check for under_review or submitted status (only if step is complete)
-          // NOTE: ready_to_repeat_disbursal should NOT redirect here - it's handled in PRIORITY 3
-          const underReviewApp = applications.find(
-            (app: any) => (app.status === 'under_review' || app.status === 'submitted') && 
-                          app.status !== 'ready_to_repeat_disbursal' &&
-                          (app.current_step === 'complete' || !app.current_step)
-          );
-          if (underReviewApp) {
-            navigate('/application-under-review');
-            return;
-          }
-        }
-      } catch (appError) {
-        console.error('Error checking applications:', appError);
-        // Continue to load dashboard
-      }
+      // Note: Status-based redirects (on_hold, deleted) are now handled by StatusGuard in App.tsx
+      // No need to check here - StatusGuard will redirect before this component renders
 
       const response = await apiService.getDashboardSummary();
 
       if (response.status === 'success' && response.data) {
-        // Check if user is deleted
-        if ((response.data as any).deleted || (response.data as any).deleted_message) {
-          // Redirect to deleted status page
-          navigate('/deleted-status', { replace: true });
-          return;
-        }
-
         setDashboardData(response.data);
-
-        // Check if user can apply for new loan
         if ((response.data as any).loan_status) {
           setCanApplyForLoan((response.data as any).loan_status.can_apply);
         }
       } else if (response.status === 'profile_incomplete') {
         const incompleteData = response.data as any;
         console.log('Profile incomplete, redirecting to completion:', incompleteData);
-
-        // Redirect to profile completion
         navigate('/profile-completion');
         return;
       } else {
@@ -425,7 +196,7 @@ export function DynamicDashboardPage() {
       // Check for pending credit limit increase
       try {
         const creditLimitResponse = await apiService.getPendingCreditLimit();
-        if (creditLimitResponse.success && creditLimitResponse.hasPendingLimit && creditLimitResponse.data) {
+        if (creditLimitResponse.status === 'success' && (creditLimitResponse as any).hasPendingLimit && creditLimitResponse.data) {
           setPendingCreditLimit(creditLimitResponse.data);
           setShowCreditLimitModal(true);
         }
@@ -460,72 +231,6 @@ export function DynamicDashboardPage() {
 
         console.log('✅ Unique applications:', uniqueApplications);
 
-        // Check for account_manager status - redirect to repayment schedule
-        // But don't redirect if the loan is already cleared
-        const accountManagerApp = uniqueApplications.find((app: any) =>
-          app.status === 'account_manager'
-        );
-
-        if (accountManagerApp) {
-          console.log('✅ Found account_manager loan, allowing dashboard access');
-          // Don't redirect - let user stay on dashboard
-          // User can navigate to repayment schedule via "View Repayment" buttons
-        }
-
-        // If loan is cleared, keep user on dashboard (don't redirect)
-        const clearedApp = uniqueApplications.find((app: any) =>
-          app.status === 'cleared'
-        );
-        // Cleared loans stay on dashboard - user can apply for new loan
-
-        // Check for ready_for_disbursement or ready_to_repeat_disbursal status - show waiting message (admin needs to add transaction)
-        const readyForDisbursementApp = uniqueApplications.find((app: any) =>
-          app.status === 'ready_for_disbursement' || app.status === 'ready_to_repeat_disbursal'
-        );
-
-        if (readyForDisbursementApp) {
-          // Don't redirect - just show the dashboard with a message
-          // The loan will appear in "Applied Loans" section
-          // Once admin adds transaction, status will change to repeat_disbursal/disbursal and user will see post-disbursal flow
-        }
-
-        // Check for disbursal status - redirect to post-disbursal flow
-        // But check if user has already completed all steps first
-        const disbursalApp = uniqueApplications.find((app: any) =>
-          app.status === 'disbursal' || app.status === 'repeat_disbursal'
-        );
-
-        if (disbursalApp) {
-          // Check if user has completed step 6 (agreement signed)
-          // If yes, redirect to post-disbursal to show "You will get funds shortly" message
-          try {
-            const progressResponse = await apiService.getPostDisbursalProgress(disbursalApp.id);
-            if (progressResponse.success && progressResponse.data) {
-              const progress = progressResponse.data;
-              // If step 6 completed and agreement signed, redirect to show confirmation
-              if ((progress.current_step >= 6 && progress.agreement_signed) || progress.current_step >= 7) {
-                console.log('✅ Post-disbursal completed, redirecting to confirmation page...');
-                // Redirect to post-disbursal to show "You will get funds shortly" message
-                navigate(`/post-disbursal?applicationId=${disbursalApp.id}`);
-                return;
-              } else {
-                // User hasn't completed all steps - redirect to post-disbursal
-                navigate(`/post-disbursal?applicationId=${disbursalApp.id}`);
-                return;
-              }
-            } else {
-              // Can't determine progress - redirect to post-disbursal
-              navigate(`/post-disbursal?applicationId=${disbursalApp.id}`);
-              return;
-            }
-          } catch (error) {
-            console.error('Error checking progress:', error);
-            // On error, redirect to post-disbursal
-            navigate(`/post-disbursal?applicationId=${disbursalApp.id}`);
-            return;
-          }
-        }
-
         // Split applications into applied loans and running loans
         // Applied: Pre-disbursal statuses (submitted, under_review, follow_up, ready_for_disbursement, ready_to_repeat_disbursal, qa_verification)
         const applied = uniqueApplications.filter((app: any) =>
@@ -545,7 +250,7 @@ export function DynamicDashboardPage() {
           .filter((app: any) => app.status === 'follow_up')
           .map(async (app: any) => {
             try {
-              const validationResponse = await apiService.request('GET', `/validation/user/history?loanApplicationId=${app.id}`, {});
+              const validationResponse = await apiService.request<any>('GET', `/validation/user/history?loanApplicationId=${app.id}`, {});
               if (validationResponse.status === 'success' && validationResponse.data) {
                 const documentActions = validationResponse.data.filter(
                   (action: any) => action.action_type === 'need_document' && action.loan_application_id === app.id
@@ -626,29 +331,22 @@ export function DynamicDashboardPage() {
     }
   }, []);
 
+  // Consolidated effect: Load dashboard data and pending applications together
+  // Only runs when user changes (not on every render) to prevent duplicate API calls
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !user) {
       navigate('/auth');
       return;
     }
 
-    // Load all dashboard data in one go
+    // Load dashboard data only if not already loaded
     if (!dashboardData) {
       loadDashboardData();
     }
 
-    // Fetch pending applications
-    if (user) {
-      fetchPendingApplications();
-    }
-  }, [isAuthenticated, user]);
-
-  // Refresh pending applications when component mounts (in case user deleted an application)
-  useEffect(() => {
-    if (isAuthenticated && user) {
-      fetchPendingApplications();
-    }
-  }, []); // Empty dependency array means this runs once when component mounts
+    // Fetch pending applications - this is separate data that may need refreshing
+    fetchPendingApplications();
+  }, [isAuthenticated, user?.id]); // Only depend on user.id to prevent unnecessary re-fetches
 
   // Format currency
   const formatCurrency = (amount: number) => {
@@ -682,7 +380,7 @@ export function DynamicDashboardPage() {
   const handleDownloadNOC = async (loanId: number, applicationNumber: string) => {
     try {
       setDownloadingNOC(loanId);
-      
+
       // Try to download PDF directly (backend will check if PDF exists in S3)
       // If it doesn't exist, backend will generate it automatically
       const blob = await apiService.downloadNOCPDF(loanId);
@@ -760,7 +458,7 @@ export function DynamicDashboardPage() {
   const hasActiveOrPendingLoans = () => {
     const hasActiveLoans = active_loans && active_loans.length > 0;
     // Filter out cleared and cancelled loans from pendingApplications when checking if user can apply
-    const activePendingApps = pendingApplications?.filter((app: any) => 
+    const activePendingApps = pendingApplications?.filter((app: any) =>
       app.status !== 'cleared' && app.status !== 'cancelled'
     ) || [];
     const hasPendingApplications = activePendingApps.length > 0;
@@ -955,15 +653,15 @@ export function DynamicDashboardPage() {
                                   loan.status === 'ready_to_repeat_disbursal' ? 'bg-green-100 text-green-800' :
                                     loan.status === 'repeat_disbursal' ? 'bg-orange-100 text-orange-800' :
                                       loan.status === 'account_manager' ? 'bg-emerald-100 text-emerald-800' :
-                                      loan.status === 'overdue' ? 'bg-red-100 text-red-800' :
-                                        'bg-gray-100 text-gray-800'
+                                        loan.status === 'overdue' ? 'bg-red-100 text-red-800' :
+                                          'bg-gray-100 text-gray-800'
                             }`}
                         >
                           {loan.status === 'account_manager' ? 'Active' :
-                          loan.status === 'overdue' ? 'Overdue' :
-                            loan.status === 'repeat_disbursal' ? 'Repeat Disbursal' :
-                              loan.status === 'ready_to_repeat_disbursal' ? 'Ready for Repeat Disbursal' :
-                                loan.status.replace('_', ' ')}
+                            loan.status === 'overdue' ? 'Overdue' :
+                              loan.status === 'repeat_disbursal' ? 'Repeat Disbursal' :
+                                loan.status === 'ready_to_repeat_disbursal' ? 'Ready for Repeat Disbursal' :
+                                  loan.status.replace('_', ' ')}
                         </Badge>
                       </div>
 
@@ -1045,7 +743,7 @@ export function DynamicDashboardPage() {
                                 const alternateData = refsResponse.data?.alternate_data;
                                 const hasReferences = Array.isArray(referencesList) && referencesList.length >= 3;
                                 const hasAlternateMobile = alternateData?.alternate_mobile ? true : false;
-                                
+
                                 if (!hasReferences || !hasAlternateMobile) {
                                   // References not complete - redirect to complete them
                                   console.log('📋 References pending, redirecting to references page');
@@ -1057,6 +755,10 @@ export function DynamicDashboardPage() {
                               }
                               // References complete - go to under review page
                               navigate('/application-under-review');
+                            } else if (loan.status === 'ready_for_disbursement') {
+                              // Loan is ready for disbursement - navigate to post-disbursal flow
+                              console.log('✅ Loan ready for disbursement, navigating to post-disbursal flow');
+                              navigate(`/post-disbursal?applicationId=${loan.id}`);
                             } else {
                               navigate('/loan-application/kyc-verification', {
                                 state: { applicationId: loan.id }
@@ -1192,7 +894,7 @@ export function DynamicDashboardPage() {
                             const alternateData = refsResponse.data?.alternate_data;
                             const hasReferences = Array.isArray(referencesList) && referencesList.length >= 3;
                             const hasAlternateMobile = alternateData?.alternate_mobile ? true : false;
-                            
+
                             if (!hasReferences || !hasAlternateMobile) {
                               // References not complete - redirect to complete them
                               console.log('📋 References pending, redirecting to references page');
@@ -1204,6 +906,10 @@ export function DynamicDashboardPage() {
                           }
                           // References complete - go to under review page
                           navigate('/application-under-review');
+                        } else if (loan.status === 'ready_for_disbursement') {
+                          // Loan is ready for disbursement - navigate to post-disbursal flow
+                          console.log('✅ Loan ready for disbursement, navigating to post-disbursal flow');
+                          navigate(`/post-disbursal?applicationId=${loan.id}`);
                         } else {
                           navigate('/loan-application/kyc-verification', {
                             state: { applicationId: loan.id }
@@ -1741,8 +1447,8 @@ export function DynamicDashboardPage() {
                 <Badge
                   className={`text-base px-6 py-2 ${selectedLoanDetails.status === 'cleared' ? 'bg-green-500 text-white' :
                     selectedLoanDetails.status === 'account_manager' ? 'bg-blue-500 text-white' :
-                    selectedLoanDetails.status === 'overdue' ? 'bg-red-500 text-white' :
-                      'bg-yellow-500 text-white'
+                      selectedLoanDetails.status === 'overdue' ? 'bg-red-500 text-white' :
+                        'bg-yellow-500 text-white'
                     }`}
                 >
                   {selectedLoanDetails.status.replace('_', ' ').toUpperCase()}

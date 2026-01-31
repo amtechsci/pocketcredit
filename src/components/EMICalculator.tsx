@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
-import { Calculator, PieChart } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Calculator, PieChart, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Slider } from './ui/slider';
 import { Label } from './ui/label';
+import { apiService } from '../services/api';
 
 export function EMICalculator() {
   const [loanAmount, setLoanAmount] = useState([500000]);
@@ -14,38 +15,64 @@ export function EMICalculator() {
     totalInterest: 0,
     totalAmount: 0,
   });
+  
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const calculateEMI = () => {
+  // Debounced calculation function
+  const calculateEMI = useCallback(async () => {
     const principal = loanAmount[0];
-    const rate = interestRate[0] / 12 / 100; // Monthly interest rate
+    const rate = interestRate[0];
     const months = tenure[0];
 
-    if (rate === 0) {
-      const emi = principal / months;
-      setEmiDetails({
-        emi: Math.round(emi),
-        totalInterest: 0,
-        totalAmount: principal,
-      });
-    } else {
-      const emi = (principal * rate * Math.pow(1 + rate, months)) / (Math.pow(1 + rate, months) - 1);
-      const totalAmount = emi * months;
-      const totalInterest = totalAmount - principal;
-
-      setEmiDetails({
-        emi: Math.round(emi),
-        totalInterest: Math.round(totalInterest),
-        totalAmount: Math.round(totalAmount),
-      });
+    // Validate inputs
+    if (principal <= 0 || months <= 0) {
+      setEmiDetails({ emi: 0, totalInterest: 0, totalAmount: 0 });
+      return;
     }
-  };
 
-  useEffect(() => {
-    calculateEMI();
+    setLoading(true);
+    setError(null);
+
+    try {
+      // Call backend API for calculation
+      const response = await apiService.getEMICalculation(principal, rate, months);
+      
+      if (response.success && response.data) {
+        setEmiDetails({
+          emi: response.data.emi || 0,
+          totalInterest: response.data.totalInterest || 0,
+          totalAmount: response.data.totalAmount || 0,
+        });
+      } else {
+        throw new Error(response.message || 'Failed to calculate EMI');
+      }
+    } catch (err: any) {
+      console.error('Error calculating EMI:', err);
+      setError(err.message || 'Failed to calculate EMI. Please try again.');
+      // Fallback to zero values on error
+      setEmiDetails({ emi: 0, totalInterest: 0, totalAmount: 0 });
+    } finally {
+      setLoading(false);
+    }
   }, [loanAmount, interestRate, tenure]);
 
-  const interestPercentage = ((emiDetails.totalInterest / emiDetails.totalAmount) * 100).toFixed(1);
-  const principalPercentage = ((loanAmount[0] / emiDetails.totalAmount) * 100).toFixed(1);
+  useEffect(() => {
+    // Debounce API calls (wait 300ms after user stops changing values)
+    const timeoutId = setTimeout(() => {
+      calculateEMI();
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [calculateEMI]);
+
+  // Calculate percentages with division by zero protection
+  const interestPercentage = emiDetails.totalAmount > 0 
+    ? ((emiDetails.totalInterest / emiDetails.totalAmount) * 100).toFixed(1)
+    : '0.0';
+  const principalPercentage = emiDetails.totalAmount > 0
+    ? ((loanAmount[0] / emiDetails.totalAmount) * 100).toFixed(1)
+    : '0.0';
 
   return (
     <div className="space-y-6">
@@ -137,9 +164,18 @@ export function EMICalculator() {
                   <Calculator className="w-5 h-5" style={{ color: '#0052FF' }} />
                   <span className="text-sm text-gray-600">Monthly EMI</span>
                 </div>
-                <div className="text-3xl font-bold" style={{ color: '#0052FF' }}>
-                  ₹{emiDetails.emi.toLocaleString()}
-                </div>
+                {loading ? (
+                  <div className="flex items-center justify-center gap-2">
+                    <Loader2 className="w-6 h-6 animate-spin" style={{ color: '#0052FF' }} />
+                    <span className="text-sm text-gray-600">Calculating...</span>
+                  </div>
+                ) : error ? (
+                  <div className="text-sm text-red-600">{error}</div>
+                ) : (
+                  <div className="text-3xl font-bold" style={{ color: '#0052FF' }}>
+                    ₹{emiDetails.emi.toLocaleString()}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4 mb-6">

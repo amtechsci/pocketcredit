@@ -1,21 +1,60 @@
 /**
  * Loan Calculation Utilities
  * Centralized calculation logic for loan amounts, interest, and fees
+ * Uses decimal.js for precise financial calculations
  */
 
-const GST_RATE = 0.18; // 18% GST
+const Decimal = require('decimal.js');
+
+// Financial Constants - Centralized
+const GST_RATE = new Decimal(0.18); // 18% GST
+const EXTENSION_FEE_RATE = new Decimal(0.21); // 21% of principal (for extensions)
 
 /**
  * Ensure monetary value has exactly 2 decimal places (rounds to nearest cent)
  * For loan applications, all monetary values should have 2 decimal places
- * @param {number} value - Numeric value to format
+ * Uses Decimal for precision
+ * @param {number|string|Decimal} value - Numeric value to format
  * @returns {number} Value with exactly 2 decimal places
  */
 function toDecimal2(value) {
-  if (value === null || value === undefined || isNaN(value)) {
+  if (value === null || value === undefined) {
     return 0;
   }
-  return parseFloat(parseFloat(value).toFixed(2));
+  try {
+    const decimal = new Decimal(value);
+    if (decimal.isNaN()) {
+      return 0;
+    }
+    // Round to 2 decimal places and convert to number
+    return parseFloat(decimal.toFixed(2));
+  } catch (e) {
+    return 0;
+  }
+}
+
+/**
+ * Convert Decimal to number with 2 decimal places (for API responses)
+ * @param {Decimal} value - Decimal value
+ * @returns {number} Number with 2 decimal places
+ */
+function decimalToNumber(value) {
+  if (!value || !(value instanceof Decimal)) {
+    return 0;
+  }
+  return parseFloat(value.toFixed(2));
+}
+
+/**
+ * Convert Decimal to string with 2 decimal places (for API responses)
+ * @param {Decimal} value - Decimal value
+ * @returns {string} String with 2 decimal places
+ */
+function decimalToString(value) {
+  if (!value || !(value instanceof Decimal)) {
+    return '0.00';
+  }
+  return value.toFixed(2);
 }
 
 /**
@@ -405,21 +444,22 @@ function calculateInterestDays(planData, userData, calculationDate = null) {
 
 /**
  * Calculate all loan values based on principal, fees, and days
+ * Uses Decimal for precise financial calculations
  * @param {Object} loanData - Loan data object
  * @param {number} loanData.loan_amount - Principal loan amount
  * @param {number} loanData.processing_fee_percent - Processing fee percentage
  * @param {number} loanData.interest_percent_per_day - Daily interest percentage
  * @param {number} days - Number of days for interest calculation
- * @returns {Object} Calculated values
+ * @returns {Object} Calculated values (all as numbers with 2 decimal places)
  */
 function calculateLoanValues(loanData, days) {
-  // Parse values to ensure they're numbers
-  const principal = parseFloat(loanData.loan_amount || 0);
-  const pfPercent = parseFloat(loanData.processing_fee_percent || 0);
-  const interestPercentPerDay = parseFloat(loanData.interest_percent_per_day || 0);
+  // Parse values to Decimal for precision
+  const principal = new Decimal(loanData.loan_amount || 0);
+  const pfPercent = new Decimal(loanData.processing_fee_percent || 0);
+  const interestPercentPerDay = new Decimal(loanData.interest_percent_per_day || 0);
 
   // Validate inputs
-  if (principal <= 0) {
+  if (principal.lte(0)) {
     throw new Error('Invalid principal amount');
   }
 
@@ -428,31 +468,32 @@ function calculateLoanValues(loanData, days) {
   }
 
   // Calculate processing fee (deducted from principal)
-  const processingFee = (principal * pfPercent) / 100;
+  // Processing Fee = Principal × Processing Fee Percent / 100
+  const processingFee = principal.mul(pfPercent).div(100);
 
   // Calculate disbursement amount (what user actually receives)
   // User receives: Principal - Processing Fee
-  const disbAmount = principal - processingFee;
+  const disbAmount = principal.minus(processingFee);
 
   // Calculate interest on principal amount
   // Interest = Principal × Interest Rate (decimal) × Days
   // Note: interest_percent_per_day is already in decimal format (e.g., 0.001 = 0.1% per day)
-  const interest = principal * interestPercentPerDay * days;
+  const interest = principal.mul(interestPercentPerDay).mul(days);
 
   // Calculate total amount to be repaid
   // User repays: Principal + Interest (Processing fee already deducted upfront)
-  const totalAmount = principal + interest;
+  const totalAmount = principal.plus(interest);
 
   return {
-    principal: parseFloat(principal.toFixed(2)),
-    processingFee: parseFloat(processingFee.toFixed(2)),
-    processingFeePercent: pfPercent,
-    disbAmount: parseFloat(disbAmount.toFixed(2)),
-    interest: parseFloat(interest.toFixed(2)),
-    interestPercentPerDay: interestPercentPerDay,
+    principal: decimalToNumber(principal),
+    processingFee: decimalToNumber(processingFee),
+    processingFeePercent: parseFloat(pfPercent.toString()),
+    disbAmount: decimalToNumber(disbAmount),
+    interest: decimalToNumber(interest),
+    interestPercentPerDay: parseFloat(interestPercentPerDay.toString()),
     days: days,
-    totalAmount: parseFloat(totalAmount.toFixed(2)),
-    totalRepayable: parseFloat(totalAmount.toFixed(2))
+    totalAmount: decimalToNumber(totalAmount),
+    totalRepayable: decimalToNumber(totalAmount)
   };
 }
 
@@ -677,14 +718,14 @@ async function updateLoanCalculation(loanIdOrDb, loanIdOrUpdates, updatesParam) 
  * @returns {Object} Complete calculation breakdown
  */
 function calculateCompleteLoanValues(loanData, planData, userData = {}, options = {}) {
-  // Validate inputs
-  const principal = parseFloat(loanData.loan_amount || 0);
-  if (principal <= 0) {
+  // Validate inputs - use Decimal for precision
+  const principal = new Decimal(loanData.loan_amount || 0);
+  if (principal.lte(0)) {
     throw new Error('Invalid principal amount');
   }
 
-  const interestPercentPerDay = parseFloat(planData.interest_percent_per_day || 0);
-  if (interestPercentPerDay < 0) {
+  const interestPercentPerDay = new Decimal(planData.interest_percent_per_day || 0);
+  if (interestPercentPerDay.lt(0)) {
     throw new Error('Invalid interest rate');
   }
 
@@ -693,10 +734,11 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
   const deductFromDisbursal = [];
   const addToTotal = [];
 
-  let totalDisbursalFee = 0; // Sum of fee amounts (without GST)
-  let totalDisbursalFeeGST = 0; // Sum of GST on deduct fees
-  let totalRepayableFee = 0; // Sum of fee amounts (without GST)
-  let totalRepayableFeeGST = 0; // Sum of GST on add fees
+  // Use Decimal for all fee calculations
+  let totalDisbursalFee = new Decimal(0); // Sum of fee amounts (without GST)
+  let totalDisbursalFeeGST = new Decimal(0); // Sum of GST on deduct fees
+  let totalRepayableFee = new Decimal(0); // Sum of fee amounts (without GST)
+  let totalRepayableFeeGST = new Decimal(0); // Sum of GST on add fees
 
   // Get EMI count and determine if this is a multi-EMI loan
   const emiCount = parseInt(planData.emi_count) || 1;
@@ -704,56 +746,54 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
   const planType = planData.plan_type || 'single';
   const isMultiEmi = planType === 'multi_emi';
 
-  // Calculate each fee with GST
+  // Calculate each fee with GST using Decimal
   fees.forEach(fee => {
-    const feePercent = parseFloat(fee.fee_percent || 0);
-    const feeAmount = Math.round((principal * feePercent) / 100 * 100) / 100;
-    const gstAmount = Math.round(feeAmount * GST_RATE * 100) / 100;
-    const totalWithGST = Math.round((feeAmount + gstAmount) * 100) / 100;
+    const feePercent = new Decimal(fee.fee_percent || 0);
+    // Fee Amount = Principal × Fee Percent / 100
+    const feeAmount = principal.mul(feePercent).div(100);
+    // GST Amount = Fee Amount × GST Rate
+    const gstAmount = feeAmount.mul(GST_RATE);
+    // Total with GST = Fee Amount + GST Amount
+    const totalWithGST = feeAmount.plus(gstAmount);
 
     const feeDetail = {
       fee_name: fee.fee_name || 'Unknown Fee',
-      fee_percent: feePercent,
-      fee_amount: feeAmount,
-      gst_amount: gstAmount,
-      total_with_gst: totalWithGST
+      fee_percent: parseFloat(feePercent.toString()),
+      fee_amount: decimalToNumber(feeAmount),
+      gst_amount: decimalToNumber(gstAmount),
+      total_with_gst: decimalToNumber(totalWithGST)
     };
 
     if (fee.application_method === 'deduct_from_disbursal') {
       deductFromDisbursal.push(feeDetail);
-      totalDisbursalFee += feeAmount;
-      totalDisbursalFeeGST += gstAmount;
+      totalDisbursalFee = totalDisbursalFee.plus(feeAmount);
+      totalDisbursalFeeGST = totalDisbursalFeeGST.plus(gstAmount);
     } else if (fee.application_method === 'add_to_total') {
       // Only multiply fees for actual multi-EMI loans (plan_type === 'multi_emi')
       const multiplier = isMultiEmi ? emiCount : 1;
-      const multipliedFeeAmount = feeAmount * multiplier;
-      const multipliedGstAmount = gstAmount * multiplier;
-      const multipliedTotalWithGST = totalWithGST * multiplier;
+      const multipliedFeeAmount = feeAmount.mul(multiplier);
+      const multipliedGstAmount = gstAmount.mul(multiplier);
+      const multipliedTotalWithGST = totalWithGST.mul(multiplier);
 
       addToTotal.push({
         ...feeDetail,
-        fee_amount: multipliedFeeAmount,
-        gst_amount: multipliedGstAmount,
-        total_with_gst: multipliedTotalWithGST,
-        base_fee_amount: feeAmount,
+        fee_amount: decimalToNumber(multipliedFeeAmount),
+        gst_amount: decimalToNumber(multipliedGstAmount),
+        total_with_gst: decimalToNumber(multipliedTotalWithGST),
+        base_fee_amount: decimalToNumber(feeAmount),
         emi_count: emiCount
       });
-      totalRepayableFee += multipliedFeeAmount;
-      totalRepayableFeeGST += multipliedGstAmount;
+      totalRepayableFee = totalRepayableFee.plus(multipliedFeeAmount);
+      totalRepayableFeeGST = totalRepayableFeeGST.plus(multipliedGstAmount);
     }
   });
 
-  // Round totals
-  totalDisbursalFee = Math.round(totalDisbursalFee * 100) / 100;
-  totalDisbursalFeeGST = Math.round(totalDisbursalFeeGST * 100) / 100;
-  totalRepayableFee = Math.round(totalRepayableFee * 100) / 100;
-  totalRepayableFeeGST = Math.round(totalRepayableFeeGST * 100) / 100;
-
-  const totalDisbursalDeduction = Math.round((totalDisbursalFee + totalDisbursalFeeGST) * 100) / 100;
-  const totalRepayableAddition = Math.round((totalRepayableFee + totalRepayableFeeGST) * 100) / 100;
+  // Calculate totals using Decimal
+  const totalDisbursalDeduction = totalDisbursalFee.plus(totalDisbursalFeeGST);
+  const totalRepayableAddition = totalRepayableFee.plus(totalRepayableFeeGST);
 
   // Calculate disbursal amount
-  const disbursalAmount = Math.round((principal - totalDisbursalDeduction) * 100) / 100;
+  const disbursalAmount = principal.minus(totalDisbursalDeduction);
 
   // Calculate interest days
   let daysResult;
@@ -771,15 +811,23 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
 
   const { days, calculationMethod, repaymentDate } = daysResult;
 
-  // Calculate interest on principal
-  const interest = Math.round(principal * interestPercentPerDay * days * 100) / 100;
+  // Calculate interest on principal using Decimal
+  // Interest = Principal × Interest Rate Per Day × Days
+  const interest = principal.mul(interestPercentPerDay).mul(days);
 
-  // Calculate total repayable
-  const totalRepayable = Math.round((principal + interest + totalRepayableAddition) * 100) / 100;
+  // Calculate total repayable using Decimal
+  const totalRepayable = principal.plus(interest).plus(totalRepayableAddition);
 
   // Build calculation explanation strings
-  const disbursalCalculation = `Principal (₹${principal.toFixed(2)}) - Deduct Fees (₹${totalDisbursalDeduction.toFixed(2)}) = ₹${disbursalAmount.toFixed(2)}`;
-  const totalBreakdown = `Principal (₹${principal.toFixed(2)}) + Interest (₹${interest.toFixed(2)}) + Repayable Fees (₹${totalRepayableAddition.toFixed(2)}) = ₹${totalRepayable.toFixed(2)}`;
+  const principalNum = decimalToNumber(principal);
+  const disbursalDeductionNum = decimalToNumber(totalDisbursalDeduction);
+  const disbursalAmountNum = decimalToNumber(disbursalAmount);
+  const interestNum = decimalToNumber(interest);
+  const repayableAdditionNum = decimalToNumber(totalRepayableAddition);
+  const totalRepayableNum = decimalToNumber(totalRepayable);
+
+  const disbursalCalculation = `Principal (₹${principalNum.toFixed(2)}) - Deduct Fees (₹${disbursalDeductionNum.toFixed(2)}) = ₹${disbursalAmountNum.toFixed(2)}`;
+  const totalBreakdown = `Principal (₹${principalNum.toFixed(2)}) + Interest (₹${interestNum.toFixed(2)}) + Repayable Fees (₹${repayableAdditionNum.toFixed(2)}) = ₹${totalRepayableNum.toFixed(2)}`;
 
   // Format calculation date (no timezone conversion)
   const calculationDateStr = options.calculationDate ? parseDateToString(options.calculationDate) : getTodayString();
@@ -788,33 +836,33 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
   const repaymentDateStr = repaymentDate ? formatDateToString(repaymentDate) : null;
 
   return {
-    principal: principal,
+    principal: principalNum,
     fees: {
       deductFromDisbursal: deductFromDisbursal,
       addToTotal: addToTotal
     },
     totals: {
-      disbursalFee: totalDisbursalFee,
-      disbursalFeeGST: totalDisbursalFeeGST,
-      repayableFee: totalRepayableFee,
-      repayableFeeGST: totalRepayableFeeGST,
-      totalDisbursalDeduction: totalDisbursalDeduction,
-      totalRepayableAddition: totalRepayableAddition
+      disbursalFee: decimalToNumber(totalDisbursalFee),
+      disbursalFeeGST: decimalToNumber(totalDisbursalFeeGST),
+      repayableFee: decimalToNumber(totalRepayableFee),
+      repayableFeeGST: decimalToNumber(totalRepayableFeeGST),
+      totalDisbursalDeduction: disbursalDeductionNum,
+      totalRepayableAddition: repayableAdditionNum
     },
     disbursal: {
-      amount: disbursalAmount,
+      amount: disbursalAmountNum,
       calculation: disbursalCalculation
     },
     interest: {
-      amount: interest,
+      amount: interestNum,
       days: days,
-      rate_per_day: interestPercentPerDay,
+      rate_per_day: parseFloat(interestPercentPerDay.toString()),
       calculation_method: calculationMethod,
       calculation_date: calculationDateStr,
       repayment_date: repaymentDateStr
     },
     total: {
-      repayable: totalRepayable,
+      repayable: totalRepayableNum,
       breakdown: totalBreakdown
     }
   };
@@ -836,6 +884,12 @@ module.exports = {
   parseDateComponents,
   formatDateToString,
   // Monetary formatting
-  toDecimal2
+  toDecimal2,
+  // Decimal utilities
+  decimalToNumber,
+  decimalToString,
+  // Financial constants (exported as numbers for compatibility)
+  GST_RATE: parseFloat(GST_RATE.toString()),
+  EXTENSION_FEE_RATE: parseFloat(EXTENSION_FEE_RATE.toString())
 };
 

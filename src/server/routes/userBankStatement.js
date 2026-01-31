@@ -848,15 +848,15 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Bank statement status check error:', error);
 
-    // If error is about missing column, table needs migration
+    // If error is about missing column, table schema may be outdated
     if (error.message && error.message.includes('Unknown column')) {
-      console.warn('⚠️  Table schema is outdated, needs migration');
+      console.warn('⚠️  Table schema may be outdated');
       return res.json({
         success: true,
         data: {
           hasStatement: false,
           status: null,
-          needsMigration: true
+          schemaOutdated: true
         }
       });
     }
@@ -1569,138 +1569,13 @@ router.get('/bank-data/success', async (req, res) => {
 /**
  * POST /api/user/init-bank-statement-table
  * Initialize user_bank_statements table (one-time setup)
+ * DEPRECATED: Table schema should be managed separately
  */
 router.post('/init-bank-statement-table', async (req, res) => {
-  try {
-    await initializeDatabase();
-
-    // Check if table exists
-    const tables = await executeQuery(`SHOW TABLES LIKE 'user_bank_statements'`);
-
-    if (tables && tables.length > 0) {
-      // Table exists, add new columns if missing
-      console.log('Table exists, checking for new columns...');
-
-      const columnsToAdd = [
-        { name: 'request_id', definition: 'INT DEFAULT NULL AFTER client_ref_num' },
-        { name: 'txn_id', definition: 'VARCHAR(255) DEFAULT NULL AFTER request_id' },
-        { name: 'expires_at', definition: 'TIMESTAMP DEFAULT NULL AFTER digitap_url' },
-        { name: 'transaction_data', definition: 'JSON DEFAULT NULL AFTER status' }
-      ];
-
-      for (const col of columnsToAdd) {
-        try {
-          await executeQuery(`ALTER TABLE user_bank_statements ADD COLUMN ${col.name} ${col.definition}`);
-          console.log(`✅ Added column: ${col.name}`);
-        } catch (err) {
-          if (err.message && err.message.includes('Duplicate column')) {
-            console.log(`   Column ${col.name} already exists`);
-          } else {
-            throw err;
-          }
-        }
-      }
-
-      // Add index for request_id if doesn't exist
-      try {
-        await executeQuery(`ALTER TABLE user_bank_statements ADD INDEX idx_request_id (request_id)`);
-        console.log('✅ Added index: idx_request_id');
-      } catch (err) {
-        if (err.message && err.message.includes('Duplicate key')) {
-          console.log('   Index idx_request_id already exists');
-        }
-      }
-
-      // Add index for txn_id if doesn't exist
-      try {
-        await executeQuery(`ALTER TABLE user_bank_statements ADD INDEX idx_txn_id (txn_id)`);
-        console.log('✅ Added index: idx_txn_id');
-      } catch (err) {
-        if (err.message && err.message.includes('Duplicate key')) {
-          console.log('   Index idx_txn_id already exists');
-        }
-      }
-
-      // Update status enum to include 'InProgress'
-      try {
-        await executeQuery(`ALTER TABLE user_bank_statements MODIFY status ENUM('pending', 'processing', 'completed', 'failed', 'InProgress') DEFAULT 'pending'`);
-        console.log('✅ Updated status enum');
-      } catch (err) {
-        console.log('   Status enum already updated or error:', err.message);
-      }
-
-      return res.json({
-        success: true,
-        message: 'user_bank_statements table updated with new columns'
-      });
-    }
-
-    // Create table for user-level bank statements (not per-application)
-    // Note: Multiple statements per user are allowed (for multiple banks)
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS user_bank_statements (
-        id INT PRIMARY KEY AUTO_INCREMENT,
-        user_id INT NOT NULL,
-        client_ref_num VARCHAR(255) NOT NULL UNIQUE,
-        request_id INT DEFAULT NULL,
-        txn_id VARCHAR(255) DEFAULT NULL,
-        mobile_number VARCHAR(15) NOT NULL,
-        bank_name VARCHAR(100) DEFAULT NULL,
-        upload_method ENUM('online', 'manual', 'aa') DEFAULT 'online',
-        file_path VARCHAR(500) DEFAULT NULL,
-        file_name VARCHAR(255) DEFAULT NULL,
-        file_size INT DEFAULT NULL,
-        digitap_url TEXT DEFAULT NULL,
-        expires_at TIMESTAMP DEFAULT NULL,
-        status ENUM('pending', 'processing', 'completed', 'failed', 'InProgress') DEFAULT 'pending',
-        transaction_data JSON DEFAULT NULL,
-        report_data LONGTEXT DEFAULT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        INDEX idx_user_id (user_id),
-        INDEX idx_request_id (request_id),
-        INDEX idx_txn_id (txn_id),
-        INDEX idx_client_ref_num (client_ref_num),
-        INDEX idx_status (status),
-        INDEX idx_expires_at (expires_at)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-      COMMENT='Stores user bank statements - supports multiple statements per user (multiple banks)'
-    `);
-
-    // Migration: Drop UNIQUE constraint on user_id if it exists (to support multiple statements per user)
-    try {
-      const constraints = await executeQuery(`
-        SELECT CONSTRAINT_NAME 
-        FROM information_schema.TABLE_CONSTRAINTS 
-        WHERE TABLE_SCHEMA = DATABASE() 
-        AND TABLE_NAME = 'user_bank_statements' 
-        AND CONSTRAINT_TYPE = 'UNIQUE' 
-        AND CONSTRAINT_NAME = 'user_id'
-      `);
-      
-      if (constraints.length > 0) {
-        console.log('🔄 Dropping UNIQUE constraint on user_id to support multiple statements per user...');
-        await executeQuery(`ALTER TABLE user_bank_statements DROP INDEX user_id`);
-        console.log('✅ UNIQUE constraint on user_id removed successfully');
-      }
-    } catch (migrationError) {
-      // If constraint doesn't exist or already dropped, that's fine
-      console.log('ℹ️  UNIQUE constraint on user_id does not exist (or already removed)');
-    }
-
-    res.json({
-      success: true,
-      message: 'user_bank_statements table created successfully'
-    });
-  } catch (error) {
-    console.error('Table creation error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to create table',
-      error: error.message
-    });
-  }
+  res.status(400).json({
+    success: false,
+    message: 'This endpoint is no longer available. Table schema should be managed separately.'
+  });
 });
 
 /**

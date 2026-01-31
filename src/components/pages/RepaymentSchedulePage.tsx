@@ -650,41 +650,21 @@ export const RepaymentSchedulePage = () => {
                 {(() => {
                   const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
                   
-                  // Calculate interest till today for preclose
-                  // Priority: Use interestTillToday from API (calculated with last_extension_date priority)
-                  let interestTillToday = calculations?.interest?.interestTillToday || 0;
-                  let interestRatePerDay = planData.interest_percent_per_day || 
-                                      calculations.interest?.rate_per_day ||
-                                      (calculations.interest?.amount && calculations.interest?.days && principal > 0
-                                        ? calculations.interest.amount / (calculations.interest.days * principal)
-                                        : 0.001); // Default 0.1% per day
+                  // Use interestTillToday from API (backend authority - calculated with last_extension_date priority)
+                  const interestTillToday = calculations?.interest?.interestTillToday || 0;
                   
-                  // If API didn't provide interestTillToday, calculate locally using exhaustedDays
-                  // exhaustedDays is already calculated with last_extension_date priority above
-                  if (!interestTillToday || interestTillToday === 0) {
-                    // Calculate interest based on exhaustedDays (which uses last_extension_date + 1 day as priority)
-                    interestTillToday = principal * interestRatePerDay * exhaustedDays;
-                    
-                    console.log('Calculating interestTillToday locally for single payment preclose:', {
-                      principal,
-                      interestRatePerDay,
-                      exhaustedDays,
-                      interestTillToday,
-                      baseDate: loanData.last_extension_date && loanData.extension_count > 0
-                        ? `last_extension_date (${loanData.last_extension_date.split('T')[0]}) + 1 day`
-                        : loanData.processed_at 
-                          ? `processed_at (${loanData.processed_at.split('T')[0]})`
-                          : 'disbursed_at'
-                    });
-                  } else {
-                    console.log('Using interestTillToday from API (with last_extension_date priority) for single payment preclose:', interestTillToday);
+                  if (!interestTillToday) {
+                    console.warn('⚠️ interestTillToday not available from API for preclose calculation');
                   }
                   
                   // Pre-close fee: 10% of principal + 18% GST (NO post service fee for pre-close)
+                  // Use API principal value for consistency
                   const preCloseFeePercent = 10;
                   const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
                   const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
                   
+                  // Calculate preclose amount using API values
+                  // Note: Backend will recalculate this when creating payment order, but we show it for display
                   const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
                   
                   // Get due date for display
@@ -759,33 +739,14 @@ export const RepaymentSchedulePage = () => {
                               toast.loading('Creating payment order...');
 
                               const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
-                              const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
-                              
-                              // Calculate interest till today
-                              let interestTillToday = 0;
-                              let interestRatePerDay = planData.interest_percent_per_day || 
-                                                  calculations.interest?.rate_per_day ||
-                                                  (calculations.interest?.amount && calculations.interest?.days && principal > 0
-                                                    ? calculations.interest.amount / (calculations.interest.days * principal)
-                                                    : 0.001);
-                              
-                              if (loanData.processed_at && loanData.processed_interest !== null && loanData.processed_interest !== undefined) {
-                                interestTillToday = parseFloat(loanData.processed_interest || 0);
-                              } else {
-                                interestTillToday = principal * interestRatePerDay * exhaustedDays;
-                              }
-                              
-                              const preCloseFeePercent = 10;
-                              const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
-                              const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
-                              const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
 
-                              if (!loanId || !precloseAmount) {
+                              if (!loanId) {
                                 toast.error('Unable to process payment');
                                 return;
                               }
 
-                              const response = await apiService.createPaymentOrder(loanId, precloseAmount, 'pre-close');
+                              // Backend authority: Pass null for amount, backend will calculate based on paymentType
+                              const response = await apiService.createPaymentOrder(loanId, null, 'pre-close');
 
                               if (response.success && response.data?.paymentSessionId) {
                                 toast.success('Opening payment gateway...');
@@ -1008,13 +969,14 @@ export const RepaymentSchedulePage = () => {
 
                               const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
 
-                              if (!loanId || !totalAmount) {
+                              if (!loanId) {
                                 toast.error('Unable to process payment');
                                 return;
                               }
 
                               // For single payment loans, use 'full_payment' which will clear immediately
-                              const response = await apiService.createPaymentOrder(loanId, totalAmount, 'full_payment');
+                              // Backend authority: Pass null for amount, backend will calculate based on paymentType
+                              const response = await apiService.createPaymentOrder(loanId, null, 'full_payment');
 
                               if (response.success && response.data?.paymentSessionId) {
                                 toast.success('Opening payment gateway...');
@@ -1329,42 +1291,21 @@ export const RepaymentSchedulePage = () => {
                   {(() => {
                     const principal = calculations.principal || loanData.sanctioned_amount || loanData.principal_amount || loanData.loan_amount || 0;
                     
-                    // Calculate interest till today for preclose
-                    // Priority: Use interestTillToday from API (calculated with last_extension_date priority)
-                    let interestTillToday = calculations?.interest?.interestTillToday || 0;
-                    let interestDays = exhaustedDays; // Use exhaustedDays (already calculated with last_extension_date priority)
-                    let interestRatePerDay = planData.interest_percent_per_day || 
-                                        calculations.interest?.rate_per_day ||
-                                        (calculations.interest?.amount && calculations.interest?.days && principal > 0
-                                          ? calculations.interest.amount / (calculations.interest.days * principal)
-                                          : 0.001); // Default 0.1% per day
+                    // Use interestTillToday from API (backend authority - calculated with last_extension_date priority)
+                    const interestTillToday = calculations?.interest?.interestTillToday || 0;
                     
-                    // If API didn't provide interestTillToday, calculate locally using exhaustedDays
-                    // exhaustedDays is already calculated with last_extension_date priority above
                     if (!interestTillToday) {
-                      // Calculate interest based on exhaustedDays (which uses last_extension_date + 1 day as priority)
-                      interestTillToday = principal * interestRatePerDay * exhaustedDays;
-                      
-                      console.log('Calculating interestTillToday locally for multi-EMI:', {
-                        principal,
-                        interestRatePerDay,
-                        exhaustedDays,
-                        interestTillToday,
-                        baseDate: loanData.last_extension_date 
-                          ? `last_extension_date (${loanData.last_extension_date.split('T')[0]}) + 1 day`
-                          : loanData.processed_at 
-                            ? `processed_at (${loanData.processed_at.split('T')[0]})`
-                            : 'disbursed_at'
-                      });
-                    } else {
-                      console.log('Using interestTillToday from API (with last_extension_date priority) for multi-EMI:', interestTillToday);
+                      console.warn('⚠️ interestTillToday not available from API for preclose calculation');
                     }
                     
                     // Pre-close fee: 10% of principal + 18% GST (NO post service fee for pre-close)
+                    // Use API principal value for consistency
                     const preCloseFeePercent = 10;
                     const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
                     const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
                     
+                    // Calculate preclose amount using API values
+                    // Note: Backend will recalculate this when creating payment order, but we show it for display
                     const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
                     
                     // Calculate total of all remaining EMIs to show interest saved
@@ -1378,7 +1319,7 @@ export const RepaymentSchedulePage = () => {
                     // Debug logging
                     console.log('Preclose Calculation:', {
                       principal,
-                      interestRatePerDay,
+                      interestRatePerDay: calculations?.interest?.rate_per_day || planData.interest_percent_per_day || 'N/A',
                       exhaustedDays,
                       interestTillToday,
                       preCloseFee,
@@ -1466,12 +1407,13 @@ export const RepaymentSchedulePage = () => {
 
                                 const loanId = loanData.id || parseInt(searchParams.get('applicationId') || '0');
 
-                                if (!loanId || !precloseAmount) {
+                                if (!loanId) {
                                   toast.error('Unable to process payment');
                                   return;
                                 }
 
-                                const response = await apiService.createPaymentOrder(loanId, precloseAmount);
+                                // Backend authority: Pass null for amount, backend will calculate based on paymentType
+                                const response = await apiService.createPaymentOrder(loanId, null, 'pre-close');
 
                                 if (response.success && response.data?.paymentSessionId) {
                                   toast.success('Opening payment gateway...');
@@ -1742,7 +1684,8 @@ export const RepaymentSchedulePage = () => {
                                       return;
                                     }
 
-                                    const response = await apiService.createPaymentOrder(loanId, amount, paymentType);
+                                    // Backend authority: Pass null for amount, backend will calculate based on paymentType
+                                    const response = await apiService.createPaymentOrder(loanId, null, paymentType);
                                     
                                     toast.dismiss(loadingToastId);
 

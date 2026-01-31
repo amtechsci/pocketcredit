@@ -311,6 +311,22 @@ class AdminApiService {
     return this.request('GET', `/user-profile/${userId}/enach-subscriptions`);
   }
 
+  async recheckEnachSubscriptionStatus(userId: string, subscriptionId: string): Promise<ApiResponse<any>> {
+    return this.request('POST', `/user-profile/${userId}/enach-subscriptions/${subscriptionId}/recheck-status`);
+  }
+
+  async chargeEnachSubscription(userId: string, subscriptionId: string, amount: number): Promise<ApiResponse<any>> {
+    return this.request('POST', `/user-profile/${userId}/enach-subscriptions/${subscriptionId}/charge`, { amount });
+  }
+
+  async getEnachChargeHistory(userId: string): Promise<ApiResponse<any>> {
+    return this.request('GET', `/user-profile/${userId}/enach-subscriptions/charge-history`);
+  }
+
+  async recheckEnachChargeStatus(userId: string, chargeId: string): Promise<ApiResponse<any>> {
+    return this.request('POST', `/user-profile/${userId}/enach-subscriptions/charge-history/${chargeId}/recheck-status`);
+  }
+
   async refetchKYCData(userId: string): Promise<ApiResponse<any>> {
     // Use longer timeout for refetch operation (90 seconds) as it involves downloading and uploading documents
     try {

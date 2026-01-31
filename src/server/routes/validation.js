@@ -162,45 +162,6 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // Ensure the status enum includes 'on_hold', 'deleted', 'qa_verification' values
-    try {
-      await executeQuery(
-        `ALTER TABLE users MODIFY COLUMN status ENUM('active', 'inactive', 'suspended', 'on_hold', 'deleted', 'qa_verification') DEFAULT 'active'`
-      );
-      console.log('✅ Updated users.status enum to include on_hold, deleted, and qa_verification');
-    } catch (enumError) {
-      // Ignore error if enum already has these values or if it's a different error
-      if (!enumError.message.includes('Duplicate value') && !enumError.message.includes('already exists')) {
-        console.log('ℹ️ Status enum update note:', enumError.message);
-      }
-    }
-
-    // Ensure the action_type enum includes all action types
-    try {
-      await executeQuery(
-        `ALTER TABLE user_validation_history MODIFY COLUMN action_type ENUM('need_document', 'process', 'not_process', 'cancel', 're_process', 'unhold', 'delete', 'qa_verification', 'qa_approve') NOT NULL`
-      );
-      console.log('✅ Updated user_validation_history.action_type enum to include all action types');
-    } catch (enumError) {
-      // Ignore error if enum already has these values or if it's a different error
-      if (!enumError.message.includes('Duplicate value') && !enumError.message.includes('already exists')) {
-        console.log('ℹ️ Action type enum update note:', enumError.message);
-      }
-    }
-
-    // Ensure loan_applications status enum includes qa_verification
-    try {
-      await executeQuery(
-        `ALTER TABLE loan_applications MODIFY COLUMN status ENUM('draft', 'submitted', 'under_review', 'follow_up', 'approved', 'rejected', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal', 'account_manager', 'cleared', 'cancelled', 'defaulted', 'qa_verification') DEFAULT 'draft'`
-      );
-      console.log('✅ Updated loan_applications.status enum to include qa_verification');
-    } catch (enumError) {
-      // Ignore error if enum already has these values
-      if (!enumError.message.includes('Duplicate value') && !enumError.message.includes('already exists')) {
-        console.log('ℹ️ Loan status enum update note:', enumError.message);
-      }
-    }
-
     // For cancel/qa_verification actions, ensure we have the loan to update
     let loanToUpdate = null;
     let actualLoanId = loanApplicationId;

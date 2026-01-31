@@ -444,49 +444,8 @@ router.post('/:userId/verify-with-file', authenticateAdmin, async (req, res) => 
           statusMessage = 'Bank statement sent to Digitap for verification';
         }
 
-        // Handle verified_by column - admins table uses UUID (varchar(36)) but verified_by might be INT
-        // Check if verified_by column exists and modify it if needed to accept UUIDs
-        let verifiedByValue = adminId;
-        try {
-          // Check if column exists
-          const columns = await executeQuery(
-            `SHOW COLUMNS FROM user_bank_statements LIKE 'verified_by'`
-          );
-
-          if (columns.length > 0) {
-            const columnType = columns[0].Type.toLowerCase();
-            // If column is INT but adminId is UUID (string), modify column to VARCHAR(36)
-            if (columnType.includes('int') && typeof adminId === 'string' && adminId.includes('-')) {
-              console.log(`⚠️  verified_by column is INT but admin.id is UUID. Modifying column to VARCHAR(36)...`);
-              try {
-                await executeQuery(
-                  `ALTER TABLE user_bank_statements MODIFY verified_by VARCHAR(36) NULL COMMENT 'Admin UUID who verified'`
-                );
-                console.log('✅ Modified verified_by column to accept UUIDs');
-              } catch (alterError) {
-                console.warn('⚠️  Could not modify verified_by column:', alterError.message);
-                // If modification fails, set to NULL
-                verifiedByValue = null;
-              }
-            }
-          } else {
-            // Column doesn't exist, create it as VARCHAR(36) to accept UUIDs
-            console.log('📝 Creating verified_by column as VARCHAR(36)...');
-            try {
-              await executeQuery(
-                `ALTER TABLE user_bank_statements ADD COLUMN verified_by VARCHAR(36) NULL COMMENT 'Admin UUID who verified' AFTER verification_status`
-              );
-              console.log('✅ Created verified_by column');
-            } catch (addError) {
-              console.warn('⚠️  Could not add verified_by column:', addError.message);
-              verifiedByValue = null;
-            }
-          }
-        } catch (colError) {
-          console.warn('⚠️  Could not check verified_by column:', colError.message);
-          // If we can't determine, set to NULL to avoid errors
-          verifiedByValue = null;
-        }
+        // Use adminId for verified_by
+        const verifiedByValue = adminId;
 
         await executeQuery(
           `UPDATE user_bank_statements 
@@ -1652,49 +1611,8 @@ router.post('/:userId/start-upload/:statementId', authenticateAdmin, async (req,
       }
     }
 
-    // Handle verified_by column - admins table uses UUID (varchar(36)) but verified_by might be INT
-    // Check if verified_by column exists and modify it if needed to accept UUIDs
-    let verifiedByValue = adminId;
-    try {
-      // Check if column exists
-      const columns = await executeQuery(
-        `SHOW COLUMNS FROM user_bank_statements LIKE 'verified_by'`
-      );
-
-      if (columns.length > 0) {
-        const columnType = columns[0].Type.toLowerCase();
-        // If column is INT but adminId is UUID (string), modify column to VARCHAR(36)
-        if (columnType.includes('int') && typeof adminId === 'string' && adminId.includes('-')) {
-          console.log(`⚠️  verified_by column is INT but admin.id is UUID. Modifying column to VARCHAR(36)...`);
-          try {
-            await executeQuery(
-              `ALTER TABLE user_bank_statements MODIFY verified_by VARCHAR(36) NULL COMMENT 'Admin UUID who verified'`
-            );
-            console.log('✅ Modified verified_by column to accept UUIDs');
-          } catch (alterError) {
-            console.warn('⚠️  Could not modify verified_by column:', alterError.message);
-            // If modification fails, set to NULL
-            verifiedByValue = null;
-          }
-        }
-      } else {
-        // Column doesn't exist, create it as VARCHAR(36) to accept UUIDs
-        console.log('📝 Creating verified_by column as VARCHAR(36)...');
-        try {
-          await executeQuery(
-            `ALTER TABLE user_bank_statements ADD COLUMN verified_by VARCHAR(36) NULL COMMENT 'Admin UUID who verified' AFTER verification_status`
-          );
-          console.log('✅ Created verified_by column');
-        } catch (addError) {
-          console.warn('⚠️  Could not add verified_by column:', addError.message);
-          verifiedByValue = null;
-        }
-      }
-    } catch (colError) {
-      console.warn('⚠️  Could not check verified_by column:', colError.message);
-      // If we can't determine, set to NULL to avoid errors
-      verifiedByValue = null;
-    }
+    // Use adminId for verified_by
+    const verifiedByValue = adminId;
 
     // Update database with request_id, txn_id, and status
     await executeQuery(

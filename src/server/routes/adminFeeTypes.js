@@ -1,62 +1,13 @@
 const express = require('express');
-const { executeQuery, initializeDatabase } = require('../config/database');
+const { executeQuery } = require('../config/database');
 const { authenticateAdmin } = require('../middleware/auth');
 const router = express.Router();
-
-/**
- * Ensure fee_types table exists
- */
-const ensureFeeTypesTable = async () => {
-  await initializeDatabase();
-  
-  // Create fee_types table
-  await executeQuery(`
-    CREATE TABLE IF NOT EXISTS fee_types (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      fee_name VARCHAR(100) NOT NULL UNIQUE,
-      fee_percent DECIMAL(5,2) NOT NULL DEFAULT 0.00,
-      application_method ENUM('deduct_from_disbursal', 'add_to_total') NOT NULL DEFAULT 'deduct_from_disbursal',
-      description TEXT NULL,
-      is_active BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-  `);
-
-  // Try to create member_tier_fees table (deprecated, kept for backward compatibility)
-  // If member_tiers table doesn't exist, this will fail silently
-  try {
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS member_tier_fees (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        member_tier_id INT NOT NULL,
-        fee_type_id INT NOT NULL,
-        fee_percent DECIMAL(5,2) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (member_tier_id) REFERENCES member_tiers(id) ON DELETE CASCADE,
-        FOREIGN KEY (fee_type_id) REFERENCES fee_types(id) ON DELETE CASCADE,
-        UNIQUE KEY unique_tier_fee (member_tier_id, fee_type_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-  } catch (error) {
-    // If member_tiers table doesn't exist, skip creating member_tier_fees
-    // This is expected if member tiers have been removed
-    if (error.message && error.message.includes('member_tiers')) {
-      console.log('Note: member_tiers table not found, skipping member_tier_fees table creation');
-    } else {
-      // Re-throw unexpected errors
-      throw error;
-    }
-  }
-};
 
 /**
  * GET /api/admin/fee-types - Get all fee types
  */
 router.get('/', authenticateAdmin, async (req, res) => {
   try {
-    await ensureFeeTypesTable();
     const feeTypes = await executeQuery(
       'SELECT * FROM fee_types ORDER BY fee_name ASC'
     );
@@ -80,7 +31,6 @@ router.get('/', authenticateAdmin, async (req, res) => {
  */
 router.post('/', authenticateAdmin, async (req, res) => {
   try {
-    await ensureFeeTypesTable();
     const { fee_name, fee_percent, application_method, description, is_active } = req.body;
 
     if (!fee_name || fee_percent == null || !application_method) {
@@ -133,7 +83,6 @@ router.post('/', authenticateAdmin, async (req, res) => {
  */
 router.put('/:id', authenticateAdmin, async (req, res) => {
   try {
-    await ensureFeeTypesTable();
     const { id } = req.params;
     const { fee_name, fee_percent, application_method, description, is_active } = req.body;
 
@@ -221,7 +170,6 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
  */
 router.delete('/:id', authenticateAdmin, async (req, res) => {
   try {
-    await ensureFeeTypesTable();
     const { id } = req.params;
 
     // Check if fee type is assigned to any member tier (if table exists)
@@ -268,7 +216,6 @@ router.delete('/:id', authenticateAdmin, async (req, res) => {
  */
 router.get('/member-tier/:tierId', authenticateAdmin, async (req, res) => {
   try {
-    await ensureFeeTypesTable();
     const { tierId } = req.params;
 
     const tierFees = await executeQuery(
@@ -305,7 +252,6 @@ router.get('/member-tier/:tierId', authenticateAdmin, async (req, res) => {
  */
 router.post('/member-tier/:tierId', authenticateAdmin, async (req, res) => {
   try {
-    await ensureFeeTypesTable();
     const { tierId } = req.params;
     const { fee_type_id, fee_percent } = req.body;
 
@@ -368,7 +314,6 @@ router.post('/member-tier/:tierId', authenticateAdmin, async (req, res) => {
  */
 router.delete('/member-tier/:tierId/:feeId', authenticateAdmin, async (req, res) => {
   try {
-    await ensureFeeTypesTable();
     const { tierId, feeId } = req.params;
 
     await executeQuery(

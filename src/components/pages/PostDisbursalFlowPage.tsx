@@ -50,6 +50,8 @@ export const PostDisbursalFlowPage = () => {
   const [applicationId, setApplicationId] = useState<number | null>(null);
   const [currentStep, setCurrentStep] = useState(0); // Start at 0 to detect if not set
   const [redirecting, setRedirecting] = useState(false);
+  const [isWaitingForDisbursement, setIsWaitingForDisbursement] = useState(false); // Track if loan is ready_for_disbursement
+  const isWaitingForDisbursementRef = useRef(false); // Ref to track waiting state synchronously
   const [progress, setProgress] = useState<PostDisbursalProgress>({
     enach_done: false,
     selfie_captured: false,
@@ -149,12 +151,13 @@ export const PostDisbursalFlowPage = () => {
   }, [isAuthenticated, navigate, searchParams]);
 
   // Fetch progress when applicationId changes (for cases where it's set from URL params)
+  // Skip if we're in "waiting for disbursement" mode (ready_for_disbursement status)
   useEffect(() => {
-    if (applicationId && !loading) {
+    if (applicationId && !loading && !isWaitingForDisbursement) {
       fetchProgress(applicationId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applicationId]);
+  }, [applicationId, isWaitingForDisbursement]);
 
   // Check status and redirect if needed
   const checkStatusAndRedirect = async (appId: number) => {
@@ -298,6 +301,8 @@ export const PostDisbursalFlowPage = () => {
               console.log('✅ Loan is ready for disbursement - showing waiting page');
               setApplicationId(appId);
               setCurrentStep(0); // Special step 0 = waiting for disbursement
+              setIsWaitingForDisbursement(true); // Set flag to prevent fetchProgress from overwriting
+              isWaitingForDisbursementRef.current = true; // Set ref for synchronous check
               setLoading(false);
               return;
             } else {
@@ -311,6 +316,8 @@ export const PostDisbursalFlowPage = () => {
           // Status is valid - proceed
           console.log(`✅ Access granted: App ${appId} is in '${app.status}' status`);
           setApplicationId(appId);
+          setIsWaitingForDisbursement(false); // Reset flag for valid post-disbursal statuses
+          isWaitingForDisbursementRef.current = false; // Reset ref
         } else {
           console.error('Failed to fetch applications for status verification', { 
             response, 
@@ -349,6 +356,8 @@ export const PostDisbursalFlowPage = () => {
             console.log(`✅ Found disbursal loan ${disbursalApp.id}`);
             appId = disbursalApp.id;
             setApplicationId(appId);
+            setIsWaitingForDisbursement(false); // Reset flag for valid post-disbursal status
+            isWaitingForDisbursementRef.current = false; // Reset ref
           } else {
             console.log('ℹ️ No disbursal loans found');
           }
@@ -357,11 +366,13 @@ export const PostDisbursalFlowPage = () => {
 
       // Fetch progress immediately using the appId variable (not state)
       // This ensures we load progress even if applicationId state hasn't updated yet
-      if (appId) {
+      // Skip if we're in "waiting for disbursement" mode (use ref for synchronous check)
+      if (appId && !isWaitingForDisbursementRef.current) {
         await fetchProgress(appId);
-      } else {
+      } else if (!appId) {
         setLoading(false);
       }
+      // If isWaitingForDisbursementRef.current is true, loading was already set to false above
     } catch (error) {
       console.error('Error fetching application:', error);
       toast.error('Failed to load application');
@@ -375,6 +386,14 @@ export const PostDisbursalFlowPage = () => {
   };
 
   const fetchProgress = async (appId: number) => {
+    // Don't fetch progress if we're in "waiting for disbursement" mode
+    // This prevents overwriting step 0 (waiting page) with actual progress steps
+    // Use ref for synchronous check (state updates are async)
+    if (isWaitingForDisbursementRef.current) {
+      console.log('⏸️ Skipping fetchProgress - loan is waiting for disbursement');
+      return;
+    }
+    
     try {
       const response = await apiService.getPostDisbursalProgress(appId);
       console.log('📊 Post-disbursal progress response:', response);

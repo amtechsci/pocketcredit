@@ -363,24 +363,6 @@ router.post('/', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // Check/Add department and phone columns if they don't exist
-    try {
-      const columns = await executeQuery('SHOW COLUMNS FROM admins');
-      const columnNames = columns.map(c => c.Field);
-
-      if (!columnNames.includes('department')) {
-        await executeQuery('ALTER TABLE admins ADD COLUMN department VARCHAR(50) AFTER role');
-        console.log('✅ Added department column to admins table');
-      }
-
-      if (!columnNames.includes('phone')) {
-        await executeQuery('ALTER TABLE admins ADD COLUMN phone VARCHAR(20) AFTER email');
-        console.log('✅ Added phone column to admins table');
-      }
-    } catch (err) {
-      console.error('Error checking/adding columns:', err);
-    }
-
     // Create admin
     const adminId = uuidv4();
     await executeQuery(`

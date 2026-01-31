@@ -984,82 +984,6 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     // Fetch follow-ups
     let followUps = [];
     try {
-      // Check if table exists and fix admin_id column type if needed
-      try {
-        const tableCheck = await executeQuery(`
-          SELECT COLUMN_TYPE 
-          FROM INFORMATION_SCHEMA.COLUMNS 
-          WHERE TABLE_SCHEMA = DATABASE() 
-          AND TABLE_NAME = 'user_follow_ups' 
-          AND COLUMN_NAME = 'admin_id'
-        `);
-
-        if (tableCheck.length > 0 && tableCheck[0].COLUMN_TYPE !== 'varchar(36)') {
-          // Drop foreign key if exists
-          try {
-            await executeQuery(`ALTER TABLE user_follow_ups DROP FOREIGN KEY user_follow_ups_ibfk_2`);
-          } catch (e) {
-            // Foreign key might not exist or have different name
-          }
-          // Alter column type
-          await executeQuery(`ALTER TABLE user_follow_ups MODIFY admin_id VARCHAR(36)`);
-          // Recreate foreign key
-          await executeQuery(`
-            ALTER TABLE user_follow_ups 
-            ADD CONSTRAINT user_follow_ups_ibfk_2 
-            FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL
-          `);
-        }
-      } catch (alterError) {
-        // Table might not exist yet, continue to create it
-      }
-
-      // Create table if it doesn't exist
-      await executeQuery(`
-        CREATE TABLE IF NOT EXISTS user_follow_ups (
-          id INT PRIMARY KEY AUTO_INCREMENT,
-          user_id INT NOT NULL,
-          loan_application_id INT DEFAULT NULL,
-          follow_up_id VARCHAR(50) UNIQUE,
-          type ENUM('call', 'email', 'sms', 'meeting', 'other', 'account_manager') NOT NULL,
-          priority ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium',
-          subject VARCHAR(200),
-          description TEXT,
-          response VARCHAR(200),
-          assigned_to VARCHAR(100),
-          admin_id VARCHAR(36),
-          status ENUM('pending', 'in_progress', 'completed', 'cancelled', 'overdue') DEFAULT 'pending',
-          scheduled_date DATETIME,
-          due_date DATETIME,
-          completed_date DATETIME,
-          notes TEXT,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-          FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL,
-          INDEX idx_user_id (user_id),
-          INDEX idx_status (status),
-          INDEX idx_due_date (due_date),
-          INDEX idx_follow_up_id (follow_up_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-      `);
-
-      // Ensure loan_application_id column exists
-      try {
-        const colCheck = await executeQuery(`SHOW COLUMNS FROM user_follow_ups LIKE 'loan_application_id'`);
-        if (colCheck.length === 0) {
-          await executeQuery(`ALTER TABLE user_follow_ups ADD COLUMN loan_application_id INT DEFAULT NULL AFTER user_id`);
-        }
-      } catch (e) { }
-
-      // Ensure 'account_manager' is in ENUM
-      try {
-        await executeQuery(`
-          ALTER TABLE user_follow_ups 
-          MODIFY type ENUM('call', 'email', 'sms', 'meeting', 'other', 'account_manager') NOT NULL
-        `);
-      } catch (e) { }
-
       // Fetch follow-ups
       followUps = await executeQuery(`
         SELECT 
@@ -2104,29 +2028,6 @@ router.put('/:userId/references/:referenceId', authenticateAdmin, async (req, re
 
     // Get admin ID from request (if available)
     const adminId = req.admin?.id || null;
-
-    // Add admin_notes column if it doesn't exist
-    try {
-      // Check if column exists
-      const columnCheck = await executeQuery(`
-        SELECT COLUMN_NAME 
-        FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_SCHEMA = DATABASE() 
-        AND TABLE_NAME = 'references' 
-        AND COLUMN_NAME = 'admin_notes'
-      `);
-
-      if (!columnCheck || columnCheck.length === 0) {
-        await executeQuery(`
-          ALTER TABLE \`references\` 
-          ADD COLUMN admin_notes TEXT NULL AFTER status
-        `);
-        console.log('✅ Added admin_notes column to references table');
-      }
-    } catch (err) {
-      // Column might already exist or other error, log and continue
-      console.log('⚠️  Could not add admin_notes column:', err.message);
-    }
 
     // Build update query dynamically based on what's provided
     let updateFields = [];
@@ -3657,35 +3558,6 @@ router.get('/:userId/follow-ups', authenticateAdmin, async (req, res) => {
     await initializeDatabase();
     const { userId } = req.params;
 
-    // Create table if it doesn't exist
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS user_follow_ups (
-        id INT PRIMARY KEY AUTO_INCREMENT,
-        user_id INT NOT NULL,
-        follow_up_id VARCHAR(50) UNIQUE,
-        type ENUM('call', 'email', 'sms', 'meeting', 'other') NOT NULL,
-        priority ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium',
-        subject VARCHAR(200),
-        description TEXT,
-        response VARCHAR(200),
-        assigned_to VARCHAR(100),
-        admin_id INT,
-        status ENUM('pending', 'in_progress', 'completed', 'cancelled', 'overdue') DEFAULT 'pending',
-        scheduled_date DATETIME,
-        due_date DATETIME,
-        completed_date DATETIME,
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL,
-        INDEX idx_user_id (user_id),
-        INDEX idx_status (status),
-        INDEX idx_due_date (due_date),
-        INDEX idx_follow_up_id (follow_up_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-
     // Fetch follow-ups
     const followUps = await executeQuery(`
       SELECT 
@@ -3740,65 +3612,6 @@ router.post('/:userId/follow-ups', authenticateAdmin, async (req, res) => {
         message: 'Follow-up type is required'
       });
     }
-
-    // Check if table exists and fix admin_id column type if needed
-    try {
-      const tableCheck = await executeQuery(`
-        SELECT COLUMN_TYPE 
-        FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_SCHEMA = DATABASE() 
-        AND TABLE_NAME = 'user_follow_ups' 
-        AND COLUMN_NAME = 'admin_id'
-      `);
-
-      if (tableCheck.length > 0 && tableCheck[0].COLUMN_TYPE !== 'varchar(36)') {
-        // Drop foreign key if exists
-        try {
-          await executeQuery(`ALTER TABLE user_follow_ups DROP FOREIGN KEY user_follow_ups_ibfk_2`);
-        } catch (e) {
-          // Foreign key might not exist or have different name
-        }
-        // Alter column type
-        await executeQuery(`ALTER TABLE user_follow_ups MODIFY admin_id VARCHAR(36)`);
-        // Recreate foreign key
-        await executeQuery(`
-          ALTER TABLE user_follow_ups 
-          ADD CONSTRAINT user_follow_ups_ibfk_2 
-          FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL
-        `);
-      }
-    } catch (alterError) {
-      // Table might not exist yet, continue to create it
-    }
-
-    // Create table if it doesn't exist
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS user_follow_ups (
-        id INT PRIMARY KEY AUTO_INCREMENT,
-        user_id INT NOT NULL,
-        follow_up_id VARCHAR(50) UNIQUE,
-        type ENUM('call', 'email', 'sms', 'meeting', 'other') NOT NULL,
-        priority ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium',
-        subject VARCHAR(200),
-        description TEXT,
-        response VARCHAR(200),
-        assigned_to VARCHAR(100),
-        admin_id INT,
-        status ENUM('pending', 'in_progress', 'completed', 'cancelled', 'overdue') DEFAULT 'pending',
-        scheduled_date DATETIME,
-        due_date DATETIME,
-        completed_date DATETIME,
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL,
-        INDEX idx_user_id (user_id),
-        INDEX idx_status (status),
-        INDEX idx_due_date (due_date),
-        INDEX idx_follow_up_id (follow_up_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
 
     // Generate follow-up ID
     const followUpCount = await executeQuery(`
@@ -4512,9 +4325,31 @@ router.get('/:userId/enach-subscriptions', authenticateAdmin, async (req, res) =
   try {
     await initializeDatabase();
     const { userId } = req.params;
+    
+    // Convert userId to integer to ensure proper type matching
+    const userIdInt = parseInt(userId, 10);
+    
+    if (isNaN(userIdInt)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid user ID'
+      });
+    }
+
+    console.log(`[E-NACH] Fetching subscriptions for user_id: ${userIdInt} (original: ${userId})`);
+
+    // First, let's check what user_ids actually exist in the table (for debugging)
+    const debugCheck = await executeQuery(`
+      SELECT DISTINCT user_id, COUNT(*) as count 
+      FROM enach_subscriptions 
+      WHERE user_id IN (?, ?) 
+      GROUP BY user_id
+    `, [userIdInt, userId]);
+    console.log(`[E-NACH] Debug - user_ids found in table:`, debugCheck);
 
     // Get all E-NACH subscriptions for this user
-    const subscriptions = await executeQuery(`
+    // Simple query without JOIN - we'll fetch application_number separately if needed
+    let subscriptions = await executeQuery(`
       SELECT 
         es.id,
         es.user_id,
@@ -4527,20 +4362,96 @@ router.get('/:userId/enach-subscriptions', authenticateAdmin, async (req, res) =
         es.subscription_session_id,
         es.cashfree_response,
         es.authorization_url,
+        es.return_url,
         DATE_FORMAT(es.initialized_at, '%Y-%m-%d %H:%i:%s') as initialized_at,
-        DATE_FORMAT(es.authorized_at, '%Y-%m-%d %H:%i:%s') as authorized_at,
+        DATE_FORMAT(es.activated_at, '%Y-%m-%d %H:%i:%s') as activated_at,
+        DATE_FORMAT(es.failed_at, '%Y-%m-%d %H:%i:%s') as failed_at,
+        DATE_FORMAT(es.cancelled_at, '%Y-%m-%d %H:%i:%s') as cancelled_at,
         DATE_FORMAT(es.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
         DATE_FORMAT(es.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at,
-        la.application_number,
-        la.short_loan_id
+        es.last_error,
+        es.retry_count
       FROM enach_subscriptions es
-      LEFT JOIN loan_applications la ON es.loan_application_id = la.id
       WHERE es.user_id = ?
       ORDER BY es.created_at DESC
-    `, [userId]);
+    `, [userIdInt]);
 
-    // Parse cashfree_response JSON for each subscription
-    const subscriptionsWithParsedData = subscriptions.map(sub => {
+    console.log(`[E-NACH] Found ${subscriptions?.length || 0} subscriptions for user_id: ${userIdInt}`);
+    
+    // If no results with integer, try with string
+    if (!subscriptions || subscriptions.length === 0) {
+      console.log(`[E-NACH] No results with integer, trying with string: ${userId}`);
+      const subscriptionsStr = await executeQuery(`
+        SELECT 
+          es.id,
+          es.user_id,
+          es.loan_application_id,
+          es.subscription_id,
+          es.cf_subscription_id,
+          es.plan_id,
+          es.status,
+          es.mandate_status,
+          es.subscription_session_id,
+          es.cashfree_response,
+          es.authorization_url,
+          es.return_url,
+          DATE_FORMAT(es.initialized_at, '%Y-%m-%d %H:%i:%s') as initialized_at,
+          DATE_FORMAT(es.activated_at, '%Y-%m-%d %H:%i:%s') as activated_at,
+          DATE_FORMAT(es.failed_at, '%Y-%m-%d %H:%i:%s') as failed_at,
+          DATE_FORMAT(es.cancelled_at, '%Y-%m-%d %H:%i:%s') as cancelled_at,
+          DATE_FORMAT(es.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+          DATE_FORMAT(es.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at,
+          es.last_error,
+          es.retry_count
+        FROM enach_subscriptions es
+        WHERE es.user_id = ?
+        ORDER BY es.created_at DESC
+      `, [userId]);
+      
+      if (subscriptionsStr && subscriptionsStr.length > 0) {
+        subscriptions = subscriptionsStr;
+        console.log(`[E-NACH] Found ${subscriptions.length} subscriptions using string user_id`);
+      }
+    }
+    
+    if (subscriptions && subscriptions.length > 0) {
+      console.log(`[E-NACH] Sample subscription:`, {
+        id: subscriptions[0].id,
+        user_id: subscriptions[0].user_id,
+        user_id_type: typeof subscriptions[0].user_id,
+        loan_application_id: subscriptions[0].loan_application_id
+      });
+    } else {
+      console.log(`[E-NACH] No subscriptions found. Checking all user_ids in table...`);
+      const allUserIds = await executeQuery(`SELECT DISTINCT user_id FROM enach_subscriptions LIMIT 10`);
+      console.log(`[E-NACH] Sample user_ids in table:`, allUserIds);
+    }
+
+    // Fetch application_numbers for all loan_application_ids in batch
+    let applicationNumbersMap = {};
+    if (subscriptions && subscriptions.length > 0) {
+      const loanAppIds = subscriptions
+        .map(s => s.loan_application_id)
+        .filter(id => id != null);
+      
+      if (loanAppIds.length > 0) {
+        const placeholders = loanAppIds.map(() => '?').join(',');
+        const appNumbers = await executeQuery(`
+          SELECT id, application_number 
+          FROM loan_applications 
+          WHERE id IN (${placeholders})
+        `, loanAppIds);
+        
+        applicationNumbersMap = {};
+        appNumbers.forEach(app => {
+          applicationNumbersMap[app.id] = app.application_number;
+        });
+        console.log(`[E-NACH] Fetched ${Object.keys(applicationNumbersMap).length} application numbers`);
+      }
+    }
+
+    // Parse cashfree_response JSON for each subscription and compute short_loan_id
+    const subscriptionsWithParsedData = (subscriptions || []).map(sub => {
       let cashfreeResponse = null;
       try {
         if (sub.cashfree_response) {
@@ -4552,8 +4463,23 @@ router.get('/:userId/enach-subscriptions', authenticateAdmin, async (req, res) =
         console.error('Error parsing cashfree_response for subscription:', sub.id, e);
       }
 
+      // Get application_number from the map
+      const applicationNumber = sub.loan_application_id 
+        ? applicationNumbersMap[sub.loan_application_id] 
+        : null;
+
+      // Compute short_loan_id from application_number (format: PLL + last 4 digits)
+      let shortLoanId = null;
+      if (applicationNumber) {
+        const appNumber = String(applicationNumber);
+        const last4Digits = appNumber.slice(-4);
+        shortLoanId = `PLL${last4Digits}`;
+      }
+
       return {
         ...sub,
+        application_number: applicationNumber,
+        short_loan_id: shortLoanId,
         cashfreeResponse
       };
     });
@@ -4569,6 +4495,729 @@ router.get('/:userId/enach-subscriptions', authenticateAdmin, async (req, res) =
       status: 'error',
       message: 'Failed to fetch E-NACH subscriptions',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Recheck E-NACH subscription status from Cashfree API
+router.post('/:userId/enach-subscriptions/:subscriptionId/recheck-status', authenticateAdmin, async (req, res) => {
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  
+  try {
+    await initializeDatabase();
+    const { userId, subscriptionId } = req.params;
+
+    // Get subscription details from database
+    const subscriptions = await executeQuery(`
+      SELECT subscription_id, cf_subscription_id, status, mandate_status
+      FROM enach_subscriptions 
+      WHERE id = ? AND user_id = ?
+    `, [subscriptionId, userId]);
+
+    if (!subscriptions || subscriptions.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Subscription not found'
+      });
+    }
+
+    const subscription = subscriptions[0];
+    // Cashfree API accepts both subscription_id (merchant ID) and cf_subscription_id
+    // Based on existing code in enach.js, we use subscription_id (merchant ID)
+    // But we'll try both if one fails
+    const subId = subscription.subscription_id;
+    const cfSubId = subscription.cf_subscription_id;
+
+    if (!subId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Subscription ID not found in database'
+      });
+    }
+
+    // Import Cashfree configuration and helpers
+    const axios = require('axios');
+    const { v4: uuidv4 } = require('uuid');
+    const CASHFREE_API_BASE = process.env.CASHFREE_API_BASE || 'https://sandbox.cashfree.com/pg';
+    const CASHFREE_CLIENT_ID = process.env.CASHFREE_CLIENT_ID;
+    const CASHFREE_CLIENT_SECRET = process.env.CASHFREE_CLIENT_SECRET;
+    const CASHFREE_API_VERSION = process.env.CASHFREE_API_VERSION || '2025-01-01';
+
+    const getCashfreeHeaders = () => ({
+      'Content-Type': 'application/json',
+      'x-api-version': CASHFREE_API_VERSION,
+      'x-client-id': CASHFREE_CLIENT_ID,
+      'x-client-secret': CASHFREE_CLIENT_SECRET,
+      'x-request-id': uuidv4(),
+    });
+
+    // Helper to log API calls
+    const logApiCall = (method, url, headers, body, response = null, error = null) => {
+      const logId = `[${requestId}]`;
+      const safeHeaders = { ...headers };
+      if (safeHeaders['x-client-secret']) {
+        safeHeaders['x-client-secret'] = '***MASKED***';
+      }
+      
+      console.log(`${logId} [${method}] ${url}`);
+      if (error) {
+        console.error(`${logId} [ERROR]:`, {
+          status: error.response?.status || 'N/A',
+          statusText: error.response?.statusText || 'N/A',
+          data: error.response?.data || error.message,
+          code: error.code || 'N/A'
+        });
+      } else if (response) {
+        console.log(`${logId} [SUCCESS]:`, {
+          status: response.status,
+          statusText: response.statusText,
+          dataKeys: Object.keys(response.data || {})
+        });
+      }
+    };
+
+    // Fetch latest status from Cashfree API
+    // Try with subscription_id first (merchant ID), then cf_subscription_id if that fails
+    let statusUrl = `${CASHFREE_API_BASE}/subscriptions/${subId}`;
+    const statusHeaders = getCashfreeHeaders();
+
+    console.log(`[E-NACH Admin ${requestId}] 🔍 Rechecking status for subscription:`, {
+      db_id: subscriptionId,
+      subscription_id: subscription.subscription_id,
+      cf_subscription_id: subscription.cf_subscription_id,
+      using_id: subId,
+      url: statusUrl,
+      api_base: CASHFREE_API_BASE,
+      has_credentials: !!(CASHFREE_CLIENT_ID && CASHFREE_CLIENT_SECRET)
+    });
+
+    logApiCall('GET', statusUrl, statusHeaders, null);
+
+    console.log(`[E-NACH Admin ${requestId}] 📞 Making HTTP GET request to Cashfree API...`);
+
+    let statusResponse;
+    try {
+      statusResponse = await axios.get(statusUrl, { 
+        headers: statusHeaders,
+        timeout: 30000 // 30 second timeout
+      });
+      
+      console.log(`[E-NACH Admin ${requestId}] ✅ Cashfree API call successful!`, {
+        http_status: statusResponse.status,
+        http_status_text: statusResponse.statusText,
+        response_data_keys: Object.keys(statusResponse.data || {}),
+        subscription_status: statusResponse.data?.subscription_status,
+        has_authorization_details: !!statusResponse.data?.authorization_details
+      });
+      
+      // Log authorization_details structure for debugging
+      if (statusResponse.data?.authorization_details) {
+        console.log(`[E-NACH Admin ${requestId}] 📋 Authorization Details:`, {
+          keys: Object.keys(statusResponse.data.authorization_details),
+          authorizationStatus: statusResponse.data.authorization_details.authorizationStatus,
+          authorization_status: statusResponse.data.authorization_details.authorization_status,
+          mandate_status: statusResponse.data.authorization_details.mandate_status,
+          full_details: JSON.stringify(statusResponse.data.authorization_details, null, 2)
+        });
+      }
+      
+      logApiCall('GET', statusUrl, statusHeaders, null, statusResponse);
+      
+      // Log full response in development
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[E-NACH Admin ${requestId}] 📋 Full Cashfree API Response:`, JSON.stringify(statusResponse.data, null, 2));
+      }
+    } catch (apiError) {
+      console.error(`[E-NACH Admin ${requestId}] ❌ Cashfree API call failed with subscription_id:`, {
+        message: apiError.message,
+        code: apiError.code,
+        response_status: apiError.response?.status,
+        response_status_text: apiError.response?.statusText,
+        response_data: apiError.response?.data,
+        url: apiError.config?.url,
+        method: apiError.config?.method
+      });
+      
+      logApiCall('GET', statusUrl, statusHeaders, null, null, apiError);
+      
+      // If subscription_id failed and we have cf_subscription_id, try with that
+      if (cfSubId && cfSubId !== subId) {
+        console.log(`[E-NACH Admin ${requestId}] 🔄 Retrying with cf_subscription_id: ${cfSubId}`);
+        statusUrl = `${CASHFREE_API_BASE}/subscriptions/${cfSubId}`;
+        console.log(`[E-NACH Admin ${requestId}] 🔍 Retry URL: ${statusUrl}`);
+        try {
+          statusResponse = await axios.get(statusUrl, { 
+            headers: statusHeaders,
+            timeout: 30000
+          });
+          console.log(`[E-NACH Admin ${requestId}] ✅ Retry with cf_subscription_id successful!`, {
+            http_status: statusResponse.status,
+            subscription_status: statusResponse.data?.subscription_status
+          });
+          logApiCall('GET', statusUrl, statusHeaders, null, statusResponse);
+        } catch (retryError) {
+          console.error(`[E-NACH Admin ${requestId}] ❌ Retry with cf_subscription_id also failed:`, {
+            message: retryError.message,
+            response_status: retryError.response?.status,
+            response_data: retryError.response?.data
+          });
+          logApiCall('GET', statusUrl, statusHeaders, null, null, retryError);
+          throw retryError;
+        }
+      } else {
+        throw apiError;
+      }
+    }
+
+    if (!statusResponse || !statusResponse.data) {
+      throw new Error('Invalid response from Cashfree API');
+    }
+
+    // Update database with latest status
+    const updateQuery = `
+      UPDATE enach_subscriptions 
+      SET 
+        status = ?,
+        mandate_status = ?,
+        cashfree_response = ?,
+        updated_at = NOW()
+      WHERE id = ?
+    `;
+
+    const subscriptionStatus = statusResponse.data.subscription_status || statusResponse.data.status;
+    const authorizationDetails = statusResponse.data.authorization_details || {};
+    
+    // Extract mandate status from authorization_details
+    // Cashfree can use different field names: authorizationStatus, authorization_status, mandate_status
+    let mandateStatus = authorizationDetails.authorizationStatus || 
+                       authorizationDetails.authorization_status ||
+                       authorizationDetails.mandate_status ||
+                       authorizationDetails.status;
+    
+    // If not found in authorization_details, check root level
+    if (!mandateStatus) {
+      mandateStatus = statusResponse.data.mandate_status || 
+                     statusResponse.data.authorization_status;
+    }
+    
+    // Fallback to existing mandate_status if still not found
+    if (!mandateStatus) {
+      mandateStatus = subscription.mandate_status;
+    }
+    
+    console.log(`[E-NACH Admin ${requestId}] 📊 Extracted Status Values:`, {
+      subscription_status: subscriptionStatus,
+      mandate_status: mandateStatus,
+      authorization_details_keys: Object.keys(authorizationDetails),
+      authorizationStatus: authorizationDetails.authorizationStatus,
+      authorization_status: authorizationDetails.authorization_status,
+      mandate_status_in_details: authorizationDetails.mandate_status
+    });
+
+    await executeQuery(updateQuery, [
+      subscriptionStatus,
+      mandateStatus,
+      JSON.stringify(statusResponse.data),
+      subscriptionId
+    ]);
+
+    console.log(`[E-NACH Admin ${requestId}] Updated subscription ${subscriptionId}:`, {
+      old_status: subscription.status,
+      new_status: subscriptionStatus,
+      old_mandate_status: subscription.mandate_status,
+      new_mandate_status: mandateStatus
+    });
+
+    res.json({
+      status: 'success',
+      message: 'Subscription status updated successfully',
+      data: {
+        subscription_status: subscriptionStatus,
+        mandate_status: mandateStatus,
+        cashfree_data: statusResponse.data
+      }
+    });
+
+  } catch (error) {
+    console.error(`[E-NACH Admin ${requestId}] Error rechecking subscription status:`, {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+      url: error.config?.url
+    });
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to recheck subscription status',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      details: error.response?.data || undefined,
+      requestId: requestId
+    });
+  }
+});
+
+// Admin endpoint to charge/deduct amount from existing E-NACH subscription
+router.post('/:userId/enach-subscriptions/:subscriptionId/charge', authenticateAdmin, async (req, res) => {
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  
+  try {
+    await initializeDatabase();
+    const { userId, subscriptionId } = req.params;
+    const { amount } = req.body;
+
+    // Validate required fields
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid amount is required (must be greater than 0)'
+      });
+    }
+
+    const chargeAmount = parseFloat(amount);
+    if (isNaN(chargeAmount) || chargeAmount <= 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid amount'
+      });
+    }
+
+    // Validate Cashfree configuration
+    const axios = require('axios');
+    const { v4: uuidv4 } = require('uuid');
+    const CASHFREE_API_BASE = process.env.CASHFREE_API_BASE || 'https://sandbox.cashfree.com/pg';
+    const CASHFREE_CLIENT_ID = process.env.CASHFREE_CLIENT_ID;
+    const CASHFREE_CLIENT_SECRET = process.env.CASHFREE_CLIENT_SECRET;
+    const CASHFREE_API_VERSION = process.env.CASHFREE_API_VERSION || '2025-01-01';
+
+    if (!CASHFREE_CLIENT_ID || !CASHFREE_CLIENT_SECRET) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'E-NACH service is not configured. Please contact support.'
+      });
+    }
+
+    const getCashfreeHeaders = (idempotencyKey = null) => {
+      const headers = {
+        'Content-Type': 'application/json',
+        'x-api-version': CASHFREE_API_VERSION,
+        'x-client-id': CASHFREE_CLIENT_ID,
+        'x-client-secret': CASHFREE_CLIENT_SECRET,
+        'x-request-id': uuidv4(),
+      };
+      
+      if (idempotencyKey) {
+        headers['x-idempotency-key'] = idempotencyKey;
+      } else {
+        headers['x-idempotency-key'] = uuidv4();
+      }
+      
+      return headers;
+    };
+
+    // Fetch subscription details from database
+    const subscriptionQuery = `
+      SELECT 
+        es.*,
+        la.application_number,
+        u.first_name,
+        u.last_name
+      FROM enach_subscriptions es
+      LEFT JOIN loan_applications la ON es.loan_application_id = la.id
+      LEFT JOIN users u ON es.user_id = u.id
+      WHERE es.id = ? AND es.user_id = ?
+    `;
+
+    const subscriptions = await executeQuery(subscriptionQuery, [subscriptionId, userId]);
+
+    if (!subscriptions || subscriptions.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'E-NACH subscription not found for this user'
+      });
+    }
+
+    const subscription = subscriptions[0];
+    const merchantSubscriptionId = subscription.subscription_id; // Our merchant subscription ID
+    const cfSubscriptionId = subscription.cf_subscription_id; // Cashfree subscription ID
+
+    if (!merchantSubscriptionId && !cfSubscriptionId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Subscription ID not found in database'
+      });
+    }
+
+    // Use merchant subscription ID first, fallback to Cashfree ID
+    const subscriptionIdToUse = merchantSubscriptionId || cfSubscriptionId;
+
+    console.log(`[E-NACH Admin ${requestId}] Charging subscription:`, {
+      db_id: subscriptionId,
+      subscription_id: merchantSubscriptionId,
+      cf_subscription_id: cfSubscriptionId,
+      using_id: subscriptionIdToUse,
+      amount: chargeAmount,
+      user_id: userId
+    });
+
+    // Generate unique payment ID for this charge
+    const paymentId = `charge_${subscriptionIdToUse}_${Date.now()}`;
+
+    // Prepare charge payload for ON_DEMAND subscription
+    // For charging, we use payment_type: "CHARGE" (not "AUTH" or "PAYMENT")
+    const chargePayload = {
+      subscription_id: subscriptionIdToUse,
+      payment_id: paymentId,
+      payment_type: 'CHARGE', // CHARGE for charging/deducting amount, AUTH for authorization
+      payment_amount: chargeAmount,
+      payment_currency: 'INR'
+    };
+
+    const chargeHeaders = getCashfreeHeaders(paymentId);
+    const chargeUrl = `${CASHFREE_API_BASE}/subscriptions/pay`;
+
+    console.log(`[E-NACH Admin ${requestId}] Calling Cashfree charge API:`, {
+      url: chargeUrl,
+      payload: chargePayload
+    });
+
+    let chargeResponse;
+    try {
+      chargeResponse = await axios.post(
+        chargeUrl,
+        chargePayload,
+        { 
+          headers: chargeHeaders,
+          timeout: 60000
+        }
+      );
+
+      console.log(`[E-NACH Admin ${requestId}] Charge API call successful:`, {
+        http_status: chargeResponse.status,
+        payment_status: chargeResponse.data?.payment_status,
+        cf_payment_id: chargeResponse.data?.cf_payment_id
+      });
+
+    } catch (apiError) {
+      console.error(`[E-NACH Admin ${requestId}] Charge API call failed:`, {
+        message: apiError.message,
+        response_status: apiError.response?.status,
+        response_data: apiError.response?.data,
+        url: apiError.config?.url
+      });
+
+      // Save failed charge request to database
+      try {
+        await executeQuery(`
+          INSERT INTO enach_charge_requests 
+          (user_id, subscription_id, db_subscription_id, payment_id, amount, status, 
+           request_data, response_data, error_message, created_at)
+          VALUES (?, ?, ?, ?, ?, 'FAILED', ?, ?, ?, NOW())
+        `, [
+          userId,
+          subscriptionIdToUse,
+          subscriptionId,
+          paymentId,
+          chargeAmount,
+          JSON.stringify(chargePayload),
+          JSON.stringify(apiError.response?.data || {}),
+          apiError.message
+        ]);
+      } catch (dbError) {
+        console.error(`[E-NACH Admin ${requestId}] Error saving failed charge to database:`, dbError);
+      }
+
+      return res.status(apiError.response?.status || 500).json({
+        status: 'error',
+        message: 'Failed to charge subscription',
+        error: process.env.NODE_ENV === 'development' ? apiError.message : undefined,
+        details: apiError.response?.data || undefined,
+        requestId: requestId
+      });
+    }
+
+    // Save charge request to database (successful or pending)
+    const paymentStatus = chargeResponse.data?.payment_status || 'PENDING';
+    const cfPaymentId = chargeResponse.data?.cf_payment_id || null;
+
+    try {
+      await executeQuery(`
+        INSERT INTO enach_charge_requests 
+        (user_id, subscription_id, db_subscription_id, payment_id, cf_payment_id, amount, status, 
+         request_data, response_data, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      `, [
+        userId,
+        subscriptionIdToUse,
+        subscriptionId,
+        paymentId,
+        cfPaymentId,
+        chargeAmount,
+        paymentStatus,
+        JSON.stringify(chargePayload),
+        JSON.stringify(chargeResponse.data)
+      ]);
+
+      console.log(`[E-NACH Admin ${requestId}] Charge request saved to database`);
+    } catch (dbError) {
+      console.error(`[E-NACH Admin ${requestId}] Error saving charge to database:`, dbError);
+      // Continue - don't fail the request if DB save fails
+    }
+
+    res.json({
+      status: 'success',
+      message: 'Charge request submitted successfully',
+      data: {
+        payment_id: paymentId,
+        cf_payment_id: cfPaymentId,
+        payment_status: paymentStatus,
+        amount: chargeAmount,
+        subscription_id: subscriptionIdToUse,
+        cashfree_data: chargeResponse.data
+      }
+    });
+
+  } catch (error) {
+    console.error(`[E-NACH Admin ${requestId}] Error charging subscription:`, {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status
+    });
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to charge subscription',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      details: error.response?.data || undefined,
+      requestId: requestId
+    });
+  }
+});
+
+// Admin endpoint to get E-NACH charge history
+router.get('/:userId/enach-subscriptions/charge-history', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+
+    // Convert userId to integer
+    const userIdInt = parseInt(userId, 10);
+    if (isNaN(userIdInt)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid user ID'
+      });
+    }
+
+    // Fetch charge history for this user
+    const chargeHistoryQuery = `
+      SELECT 
+        ecr.*,
+        es.subscription_id,
+        es.cf_subscription_id,
+        la.application_number,
+        u.first_name,
+        u.last_name
+      FROM enach_charge_requests ecr
+      LEFT JOIN enach_subscriptions es ON ecr.db_subscription_id = es.id
+      LEFT JOIN loan_applications la ON es.loan_application_id = la.id
+      LEFT JOIN users u ON ecr.user_id = u.id
+      WHERE ecr.user_id = ?
+      ORDER BY ecr.created_at DESC
+    `;
+
+    const chargeHistory = await executeQuery(chargeHistoryQuery, [userIdInt]);
+
+    // Parse JSON fields
+    const formattedHistory = (chargeHistory || []).map(charge => {
+      let requestData = {};
+      let responseData = {};
+      
+      try {
+        requestData = typeof charge.request_data === 'string' 
+          ? JSON.parse(charge.request_data) 
+          : charge.request_data || {};
+      } catch (e) {
+        console.warn('Error parsing request_data:', e);
+      }
+      
+      try {
+        responseData = typeof charge.response_data === 'string' 
+          ? JSON.parse(charge.response_data) 
+          : charge.response_data || {};
+      } catch (e) {
+        console.warn('Error parsing response_data:', e);
+      }
+
+      return {
+        ...charge,
+        request_data: requestData,
+        response_data: responseData
+      };
+    });
+
+    res.json({
+      status: 'success',
+      data: formattedHistory
+    });
+
+  } catch (error) {
+    console.error('Error fetching E-NACH charge history:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch E-NACH charge history',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Admin endpoint to check payment status from Cashfree
+router.post('/:userId/enach-subscriptions/charge-history/:chargeId/recheck-status', authenticateAdmin, async (req, res) => {
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  
+  try {
+    await initializeDatabase();
+    const { userId, chargeId } = req.params;
+
+    // Fetch charge request from database
+    const chargeQuery = `
+      SELECT * FROM enach_charge_requests 
+      WHERE id = ? AND user_id = ?
+    `;
+
+    const charges = await executeQuery(chargeQuery, [chargeId, userId]);
+
+    if (!charges || charges.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Charge request not found'
+      });
+    }
+
+    const charge = charges[0];
+    const paymentId = charge.payment_id;
+    const subscriptionId = charge.subscription_id;
+
+    if (!paymentId || !subscriptionId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Payment ID or Subscription ID not found'
+      });
+    }
+
+    // Validate Cashfree configuration
+    const axios = require('axios');
+    const { v4: uuidv4 } = require('uuid');
+    const CASHFREE_API_BASE = process.env.CASHFREE_API_BASE || 'https://sandbox.cashfree.com/pg';
+    const CASHFREE_CLIENT_ID = process.env.CASHFREE_CLIENT_ID;
+    const CASHFREE_CLIENT_SECRET = process.env.CASHFREE_CLIENT_SECRET;
+    const CASHFREE_API_VERSION = process.env.CASHFREE_API_VERSION || '2025-01-01';
+
+    if (!CASHFREE_CLIENT_ID || !CASHFREE_CLIENT_SECRET) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'E-NACH service is not configured'
+      });
+    }
+
+    const getCashfreeHeaders = () => ({
+      'Content-Type': 'application/json',
+      'x-api-version': CASHFREE_API_VERSION,
+      'x-client-id': CASHFREE_CLIENT_ID,
+      'x-client-secret': CASHFREE_CLIENT_SECRET,
+      'x-request-id': uuidv4(),
+    });
+
+    // Check payment status from Cashfree
+    // Cashfree API: GET /subscriptions/{subscription_id}/payments/{payment_id}
+    const statusUrl = `${CASHFREE_API_BASE}/subscriptions/${subscriptionId}/payments/${paymentId}`;
+    const statusHeaders = getCashfreeHeaders();
+
+    console.log(`[E-NACH Admin ${requestId}] Checking payment status:`, {
+      subscription_id: subscriptionId,
+      payment_id: paymentId,
+      url: statusUrl
+    });
+
+    let paymentStatusResponse;
+    try {
+      paymentStatusResponse = await axios.get(statusUrl, { 
+        headers: statusHeaders,
+        timeout: 30000
+      });
+
+      console.log(`[E-NACH Admin ${requestId}] Payment status retrieved:`, {
+        http_status: paymentStatusResponse.status,
+        payment_status: paymentStatusResponse.data?.payment_status,
+        payment_message: paymentStatusResponse.data?.payment_message
+      });
+
+    } catch (apiError) {
+      console.error(`[E-NACH Admin ${requestId}] Error checking payment status:`, {
+        message: apiError.message,
+        response_status: apiError.response?.status,
+        response_data: apiError.response?.data
+      });
+
+      return res.status(apiError.response?.status || 500).json({
+        status: 'error',
+        message: 'Failed to check payment status from Cashfree',
+        error: process.env.NODE_ENV === 'development' ? apiError.message : undefined,
+        details: apiError.response?.data || undefined,
+        requestId: requestId
+      });
+    }
+
+    // Update database with latest status
+    const paymentStatus = paymentStatusResponse.data?.payment_status || charge.status;
+    const cfPaymentId = paymentStatusResponse.data?.cf_payment_id || charge.cf_payment_id;
+    const paymentMessage = paymentStatusResponse.data?.payment_message || null;
+
+    await executeQuery(`
+      UPDATE enach_charge_requests 
+      SET 
+        status = ?,
+        cf_payment_id = COALESCE(?, cf_payment_id),
+        response_data = ?,
+        error_message = ?,
+        updated_at = NOW()
+      WHERE id = ?
+    `, [
+      paymentStatus,
+      cfPaymentId,
+      JSON.stringify(paymentStatusResponse.data),
+      paymentMessage && paymentStatus !== 'SUCCESS' ? paymentMessage : null,
+      chargeId
+    ]);
+
+    console.log(`[E-NACH Admin ${requestId}] Updated charge ${chargeId}:`, {
+      old_status: charge.status,
+      new_status: paymentStatus
+    });
+
+    res.json({
+      status: 'success',
+      message: 'Payment status updated successfully',
+      data: {
+        payment_status: paymentStatus,
+        payment_message: paymentMessage,
+        cf_payment_id: cfPaymentId,
+        cashfree_data: paymentStatusResponse.data
+      }
+    });
+
+  } catch (error) {
+    console.error(`[E-NACH Admin ${requestId}] Error rechecking payment status:`, {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status
+    });
+    
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to recheck payment status',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      details: error.response?.data || undefined,
+      requestId: requestId
     });
   }
 });

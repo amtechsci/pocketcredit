@@ -65,40 +65,40 @@ const ProfileCompletionPageSimple = () => {
     if (!regex.test(date)) {
       return { valid: false, error: 'Please enter date in DD/MM/YYYY format' };
     }
-    
+
     const [day, month, year] = date.split('/').map(Number);
-    
+
     // Check valid ranges
     if (month < 1 || month > 12) {
       return { valid: false, error: 'Month must be between 01 and 12' };
     }
-    
+
     if (day < 1 || day > 31) {
       return { valid: false, error: 'Day must be between 01 and 31' };
     }
-    
+
     if (year < 1900 || year > new Date().getFullYear()) {
       return { valid: false, error: 'Please enter a valid year' };
     }
-    
+
     // Check if date is valid (handles things like 31/02/2024)
     const dateObj = new Date(year, month - 1, day);
-    if (dateObj.getFullYear() !== year || 
-        dateObj.getMonth() !== month - 1 || 
-        dateObj.getDate() !== day) {
+    if (dateObj.getFullYear() !== year ||
+      dateObj.getMonth() !== month - 1 ||
+      dateObj.getDate() !== day) {
       return { valid: false, error: 'This date does not exist in the calendar' };
     }
-    
+
     return { valid: true, error: '' };
   };
 
   const formatDateInput = (input: string): string => {
     // Remove all non-numeric characters
     const numbers = input.replace(/\D/g, '');
-    
+
     // Limit to 8 digits (DDMMYYYY)
     const limited = numbers.slice(0, 8);
-    
+
     // Add slashes automatically
     let formatted = '';
     if (limited.length > 0) {
@@ -110,14 +110,14 @@ const ProfileCompletionPageSimple = () => {
         formatted += '/' + limited.slice(4, 8); // YYYY
       }
     }
-    
+
     return formatted;
   };
 
   const handleEmploymentDOBChange = (value: string) => {
     const formatted = formatDateInput(value);
     setEmploymentQuickCheckData(prev => ({ ...prev, date_of_birth: formatted }));
-    
+
     // Only validate if user has entered the full format
     if (formatted.length === 10) {
       const validation = validateDateFormat(formatted);
@@ -132,7 +132,7 @@ const ProfileCompletionPageSimple = () => {
   const handleStudentDOBChange = (value: string) => {
     const formatted = formatDateInput(value);
     setStudentFormData(prev => ({ ...prev, date_of_birth: formatted }));
-    
+
     // Only validate if user has entered the full format
     if (formatted.length === 10) {
       const validation = validateDateFormat(formatted);
@@ -192,7 +192,7 @@ const ProfileCompletionPageSimple = () => {
         setCurrentStep(1);
         return;
       }
-      
+
       // Step 2 (Basic Information) is removed - skip to step 3 for students, or redirect to dashboard for salaried
       let newStep = user.profile_completion_step;
       if (newStep === 2) {
@@ -210,7 +210,7 @@ const ProfileCompletionPageSimple = () => {
           return;
         }
       }
-      
+
       if (newStep !== currentStep && !stepUpdatedRef.current) {
         stepUpdatedRef.current = true;
         setCurrentStep(newStep);
@@ -239,13 +239,6 @@ const ProfileCompletionPageSimple = () => {
       }
     }
   }, [user?.id]);
-
-  // Redirect if user is on hold
-  useEffect(() => {
-    if (user && user.status === 'on_hold') {
-      navigate('/hold-status', { replace: true });
-    }
-  }, [user, navigate]);
 
   // Redirect if user is active and has completed employment quick check (step 2) AND profile is completed
   // If user was on hold at step 1 and admin unholds, profile_completed will be false,

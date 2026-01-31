@@ -549,43 +549,15 @@ router.post('/check-and-retrieve/:applicationId', requireAuth, async (req, res) 
  */
 router.post('/init-table', async (req, res) => {
   try {
-    await initializeDatabase();
-
-    // Create table
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS digitap_bank_statements (
-        id INT PRIMARY KEY AUTO_INCREMENT,
-        user_id INT NOT NULL,
-        application_id INT NOT NULL,
-        client_ref_num VARCHAR(255) NOT NULL UNIQUE,
-        mobile_number VARCHAR(15) NOT NULL,
-        bank_name VARCHAR(100) DEFAULT NULL,
-        upload_method ENUM('online', 'manual', 'aa') DEFAULT 'online',
-        file_path VARCHAR(500) DEFAULT NULL,
-        file_name VARCHAR(255) DEFAULT NULL,
-        file_size INT DEFAULT NULL,
-        digitap_url TEXT DEFAULT NULL,
-        status ENUM('pending', 'processing', 'completed', 'failed', 'ReportGenerated') DEFAULT 'pending',
-        report_data LONGTEXT DEFAULT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_user_id (user_id),
-        INDEX idx_application_id (application_id),
-        INDEX idx_client_ref_num (client_ref_num),
-        INDEX idx_status (status),
-        UNIQUE KEY unique_application (application_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-
-    res.json({
-      success: true,
-      message: 'digitap_bank_statements table created successfully'
+    res.status(400).json({
+      success: false,
+      message: 'This endpoint is no longer available. Table schema should be managed separately.'
     });
   } catch (error) {
-    console.error('Table creation error:', error);
+    console.error('Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to create table',
+      message: 'Operation failed',
       error: error.message
     });
   }

@@ -3560,7 +3560,7 @@ router.post('/user/:loanId/noc/generate-pdf', requireAuth, async (req, res) => {
         } catch (dbError) {
           // If column doesn't exist, try alternative approach
           console.warn('⚠️ Could not save NOC PDF URL to database (column may not exist):', dbError.message);
-          // Could add column migration here if needed
+          // Column may need to be added to schema if needed
         }
       } else {
         console.warn('⚠️ User ID not found, skipping S3 upload');
@@ -3843,7 +3843,7 @@ router.post('/:loanId/noc/generate-pdf', authenticateAdmin, async (req, res) => 
         } catch (dbError) {
           // If column doesn't exist, try alternative approach
           console.warn('⚠️ Could not save NOC PDF URL to database (column may not exist):', dbError.message);
-          // Could add column migration here if needed
+          // Column may need to be added to schema if needed
         }
       } else {
         console.warn('⚠️ User ID not found, skipping S3 upload');
