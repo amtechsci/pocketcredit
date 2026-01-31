@@ -1,16 +1,19 @@
 /**
  * Loan Calculation Cron Job
  * 
- * Calculates and updates interest and penalty for all processed loans.
+ * Calculates and updates interest and penalty for active loans.
  * Runs every 4 hours as per user requirement.
  * 
  * This job:
- * 1. Finds all loans with processed_at IS NOT NULL that haven't been calculated today
+ * 1. Finds all loans with status 'account_manager' that haven't been calculated today
  * 2. Skips loans already calculated today to reduce load
  * 3. Calculates interest from last_calculated_at (or processed_at) to today
  * 4. Calculates penalty if loan is overdue
  * 5. Updates processed_interest and processed_penalty
  * 6. Updates last_calculated_at
+ * 
+ * Note: Only processes 'account_manager' status loans. 'cleared' loans are fully paid
+ * and don't need interest/penalty calculation.
  */
 
 const { executeQuery } = require('../config/database');
@@ -143,8 +146,9 @@ async function calculateLoanInterestAndPenalty() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Get all processed loans (active loans)
+    // Get all processed loans with account_manager status only
     // Skip loans that were already calculated today to reduce load
+    // Note: 'cleared' loans are fully paid, no need to calculate interest/penalty
     const processedLoans = await executeQuery(`
       SELECT 
         id,
@@ -160,7 +164,7 @@ async function calculateLoanInterestAndPenalty() {
         status
       FROM loan_applications
       WHERE processed_at IS NOT NULL
-        AND status IN ('account_manager', 'cleared', 'active')
+        AND status = 'account_manager'
         AND (
           last_calculated_at IS NULL 
           OR DATE(last_calculated_at) < DATE(NOW())
