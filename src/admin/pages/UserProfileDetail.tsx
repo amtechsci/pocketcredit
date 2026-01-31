@@ -6496,11 +6496,28 @@ export function UserProfileDetail() {
                         // Use the pre-calculated DPD value, or calculate if not available
                         const dpd = loan.calculatedDPD !== undefined ? loan.calculatedDPD : calculateDPDForEmiLoan(loan);
 
-                        // Penalty - use processed value if available, otherwise calculate
+                        // Penalty - PRIORITY 1: Use from calculation API (uses processed_penalty from DB)
+                        // PRIORITY 2: Use processed_penalty directly from loan data
+                        // FALLBACK: Calculate dynamically
                         let penaltyData = { penalty: 0, gst: 0, total: 0 };
-                        if (isProcessed && loan.processed_penalty !== null && loan.processed_penalty !== undefined) {
-                          penaltyData.total = parseFloat(loan.processed_penalty) || 0; // Ensure it's a number
+                        if (calculation?.penalty?.penalty_total !== undefined && calculation.penalty.penalty_total > 0) {
+                          // Use penalty from calculation API (calculated by backend using processed_penalty)
+                          penaltyData = {
+                            penalty: calculation.penalty.penalty_base || 0,
+                            gst: calculation.penalty.penalty_gst || 0,
+                            total: calculation.penalty.penalty_total || 0
+                          };
+                        } else if (isProcessed && loan.processed_penalty !== null && loan.processed_penalty !== undefined) {
+                          // Fallback: Use processed_penalty directly from loan data
+                          const penaltyTotal = parseFloat(loan.processed_penalty) || 0;
+                          // Estimate base and GST (18% GST is standard)
+                          penaltyData = {
+                            penalty: penaltyTotal / 1.18,
+                            gst: penaltyTotal - (penaltyTotal / 1.18),
+                            total: penaltyTotal
+                          };
                         } else {
+                          // Fallback: Calculate dynamically
                           penaltyData = calculatePenalty(principal, dpd);
                         }
 
