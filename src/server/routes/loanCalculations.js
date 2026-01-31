@@ -1192,9 +1192,24 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
       console.log(`[Exhausted Days] exhaustedDays: ${exhaustedDays}`);
       
       // Calculate interest till today using exhausted days
-      if (calculation.interest && calculation.interest.rate_per_day && calculation.principal) {
-        interestTillToday = toDecimal2(calculation.principal * calculation.interest.rate_per_day * exhaustedDays);
-        console.log(`[Interest Calculation] principal: ${calculation.principal}, rate_per_day: ${calculation.interest.rate_per_day}, exhaustedDays: ${exhaustedDays}, interestTillToday: ${interestTillToday}`);
+      // Debug: Check what we have in calculation object
+      console.log(`[Interest Calculation Debug] calculation.interest exists: ${!!calculation.interest}, calculation.principal: ${calculation.principal}, calculation.interest?.rate_per_day: ${calculation.interest?.rate_per_day}`);
+      
+      // Ensure we have all required values, with fallbacks if needed
+      const principal = calculation.principal || parseFloat(loan.processed_amount || loan.sanctioned_amount || loan.loan_amount || 0);
+      const ratePerDay = calculation.interest?.rate_per_day || parseFloat(planData.interest_percent_per_day || loan.interest_percent_per_day || 0.001);
+      
+      // Ensure at least 1 day if same day (exhaustedDays = 0 means same day = 1 day for interest)
+      const daysForInterest = exhaustedDays === 0 ? 1 : exhaustedDays;
+      
+      if (principal > 0 && ratePerDay > 0 && daysForInterest > 0) {
+        interestTillToday = toDecimal2(principal * ratePerDay * daysForInterest);
+        console.log(`[Interest Calculation] ✅ Calculated - principal: ${principal}, rate_per_day: ${ratePerDay}, exhaustedDays: ${exhaustedDays} (using ${daysForInterest} for calculation), interestTillToday: ${interestTillToday}`);
+      } else {
+        console.warn(`[Interest Calculation] ⚠️ Cannot calculate - principal: ${principal}, ratePerDay: ${ratePerDay}, daysForInterest: ${daysForInterest}, exhaustedDays: ${exhaustedDays}`);
+        console.warn(`[Interest Calculation] ⚠️ calculation.interest:`, calculation.interest);
+        console.warn(`[Interest Calculation] ⚠️ planData.interest_percent_per_day:`, planData.interest_percent_per_day);
+        console.warn(`[Interest Calculation] ⚠️ loan.interest_percent_per_day:`, loan.interest_percent_per_day);
       }
     }
     

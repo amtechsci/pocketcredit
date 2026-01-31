@@ -118,6 +118,43 @@ function getTodayString() {
 }
 
 /**
+ * Convert a date value (Date object, string, or Date-like) to YYYY-MM-DD string format
+ * @param {any} dateValue - Date value that could be Date object, string, or null
+ * @returns {string|null} Date in YYYY-MM-DD format or null
+ */
+function normalizeDateToString(dateValue) {
+  if (!dateValue) return null;
+  
+  // If it's already a string in YYYY-MM-DD format, return it
+  if (typeof dateValue === 'string') {
+    // Check if it's already in YYYY-MM-DD format
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+      return dateValue;
+    }
+    // Try to parse it as a date
+    const date = new Date(dateValue);
+    if (!isNaN(date.getTime())) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    return null;
+  }
+  
+  // If it's a Date object
+  if (dateValue instanceof Date) {
+    if (isNaN(dateValue.getTime())) return null;
+    const year = dateValue.getFullYear();
+    const month = String(dateValue.getMonth() + 1).padStart(2, '0');
+    const day = String(dateValue.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  
+  return null;
+}
+
+/**
  * Calculate calendar day difference between two dates (inclusive)
  * @param {string} startDateStr - Start date in YYYY-MM-DD format
  * @param {string} endDateStr - End date in YYYY-MM-DD format
@@ -125,6 +162,12 @@ function getTodayString() {
  */
 function calculateDaysBetween(startDateStr, endDateStr) {
   if (!startDateStr || !endDateStr) return 0;
+  
+  // Ensure both are strings
+  if (typeof startDateStr !== 'string' || typeof endDateStr !== 'string') {
+    console.error('calculateDaysBetween: Invalid input types', { startDateStr, endDateStr });
+    return 0;
+  }
 
   // Parse date strings to components
   const [startYear, startMonth, startDay] = startDateStr.split('-').map(Number);
@@ -567,6 +610,90 @@ async function getLoanCalculation(loanIdOrDb, loanIdParam, customDays = null) {
 
     // Calculate all values
     const calculations = calculateLoanValues(loan, days);
+    
+    // For account_manager/cleared loans, also calculate interestTillToday and exhaustedDays
+    // This matches the logic in the API endpoint /loan-calculations/:loanId
+    if (loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)) {
+      // Get processed_at or disbursed_at as base date (fetch full loan data)
+      const fullLoanQuery = await executeQuery(
+        `SELECT 
+          DATE(processed_at) as processed_at_date,
+          DATE(disbursed_at) as disbursed_at_date,
+          processed_at,
+          disbursed_at,
+          processed_amount,
+          loan_amount
+        FROM loan_applications 
+        WHERE id = ?`,
+        [loanId]
+      );
+      
+      if (fullLoanQuery && fullLoanQuery.length > 0) {
+        const loanData = fullLoanQuery[0];
+        // PRIORITY: Use processed_at_date (from SQL DATE() function - already local date)
+        let baseDateStr = normalizeDateToString(loanData.processed_at_date);
+        if (!baseDateStr && loanData.processed_at) {
+          // Parse processed_at to YYYY-MM-DD string
+          baseDateStr = normalizeDateToString(loanData.processed_at);
+        }
+        
+        // FALLBACK: Use disbursed_at_date
+        if (!baseDateStr) {
+          baseDateStr = normalizeDateToString(loanData.disbursed_at_date);
+          if (!baseDateStr && loanData.disbursed_at) {
+            baseDateStr = normalizeDateToString(loanData.disbursed_at);
+          }
+        }
+        
+        if (baseDateStr) {
+          const todayStr = getTodayString();
+          // Use inclusive counting (same day = 1 day)
+          let exhaustedDays = calculateDaysBetween(baseDateStr, todayStr);
+          exhaustedDays = Math.max(0, exhaustedDays);
+          
+          // Calculate interest till today
+          const principal = calculations.principal || parseFloat(loanData.processed_amount || loanData.loan_amount || loan.loan_amount || 0);
+          const ratePerDay = calculations.interestPercentPerDay || parseFloat(loan.interest_percent_per_day || 0.001);
+          
+          // Ensure at least 1 day if same day (exhaustedDays = 0 means same day = 1 day for interest)
+          const daysForInterest = exhaustedDays === 0 ? 1 : exhaustedDays;
+          
+          if (principal > 0 && ratePerDay > 0 && daysForInterest > 0) {
+            const interestTillToday = toDecimal2(principal * ratePerDay * daysForInterest);
+            
+            // Convert interest from number to object structure (matching API endpoint format)
+            // calculateLoanValues returns interest as a number, but we need it as an object
+            if (typeof calculations.interest === 'number') {
+              calculations.interest = {
+                amount: calculations.interest,
+                rate_per_day: ratePerDay,
+                days: calculations.days || days,
+                exhaustedDays: exhaustedDays,
+                interestTillToday: interestTillToday
+              };
+            } else if (calculations.interest && typeof calculations.interest === 'object') {
+              // Already an object, just add the new fields
+              calculations.interest.exhaustedDays = exhaustedDays;
+              calculations.interest.interestTillToday = interestTillToday;
+              if (!calculations.interest.rate_per_day) {
+                calculations.interest.rate_per_day = ratePerDay;
+              }
+            } else {
+              // Create new interest object
+              calculations.interest = {
+                amount: calculations.interest || 0,
+                rate_per_day: ratePerDay,
+                days: calculations.days || days,
+                exhaustedDays: exhaustedDays,
+                interestTillToday: interestTillToday
+              };
+            }
+            
+            console.log(`[getLoanCalculation] ✅ Calculated interestTillToday: principal=${principal}, ratePerDay=${ratePerDay}, exhaustedDays=${exhaustedDays}, daysForInterest=${daysForInterest}, interestTillToday=${interestTillToday}`);
+          }
+        }
+      }
+    }
 
     return {
       success: true,

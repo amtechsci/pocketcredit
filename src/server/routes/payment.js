@@ -302,7 +302,7 @@ async function calculatePaymentAmount(loan, paymentType) {
       // NOTE: Pre-close does NOT include post service fees - those are waived on pre-close
       const principal = parseFloat(loan.processed_amount || loan.sanctioned_amount || loan.loan_amount || loan.principal_amount || 0);
       
-      // Get interest till today from calculation
+      // Get interest till today from calculation API (main source of truth)
       const interestTillToday = calculationData.interest?.interestTillToday || 0;
       
       // For pre-close, also include penalty if overdue
