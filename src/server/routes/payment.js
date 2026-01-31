@@ -682,13 +682,36 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                 [loanId]
             );
             
-            const paidEmiNumbers = paidEmis.map(t => {
+            const paidEmiNumbersFromOrders = paidEmis.map(t => {
                 if (t.payment_type === 'emi_1st') return 1;
                 if (t.payment_type === 'emi_2nd') return 2;
                 if (t.payment_type === 'emi_3rd') return 3;
                 if (t.payment_type === 'emi_4th') return 4;
                 return 0;
             }).sort((a, b) => a - b);
+            
+            // Also check emi_schedule status (for admin-marked payments)
+            let paidEmiNumbersFromSchedule = [];
+            if (loan.emi_schedule) {
+                try {
+                    const emiSchedule = typeof loan.emi_schedule === 'string' 
+                        ? JSON.parse(loan.emi_schedule) 
+                        : loan.emi_schedule;
+                    
+                    if (Array.isArray(emiSchedule)) {
+                        emiSchedule.forEach((emi, index) => {
+                            if (emi.status === 'paid') {
+                                paidEmiNumbersFromSchedule.push(index + 1);
+                            }
+                        });
+                    }
+                } catch (e) {
+                    console.error('[Payment] Error parsing emi_schedule for validation:', e);
+                }
+            }
+            
+            // Combine both sources (remove duplicates)
+            const paidEmiNumbers = [...new Set([...paidEmiNumbersFromOrders, ...paidEmiNumbersFromSchedule])].sort((a, b) => a - b);
             
             // Determine which EMI user is trying to pay
             let requestedEmiNumber = 0;

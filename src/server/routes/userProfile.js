@@ -3298,6 +3298,42 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
               );
               
               console.log(`✅ EMI #${emiNumber} marked as paid in emi_schedule`);
+              
+              // Also create/update payment_orders record to match payment validation logic
+              // This ensures payment validation sees the paid status
+              let paymentTypeSuffix = '1st';
+              if (emiNumber === 1) paymentTypeSuffix = '1st';
+              else if (emiNumber === 2) paymentTypeSuffix = '2nd';
+              else if (emiNumber === 3) paymentTypeSuffix = '3rd';
+              else paymentTypeSuffix = `${emiNumber}th`;
+              const paymentType = `emi_${paymentTypeSuffix}`;
+              const emiAmount = emiSchedule[unpaidEmiIndex].instalment_amount || emiSchedule[unpaidEmiIndex].emi_amount || 0;
+              
+              // Check if payment order already exists
+              const existingOrders = await executeQuery(
+                'SELECT id FROM payment_orders WHERE loan_id = ? AND payment_type = ?',
+                [loanIdInt, paymentType]
+              );
+              
+              if (existingOrders.length > 0) {
+                // Update existing order to PAID
+                await executeQuery(
+                  `UPDATE payment_orders 
+                   SET status = 'PAID', amount = ?, updated_at = NOW() 
+                   WHERE loan_id = ? AND payment_type = ?`,
+                  [emiAmount, loanIdInt, paymentType]
+                );
+                console.log(`✅ Updated existing payment_order for ${paymentType} to PAID`);
+              } else {
+                // Create new payment order record
+                const orderId = `ADMIN_${loan.application_number || loanIdInt}_${paymentType}_${Date.now()}`;
+                await executeQuery(
+                  `INSERT INTO payment_orders (order_id, loan_id, user_id, amount, payment_type, status, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, 'PAID', NOW(), NOW())`,
+                  [orderId, loanIdInt, userIdInt, emiAmount, paymentType]
+                );
+                console.log(`✅ Created payment_order record for ${paymentType} with status PAID`);
+              }
 
               // Check if all EMIs are now paid
               const allEmisPaid = emiSchedule.every(emi => emi.status === 'paid');

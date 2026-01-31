@@ -1566,8 +1566,10 @@ export const RepaymentSchedulePage = () => {
                       const emiDate = new Date(emi.due_date);
                       emiDate.setHours(0, 0, 0, 0);
                       const daysUntilDue = Math.ceil((emiDate.getTime() - currentDateMidnight.getTime()) / (1000 * 60 * 60 * 24));
-                      const isOverdue = daysUntilDue < 0;
-                      const isDueToday = daysUntilDue === 0;
+                      const isPaid = emi.status === 'paid';
+                      // Only show overdue if not paid
+                      const isOverdue = !isPaid && daysUntilDue < 0;
+                      const isDueToday = !isPaid && daysUntilDue === 0;
                       
                       const getOrdinal = (n: number) => {
                         const s = ["th", "st", "nd", "rd"];
@@ -1579,7 +1581,9 @@ export const RepaymentSchedulePage = () => {
                         <div
                           key={emi.instalment_no || index}
                           className={`p-4 rounded-lg border-2 ${
-                            isOverdue
+                            isPaid
+                              ? 'bg-green-50 border-green-200'
+                              : isOverdue
                               ? 'bg-red-50 border-red-200'
                               : isDueToday
                               ? 'bg-yellow-50 border-yellow-200'
@@ -1592,7 +1596,7 @@ export const RepaymentSchedulePage = () => {
                                 <span className="text-base sm:text-lg font-bold text-gray-900">
                                   {getOrdinal(emi.instalment_no || index + 1)} EMI
                                 </span>
-                                {emi.status === 'paid' ? (
+                                {isPaid ? (
                                   <span className="text-xs font-semibold text-green-600 bg-green-100 px-2 py-1 rounded flex items-center gap-1">
                                     <CheckCircle className="w-3 h-3" />
                                     Paid
@@ -1623,9 +1627,11 @@ export const RepaymentSchedulePage = () => {
                                   <p className="font-semibold text-gray-900">{formatDate(emi.due_date)}</p>
                                 </div>
                                 <div>
-                                  <p className="text-gray-500">Due in</p>
-                                  <p className={`font-semibold ${isOverdue ? 'text-red-600' : isDueToday ? 'text-yellow-600' : 'text-gray-900'}`}>
-                                    {isOverdue
+                                  <p className="text-gray-500">{isPaid ? 'Paid on' : 'Due in'}</p>
+                                  <p className={`font-semibold ${isPaid ? 'text-green-600' : isOverdue ? 'text-red-600' : isDueToday ? 'text-yellow-600' : 'text-gray-900'}`}>
+                                    {isPaid
+                                      ? (emi.paid_date ? formatDate(emi.paid_date) : 'Paid')
+                                      : isOverdue
                                       ? `${Math.abs(daysUntilDue)} days ago`
                                       : isDueToday
                                       ? 'Today'
