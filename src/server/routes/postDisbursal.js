@@ -309,9 +309,11 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
     // SECURITY: Validate eNACH completion before allowing enach_done to be set to true
     if (enach_done === true && existingColumns.includes('enach_done')) {
       // Check if there's an active eNACH subscription for this loan application
+      // For repeat customers, also check subscriptions from previous loans
       try {
-        const enachCheck = await executeQuery(
-          `SELECT subscription_id, status, mandate_status 
+        // First, check for eNACH subscription for current loan application
+        let enachCheck = await executeQuery(
+          `SELECT subscription_id, status, mandate_status, loan_application_id, user_id
            FROM enach_subscriptions 
            WHERE loan_application_id = ? 
              AND (status IN ('ACTIVE', 'BANK_APPROVAL_PENDING', 'AUTHENTICATED') 
@@ -320,6 +322,26 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
            LIMIT 1`,
           [applicationId]
         );
+
+        // If not found for current loan, check for active subscriptions from previous loans for the same user
+        // This handles repeat customers who already have eNACH from a previous loan
+        if (!enachCheck || enachCheck.length === 0) {
+          console.log(`[Security] No eNACH found for app ${applicationId}, checking previous loans for user ${userId}`);
+          enachCheck = await executeQuery(
+            `SELECT subscription_id, status, mandate_status, loan_application_id, user_id
+             FROM enach_subscriptions 
+             WHERE user_id = ? 
+               AND (status IN ('ACTIVE', 'BANK_APPROVAL_PENDING', 'AUTHENTICATED') 
+                    OR mandate_status IN ('APPROVED', 'ACTIVE'))
+             ORDER BY created_at DESC 
+             LIMIT 1`,
+            [userId]
+          );
+          
+          if (enachCheck && enachCheck.length > 0) {
+            console.log(`[Security] Found active eNACH from previous loan ${enachCheck[0].loan_application_id} for user ${userId}`);
+          }
+        }
 
         if (!enachCheck || enachCheck.length === 0) {
           return res.status(403).json({
@@ -333,7 +355,9 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
         console.log(`[Security] Validating eNACH completion for app ${applicationId}:`, {
           subscription_id: subscription.subscription_id,
           status: subscription.status,
-          mandate_status: subscription.mandate_status
+          mandate_status: subscription.mandate_status,
+          loan_application_id: subscription.loan_application_id,
+          is_from_previous_loan: String(subscription.loan_application_id) !== String(applicationId)
         });
 
         // Additional validation: Ensure subscription is actually active/approved

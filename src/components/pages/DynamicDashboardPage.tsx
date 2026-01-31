@@ -196,9 +196,20 @@ export function DynamicDashboardPage() {
       // Check for pending credit limit increase
       try {
         const creditLimitResponse = await apiService.getPendingCreditLimit();
-        if (creditLimitResponse.status === 'success' && (creditLimitResponse as any).hasPendingLimit && creditLimitResponse.data) {
+        console.log('📊 Pending credit limit response:', creditLimitResponse);
+        if ((creditLimitResponse.status === 'success' || creditLimitResponse.success === true) && 
+            (creditLimitResponse as any).hasPendingLimit && 
+            creditLimitResponse.data) {
+          console.log('✅ Found pending credit limit:', creditLimitResponse.data);
           setPendingCreditLimit(creditLimitResponse.data);
           setShowCreditLimitModal(true);
+        } else {
+          console.log('ℹ️ No pending credit limit found:', {
+            status: creditLimitResponse.status,
+            success: creditLimitResponse.success,
+            hasPendingLimit: (creditLimitResponse as any).hasPendingLimit,
+            hasData: !!creditLimitResponse.data
+          });
         }
       } catch (creditLimitError) {
         console.error('Error fetching pending credit limit:', creditLimitError);

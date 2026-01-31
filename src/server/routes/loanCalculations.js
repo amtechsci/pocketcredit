@@ -909,18 +909,24 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           const baseAmount = principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi;
           const instalmentAmount = toDecimal2(baseAmount + penaltyAmount);
           
-          // Preserve stored status if available (for account_manager loans with payment tracking)
+          // Preserve stored status and paid_date if available (for account_manager loans with payment tracking)
           let emiStatus = 'pending';
+          let paidDate = null;
           if (storedEmiSchedule && Array.isArray(storedEmiSchedule)) {
             const storedEmi = storedEmiSchedule.find(e => 
               (e.emi_number === i + 1 || e.instalment_no === i + 1)
             ) || storedEmiSchedule[i];
-            if (storedEmi && storedEmi.status) {
-              emiStatus = storedEmi.status;
+            if (storedEmi) {
+              if (storedEmi.status) {
+                emiStatus = storedEmi.status;
+              }
+              if (storedEmi.paid_date) {
+                paidDate = storedEmi.paid_date;
+              }
             }
           }
           
-          schedule.push({
+          const scheduleEntry = {
             emi_number: i + 1,
             instalment_no: i + 1, // Add instalment_no for consistency with kfs.js
             due_date: emiDateStr,
@@ -934,7 +940,14 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
             instalment_amount: instalmentAmount,
             days: daysForPeriod,
             status: emiStatus
-          });
+          };
+          
+          // Add paid_date if available
+          if (paidDate) {
+            scheduleEntry.paid_date = paidDate;
+          }
+          
+          schedule.push(scheduleEntry);
           
           outstandingPrincipal = toDecimal2(outstandingPrincipal - principalForThisEmi);
         }
@@ -971,7 +984,7 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           }
           
           if (Array.isArray(emiScheduleArray) && emiScheduleArray.length > 0) {
-            // Merge status from emi_schedule into repayment schedule
+            // Merge status and paid_date from emi_schedule into repayment schedule
             schedule = schedule.map((instalment, index) => {
               // Match by instalment_no or emi_number (both are 1-indexed)
               const instalmentNo = instalment.instalment_no || instalment.emi_number || index + 1;
@@ -979,14 +992,21 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
                 (emi.instalment_no === instalmentNo || emi.emi_number === instalmentNo)
               ) || emiScheduleArray[index];
               
-              // Use status from emi_schedule if available, otherwise keep existing status
-              if (emiFromSchedule && emiFromSchedule.status) {
-                return {
+              // Use status and paid_date from emi_schedule if available
+              if (emiFromSchedule) {
+                const mergedInstalment = {
                   ...instalment,
-                  status: emiFromSchedule.status // 'paid' or 'pending'
+                  status: emiFromSchedule.status || instalment.status || 'pending'
                 };
+                
+                // Preserve paid_date if available
+                if (emiFromSchedule.paid_date) {
+                  mergedInstalment.paid_date = emiFromSchedule.paid_date;
+                }
+                
+                return mergedInstalment;
               }
-              // If no status in emi_schedule, keep existing status or default to pending
+              // If no matching EMI in emi_schedule, keep existing status or default to pending
               return {
                 ...instalment,
                 status: instalment.status || 'pending'

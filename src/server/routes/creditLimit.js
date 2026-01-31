@@ -30,6 +30,7 @@ router.get('/pending', requireAuth, async (req, res) => {
 
     if (!pendingLimit) {
       return res.json({
+        status: 'success',
         success: true,
         hasPendingLimit: false,
         data: null
@@ -86,6 +87,7 @@ router.get('/pending', requireAuth, async (req, res) => {
         const updatedPendingLimit = await getPendingCreditLimit(userId);
         if (updatedPendingLimit) {
           return res.json({
+            status: 'success',
             success: true,
             hasPendingLimit: true,
             data: {
@@ -108,6 +110,7 @@ router.get('/pending', requireAuth, async (req, res) => {
     const finalPendingLimit = await getPendingCreditLimit(userId);
     if (!finalPendingLimit) {
       return res.json({
+        status: 'success',
         success: true,
         hasPendingLimit: false,
         data: null
@@ -130,6 +133,7 @@ router.get('/pending', requireAuth, async (req, res) => {
       );
       
       return res.json({
+        status: 'success',
         success: true,
         hasPendingLimit: false,
         data: null
@@ -137,6 +141,7 @@ router.get('/pending', requireAuth, async (req, res) => {
     }
 
     res.json({
+      status: 'success',
       success: true,
       hasPendingLimit: true,
       data: {
@@ -155,6 +160,7 @@ router.get('/pending', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Error fetching pending credit limit:', error);
     res.status(500).json({
+      status: 'error',
       success: false,
       message: 'Failed to fetch pending credit limit'
     });

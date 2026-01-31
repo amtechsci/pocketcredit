@@ -1385,10 +1385,17 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
       console.log('✅ KFS accepted:', response.data);
       toast.success('KFS accepted successfully! PDF will be generated when loan is disbursed.');
       
-      // Automatically mark as reviewed after generating
-      setTimeout(() => {
-        onComplete();
-      }, 1000);
+      // Reset generating state first
+      setGenerating(false);
+      
+      // Automatically mark as reviewed and move to next step
+      try {
+        await onComplete();
+      } catch (completeError) {
+        console.error('Error completing KFS step:', completeError);
+        // Even if onComplete fails, we've already accepted KFS, so just show a warning
+        toast.warning('KFS accepted, but there was an issue moving to the next step. Please refresh the page.');
+      }
 
     } catch (error: any) {
       console.error('Error generating KFS PDF:', error);
