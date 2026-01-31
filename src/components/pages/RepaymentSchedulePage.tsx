@@ -1666,18 +1666,43 @@ export const RepaymentSchedulePage = () => {
                             </div>
                             <div className="flex items-center gap-2">
                               <div className="text-right mr-2">
-                                {(emi.penalty_total || emi.penalty) && parseFloat(emi.penalty_total || emi.penalty) > 0 && emi.status !== 'paid' ? (
-                                  <>
-                                    <p className="text-lg sm:text-xl font-bold text-gray-900">
-                                      {formatCurrency((emi.instalment_amount || 0) - parseFloat(emi.penalty_total || emi.penalty))} + <span className="text-red-600">{formatCurrency(parseFloat(emi.penalty_total || emi.penalty))}</span>
-                                    </p>
-                                    <p className="text-xs text-red-500">Penalty</p>
-                                  </>
-                                ) : (
-                                  <p className="text-lg sm:text-xl font-bold text-gray-900">
-                                    {formatCurrency(emi.instalment_amount || 0)}
-                                  </p>
-                                )}
+                                {(() => {
+                                  // Check for penalty - try multiple possible field names
+                                  const penaltyTotal = parseFloat(emi.penalty_total || emi.penalty || 0);
+                                  const hasPenalty = penaltyTotal > 0 && emi.status !== 'paid';
+                                  
+                                  // Debug log for troubleshooting
+                                  if (emi.status === 'overdue' || emi.status === 'pending') {
+                                    console.log(`🔍 EMI #${emi.emi_number || emi.instalment_no || index + 1} Penalty Check:`, {
+                                      penalty_total: emi.penalty_total,
+                                      penalty: emi.penalty,
+                                      penaltyTotal,
+                                      hasPenalty,
+                                      status: emi.status,
+                                      instalment_amount: emi.instalment_amount,
+                                      emi: emi
+                                    });
+                                  }
+                                  
+                                  if (hasPenalty) {
+                                    // Calculate base amount (instalment_amount should include penalty, so subtract it)
+                                    const baseAmount = (emi.instalment_amount || 0) - penaltyTotal;
+                                    return (
+                                      <>
+                                        <p className="text-lg sm:text-xl font-bold text-gray-900">
+                                          {formatCurrency(baseAmount)} + <span className="text-red-600">{formatCurrency(penaltyTotal)}</span>
+                                        </p>
+                                        <p className="text-xs text-red-500">Penalty</p>
+                                      </>
+                                    );
+                                  } else {
+                                    return (
+                                      <p className="text-lg sm:text-xl font-bold text-gray-900">
+                                        {formatCurrency(emi.instalment_amount || 0)}
+                                      </p>
+                                    );
+                                  }
+                                })()}
                               </div>
                               {emi.status !== 'paid' ? (
                               <Button
