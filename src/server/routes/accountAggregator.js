@@ -137,7 +137,7 @@ router.post('/initiate', requireAuth, async (req, res) => {
     const frontendUrl = process.env.FRONTEND_URL || (isDevelopment ? 'http://localhost:3000' : 'https://pocketcredit.in');
     // APP_URL: production includes /api, development doesn't
     const appUrl = process.env.APP_URL || (isDevelopment ? 'http://localhost:3002' : 'https://pocketcredit.in/api');
-    const returnUrl = `${frontendUrl}/loan-application/bank-details?applicationId=${application_id}&bankStatementComplete=true`;
+    const returnUrl = `${frontendUrl}/link-salary-bank-account?applicationId=${application_id}&bankStatementComplete=true`;
     // Routes are mounted at /api/aa, so add /api for dev, or just /aa for prod (since appUrl already has /api)
     const webhookUrl = isDevelopment ? `${appUrl}/api/aa/webhook` : `${appUrl}/aa/webhook`;
 
@@ -233,7 +233,7 @@ router.get('/callback', async (req, res) => {
 
       // Redirect to next step (bank details after bank statement)
       res.redirect(
-        `${process.env.FRONTEND_URL || 'http://localhost:3000'}/loan-application/bank-details?applicationId=${
+        `${process.env.FRONTEND_URL || 'http://localhost:3000'}/link-salary-bank-account?applicationId=${
           aaRequest.application_id
         }&bankStatementComplete=true`
       );

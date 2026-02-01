@@ -114,7 +114,13 @@ const DESIGNATIONS = [
 export const EmploymentDetailsPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { applicationId } = location.state || {};
+  // Get applicationId from URL params, state, or fetch latest
+  const urlParams = new URLSearchParams(location.search);
+  const urlAppId = urlParams.get('applicationId');
+  const stateAppId = (location.state as any)?.applicationId;
+  const [applicationId, setApplicationId] = useState<number | null>(
+    urlAppId ? parseInt(urlAppId) : (stateAppId ? (typeof stateAppId === 'string' ? parseInt(stateAppId) : stateAppId) : null)
+  );
 
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<EmploymentData>({
@@ -144,44 +150,39 @@ export const EmploymentDetailsPage: React.FC = () => {
   useEffect(() => {
     const checkEmploymentStatus = async () => {
       try {
-        // Check if employment details already exist (user-specific, no longer requires applicationId)
+        // Just pre-fill form if data exists, don't handle redirection here
+        // StepGuard already handles redirection if the step is complete
         const response = await apiService.getEmploymentDetailsStatus();
 
-        if (response.status === 'success' && response.data?.completed) {
-          // Employment details already completed - redirect to next step
-          toast.success('Employment details already submitted! Proceeding to next step...');
-          setTimeout(() => {
-            navigate('/loan-application/bank-statement', {
-              state: { applicationId }
-            });
-          }, 1500);
-        } else {
-          // Not complete - pre-fill form if data exists
-          if (response.data?.employmentData) {
-            const data = response.data.employmentData;
-            setFormData(prev => ({
-              ...prev,
-              company_name: data.company_name || prev.company_name,
-              designation: data.designation || prev.designation,
-              industry: data.industry || prev.industry,
-              department: data.department || prev.department,
-              education: data.education || prev.education,
-              monthly_net_income: data.monthly_net_income ? data.monthly_net_income.toString() : prev.monthly_net_income,
-              salary_date: data.salary_date ? data.salary_date.toString() : prev.salary_date
-            }));
-            toast.info('Found existing employment details. Please review and submit.');
+        if (response.status === 'success' && response.data?.employmentData) {
+          const data = response.data.employmentData;
+          setFormData(prev => ({
+            ...prev,
+            company_name: data.company_name || prev.company_name,
+            designation: data.designation || prev.designation,
+            industry: data.industry || prev.industry,
+            department: data.department || prev.department,
+            education: data.education || prev.education,
+            monthly_net_income: data.monthly_net_income ? data.monthly_net_income.toString() : prev.monthly_net_income,
+            salary_date: data.salary_date ? data.salary_date.toString() : prev.salary_date
+          }));
+
+          if (response.data.completed) {
+            console.log('[EmploymentDetails] Details are complete, StepGuard will handle any needed redirection.');
+          } else {
+            // Data exists but not completed - form is pre-filled, user can review and submit
+            console.log('[EmploymentDetails] Found existing employment details, form pre-filled for review.');
           }
-          setChecking(false);
         }
+        setChecking(false);
       } catch (error) {
         console.error('Error checking employment status:', error);
-        // On error, show the form anyway
         setChecking(false);
       }
     };
 
     checkEmploymentStatus();
-  }, [navigate]);
+  }, []);
 
   // Load initial companies on mount
   useEffect(() => {
@@ -352,37 +353,61 @@ export const EmploymentDetailsPage: React.FC = () => {
         // toast.success('Employment details saved successfully!');
 
         // Trigger Credit Check (BRE Engine)
-        toast.info('Verifying eligibility...', { duration: 3000 });
-
         try {
-          // Pass applicationId if available from location state
-          const creditCheckResponse = await apiService.checkCreditEligibility(applicationId);
+          // Pass applicationId if available from location state (convert null to undefined)
+          const creditCheckResponse = await apiService.checkCreditEligibility(applicationId || undefined);
 
           // Backend returns 'is_eligible' not 'eligible' - check both for compatibility
           // Type assertion needed because TypeScript interface doesn't match backend response
           // Handle both boolean and number (0/1) formats from database
           const responseData = creditCheckResponse.data as any;
-          const isEligible = responseData?.is_eligible === true || 
-                            (typeof responseData?.is_eligible === 'number' && responseData?.is_eligible === 1) ||
-                            responseData?.eligible === true || 
-                            (typeof responseData?.eligible === 'number' && responseData?.eligible === 1);
+          const isEligible = responseData?.is_eligible === true ||
+            (typeof responseData?.is_eligible === 'number' && responseData?.is_eligible === 1) ||
+            responseData?.eligible === true ||
+            (typeof responseData?.eligible === 'number' && responseData?.eligible === 1);
 
           if (creditCheckResponse.status === 'success' && isEligible) {
-            toast.success('Eligibility verified! Proceeding to next step...');
-
-            // Wait a moment before navigating
-            setTimeout(() => {
-              navigate('/loan-application/bank-statement', {
-                state: { applicationId },
-                replace: true
-              });
+            // Use unified progress engine to determine next step
+            setTimeout(async () => {
+              try {
+                // Ensure we have applicationId - fetch latest if missing
+                let appId = applicationId;
+                if (!appId) {
+                  try {
+                    const appsResponse = await apiService.getLoanApplications();
+                    if (appsResponse.success || appsResponse.status === 'success') {
+                      const apps = appsResponse.data?.applications || [];
+                      const activeApp = apps.find((app: any) => 
+                        ['submitted', 'under_review', 'follow_up', 'pending', 'in_progress'].includes(app.status)
+                      );
+                      appId = activeApp?.id || null;
+                      if (appId) setApplicationId(appId);
+                    }
+                  } catch (e) {
+                    console.error('[EmploymentDetails] Error fetching application:', e);
+                  }
+                }
+                
+                const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                const progress = await getOnboardingProgress(appId);
+                const nextRoute = getStepRoute(progress.currentStep, appId);
+                console.log('[EmploymentDetails] Next step from engine:', progress.currentStep, '->', nextRoute, 'appId:', appId);
+                navigate(nextRoute, { replace: true });
+              } catch (error) {
+                console.error('[EmploymentDetails] Error getting next step, using fallback:', error);
+                // Fallback to bank statement (old behavior)
+                navigate('/loan-application/bank-statement', {
+                  state: { applicationId },
+                  replace: true
+                });
+              }
             }, 1000);
           } else {
             // Failed BRE or other checks
             // Backend returns 'reasons' array, not 'rejection_reasons'
             const reasons = responseData?.reasons || responseData?.rejection_reasons || [];
-            const displayReason = Array.isArray(reasons) && reasons.length > 0 
-              ? reasons[0] 
+            const displayReason = Array.isArray(reasons) && reasons.length > 0
+              ? reasons[0]
               : (responseData?.hold_reason || 'Credit criteria not met');
 
             toast.error(`Application placed on hold: ${displayReason}`, { duration: 5000 });

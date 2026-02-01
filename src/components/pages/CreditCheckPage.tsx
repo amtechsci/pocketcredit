@@ -63,7 +63,6 @@ export const CreditCheckPage: React.FC = () => {
             const isEligible = response.data.is_eligible === true || 
                               (typeof response.data.is_eligible === 'number' && response.data.is_eligible === 1);
             if (isEligible) {
-              toast.success('Credit check already completed! Proceeding to bank statement...');
               setTimeout(() => {
                 navigate(`/loan-application/bank-statement?applicationId=${applicationId}`);
               }, 2000);

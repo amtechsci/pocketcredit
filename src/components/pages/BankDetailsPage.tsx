@@ -33,6 +33,7 @@ interface ExistingBankDetails {
 
 export function BankDetailsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const { user, isAuthenticated } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -119,10 +120,34 @@ export function BankDetailsPage() {
       });
 
       if (response.success) {
-        toast.success('Bank details selected successfully!');
+        
+        // Clear ALL cache to ensure fresh data (database update needs to propagate)
+        apiService.clearCache();
+        
+        // Small delay to ensure database update has propagated
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         // Refresh bank details to show updated state
         await fetchBankDetails();
         setSelectedBankId(null);
+        
+        // Use progress engine to determine next step (with fresh data)
+        try {
+          const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+          const progress = await getOnboardingProgress(parseInt(applicationId));
+          const nextRoute = getStepRoute(progress.currentStep, progress.applicationId);
+          console.log('[BankDetails] After choosing bank, next step from engine:', progress.currentStep, '->', nextRoute);
+          
+          // Only navigate if we're not already on the correct step
+          if (progress.currentStep !== 'bank-details') {
+            navigate(nextRoute, { replace: true });
+          } else {
+            console.warn('[BankDetails] Still on bank-details step after linking. user_bank_id may not be set.');
+          }
+        } catch (error) {
+          console.error('[BankDetails] Error getting next step, using fallback:', error);
+          // Fallback: stay on page to let user see the success message
+        }
       } else {
         toast.error(response.message || 'Failed to select bank details');
       }
@@ -174,7 +199,13 @@ export function BankDetailsPage() {
       });
 
       if (response.success) {
-        toast.success('Bank details saved successfully!');
+        
+        // Clear ALL cache to ensure fresh data (database update needs to propagate)
+        apiService.clearCache();
+        
+        // Small delay to ensure database update has propagated
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         // Refresh bank details to show updated state
         await fetchBankDetails();
         // Reset form
@@ -184,6 +215,24 @@ export function BankDetailsPage() {
           confirmDetails: false
         });
         setShowNewForm(false);
+        
+        // Use progress engine to determine next step (with fresh data)
+        try {
+          const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+          const progress = await getOnboardingProgress(parseInt(applicationId));
+          const nextRoute = getStepRoute(progress.currentStep, progress.applicationId);
+          console.log('[BankDetails] After saving bank, next step from engine:', progress.currentStep, '->', nextRoute);
+          
+          // Only navigate if we're not already on the correct step
+          if (progress.currentStep !== 'bank-details') {
+            navigate(nextRoute, { replace: true });
+          } else {
+            console.warn('[BankDetails] Still on bank-details step after saving. user_bank_id may not be set.');
+          }
+        } catch (error) {
+          console.error('[BankDetails] Error getting next step, using fallback:', error);
+          // Fallback: stay on page to let user see the success message
+        }
       } else {
         toast.error(response.message || 'Failed to save bank details');
       }
@@ -272,7 +321,97 @@ export function BankDetailsPage() {
                 </div>
                 <div className="mt-4 pt-4 border-t">
                   <Button
-                    onClick={() => navigate('/loan-application/references?applicationId=' + applicationId)}
+                    onClick={async () => {
+                      if (!applicationId || !currentBankDetails?.id) {
+                        toast.error('Missing application or bank details');
+                        return;
+                      }
+
+                      setLoading(true);
+                      try {
+                        // First, ensure the bank is linked to the application
+                        // Even if currentBankDetails exists, user_bank_id might not be set
+                        const linkResponse = await apiService.chooseBankDetails({
+                          application_id: parseInt(applicationId),
+                          bank_details_id: currentBankDetails.id
+                        });
+
+                        if (!linkResponse.success) {
+                          toast.error(linkResponse.message || 'Failed to link bank details');
+                          setLoading(false);
+                          return;
+                        }
+
+                        // Use the user_bank_id from the response directly
+                        const userBankId = linkResponse.data?.user_bank_id || linkResponse.data?.application?.user_bank_id;
+                        console.log('[BankDetails] Bank details linked, user_bank_id from response:', userBankId);
+                        
+                        if (!userBankId) {
+                          console.warn('[BankDetails] user_bank_id not in response, verifying...');
+                          // Fallback: verify by fetching the application
+                          try {
+                            apiService.clearCache(); // Clear cache before fetching
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                            const verifyResponse = await apiService.getLoanApplicationById(parseInt(applicationId));
+                            const verifyUserBankId = verifyResponse.data?.application?.user_bank_id;
+                            console.log('[BankDetails] Verification: user_bank_id =', verifyUserBankId);
+                            
+                            if (!verifyUserBankId) {
+                              console.warn('[BankDetails] user_bank_id still not set. Retrying...');
+                              await new Promise(resolve => setTimeout(resolve, 1000));
+                              const retryResponse = await apiService.getLoanApplicationById(parseInt(applicationId));
+                              const retryUserBankId = retryResponse.data?.application?.user_bank_id;
+                              console.log('[BankDetails] Retry verification: user_bank_id =', retryUserBankId);
+                              
+                              if (!retryUserBankId) {
+                                toast.error('Bank linking failed. Please try again or contact support.');
+                                setLoading(false);
+                                return;
+                              }
+                            }
+                          } catch (verifyError) {
+                            console.error('[BankDetails] Error verifying bank link:', verifyError);
+                            // Continue anyway - the server confirmed the update
+                          }
+                        }
+
+                        // Clear cache to ensure fresh data for next steps
+                        apiService.clearCache();
+                        
+                        // Specifically clear the loan application cache to force fresh fetch
+                        const cacheKey = `GET /loan-applications/${applicationId}`;
+                        if (apiService.clearCacheEntry) {
+                          apiService.clearCacheEntry(cacheKey);
+                        }
+                        
+                        // Use progress engine to determine next step (with fresh data, force refresh)
+                        const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                        const progress = await getOnboardingProgress(parseInt(applicationId), true); // forceRefresh = true
+                        const nextRoute = getStepRoute(progress.currentStep, progress.applicationId);
+                        console.log('[BankDetails] Continue button, next step from engine:', progress.currentStep, '->', nextRoute);
+                        console.log('[BankDetails] Progress prerequisites:', progress.prerequisites);
+                        
+                        // Navigate to next step
+                        if (progress.currentStep !== 'bank-details') {
+                          navigate(nextRoute, { replace: true });
+                        } else {
+                          console.warn('[BankDetails] Still on bank-details step after linking. Prerequisites:', progress.prerequisites);
+                          // Force navigation to references if bank is linked but engine hasn't updated
+                          if (progress.prerequisites.bankDetailsCompleted) {
+                            console.log('[BankDetails] Bank is completed but engine says bank-details. Navigating to references anyway.');
+                            navigate('/user-references', { replace: true });
+                          } else {
+                            toast.error('Unable to proceed. Please refresh and try again.');
+                          }
+                        }
+                      } catch (error: any) {
+                        console.error('[BankDetails] Error continuing with bank details:', error);
+                        toast.error(error.message || 'Failed to continue');
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    disabled={loading}
                     className="w-full bg-green-600 hover:bg-green-700"
                   >
                     <Check className="w-4 h-4 mr-2" />

@@ -20,8 +20,6 @@ import { DynamicPaymentHistoryPage as PaymentHistoryPage } from './components/pa
 import { SimplifiedLoanApplicationPage } from './components/pages/SimplifiedLoanApplicationPage';
 import LoanApplicationConfirmation from './components/pages/LoanApplicationConfirmation';
 import { LoanDocumentUploadPage } from './components/pages/LoanDocumentUploadPage';
-import { BankDetailsPage } from './components/pages/BankDetailsPage';
-import { ReferenceDetailsPage } from './components/pages/ReferenceDetailsPage';
 import { EnhancedUserReferencesPage } from './components/pages/EnhancedUserReferencesPage';
 import { LoanApplicationStepsPage } from './components/pages/LoanApplicationStepsPage';
 import { DigilockerKYCPage } from './components/pages/DigilockerKYCPage';
@@ -219,6 +217,17 @@ function AdminLoginPage() {
   );
 }
 
+// Redirect component for /loan-application/bank-details to /link-salary-bank-account
+function BankDetailsRedirect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const applicationId = params.get('applicationId');
+  const redirectUrl = applicationId 
+    ? `/link-salary-bank-account?applicationId=${applicationId}`
+    : '/link-salary-bank-account';
+  return <Navigate to={redirectUrl} replace />;
+}
+
 function AppContent() {
   const { isAuthenticated, user, isLoading } = useAuth();
 
@@ -378,29 +387,12 @@ function AppContent() {
 
         <Route path="/loan-application/bank-details" element={
           isAuthenticated ? (
-            <StatusGuard>
-              <DashboardLayout>
-                <StepGuard step="bank-details">
-                  <BankDetailsPage />
-                </StepGuard>
-              </DashboardLayout>
-            </StatusGuard>
+            <BankDetailsRedirect />
           ) : (
             <Navigate to="/auth" replace />
           )
         } />
 
-        <Route path="/loan-application/references" element={
-          isAuthenticated ? (
-            <DashboardLayout>
-              <StepGuard step="references">
-                <ReferenceDetailsPage />
-              </StepGuard>
-            </DashboardLayout>
-          ) : (
-            <Navigate to="/auth" replace />
-          )
-        } />
 
         <Route path="/user-references" element={
           <DashboardLayout>
@@ -526,7 +518,11 @@ function AppContent() {
 
         <Route path="/link-salary-bank-account" element={
           isAuthenticated ? (
-            <LinkSalaryBankAccountPage />
+            <DashboardLayout>
+              <StepGuard step="bank-details">
+                <LinkSalaryBankAccountPage />
+              </StepGuard>
+            </DashboardLayout>
           ) : (
             <Navigate to="/auth" replace />
           )
@@ -566,7 +562,11 @@ function AppContent() {
 
         <Route path="/loan-application/aa-flow" element={
           isAuthenticated ? (
-            <AccountAggregatorFlow />
+            <DashboardLayout>
+              <StepGuard step="aa-consent">
+                <AccountAggregatorFlow />
+              </StepGuard>
+            </DashboardLayout>
           ) : (
             <Navigate to="/auth" replace />
           )

@@ -214,6 +214,25 @@ class ApiService {
     });
   }
 
+  /**
+   * Clear cache for a specific endpoint pattern
+   * Useful when data is updated and cache needs to be invalidated
+   */
+  public clearCache(pattern?: string): void {
+    if (!pattern) {
+      // Clear all cache
+      this.cache.clear();
+      return;
+    }
+    
+    // Clear cache entries matching the pattern
+    for (const key of this.cache.keys()) {
+      if (key.includes(pattern)) {
+        this.cache.delete(key);
+      }
+    }
+  }
+
   // Generic API request method with caching and deduplication
   async request<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',

@@ -197,9 +197,9 @@ export function DynamicDashboardPage() {
       try {
         const creditLimitResponse = await apiService.getPendingCreditLimit();
         console.log('📊 Pending credit limit response:', creditLimitResponse);
-        if ((creditLimitResponse.status === 'success' || creditLimitResponse.success === true) && 
-            (creditLimitResponse as any).hasPendingLimit && 
-            creditLimitResponse.data) {
+        if ((creditLimitResponse.status === 'success' || creditLimitResponse.success === true) &&
+          (creditLimitResponse as any).hasPendingLimit &&
+          creditLimitResponse.data) {
           console.log('✅ Found pending credit limit:', creditLimitResponse.data);
           setPendingCreditLimit(creditLimitResponse.data);
           setShowCreditLimitModal(true);
@@ -699,113 +699,43 @@ export function DynamicDashboardPage() {
                             console.log('View Details clicked for:', loan.id);
                             if (loan.status === 'account_manager' || loan.status === 'overdue') {
                               navigate(`/repayment-schedule?applicationId=${loan.id}`);
-                            } else if (loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal') {
+                            } else if (loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal' || loan.status === 'ready_for_disbursement') {
                               navigate(`/post-disbursal?applicationId=${loan.id}`);
-                            } else if (loan.status === 'follow_up') {
-                              // Check if documents are uploaded
-                              const docStatus = loanDocumentStatus[loan.id];
-                              if (docStatus?.allUploaded) {
-                                // Documents are uploaded, get current step from loan application
-                                try {
-                                  const appResponse = await apiService.getLoanApplicationById(loan.id);
-                                  if (appResponse.success && appResponse.data?.application) {
-                                    const currentStep = (appResponse.data.application as any).current_step;
-
-                                    // If current_step is 'steps', navigate to first step and let StepGuard redirect to correct step
-                                    // This handles cases where step was updated prematurely
-                                    if (currentStep === 'steps') {
-                                      // Navigate to first step - StepGuard will redirect to actual current step
-                                      navigate(`/loan-application/kyc-verification?applicationId=${loan.id}`);
-                                      return;
-                                    }
-
-                                    // Map current_step to route
-                                    const stepRoutes: { [key: string]: string } = {
-                                      'kyc-verification': `/loan-application/kyc-verification?applicationId=${loan.id}`,
-                                      'employment-details': `/loan-application/employment-details?applicationId=${loan.id}`,
-                                      'bank-statement': `/loan-application/bank-statement?applicationId=${loan.id}`,
-                                      'bank-details': `/link-salary-bank-account?applicationId=${loan.id}`,
-                                      'references': `/loan-application/references?applicationId=${loan.id}`,
-                                      'upload-documents': `/loan-application/upload-documents?applicationId=${loan.id}`,
-                                      'steps': `/loan-application/kyc-verification?applicationId=${loan.id}` // Let StepGuard redirect
-                                    };
-                                    const route = stepRoutes[currentStep] || `/loan-application/kyc-verification?applicationId=${loan.id}`;
-                                    navigate(route);
-                                  } else {
-                                    // Fallback: navigate to first step, StepGuard will redirect
-                                    navigate(`/loan-application/kyc-verification?applicationId=${loan.id}`);
-                                  }
-                                } catch (error) {
-                                  console.error('Error getting loan application:', error);
-                                  // Fallback: navigate to first step, StepGuard will redirect
-                                  navigate(`/loan-application/kyc-verification?applicationId=${loan.id}`);
-                                }
-                              } else {
-                                // Documents not uploaded, navigate to upload page
-                                navigate('/loan-application/upload-documents', {
-                                  state: { applicationId: loan.id }
-                                });
-                              }
-                            } else if (loan.status === 'under_review' || loan.status === 'submitted') {
-                              // Use unified progress engine to determine next step
+                            } else if (loan.status === 'follow_up' || loan.status === 'under_review' || loan.status === 'submitted' || loan.status === 'pending') {
+                              // Use unified progress engine to determine next step for all in-progress/review statuses
                               try {
                                 const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
                                 const progress = await getOnboardingProgress(loan.id);
-                                console.log('📊 [View Status] Onboarding progress:', progress);
-                                
-                                // If there's a pending step, redirect to it
-                                if (progress.currentStep !== 'steps') {
-                                  const route = getStepRoute(progress.currentStep, loan.id);
-                                  console.log(`📊 [View Status] Redirecting to next pending step: ${progress.currentStep} -> ${route}`);
-                                  navigate(route, { replace: true });
+                                console.log(`📊 [View Status] Progress for ${loan.status}:`, progress.currentStep);
+
+                                // All steps complete - go to under review page
+                                if (progress.currentStep === 'steps') {
+                                  console.log('✅ [View Status] All steps complete, showing status page');
+                                  navigate('/application-under-review');
                                   return;
                                 }
-                                
-                                // All steps complete - go to under review page
-                                console.log('✅ [View Status] All steps complete, showing under review page');
-                                navigate('/application-under-review');
-                              } catch (progressError) {
-                                console.error('❌ [View Status] Error checking progress, falling back to references check:', progressError);
-                                // Fallback: Check references only
-                                try {
-                                  const refsResponse = await apiService.getUserReferences();
-                                  const referencesList = refsResponse.data?.references || [];
-                                  const alternateData = refsResponse.data?.alternate_data;
-                                  const hasReferences = Array.isArray(referencesList) && referencesList.length >= 3;
-                                  const hasAlternateMobile = alternateData?.alternate_mobile ? true : false;
 
-                                  if (!hasReferences || !hasAlternateMobile) {
-                                    console.log('📋 [View Status] References pending, redirecting to references page');
-                                    navigate('/user-references');
-                                    return;
-                                  }
-                                } catch (refError) {
-                                  console.error('Error checking references:', refError);
-                                }
-                                // References complete - go to under review page
+                                // Otherwise go to the current pending step
+                                const route = getStepRoute(progress.currentStep, loan.id);
+                                console.log(`📊 [View Status] Redirecting to: ${route}`);
+                                navigate(route, { replace: true });
+                              } catch (progressError) {
+                                console.error('❌ [View Status] Error checking progress:', progressError);
+                                // Fallback: try to guess or go to status page
                                 navigate('/application-under-review');
                               }
-                            } else if (loan.status === 'ready_for_disbursement') {
-                              // Loan is ready for disbursement - navigate to post-disbursal flow
-                              console.log('✅ Loan ready for disbursement, navigating to post-disbursal flow');
-                              navigate(`/post-disbursal?applicationId=${loan.id}`);
                             } else {
-                              // Use unified progress engine to determine next step
+                              // Catch-all for other statuses
                               try {
                                 const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
                                 const progress = await getOnboardingProgress(loan.id);
-                                console.log('📊 [View Status] Onboarding progress:', progress);
                                 const route = getStepRoute(progress.currentStep, loan.id);
-                                console.log(`📊 [View Status] Redirecting to next pending step: ${progress.currentStep} -> ${route}`);
                                 navigate(route, { replace: true });
-                              } catch (progressError) {
-                                console.error('❌ [View Status] Error checking progress, defaulting to KYC:', progressError);
-                                // Fallback: Default to KYC
-                                navigate('/loan-application/kyc-verification', {
-                                  state: { applicationId: loan.id }
-                                });
+                              } catch (e) {
+                                navigate('/dashboard');
                               }
                             }
+
                           }}
                           variant="outline"
                           size="sm"
@@ -934,7 +864,7 @@ export function DynamicDashboardPage() {
                             const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
                             const progress = await getOnboardingProgress(loan.id);
                             console.log('📊 [View Status] Onboarding progress:', progress);
-                            
+
                             // If there's a pending step, redirect to it
                             if (progress.currentStep !== 'steps') {
                               const route = getStepRoute(progress.currentStep, loan.id);
@@ -942,7 +872,7 @@ export function DynamicDashboardPage() {
                               navigate(route, { replace: true });
                               return;
                             }
-                            
+
                             // All steps complete - go to under review page
                             console.log('✅ [View Status] All steps complete, showing under review page');
                             navigate('/application-under-review');

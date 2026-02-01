@@ -81,7 +81,7 @@ export const LoanDocumentUploadPage = () => {
                   'employment-details': `/loan-application/employment-details?applicationId=${id}`,
                   'bank-statement': `/loan-application/bank-statement?applicationId=${id}`,
                   'bank-details': `/link-salary-bank-account?applicationId=${id}`,
-                  'references': `/loan-application/references?applicationId=${id}`,
+                  'references': '/user-references',
                   'steps': `/application-under-review?applicationId=${id}`
                 };
                 const route = stepRoutes[currentStep] || STEP_ROUTES[currentStep as keyof typeof STEP_ROUTES] || '/dashboard';
@@ -220,7 +220,7 @@ export const LoanDocumentUploadPage = () => {
                           'employment-details': `/loan-application/employment-details?applicationId=${appId}`,
                           'bank-statement': `/loan-application/bank-statement?applicationId=${appId}`,
                           'bank-details': `/link-salary-bank-account?applicationId=${appId}`,
-                          'references': `/loan-application/references?applicationId=${appId}`,
+                          'references': '/user-references',
                           'upload-documents': `/loan-application/upload-documents?applicationId=${appId}`,
                           'steps': `/application-under-review?applicationId=${appId}`
                         };
@@ -461,37 +461,27 @@ export const LoanDocumentUploadPage = () => {
             return;
           }
           
-          // Get current step from loan application
-          const appResponse = await apiService.getLoanApplicationById(applicationId);
-          if (appResponse.success && appResponse.data?.application) {
-            const currentStep = appResponse.data.application.current_step;
-            // Map current_step to route
-            const stepRoutes: { [key: string]: string } = {
-              'kyc-verification': `/loan-application/kyc-verification?applicationId=${applicationId}`,
-              'employment-details': `/loan-application/employment-details?applicationId=${applicationId}`,
-              'bank-statement': `/loan-application/bank-statement?applicationId=${applicationId}`,
-              'bank-details': `/link-salary-bank-account?applicationId=${applicationId}`,
-              'references': `/loan-application/references?applicationId=${applicationId}`,
-              'upload-documents': `/loan-application/upload-documents?applicationId=${applicationId}`,
-              'steps': `/application-under-review?applicationId=${applicationId}`
-            };
-            const route = stepRoutes[currentStep] || `/application-under-review?applicationId=${applicationId}`;
-            
-            toast.success('All documents uploaded successfully!');
-            setTimeout(() => {
-              navigate(route);
-            }, 1500);
-          } else {
-            toast.success('All documents uploaded successfully!');
-            setTimeout(() => {
-              navigate('/application-under-review');
-            }, 1500);
-          }
-        } catch (error) {
-          console.error('Error getting loan application:', error);
+          // Use unified progress engine to determine next step
+          toast.success('All documents uploaded successfully!');
+          setTimeout(async () => {
+            try {
+              const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+              const progress = await getOnboardingProgress(applicationId);
+              const nextRoute = getStepRoute(progress.currentStep, applicationId);
+              console.log('[LoanDocumentUpload] Next step from engine:', progress.currentStep, '->', nextRoute);
+              navigate(nextRoute, { replace: true });
+            } catch (error) {
+              console.error('[LoanDocumentUpload] Error getting next step, using fallback:', error);
+              // Fallback to under review page
+              navigate(`/application-under-review?applicationId=${applicationId}`, { replace: true });
+            }
+          }, 1500);
+        } catch (innerError) {
+          console.error('[LoanDocumentUpload] Error checking email or getting next step:', innerError);
+          // Fallback: just navigate to under review
           toast.success('All documents uploaded successfully!');
           setTimeout(() => {
-            navigate('/application-under-review');
+            navigate(`/application-under-review?applicationId=${applicationId}`, { replace: true });
           }, 1500);
         }
       } else {

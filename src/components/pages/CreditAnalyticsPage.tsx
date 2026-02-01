@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card } from '../ui/card';
-import { Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { Button } from '../ui/button';
+import { Loader2, CheckCircle, XCircle, ArrowRight } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { toast } from 'sonner';
 
@@ -12,6 +13,7 @@ export const CreditAnalyticsPage = () => {
   const [loading, setLoading] = useState(true);
   const [performingCheck, setPerformingCheck] = useState(false);
   const [dataFetched, setDataFetched] = useState(false);
+  const [redirectCountdown, setRedirectCountdown] = useState<number | null>(null);
 
   // Auto-fetch credit analytics data on mount, and if no data exists, auto-perform credit check
   useEffect(() => {
@@ -59,16 +61,44 @@ export const CreditAnalyticsPage = () => {
                 return;
               }
               
-              // Credit check passed - show success message
-              toast.success('Credit check passed! Proceeding...');
-              
-              // Fetch the newly created credit data
-              const dataResponse = await apiService.getCreditAnalyticsData();
-              if (dataResponse.status === 'success' && dataResponse.data) {
-                setCreditData(dataResponse.data);
+              // Credit check passed - use the data from the credit check response directly
+              // The backend has already processed and saved the credit data
+              if (checkResponse.data) {
+                // Map the response data to creditData format
+                setCreditData({
+                  credit_score: checkResponse.data.credit_score,
+                  is_eligible: isEligible,
+                  completed: true,
+                  checked_at: new Date().toISOString(),
+                  ...checkResponse.data
+                });
                 setDataFetched(true);
               } else {
-                setCreditData(null);
+                // Fallback: try to fetch the data, but don't show error if it fails
+                // since the check itself succeeded
+                try {
+                  const dataResponse = await apiService.getCreditAnalyticsData();
+                  if (dataResponse.status === 'success' && dataResponse.data) {
+                    setCreditData(dataResponse.data);
+                  } else {
+                    // Use minimal data from check response
+                    setCreditData({
+                      credit_score: checkResponse.data?.credit_score || null,
+                      is_eligible: isEligible,
+                      completed: true,
+                      checked_at: new Date().toISOString()
+                    });
+                  }
+                } catch (fetchError) {
+                  // Even if fetch fails, use data from check response
+                  console.warn('Failed to fetch credit analytics data, using check response:', fetchError);
+                  setCreditData({
+                    credit_score: checkResponse.data?.credit_score || null,
+                    is_eligible: isEligible,
+                    completed: true,
+                    checked_at: new Date().toISOString()
+                  });
+                }
                 setDataFetched(true);
               }
             } else {
@@ -99,29 +129,80 @@ export const CreditAnalyticsPage = () => {
 
   // Handle redirect based on credit score
   useEffect(() => {
-    if (!creditData || loading || performingCheck) return;
+    if (!creditData || loading || performingCheck) {
+      console.log('[CreditAnalytics] Redirect check skipped:', { hasCreditData: !!creditData, loading, performingCheck });
+      return;
+    }
 
     const creditScore = creditData.credit_score;
-    const score = typeof creditScore === 'number' ? creditScore : parseInt(creditScore) || 0;
+    const score = typeof creditScore === 'number' ? creditScore : parseInt(String(creditScore)) || 0;
+    console.log('[CreditAnalytics] Credit score check:', { creditScore, score, creditData });
 
     // If score > 450: Eligible, redirect to employment-details after 5 seconds
     // Add a small delay to ensure backend has updated the loan application step
     if (score > 450) {
+      console.log('[CreditAnalytics] Score > 450, setting up redirect...');
+      
+      // Start countdown
+      setRedirectCountdown(5);
+      
       // Wait 1 second for backend to update step, then start 5-second countdown (total 6 seconds)
       let redirectTimer: NodeJS.Timeout;
+      let countdownTimer: NodeJS.Timeout;
       const delayTimer = setTimeout(() => {
-        redirectTimer = setTimeout(() => {
-          navigate('/loan-application/employment-details', { replace: true });
+        console.log('[CreditAnalytics] Delay timer fired, starting 5-second redirect timer...');
+        
+        // Update countdown every second
+        let countdown = 5;
+        countdownTimer = setInterval(() => {
+          countdown -= 1;
+          setRedirectCountdown(countdown);
+          if (countdown <= 0) {
+            clearInterval(countdownTimer);
+            setRedirectCountdown(null);
+          }
+        }, 1000);
+        
+        redirectTimer = setTimeout(async () => {
+          console.log('[CreditAnalytics] Redirect timer fired, navigating...');
+          clearInterval(countdownTimer);
+          setRedirectCountdown(null);
+          
+          // Get application ID from URL or location state
+          const urlParams = new URLSearchParams(window.location.search);
+          const appIdParam = urlParams.get('applicationId');
+          const applicationId = appIdParam ? parseInt(appIdParam) : null;
+          console.log('[CreditAnalytics] Application ID:', applicationId);
+          
+          // Use unified progress engine to determine next step
+          try {
+            const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+            const progress = await getOnboardingProgress(applicationId);
+            const nextRoute = getStepRoute(progress.currentStep, applicationId);
+            console.log('[CreditAnalytics] Next step from engine:', progress.currentStep, '->', nextRoute);
+            navigate(nextRoute, { replace: true });
+          } catch (error) {
+            console.error('[CreditAnalytics] Error getting next step, using fallback:', error);
+            // Fallback to employment details (old behavior)
+            const fallbackRoute = applicationId 
+              ? `/loan-application/employment-details?applicationId=${applicationId}`
+              : '/loan-application/employment-details';
+            console.log('[CreditAnalytics] Using fallback route:', fallbackRoute);
+            navigate(fallbackRoute, { replace: true });
+          }
         }, 5000);
       }, 1000);
 
       return () => {
+        console.log('[CreditAnalytics] Cleaning up timers');
         clearTimeout(delayTimer);
         if (redirectTimer) clearTimeout(redirectTimer);
+        if (countdownTimer) clearInterval(countdownTimer);
       };
     } else {
       // If score <= 450: Not eligible, user should be on hold, redirect to hold-status
       // Backend should have already set user to on_hold
+      console.log('[CreditAnalytics] Score <= 450, redirecting to hold status...');
       const timer = setTimeout(() => {
         navigate('/hold-status', { replace: true });
       }, 2000);
@@ -129,6 +210,27 @@ export const CreditAnalyticsPage = () => {
       return () => clearTimeout(timer);
     }
   }, [creditData, loading, performingCheck, navigate]);
+
+  // Manual navigation handler
+  const handleContinue = async () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const appIdParam = urlParams.get('applicationId');
+    const applicationId = appIdParam ? parseInt(appIdParam) : null;
+    
+    try {
+      const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+      const progress = await getOnboardingProgress(applicationId);
+      const nextRoute = getStepRoute(progress.currentStep, applicationId);
+      console.log('[CreditAnalytics] Manual continue - Next step:', progress.currentStep, '->', nextRoute);
+      navigate(nextRoute, { replace: true });
+    } catch (error) {
+      console.error('[CreditAnalytics] Error getting next step, using fallback:', error);
+      const fallbackRoute = applicationId 
+        ? `/loan-application/employment-details?applicationId=${applicationId}`
+        : '/loan-application/employment-details';
+      navigate(fallbackRoute, { replace: true });
+    }
+  };
 
   // Show loading/checking state
   if (loading || performingCheck) {
@@ -181,13 +283,23 @@ export const CreditAnalyticsPage = () => {
               </div>
               <h2 className="text-3xl font-bold text-green-600 mb-4">You are Eligible</h2>
               <p className="text-lg text-gray-700 mb-2">Your Experian Credit Score: <span className="font-bold">{score}</span></p>
-              <p className="text-gray-600 mb-6">Redirecting to employment details in 5 seconds...</p>
-              <div className="w-full bg-gray-200 rounded-full h-2.5">
+              {redirectCountdown !== null && redirectCountdown > 0 ? (
+                <p className="text-gray-600 mb-4">Redirecting to employment details in {redirectCountdown} seconds...</p>
+              ) : (
+                <p className="text-gray-600 mb-4">Preparing to redirect...</p>
+              )}
+              <div className="w-full bg-gray-200 rounded-full h-2.5 mb-6">
                 <div 
                   className="bg-green-600 h-2.5 rounded-full transition-all duration-5000"
-                  style={{ width: '100%' }}
+                  style={{ width: redirectCountdown !== null && redirectCountdown > 0 ? `${((6 - redirectCountdown) / 6) * 100}%` : '0%' }}
                 ></div>
               </div>
+              <Button
+                onClick={handleContinue}
+                className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white"
+              >
+                Continue Now <ArrowRight className="w-4 h-4 ml-2" />
+              </Button>
             </>
           ) : (
             <>

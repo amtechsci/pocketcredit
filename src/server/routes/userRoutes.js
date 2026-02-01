@@ -710,7 +710,10 @@ router.post('/additional-information', requireAuth, async (req, res) => {
       work_experience
     } = req.body;
 
-    if (!marital_status || !['single', 'married', 'divorced', 'widow'].includes(marital_status)) {
+    // Map 'widow' to 'widowed' to match database ENUM
+    const normalizedMaritalStatus = marital_status === 'widow' ? 'widowed' : marital_status;
+
+    if (!marital_status || !['single', 'married', 'divorced', 'widow', 'widowed'].includes(marital_status)) {
       return res.status(400).json({
         success: false,
         message: 'Marital status is required and must be one of: single, married, divorced, widow'
@@ -741,7 +744,7 @@ router.post('/additional-information', requireAuth, async (req, res) => {
 
     const existingColumns = checkColumns.map(row => row.COLUMN_NAME);
     const updateFields = ['marital_status = ?'];
-    const updateValues = [marital_status];
+    const updateValues = [normalizedMaritalStatus];
 
     if (existingColumns.includes('spoken_language')) {
       updateFields.push('spoken_language = ?');

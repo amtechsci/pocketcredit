@@ -55,7 +55,7 @@ export const LinkSalaryBankAccountPage = () => {
   useEffect(() => {
     console.log('🔵🔵🔵 LinkSalaryBankAccountPage: useEffect triggered 🔵🔵🔵');
     console.log('🔵 User:', user?.id, 'Email verified:', user?.personal_email_verified);
-    
+
     // Check URL parameters
     const urlParams = new URLSearchParams(window.location.search);
     const allowEdit = urlParams.get('allowEdit');
@@ -95,7 +95,7 @@ export const LinkSalaryBankAccountPage = () => {
           setHasCheckedBank(true); // Mark as checked to prevent duplicate checks
           const bankDetailsResponse = await apiService.getUserBankDetails(user.id);
           console.log('🔵 Bank details response:', bankDetailsResponse);
-          
+
           if (bankDetailsResponse.success && bankDetailsResponse.data && bankDetailsResponse.data.length > 0) {
             console.log('🔵 Bank details data:', bankDetailsResponse.data);
             const hasPrimaryBank = bankDetailsResponse.data.some((bank: BankDetail) => {
@@ -108,14 +108,18 @@ export const LinkSalaryBankAccountPage = () => {
 
             if (hasPrimaryBank) {
               console.log('✅ Primary bank account found - user has already linked bank');
-              // User has linked bank account - redirect to next step
+              // User has linked bank account - use progress engine to determine next step
+              // First check if email is verified (prerequisite for some flows)
               if (!user.personal_email_verified) {
                 console.log('📧 Email not verified, redirecting to email verification');
                 setTimeout(() => navigate('/email-verification', { replace: true }), 500);
-              } else {
-                console.log('✅ Email verified and bank linked - redirecting to residence address');
-                setTimeout(() => navigate('/residence-address', { replace: true }), 500);
+                return;
               }
+
+              // Email verified - user has linked bank account.
+              // We don't redirect here anymore, StepGuard or Progress Engine will handle it.
+              console.log('✅ Primary bank account found - User has completed this step.');
+              setCheckingEnach(false);
               return; // Exit early - bank account exists
             } else {
               console.log('✅✅✅ No primary bank account found - user NEEDS to link bank account - STAYING ON PAGE ✅✅✅');
@@ -144,19 +148,19 @@ export const LinkSalaryBankAccountPage = () => {
             hasApplications: !!applicationsResponse.data?.applications,
             applicationsCount: applicationsResponse.data?.applications?.length || 0
           });
-          
+
           // Check for both 'success' property and 'status: success' (API uses status)
           const isSuccess = applicationsResponse.success || applicationsResponse.status === 'success';
           if (isSuccess && applicationsResponse.data?.applications) {
             const applications = applicationsResponse.data.applications;
             console.log('📋 Applications found:', applications.map((app: any) => ({ id: app.id, status: app.status })));
-            
+
             // Include all statuses that indicate an active application in progress
             // This matches the backend check in userBankStatement.js which includes:
             // 'pending', 'under_review', 'in_progress', 'submitted'
             // Also include 'ready_for_disbursement' as users can still link bank accounts at this stage
             const activeStatuses = ['submitted', 'under_review', 'follow_up', 'disbursal', 'ready_for_disbursement', 'pending', 'in_progress'];
-            
+
             // Debug: Log all application statuses
             console.log('🔍 All application statuses:', applications.map((app: any) => ({
               id: app.id,
@@ -166,7 +170,7 @@ export const LinkSalaryBankAccountPage = () => {
               inArray: activeStatuses.includes(app.status),
               inArrayTrimmed: app.status ? activeStatuses.includes(app.status.trim()) : false
             })));
-            
+
             const activeApplication = applications.find((app: any) => {
               if (!app || !app.status) return false;
               // Normalize status - trim whitespace and convert to lowercase for comparison
@@ -176,7 +180,7 @@ export const LinkSalaryBankAccountPage = () => {
               console.log(`🔍 Checking app ${app.id}: status="${app.status}" (normalized: "${normalizedStatus}"), matches=${matches}`);
               return matches;
             });
-            
+
             if (!activeApplication) {
               console.log('⚠️ No active loan application found. Applications:', applications.map((app: any) => app.status));
               console.log('⚠️ Allowed statuses:', activeStatuses);
@@ -185,7 +189,7 @@ export const LinkSalaryBankAccountPage = () => {
               setTimeout(() => navigate('/dashboard', { replace: true }), 1500);
               return;
             }
-            
+
             console.log('✅ Active application found:', { id: activeApplication.id, status: activeApplication.status });
             console.log('🔵 LinkSalaryBankAccountPage: Continuing to bank check...');
           } else {
@@ -400,8 +404,37 @@ export const LinkSalaryBankAccountPage = () => {
 
       if (response.success) {
         toast.success('Bank details verified successfully');
-        // Navigate to email verification page
-        navigate('/email-verification');
+        // Use progress engine to determine next step
+        try {
+          // Get active application ID
+          const applicationsResponse = await apiService.getLoanApplications();
+          const isSuccess = applicationsResponse.success || applicationsResponse.status === 'success';
+          let activeApplicationId: number | null = null;
+
+          if (isSuccess && applicationsResponse.data?.applications) {
+            const applications = applicationsResponse.data.applications;
+            const activeApplication = applications.find((app: any) =>
+              ['submitted', 'under_review', 'follow_up', 'disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal', 'pending', 'in_progress', 'ready_for_disbursement'].includes(app.status)
+            );
+            activeApplicationId = activeApplication?.id || null;
+          }
+
+          const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+          const progress = await getOnboardingProgress(activeApplicationId);
+          const nextRoute = getStepRoute(progress.currentStep, activeApplicationId);
+          console.log('[LinkSalaryBankAccount] After submission, next step from engine:', progress.currentStep, '->', nextRoute);
+
+          // Check if email verification is needed first
+          if (user && !user.personal_email_verified) {
+            navigate('/email-verification', { replace: true });
+          } else {
+            navigate(nextRoute, { replace: true });
+          }
+        } catch (error) {
+          console.error('[LinkSalaryBankAccount] Error getting next step, using fallback:', error);
+          // Fallback to email verification (old behavior)
+          navigate('/email-verification', { replace: true });
+        }
       } else {
         toast.error(response.message || 'Failed to verify bank details');
       }

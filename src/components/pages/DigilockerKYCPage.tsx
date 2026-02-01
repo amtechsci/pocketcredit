@@ -147,11 +147,34 @@ export const DigilockerKYCPage: React.FC = () => {
 
           if (hasPendingOrActiveLoan) {
             // User has pending/active loan AND KYC is already verified AND PAN exists
-            // Auto-redirect to dashboard
-            console.log('🚫 [KYC Page] AUTO-REDIRECTING - User has pending/active loan, KYC verified, and PAN exists');
-            toast.info('Your KYC is complete. Redirecting to dashboard...');
-            setChecking(false); // Stop loading
-            navigate('/dashboard', { replace: true });
+            // Use progress engine to determine next step instead of hardcoding dashboard
+            console.log('🚫 [KYC Page] KYC verified, PAN exists, but has pending loan - using progress engine');
+            setChecking(false);
+            
+            // Get the active application ID
+            const activeApp = applications.find((app: any) => {
+              const status = (app.status || '').toLowerCase().trim();
+              return !['cleared', 'cancelled'].includes(status);
+            });
+            
+            if (activeApp?.id) {
+              setTimeout(async () => {
+                try {
+                  const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                  const progress = await getOnboardingProgress(activeApp.id);
+                  const nextRoute = getStepRoute(progress.currentStep, activeApp.id);
+                  console.log('[DigilockerKYC] Next step from engine (pending loan):', progress.currentStep, '->', nextRoute);
+                  navigate(nextRoute, { replace: true });
+                } catch (error) {
+                  console.error('[DigilockerKYC] Error getting next step, using fallback:', error);
+                  // Fallback to dashboard
+                  navigate('/dashboard', { replace: true });
+                }
+              }, 500);
+            } else {
+              // No active app found, go to dashboard
+              navigate('/dashboard', { replace: true });
+            }
             return;
           } else {
             console.log('✅ [KYC Page] All loans are cleared or cancelled - allowing KYC access');
@@ -277,11 +300,29 @@ export const DigilockerKYCPage: React.FC = () => {
                         });
                         
                         if (hasPendingOrActiveLoan) {
-                          console.log('🚫 [KYC Page] Employment completed but user has pending loan - redirecting to dashboard');
-                          toast.info('KYC already verified. Redirecting to dashboard...');
-                          setTimeout(() => {
+                          // Use progress engine instead of hardcoding dashboard
+                          console.log('🚫 [KYC Page] Employment completed but user has pending loan - using progress engine');
+                          const activeApp = applications.find((app: any) => {
+                            const status = (app.status || '').toLowerCase().trim();
+                            return !allowedStatuses.includes(status);
+                          });
+                          
+                          if (activeApp?.id) {
+                            setTimeout(async () => {
+                              try {
+                                const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                                const progress = await getOnboardingProgress(activeApp.id);
+                                const nextRoute = getStepRoute(progress.currentStep, activeApp.id);
+                                console.log('[DigilockerKYC] Next step from engine (employment completed):', progress.currentStep, '->', nextRoute);
+                                navigate(nextRoute, { replace: true });
+                              } catch (error) {
+                                console.error('[DigilockerKYC] Error getting next step, using fallback:', error);
+                                navigate('/dashboard', { replace: true });
+                              }
+                            }, 1000);
+                          } else {
                             navigate('/dashboard', { replace: true });
-                          }, 1000);
+                          }
                           return;
                         }
                       }
@@ -289,13 +330,22 @@ export const DigilockerKYCPage: React.FC = () => {
                       console.error('Error checking loan status:', loanCheckError);
                     }
                     
-                    // No pending loans - proceed to next step
-                    toast.success('KYC already verified! Proceeding to next step...');
-                    setTimeout(() => {
-                      navigate('/loan-application/employment-details', {
-                        state: { applicationId },
-                        replace: true
-                      });
+                    // No pending loans - use progress engine to determine next step
+                    setTimeout(async () => {
+                      try {
+                        const appId = applicationId ? parseInt(applicationId) : null;
+                        const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                        const progress = await getOnboardingProgress(appId);
+                        const nextRoute = getStepRoute(progress.currentStep, appId);
+                        console.log('[DigilockerKYC] Next step from engine (no pending loans):', progress.currentStep, '->', nextRoute);
+                        navigate(nextRoute, { replace: true });
+                      } catch (error) {
+                        console.error('[DigilockerKYC] Error getting next step, using fallback:', error);
+                        navigate('/loan-application/employment-details', {
+                          state: { applicationId },
+                          replace: true
+                        });
+                      }
                     }, 1500);
                     return;
                   }
@@ -338,11 +388,29 @@ export const DigilockerKYCPage: React.FC = () => {
               });
               
               if (hasPendingOrActiveLoan) {
-                console.log('🚫 [KYC Page] KYC verified but user has pending loan - redirecting to dashboard');
-                toast.info('KYC already verified. Redirecting to dashboard...');
-                setTimeout(() => {
+                // Use progress engine instead of hardcoding dashboard
+                console.log('🚫 [KYC Page] KYC verified but user has pending loan - using progress engine');
+                const activeApp = applications.find((app: any) => {
+                  const status = (app.status || '').toLowerCase().trim();
+                  return !allowedStatuses.includes(status);
+                });
+                
+                if (activeApp?.id) {
+                  setTimeout(async () => {
+                    try {
+                      const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                      const progress = await getOnboardingProgress(activeApp.id);
+                      const nextRoute = getStepRoute(progress.currentStep, activeApp.id);
+                      console.log('[DigilockerKYC] Next step from engine (KYC verified):', progress.currentStep, '->', nextRoute);
+                      navigate(nextRoute, { replace: true });
+                    } catch (error) {
+                      console.error('[DigilockerKYC] Error getting next step, using fallback:', error);
+                      navigate('/dashboard', { replace: true });
+                    }
+                  }, 1000);
+                } else {
                   navigate('/dashboard', { replace: true });
-                }, 1000);
+                }
                 return;
               }
             }
@@ -351,12 +419,21 @@ export const DigilockerKYCPage: React.FC = () => {
             // Continue with redirect if check fails
           }
           
-          // KYC already completed and PAN exists (or check skipped) - redirect to next step
-          toast.success('KYC already verified! Proceeding to next step...');
-          setTimeout(() => {
-            navigate('/loan-application/credit-analytics', {
-              replace: true
-            });
+          // KYC already completed and PAN exists (or check skipped) - use progress engine to determine next step
+          setTimeout(async () => {
+            try {
+              const appId = applicationId ? parseInt(applicationId) : null;
+              const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+              const progress = await getOnboardingProgress(appId);
+              const nextRoute = getStepRoute(progress.currentStep, appId);
+              console.log('[DigilockerKYC] Next step from engine (KYC + PAN complete):', progress.currentStep, '->', nextRoute);
+              navigate(nextRoute, { replace: true });
+            } catch (error) {
+              console.error('[DigilockerKYC] Error getting next step, using fallback:', error);
+              navigate('/loan-application/credit-analytics', {
+                replace: true
+              });
+            }
           }, 1500);
         } else {
           // KYC not complete - show the form
@@ -404,8 +481,6 @@ export const DigilockerKYCPage: React.FC = () => {
       });
 
       if (response.success && response.data.kycUrl) {
-        toast.success('Redirecting to Digilocker for KYC verification...');
-
         // Redirect to Digilocker KYC URL
         // After returning from Digilocker, we'll check for PAN document
         window.location.href = response.data.kycUrl;
@@ -450,11 +525,27 @@ export const DigilockerKYCPage: React.FC = () => {
         setPanValidated(true);
         toast.success('PAN validated successfully!');
         
-        // Wait a moment then proceed to next step
-        setTimeout(() => {
-          navigate('/loan-application/credit-analytics', {
-            replace: true
-          });
+        // Clear PAN verification cache to force fresh check
+        const appId = applicationId || urlParams.get('applicationId') || '0';
+        apiService.clearCache('/digilocker/check-pan-document');
+        console.log('[DigilockerKYC] Cleared PAN verification cache');
+        
+        // Wait a moment for backend to process, then use progress engine to determine next step
+        setTimeout(async () => {
+          try {
+            const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+            const appIdNum = appId && appId !== '0' ? parseInt(appId) : null;
+            const progress = await getOnboardingProgress(appIdNum);
+            const nextRoute = getStepRoute(progress.currentStep, appIdNum);
+            console.log('[DigilockerKYC] After PAN save, next step from engine:', progress.currentStep, '->', nextRoute);
+            navigate(nextRoute, { replace: true });
+          } catch (error) {
+            console.error('[DigilockerKYC] Error getting next step after PAN save, using fallback:', error);
+            // Fallback to credit analytics (old behavior)
+            navigate('/loan-application/credit-analytics', {
+              replace: true
+            });
+          }
         }, 1500);
       } else {
         toast.error(response.message || 'Failed to validate PAN. Please try again.');

@@ -33,11 +33,13 @@ export type OnboardingStep =
 
 export interface OnboardingPrerequisites {
   kycVerified: boolean;
+  rekycRequired: boolean; // Admin triggered re-KYC
   panVerified: boolean;
   aaConsentGiven: boolean;
   creditAnalyticsCompleted: boolean;
   employmentCompleted: boolean;
   bankStatementCompleted: boolean;
+  bankStatementReset: boolean; // Admin reset bank statement
   bankDetailsCompleted: boolean;
   referencesCompleted: boolean;
   documentsNeeded: boolean;
@@ -73,8 +75,8 @@ export const STEP_ROUTES: Record<OnboardingStep, string> = {
   'credit-analytics': '/loan-application/credit-analytics',
   'employment-details': '/loan-application/employment-details',
   'bank-statement': '/loan-application/bank-statement',
-  'bank-details': '/loan-application/bank-details',
-  'references': '/loan-application/references',
+  'bank-details': '/link-salary-bank-account', // Onboarding flow uses link-salary-bank-account
+  'references': '/user-references',
   'upload-documents': '/loan-application/upload-documents',
   'steps': '/loan-application/steps'
 };
@@ -87,11 +89,13 @@ export async function checkAllPrerequisites(
 ): Promise<OnboardingPrerequisites> {
   const prerequisites: OnboardingPrerequisites = {
     kycVerified: false,
+    rekycRequired: false,
     panVerified: false,
     aaConsentGiven: false,
     creditAnalyticsCompleted: false,
     employmentCompleted: false,
     bankStatementCompleted: false,
+    bankStatementReset: false,
     bankDetailsCompleted: false,
     referencesCompleted: false,
     documentsNeeded: false
@@ -99,10 +103,31 @@ export async function checkAllPrerequisites(
 
   try {
     // 1. Check KYC status (user-level, not application-level)
+    // Also check for ReKYC requirement (admin-triggered reset)
     try {
       const kycResponse = await apiService.getKYCStatus(applicationId || '0');
       if (kycResponse.success && kycResponse.data) {
         prerequisites.kycVerified = kycResponse.data.kyc_status === 'verified';
+        
+        // Check for ReKYC requirement (admin triggered re-KYC)
+        if (kycResponse.data.verification_data) {
+          let verificationData = kycResponse.data.verification_data;
+          // Parse if it's a string
+          if (typeof verificationData === 'string') {
+            try {
+              verificationData = JSON.parse(verificationData);
+            } catch (e) {
+              // Ignore parsing errors
+            }
+          }
+          prerequisites.rekycRequired = verificationData?.rekyc_required === true;
+          
+          // If ReKYC is required, KYC is considered not verified
+          if (prerequisites.rekycRequired) {
+            prerequisites.kycVerified = false;
+            console.log('[ProgressEngine] 🔄 ReKYC required by admin - KYC must be redone');
+          }
+        }
       }
     } catch (error) {
       console.error('[ProgressEngine] Error checking KYC:', error);
@@ -177,16 +202,34 @@ export async function checkAllPrerequisites(
       }
     }
 
-    // 6. Check bank statement completion
+    // 6. Check bank statement completion and admin resets
     try {
       const bankStatementResponse = await apiService.getUserBankStatementStatus();
       if (bankStatementResponse.success && bankStatementResponse.data) {
         const data = bankStatementResponse.data as any;
-        prerequisites.bankStatementCompleted = 
-          data.status === 'completed' || 
-          data.userStatus === 'uploaded' || 
-          data.userStatus === 'under_review' || 
-          data.userStatus === 'verified';
+        const status = data.status;
+        const verificationStatus = data.verificationStatus || data.verification_status;
+        const userStatus = data.userStatus;
+        
+        // Check if bank statement was reset by admin
+        // Admin reset sets: status='pending', verificationStatus='not_started', userStatus=null
+        const isResetByAdmin = (
+          status === 'pending' &&
+          (verificationStatus === 'not_started' || verificationStatus === null) &&
+          (userStatus === null || userStatus === undefined)
+        );
+        
+        if (isResetByAdmin) {
+          prerequisites.bankStatementReset = true;
+          prerequisites.bankStatementCompleted = false;
+          console.log('[ProgressEngine] 🔄 Bank statement reset by admin - user must upload again');
+        } else {
+          prerequisites.bankStatementCompleted = 
+            status === 'completed' || 
+            userStatus === 'uploaded' || 
+            userStatus === 'under_review' || 
+            userStatus === 'verified';
+        }
       }
     } catch (error) {
       console.error('[ProgressEngine] Error checking bank statement:', error);
@@ -197,7 +240,11 @@ export async function checkAllPrerequisites(
       try {
         const appResponse = await apiService.getLoanApplicationById(applicationId);
         if ((appResponse.success || appResponse.status === 'success') && appResponse.data?.application) {
-          prerequisites.bankDetailsCompleted = !!(appResponse.data.application as any).user_bank_id;
+          const userBankId = (appResponse.data.application as any).user_bank_id;
+          prerequisites.bankDetailsCompleted = !!userBankId;
+          console.log(`[ProgressEngine] Bank details check: user_bank_id=${userBankId}, completed=${prerequisites.bankDetailsCompleted}`);
+        } else {
+          console.log(`[ProgressEngine] Bank details check: No application data in response`);
         }
       } catch (error: any) {
         if (error?.response?.status !== 404) {
@@ -286,8 +333,9 @@ export function determineCurrentStep(
     return 'upload-documents';
   }
 
-  // Priority 2: KYC verification
-  if (!prerequisites.kycVerified) {
+  // Priority 2: KYC verification (including ReKYC)
+  // If ReKYC is required OR KYC is not verified, user must complete KYC
+  if (!prerequisites.kycVerified || prerequisites.rekycRequired) {
     return 'kyc-verification';
   }
 
@@ -314,8 +362,9 @@ export function determineCurrentStep(
     return 'employment-details';
   }
 
-  // Priority 7: Bank statement
-  if (!prerequisites.bankStatementCompleted) {
+  // Priority 7: Bank statement (including admin resets)
+  // If bank statement was reset by admin OR not completed, user must upload
+  if (!prerequisites.bankStatementCompleted || prerequisites.bankStatementReset) {
     return 'bank-statement';
   }
 
@@ -366,23 +415,61 @@ export function canAccessStep(
 /**
  * Get complete onboarding progress
  * This is the MAIN FUNCTION to call from components
+ * 
+ * @param applicationId - The loan application ID (can be null for new users)
+ * @returns OnboardingProgress with current step, next step, and all prerequisites
+ * 
+ * @throws Never throws - always returns a valid progress object, even on error
  */
 export async function getOnboardingProgress(
-  applicationId: number | null
+  applicationId: number | null,
+  forceRefresh: boolean = false
 ): Promise<OnboardingProgress> {
-  console.log('[ProgressEngine] 🚀 Starting progress check for applicationId:', applicationId);
+  const startTime = Date.now();
+  console.log('[ProgressEngine] 🚀 Starting progress check', {
+    applicationId,
+    timestamp: new Date().toISOString(),
+    forceRefresh
+  });
+  
+  // If forceRefresh is true, clear cache for loan application
+  if (forceRefresh && applicationId) {
+    apiService.clearCache(`/loan-applications/${applicationId}`);
+    apiService.clearCache('/loan-applications');
+  }
   
   try {
     const prerequisites = await checkAllPrerequisites(applicationId);
-    console.log('[ProgressEngine] ✅ Prerequisites checked:', prerequisites);
+    const duration = Date.now() - startTime;
+    
+    console.log('[ProgressEngine] ✅ Prerequisites checked', {
+      applicationId,
+      duration: `${duration}ms`,
+      prerequisites: {
+        kycVerified: prerequisites.kycVerified,
+        rekycRequired: prerequisites.rekycRequired,
+        panVerified: prerequisites.panVerified,
+        creditAnalyticsCompleted: prerequisites.creditAnalyticsCompleted,
+        employmentCompleted: prerequisites.employmentCompleted,
+        bankStatementCompleted: prerequisites.bankStatementCompleted,
+        bankStatementReset: prerequisites.bankStatementReset,
+        bankDetailsCompleted: prerequisites.bankDetailsCompleted,
+        referencesCompleted: prerequisites.referencesCompleted,
+        documentsNeeded: prerequisites.documentsNeeded
+      }
+    });
     
     const currentStep = determineCurrentStep(prerequisites);
-    console.log('[ProgressEngine] 📍 Determined current step:', currentStep);
-    
     const nextStep = getNextStep(currentStep);
-    console.log('[ProgressEngine] ➡️ Next step:', nextStep);
+    
+    console.log('[ProgressEngine] 📍 Step determination', {
+      applicationId,
+      currentStep,
+      nextStep,
+      reason: getStepReason(prerequisites, currentStep)
+    });
 
-    const progress = {
+    const progress: OnboardingProgress = {
       currentStep,
       nextStep,
       prerequisites,
@@ -390,21 +477,38 @@ export async function getOnboardingProgress(
       canProceed: currentStep === 'steps'
     };
     
-    console.log('[ProgressEngine] ✅ Progress result:', progress);
+    console.log('[ProgressEngine] ✅ Progress result', {
+      applicationId,
+      currentStep,
+      nextStep,
+      canProceed: progress.canProceed,
+      totalDuration: `${Date.now() - startTime}ms`
+    });
+    
     return progress;
-  } catch (error) {
-    console.error('[ProgressEngine] ❌ Error getting progress:', error);
+  } catch (error: any) {
+    const duration = Date.now() - startTime;
+    console.error('[ProgressEngine] ❌ Error getting progress', {
+      applicationId,
+      error: error?.message || String(error),
+      stack: error?.stack,
+      duration: `${duration}ms`
+    });
+    
     // Return a safe default - KYC verification
-    return {
+    // This ensures the app never crashes and user can always proceed
+    const fallbackProgress: OnboardingProgress = {
       currentStep: 'kyc-verification',
       nextStep: 'pan-verification',
       prerequisites: {
         kycVerified: false,
+        rekycRequired: false,
         panVerified: false,
         aaConsentGiven: false,
         creditAnalyticsCompleted: false,
         employmentCompleted: false,
         bankStatementCompleted: false,
+        bankStatementReset: false,
         bankDetailsCompleted: false,
         referencesCompleted: false,
         documentsNeeded: false
@@ -412,6 +516,52 @@ export async function getOnboardingProgress(
       applicationId,
       canProceed: false
     };
+    
+    console.log('[ProgressEngine] 🔄 Returning fallback progress', {
+      applicationId,
+      fallbackStep: fallbackProgress.currentStep
+    });
+    
+    return fallbackProgress;
+  }
+}
+
+/**
+ * Get human-readable reason for why a step was determined
+ * Useful for debugging and logging
+ */
+function getStepReason(prerequisites: OnboardingPrerequisites, step: OnboardingStep): string {
+  switch (step) {
+    case 'upload-documents':
+      return 'Admin requested documents';
+    case 'kyc-verification':
+      if (prerequisites.rekycRequired) {
+        return 'ReKYC required by admin';
+      }
+      return 'KYC not verified';
+    case 'pan-verification':
+      return 'PAN not verified';
+    case 'aa-consent':
+      return 'AA consent not given';
+    case 'credit-analytics':
+      return 'Credit analytics not completed';
+    case 'employment-details':
+      return 'Employment details not completed';
+    case 'bank-statement':
+      if (prerequisites.bankStatementReset) {
+        return 'Bank statement reset by admin';
+      }
+      return 'Bank statement not completed';
+    case 'bank-details':
+      return 'Bank details not linked';
+    case 'references':
+      return 'References not completed';
+    case 'steps':
+      return 'All steps completed';
+    case 'application':
+      return 'No application created';
+    default:
+      return 'Unknown reason';
   }
 }
 

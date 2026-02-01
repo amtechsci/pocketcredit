@@ -123,12 +123,23 @@ export const AccountAggregatorFlow = () => {
     }
   };
 
-  const handleApproveConsent = () => {
+  const handleApproveConsent = async () => {
     toast.success('Consent approved successfully!');
-    setTimeout(() => {
+    setTimeout(async () => {
       setCurrentStep('complete');
-      setTimeout(() => {
-        navigate('/loan-application/employment-details', { state: { applicationId } });
+      setTimeout(async () => {
+        // Use unified progress engine to determine next step
+        try {
+          const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+          const progress = await getOnboardingProgress(applicationId);
+          const nextRoute = getStepRoute(progress.currentStep, applicationId);
+          console.log('[AccountAggregator] Next step from engine:', progress.currentStep, '->', nextRoute);
+          navigate(nextRoute, { replace: true });
+        } catch (error) {
+          console.error('[AccountAggregator] Error getting next step, using fallback:', error);
+          // Fallback to employment details (old behavior)
+          navigate('/loan-application/employment-details', { state: { applicationId } });
+        }
       }, 2000);
     }, 1000);
   };

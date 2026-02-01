@@ -29,106 +29,32 @@ export function LoanStatusGuard({ children }: { children: React.ReactNode }) {
                 if ((response.success || response.status === 'success') && response.data?.applications) {
                     const applications = response.data.applications;
 
-                    // PRIORITY 0: Check for admin-requested actions (these take precedence over status-based redirects)
-                    const activeApp = applications.find((app: any) => 
+                    // PRIORITY 0: Check for admin-requested actions (Re-KYC, Bank Statement Reset) via Progress Engine
+                    const activeApp = applications.find((app: any) =>
                         !['cleared', 'cancelled'].includes(app.status)
                     );
 
                     if (activeApp) {
-                        // Check 1: ReKYC required
                         try {
-                            const checkId = activeApp.id || '0';
-                            const kycResponse = await apiService.getKYCStatus(checkId);
-                            if (kycResponse.success && kycResponse.data) {
-                                let verificationData = kycResponse.data.verification_data;
-                                if (typeof verificationData === 'string') {
-                                    try {
-                                        verificationData = JSON.parse(verificationData);
-                                    } catch (e) {
-                                        // Ignore parse errors
-                                    }
-                                }
-                                if (verificationData?.rekyc_required === true) {
-                                    // ReKYC required - redirect to KYC page (even from dashboard)
-                                    if (!location.pathname.includes('/loan-application/kyc-verification')) {
-                                        setRedirectPath(`/loan-application/kyc-verification?applicationId=${activeApp.id}`);
-                                        setIsChecking(false);
-                                        return;
-                                    }
-                                }
-                            }
-                        } catch (kycError) {
-                            console.error('Error checking ReKYC:', kycError);
-                        }
+                            const { getOnboardingProgress, getStepRoute } = await import('../utils/onboardingProgressEngine');
+                            const progress = await getOnboardingProgress(activeApp.id);
 
-                        // Check 2: Re-selfie required (selfie was reset by admin)
-                        // This is checked in PostDisbursalFlowPage, but if user is on dashboard with ready_for_disbursement,
-                        // they need to be redirected to post-disbursal to complete selfie
-                        // Only check for post-disbursal statuses (ready_for_disbursement, disbursal, repeat_disbursal)
-                        if (activeApp.status === 'ready_for_disbursement' || activeApp.status === 'disbursal' || activeApp.status === 'repeat_disbursal') {
-                            try {
-                                const progressResponse = await apiService.getPostDisbursalProgress(activeApp.id);
-                                if (progressResponse.success && progressResponse.data) {
-                                    const progress = progressResponse.data;
-                                    // If selfie was reset by admin (captured=1 but verified=0), redirect to post-disbursal
-                                    // This indicates admin reset the selfie verification
-                                    if (progress.selfie_captured && !progress.selfie_verified && 
-                                        !location.pathname.includes('/post-disbursal') && 
-                                        !location.pathname.includes('/loan-application/kyc-verification')) {
-                                        console.log('🔄 Re-selfie required - redirecting to post-disbursal');
-                                        setRedirectPath(`/post-disbursal?applicationId=${activeApp.id}`);
-                                        setIsChecking(false);
-                                        return;
-                                    }
-                                }
-                            } catch (progressError) {
-                                console.error('Error checking post-disbursal progress:', progressError);
-                            }
-                        }
-
-                        // Check 3: Bank Statement required (status reset to pending by admin via "Add New from User")
-                        // When admin resets bank statement via "Add New from User", it sets:
-                        // - status = 'pending'
-                        // - verification_status = 'not_started'
-                        // - user_status = NULL
-                        // User needs to upload bank statement again
-                        try {
-                            const bankStatementResponse = await apiService.getUserBankStatementStatus();
-                            if (bankStatementResponse.success && bankStatementResponse.data) {
-                                const bsData = bankStatementResponse.data as any; // Use any to access dynamic fields that may not be in TypeScript type
-                                // Check if bank statement was reset by admin:
-                                // - status is 'pending' (admin reset it)
-                                // - verificationStatus is 'not_started' (admin reset it) - note: backend returns camelCase
-                                // - userStatus is null/undefined (not uploaded by user yet after reset)
-                                // - User has active loan application (not cleared/cancelled)
-                                // - User is not already on bank statement or other priority pages
-                                const status = bsData.status;
-                                const verificationStatus = (bsData as any).verificationStatus || (bsData as any).verification_status; // Backend returns camelCase
-                                const userStatus = (bsData as any).userStatus;
-                                
-                                // Check if this looks like an admin reset:
-                                // Status is pending AND verificationStatus is not_started AND no userStatus
-                                const isResetByAdmin = (
-                                    status === 'pending' && 
-                                    verificationStatus === 'not_started' &&
-                                    (!userStatus || userStatus === null) &&
-                                    !location.pathname.includes('/loan-application/bank-statement') &&
-                                    !location.pathname.includes('/loan-application/kyc-verification') &&
-                                    !location.pathname.includes('/post-disbursal')
-                                );
-                                
-                                if (isResetByAdmin) {
-                                    // Bank statement was reset by admin - redirect to upload page
-                                    console.log('🔄 Bank statement reset by admin - redirecting to bank statement upload page');
-                                    setRedirectPath(`/loan-application/bank-statement?applicationId=${activeApp.id}`);
+                            // If engine says we are NOT at 'steps' (completed), and we have a reset-style prerequisite,
+                            // redirect to the current pending step.
+                            if (progress.currentStep !== 'steps' && (progress.prerequisites.rekycRequired || progress.prerequisites.bankStatementReset)) {
+                                const route = getStepRoute(progress.currentStep, activeApp.id);
+                                if (!location.pathname.includes(route.split('?')[0])) {
+                                    console.log(`[LoanStatusGuard] 🔄 Admin reset detected (${progress.currentStep}), redirecting to: ${route}`);
+                                    setRedirectPath(route);
                                     setIsChecking(false);
                                     return;
                                 }
                             }
-                        } catch (bsError) {
-                            console.error('Error checking bank statement status:', bsError);
+                        } catch (engineError) {
+                            console.error('Error checking progress engine in Guard:', engineError);
                         }
                     }
+
 
                     // 1. Check for ready_for_disbursement -> /post-disbursal
                     // NOTE: Allow dashboard access for ready_for_disbursement - users can view their loan and click "View" to see waiting page

@@ -276,9 +276,9 @@ router.get('/:applicationId', requireAuth, async (req, res) => {
     const userId = req.userId;
     const { applicationId } = req.params;
 
-    // Verify that the loan application belongs to the user
+    // Verify that the loan application belongs to the user and get user_bank_id
     const applications = await executeQuery(
-      'SELECT id, user_id FROM loan_applications WHERE id = ? AND user_id = ?',
+      'SELECT id, user_id, user_bank_id FROM loan_applications WHERE id = ? AND user_id = ?',
       [applicationId, userId]
     );
 
@@ -289,10 +289,26 @@ router.get('/:applicationId', requireAuth, async (req, res) => {
       });
     }
 
-    const bankDetails = await executeQuery(
-      'SELECT * FROM bank_details WHERE loan_application_id = ? ORDER BY created_at DESC LIMIT 1',
-      [applicationId]
-    );
+    const application = applications[0];
+    
+    // Bank details are user-level, not application-level
+    // If application has user_bank_id, get that specific bank detail
+    // Otherwise, get the user's primary bank detail or most recent
+    let bankDetails;
+    
+    if (application.user_bank_id) {
+      // Application has a linked bank - get that specific one
+      bankDetails = await executeQuery(
+        'SELECT * FROM bank_details WHERE id = ? AND user_id = ?',
+        [application.user_bank_id, userId]
+      );
+    } else {
+      // No linked bank - get user's primary bank or most recent
+      bankDetails = await executeQuery(
+        'SELECT * FROM bank_details WHERE user_id = ? ORDER BY is_primary DESC, created_at DESC LIMIT 1',
+        [userId]
+      );
+    }
 
     if (!bankDetails || bankDetails.length === 0) {
       return res.status(404).json({
@@ -308,9 +324,18 @@ router.get('/:applicationId', requireAuth, async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching bank details:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      sql: error.sql,
+      sqlState: error.sqlState,
+      applicationId,
+      userId
+    });
     res.status(500).json({
       success: false,
-      message: 'Internal server error while fetching bank details'
+      message: 'Internal server error while fetching bank details',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
@@ -487,7 +512,7 @@ router.post('/choose', requireAuth, async (req, res) => {
 
     // Verify that the loan application belongs to the user
     const applications = await executeQuery(
-      'SELECT id, user_id FROM loan_applications WHERE id = ? AND user_id = ?',
+      'SELECT id, user_id, user_bank_id FROM loan_applications WHERE id = ? AND user_id = ?',
       [application_id, userId]
     );
 
@@ -498,16 +523,16 @@ router.post('/choose', requireAuth, async (req, res) => {
       });
     }
 
-    // Get the bank details to copy
+    // Verify that the bank details belong to the user
     const bankDetails = await executeQuery(
-      'SELECT * FROM bank_details WHERE id = ?',
-      [bank_details_id]
+      'SELECT * FROM bank_details WHERE id = ? AND user_id = ?',
+      [bank_details_id, userId]
     );
 
     if (!bankDetails || bankDetails.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Bank details not found'
+        message: 'Bank details not found or does not belong to you'
       });
     }
 
@@ -515,24 +540,62 @@ router.post('/choose', requireAuth, async (req, res) => {
 
     // Link the existing bank details to the loan application
     await executeQuery(
-      'UPDATE loan_applications SET user_bank_id = ? WHERE id = ?',
+      'UPDATE loan_applications SET user_bank_id = ?, updated_at = NOW() WHERE id = ?',
       [bank_details_id, application_id]
     );
+
+    // Verify the update by fetching the complete application data
+    const verifyApp = await executeQuery(
+      'SELECT id, user_id, user_bank_id, current_step FROM loan_applications WHERE id = ?',
+      [application_id]
+    );
+    
+    if (!verifyApp || verifyApp.length === 0) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to verify bank details update'
+      });
+    }
+
+    const updatedApplication = verifyApp[0];
+    console.log(`✅ Bank details linked: application ${application_id} -> bank_details ${bank_details_id}, user_bank_id = ${updatedApplication.user_bank_id}`);
+
+    // Update loan application step to references if not already set
+    if (updatedApplication.current_step === 'bank-details') {
+      await executeQuery(
+        'UPDATE loan_applications SET current_step = ?, updated_at = NOW() WHERE id = ?',
+        ['references', application_id]
+      );
+      console.log(`✅ Updated loan application ${application_id} step to 'references'`);
+    }
 
     res.json({
       success: true,
       message: 'Bank details applied successfully',
       data: {
         application_id,
-        bank_details_id
+        bank_details_id,
+        user_bank_id: updatedApplication.user_bank_id,
+        application: {
+          id: updatedApplication.id,
+          user_bank_id: updatedApplication.user_bank_id,
+          current_step: updatedApplication.current_step
+        }
       }
     });
 
   } catch (error) {
     console.error('Error choosing bank details:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      sql: error.sql,
+      sqlState: error.sqlState
+    });
     res.status(500).json({
       success: false,
-      message: 'Internal server error while choosing bank details'
+      message: 'Internal server error while choosing bank details',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

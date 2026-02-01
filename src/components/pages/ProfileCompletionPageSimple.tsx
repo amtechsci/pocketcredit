@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   User,
@@ -354,7 +354,6 @@ const ProfileCompletionPageSimple = () => {
 
       if (response && response.data) {
         if (response.data.eligible) {
-          toast.success('Eligibility verified! Please continue with your profile.');
           await refreshUser();
 
           // OLD: For salaried users, pre-fetch Digitap data for next step
@@ -372,7 +371,6 @@ const ProfileCompletionPageSimple = () => {
 
           // NEW: Skip everything and go to dashboard
           console.log('Skipping API calls, redirecting to dashboard...');
-          toast.success('Eligibility verified! Redirecting to dashboard...');
           setTimeout(() => {
             window.location.href = '/dashboard';
           }, 1000);

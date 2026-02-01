@@ -460,7 +460,10 @@ const getApplicationSummary = (application) => {
     approved_at: application.approved_at,
     disbursed_at: application.disbursed_at,
     created_at: application.created_at,
-    updated_at: application.updated_at
+    updated_at: application.updated_at,
+    // Include fields needed for progress engine and frontend
+    user_bank_id: application.user_bank_id || null,
+    current_step: application.current_step || null
   };
 };
 
