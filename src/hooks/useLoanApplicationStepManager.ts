@@ -283,14 +283,17 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
     return false;
   }, []);
 
-  // Check references status - check if application has references
-  // (applicationId kept for future use but not needed currently)
+  // Check references status - check if user has completed references
   const checkReferencesStatus = useCallback(async (_applicationId: number) => {
     try {
-      // You may need to create an API endpoint for this
-      // For now, we'll assume it's checked via application status or a separate endpoint
-      // Placeholder - implement based on your API structure
-      return false;
+      const refsResponse = await apiService.getUserReferences();
+      if (refsResponse.success && refsResponse.data) {
+        const referencesList = refsResponse.data.references || [];
+        const alternateData = refsResponse.data.alternate_data;
+        const hasReferences = Array.isArray(referencesList) && referencesList.length >= 3;
+        const hasAlternateMobile = alternateData?.alternate_mobile ? true : false;
+        return hasReferences && hasAlternateMobile;
+      }
     } catch (error) {
       console.error('Error checking references status:', error);
     }
@@ -346,30 +349,48 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
   }, []);
 
   // Determine current step based on prerequisites
+  // NOTE: For new code, prefer using the unified OnboardingProgressEngine (src/utils/onboardingProgressEngine.ts)
+  // This function is kept for backward compatibility but should be migrated to use the engine
   const determineCurrentStep = useCallback((prerequisites: StepPrerequisites): LoanApplicationStep => {
+    // Priority order: First incomplete step = current step
+    // This matches the unified progress engine logic
+    
+    // Priority 1: Documents needed (admin requested)
     if (prerequisites.documentsNeeded) {
       return 'upload-documents';
     }
+    
+    // Priority 2: KYC verification
     if (!prerequisites.kycVerified) {
       return 'kyc-verification';
     }
-    // After KYC, user must complete credit-analytics before employment-details
+    
+    // Priority 3: Credit analytics (after KYC)
     if (!prerequisites.creditAnalyticsCompleted) {
       return 'credit-analytics';
     }
-    // After credit analytics, user can proceed to employment-details
+    
+    // Priority 4: Employment details (after credit analytics)
     if (!prerequisites.employmentCompleted) {
       return 'employment-details';
     }
+    
+    // Priority 5: Bank statement
     if (!prerequisites.bankStatementCompleted) {
       return 'bank-statement';
     }
+    
+    // Priority 6: Bank details (account linking)
     if (!prerequisites.bankDetailsCompleted) {
       return 'bank-details';
     }
+    
+    // Priority 7: References
     if (!prerequisites.referencesCompleted) {
       return 'references';
     }
+    
+    // All steps complete
     return 'steps';
   }, []);
 

@@ -170,10 +170,15 @@ export function LoanStatusGuard({ children }: { children: React.ReactNode }) {
                     }
 
                     // 3. Check for under_review/qa_verification -> /application-under-review
-                    const reviewApp = applications.find((app: any) =>
-                        (app.status === 'under_review' || app.status === 'submitted' || app.status === 'qa_verification' || app.status === 'follow_up') &&
-                        (app.current_step === 'complete' || !app.current_step || app.status === 'qa_verification')
-                    );
+                    // Only redirect if current_step is 'complete' (all steps done) or status is 'qa_verification'
+                    // Don't redirect if current_step is null/undefined (steps still pending)
+                    const reviewApp = applications.find((app: any) => {
+                        const hasReviewStatus = app.status === 'under_review' || app.status === 'submitted' || app.status === 'qa_verification' || app.status === 'follow_up';
+                        const stepsComplete = app.current_step === 'complete';
+                        const isQAVerification = app.status === 'qa_verification';
+                        // Only redirect if status matches AND (steps are complete OR it's qa_verification status)
+                        return hasReviewStatus && (stepsComplete || isQAVerification);
+                    });
                     // Note: If they have pending documents, DocumentRequiredGuard will handle it.
                     // This only applies if they are waiting for admin review.
                     if (reviewApp && !location.pathname.includes('/application-under-review') && !location.pathname.includes('/loan-application/upload-documents')) {

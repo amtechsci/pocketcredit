@@ -363,7 +363,7 @@ export function AuthPage() {
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-50 rounded-lg">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
             <span className="text-sm text-green-700">
-              Secured with 256-bit encryption
+              Secured with industry-standard encryption
             </span>
           </div>
         </div>

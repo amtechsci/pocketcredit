@@ -380,7 +380,7 @@ const ProfileCompletionPageSimple = () => {
           // Handle hold status - check for hold indicators in response
           const responseData = response.data as any;
           if (responseData.hold_permanent || responseData.hold_reason) {
-            toast.error(responseData.message || 'Application has been placed on hold.');
+            // Don't show toast when application goes on hold
             // Refresh user data to get updated status
             await refreshUser();
             // Redirect to hold status page
@@ -744,7 +744,7 @@ const ProfileCompletionPageSimple = () => {
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-50 rounded-lg">
             <Shield className="w-4 h-4 text-green-600" />
             <span className="text-sm text-green-700">
-              Your information is secured with 256-bit encryption
+              Your information is transmitted securely using industry-standard encryption
             </span>
           </div>
         </div>

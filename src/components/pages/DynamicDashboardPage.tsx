@@ -747,33 +747,64 @@ export function DynamicDashboardPage() {
                                 });
                               }
                             } else if (loan.status === 'under_review' || loan.status === 'submitted') {
-                              // Check if user has completed references before showing under review page
+                              // Use unified progress engine to determine next step
                               try {
-                                const refsResponse = await apiService.getUserReferences();
-                                const referencesList = refsResponse.data?.references || [];
-                                const alternateData = refsResponse.data?.alternate_data;
-                                const hasReferences = Array.isArray(referencesList) && referencesList.length >= 3;
-                                const hasAlternateMobile = alternateData?.alternate_mobile ? true : false;
-
-                                if (!hasReferences || !hasAlternateMobile) {
-                                  // References not complete - redirect to complete them
-                                  console.log('📋 References pending, redirecting to references page');
-                                  navigate('/user-references');
+                                const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                                const progress = await getOnboardingProgress(loan.id);
+                                console.log('📊 [View Status] Onboarding progress:', progress);
+                                
+                                // If there's a pending step, redirect to it
+                                if (progress.currentStep !== 'steps') {
+                                  const route = getStepRoute(progress.currentStep, loan.id);
+                                  console.log(`📊 [View Status] Redirecting to next pending step: ${progress.currentStep} -> ${route}`);
+                                  navigate(route, { replace: true });
                                   return;
                                 }
-                              } catch (refError) {
-                                console.error('Error checking references:', refError);
+                                
+                                // All steps complete - go to under review page
+                                console.log('✅ [View Status] All steps complete, showing under review page');
+                                navigate('/application-under-review');
+                              } catch (progressError) {
+                                console.error('❌ [View Status] Error checking progress, falling back to references check:', progressError);
+                                // Fallback: Check references only
+                                try {
+                                  const refsResponse = await apiService.getUserReferences();
+                                  const referencesList = refsResponse.data?.references || [];
+                                  const alternateData = refsResponse.data?.alternate_data;
+                                  const hasReferences = Array.isArray(referencesList) && referencesList.length >= 3;
+                                  const hasAlternateMobile = alternateData?.alternate_mobile ? true : false;
+
+                                  if (!hasReferences || !hasAlternateMobile) {
+                                    console.log('📋 [View Status] References pending, redirecting to references page');
+                                    navigate('/user-references');
+                                    return;
+                                  }
+                                } catch (refError) {
+                                  console.error('Error checking references:', refError);
+                                }
+                                // References complete - go to under review page
+                                navigate('/application-under-review');
                               }
-                              // References complete - go to under review page
-                              navigate('/application-under-review');
                             } else if (loan.status === 'ready_for_disbursement') {
                               // Loan is ready for disbursement - navigate to post-disbursal flow
                               console.log('✅ Loan ready for disbursement, navigating to post-disbursal flow');
                               navigate(`/post-disbursal?applicationId=${loan.id}`);
                             } else {
-                              navigate('/loan-application/kyc-verification', {
-                                state: { applicationId: loan.id }
-                              });
+                              // Use unified progress engine to determine next step
+                              try {
+                                const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                                const progress = await getOnboardingProgress(loan.id);
+                                console.log('📊 [View Status] Onboarding progress:', progress);
+                                const route = getStepRoute(progress.currentStep, loan.id);
+                                console.log(`📊 [View Status] Redirecting to next pending step: ${progress.currentStep} -> ${route}`);
+                                navigate(route, { replace: true });
+                              } catch (progressError) {
+                                console.error('❌ [View Status] Error checking progress, defaulting to KYC:', progressError);
+                                // Fallback: Default to KYC
+                                navigate('/loan-application/kyc-verification', {
+                                  state: { applicationId: loan.id }
+                                });
+                              }
                             }
                           }}
                           variant="outline"
@@ -898,33 +929,64 @@ export function DynamicDashboardPage() {
                             state: { applicationId: loan.id }
                           });
                         } else if (loan.status === 'under_review' || loan.status === 'submitted') {
-                          // Check if user has completed references before showing under review page
+                          // Use unified progress engine to determine next step
                           try {
-                            const refsResponse = await apiService.getUserReferences();
-                            const referencesList = refsResponse.data?.references || [];
-                            const alternateData = refsResponse.data?.alternate_data;
-                            const hasReferences = Array.isArray(referencesList) && referencesList.length >= 3;
-                            const hasAlternateMobile = alternateData?.alternate_mobile ? true : false;
-
-                            if (!hasReferences || !hasAlternateMobile) {
-                              // References not complete - redirect to complete them
-                              console.log('📋 References pending, redirecting to references page');
-                              navigate('/user-references');
+                            const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                            const progress = await getOnboardingProgress(loan.id);
+                            console.log('📊 [View Status] Onboarding progress:', progress);
+                            
+                            // If there's a pending step, redirect to it
+                            if (progress.currentStep !== 'steps') {
+                              const route = getStepRoute(progress.currentStep, loan.id);
+                              console.log(`📊 [View Status] Redirecting to next pending step: ${progress.currentStep} -> ${route}`);
+                              navigate(route, { replace: true });
                               return;
                             }
-                          } catch (refError) {
-                            console.error('Error checking references:', refError);
+                            
+                            // All steps complete - go to under review page
+                            console.log('✅ [View Status] All steps complete, showing under review page');
+                            navigate('/application-under-review');
+                          } catch (progressError) {
+                            console.error('❌ [View Status] Error checking progress, falling back to references check:', progressError);
+                            // Fallback: Check references only
+                            try {
+                              const refsResponse = await apiService.getUserReferences();
+                              const referencesList = refsResponse.data?.references || [];
+                              const alternateData = refsResponse.data?.alternate_data;
+                              const hasReferences = Array.isArray(referencesList) && referencesList.length >= 3;
+                              const hasAlternateMobile = alternateData?.alternate_mobile ? true : false;
+
+                              if (!hasReferences || !hasAlternateMobile) {
+                                console.log('📋 [View Status] References pending, redirecting to references page');
+                                navigate('/user-references');
+                                return;
+                              }
+                            } catch (refError) {
+                              console.error('Error checking references:', refError);
+                            }
+                            // References complete - go to under review page
+                            navigate('/application-under-review');
                           }
-                          // References complete - go to under review page
-                          navigate('/application-under-review');
                         } else if (loan.status === 'ready_for_disbursement') {
                           // Loan is ready for disbursement - navigate to post-disbursal flow
                           console.log('✅ Loan ready for disbursement, navigating to post-disbursal flow');
                           navigate(`/post-disbursal?applicationId=${loan.id}`);
                         } else {
-                          navigate('/loan-application/kyc-verification', {
-                            state: { applicationId: loan.id }
-                          });
+                          // Use unified progress engine to determine next step
+                          try {
+                            const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                            const progress = await getOnboardingProgress(loan.id);
+                            console.log('📊 [View Status] Onboarding progress:', progress);
+                            const route = getStepRoute(progress.currentStep, loan.id);
+                            console.log(`📊 [View Status] Redirecting to next pending step: ${progress.currentStep} -> ${route}`);
+                            navigate(route, { replace: true });
+                          } catch (progressError) {
+                            console.error('❌ [View Status] Error checking progress, defaulting to KYC:', progressError);
+                            // Fallback: Default to KYC
+                            navigate('/loan-application/kyc-verification', {
+                              state: { applicationId: loan.id }
+                            });
+                          }
                         }
                       }}
                       variant="outline"
