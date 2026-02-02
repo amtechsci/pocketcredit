@@ -439,6 +439,70 @@ export async function getOnboardingProgress(
   }
   
   try {
+    // Check application status FIRST - if it's in review/submitted, don't allow going back to incomplete steps
+    // Clear cache to ensure we get fresh data
+    if (applicationId) {
+      apiService.clearCache(`/loan-applications/${applicationId}`);
+      apiService.clearCache('/loan-applications');
+    }
+    
+    let applicationStatus = null;
+    let applicationData = null;
+    
+    if (applicationId) {
+      try {
+        const appResponse = await apiService.getLoanApplicationById(applicationId);
+        console.log('[ProgressEngine] 🔍 Raw API response structure:', {
+          hasSuccess: 'success' in appResponse,
+          hasStatus: 'status' in appResponse,
+          success: appResponse.success,
+          status: appResponse.status,
+          hasData: !!appResponse.data,
+          dataKeys: appResponse.data ? Object.keys(appResponse.data) : []
+        });
+        
+        // Handle both 'success' and 'status: success' response formats
+        const isSuccess = appResponse.success || appResponse.status === 'success';
+        if (isSuccess && appResponse.data) {
+          // Try both possible response structures
+          applicationData = appResponse.data.application || appResponse.data;
+          if (applicationData && applicationData.status) {
+            applicationStatus = applicationData.status;
+            console.log('[ProgressEngine] ✅ Application status check:', applicationStatus, 'for app', applicationId);
+          } else {
+            console.warn('[ProgressEngine] ⚠️ Application status not found in data:', {
+              hasApplicationData: !!applicationData,
+              applicationDataKeys: applicationData ? Object.keys(applicationData) : [],
+              rawData: appResponse.data
+            });
+          }
+        } else {
+          console.warn('[ProgressEngine] ⚠️ Application response not successful:', { 
+            success: appResponse.success, 
+            status: appResponse.status,
+            hasData: !!appResponse.data 
+          });
+        }
+      } catch (error) {
+        console.warn('[ProgressEngine] ⚠️ Could not fetch application status:', error);
+      }
+    }
+    
+    // If application is in final review states, return 'steps' to prevent going back
+    const finalStatuses = ['under_review', 'submitted', 'approved', 'disbursed', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal'];
+    if (applicationStatus && finalStatuses.includes(applicationStatus)) {
+      console.log('[ProgressEngine] 🚫 Application is in final status, preventing step navigation:', applicationStatus);
+      // Still check prerequisites for completeness, but return steps as current step
+      const prerequisites = await checkAllPrerequisites(applicationId);
+      return {
+        currentStep: 'steps',
+        nextStep: null,
+        prerequisites,
+        applicationId,
+        canProceed: true
+      };
+    }
+    
     const prerequisites = await checkAllPrerequisites(applicationId);
     const duration = Date.now() - startTime;
     
