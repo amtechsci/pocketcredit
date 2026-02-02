@@ -107,20 +107,84 @@ export const LinkSalaryBankAccountPage = () => {
             console.log('🔵 Has primary bank account?', hasPrimaryBank);
 
             if (hasPrimaryBank) {
-              console.log('✅ Primary bank account found - user has already linked bank');
+              console.log('✅ Primary bank account found - checking if linked to application');
+              
+              // Get the primary bank account
+              const primaryBank = bankDetailsResponse.data.find((bank: BankDetail) => Boolean(bank.is_primary));
+              
+              // Check if application ID exists and if bank needs to be linked
+              const urlParams = new URLSearchParams(window.location.search);
+              const appIdParam = urlParams.get('applicationId');
+              const applicationId = appIdParam ? parseInt(appIdParam) : null;
+              
+              if (applicationId && primaryBank) {
+                // Check if bank is already linked to this application
+                try {
+                  const appResponse = await apiService.getLoanApplicationById(applicationId);
+                  const app = appResponse.data?.application || appResponse.data;
+                  const isLinked = app?.user_bank_id === primaryBank.id;
+                  
+                  if (!isLinked) {
+                    console.log('🔗 Bank exists but not linked to application - auto-linking...');
+                    // Auto-link the bank to the application
+                    const linkResponse = await apiService.chooseBankDetails({
+                      application_id: applicationId,
+                      bank_details_id: primaryBank.id
+                    });
+                    if (linkResponse.success) {
+                      console.log('✅ Bank auto-linked to application');
+                      // Clear cache to ensure fresh data
+                      apiService.clearCache(`/loan-applications/${applicationId}`);
+                      apiService.clearCache('/loan-applications');
+                    }
+                  } else {
+                    console.log('✅ Bank already linked to application');
+                  }
+                } catch (linkError) {
+                  console.error('❌ Error checking/linking bank to application:', linkError);
+                  // Continue anyway - user can manually link if needed
+                }
+              }
+              
               // User has linked bank account - use progress engine to determine next step
               // First check if email is verified (prerequisite for some flows)
               if (!user.personal_email_verified) {
                 console.log('📧 Email not verified, redirecting to email verification');
+                setCheckingEnach(false);
                 setTimeout(() => navigate('/email-verification', { replace: true }), 500);
                 return;
               }
 
-              // Email verified - user has linked bank account.
-              // We don't redirect here anymore, StepGuard or Progress Engine will handle it.
-              console.log('✅ Primary bank account found - User has completed this step.');
+              // Email verified - use progress engine to determine next step
+              console.log('✅ Primary bank account found - User has completed this step. Determining next step...');
               setCheckingEnach(false);
-              return; // Exit early - bank account exists
+              
+              // Use progress engine to determine next step
+              try {
+                const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                const progress = await getOnboardingProgress(applicationId, true); // Force refresh
+                const nextRoute = getStepRoute(progress.currentStep, applicationId);
+                console.log('[LinkSalaryBankAccount] Next step from engine:', progress.currentStep, '->', nextRoute);
+                
+                // If still on bank-details step, go to references (next step)
+                if (progress.currentStep === 'bank-details') {
+                  const referencesRoute = applicationId 
+                    ? `/user-references?applicationId=${applicationId}`
+                    : '/user-references';
+                  console.log('[LinkSalaryBankAccount] Still on bank-details, going to references');
+                  setTimeout(() => navigate(referencesRoute, { replace: true }), 500);
+                } else {
+                  setTimeout(() => navigate(nextRoute, { replace: true }), 500);
+                }
+              } catch (error) {
+                console.error('[LinkSalaryBankAccount] Error getting next step, using fallback:', error);
+                // Fallback to references
+                const fallbackRoute = applicationId 
+                  ? `/user-references?applicationId=${applicationId}`
+                  : '/user-references';
+                setTimeout(() => navigate(fallbackRoute, { replace: true }), 500);
+              }
+              return; // Exit early - bank account exists and linked
             } else {
               console.log('✅✅✅ No primary bank account found - user NEEDS to link bank account - STAYING ON PAGE ✅✅✅');
               // No primary bank account - user MUST stay on this page to link it
