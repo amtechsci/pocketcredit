@@ -440,19 +440,19 @@ export async function getOnboardingProgress(
   
   try {
     // Check application status FIRST - if it's in review/submitted, don't allow going back to incomplete steps
-    // Clear cache to ensure we get fresh data
-    if (applicationId) {
-      apiService.clearCache(`/loan-applications/${applicationId}`);
-      apiService.clearCache('/loan-applications');
-    }
-    
+    // Always fetch fresh status (no cache) for critical status checks
     let applicationStatus = null;
-    let applicationData = null;
     
     if (applicationId) {
       try {
-        const appResponse = await apiService.getLoanApplicationById(applicationId);
-        console.log('[ProgressEngine] 🔍 Raw API response structure:', {
+        // Clear cache first
+        apiService.clearCache(`/loan-applications/${applicationId}`);
+        apiService.clearCache('/loan-applications');
+        
+        // Fetch application with NO CACHE - bypass cache for critical status check
+        const appResponse = await apiService.getLoanApplicationById(applicationId, { cache: false, skipDeduplication: true });
+        
+        console.log('[ProgressEngine] 🔍 Status check response:', {
           hasSuccess: 'success' in appResponse,
           hasStatus: 'status' in appResponse,
           success: appResponse.success,
@@ -461,48 +461,52 @@ export async function getOnboardingProgress(
           dataKeys: appResponse.data ? Object.keys(appResponse.data) : []
         });
         
-        // Handle both 'success' and 'status: success' response formats
-        const isSuccess = appResponse.success || appResponse.status === 'success';
+        // Handle both response formats: {success: true, data: {...}} or {status: 'success', data: {...}}
+        const isSuccess = appResponse.success === true || appResponse.status === 'success';
+        
         if (isSuccess && appResponse.data) {
-          // Try both possible response structures
-          applicationData = appResponse.data.application || appResponse.data;
-          if (applicationData && applicationData.status) {
-            applicationStatus = applicationData.status;
-            console.log('[ProgressEngine] ✅ Application status check:', applicationStatus, 'for app', applicationId);
+          // Try to get application from nested structure or direct
+          const app = appResponse.data.application || appResponse.data;
+          if (app && app.status) {
+            applicationStatus = app.status;
+            console.log('[ProgressEngine] ✅ Application status:', applicationStatus, 'for app', applicationId);
           } else {
-            console.warn('[ProgressEngine] ⚠️ Application status not found in data:', {
-              hasApplicationData: !!applicationData,
-              applicationDataKeys: applicationData ? Object.keys(applicationData) : [],
-              rawData: appResponse.data
-            });
+            console.warn('[ProgressEngine] ⚠️ Status not found. App keys:', app ? Object.keys(app) : 'no app');
           }
         } else {
-          console.warn('[ProgressEngine] ⚠️ Application response not successful:', { 
-            success: appResponse.success, 
-            status: appResponse.status,
-            hasData: !!appResponse.data 
-          });
+          console.warn('[ProgressEngine] ⚠️ Response not successful:', { isSuccess, hasData: !!appResponse.data });
         }
       } catch (error) {
-        console.warn('[ProgressEngine] ⚠️ Could not fetch application status:', error);
+        console.warn('[ProgressEngine] ⚠️ Error fetching application status:', error);
       }
     }
     
-    // If application is in final review states, return 'steps' to prevent going back
+    // If application is in final review states, return 'steps' to prevent going back to incomplete steps
     const finalStatuses = ['under_review', 'submitted', 'approved', 'disbursed', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal'];
     if (applicationStatus && finalStatuses.includes(applicationStatus)) {
-      console.log('[ProgressEngine] 🚫 Application is in final status, preventing step navigation:', applicationStatus);
-      // Still check prerequisites for completeness, but return steps as current step
-      const prerequisites = await checkAllPrerequisites(applicationId);
+      console.log('[ProgressEngine] 🚫 Application is in final status (' + applicationStatus + '), preventing step navigation - returning steps');
+      // Return steps immediately - don't check prerequisites to avoid unnecessary API calls
       return {
         currentStep: 'steps',
         nextStep: null,
-        prerequisites,
+        prerequisites: {
+          kycVerified: true,
+          rekycRequired: false,
+          panVerified: true,
+          creditAnalyticsCompleted: true,
+          employmentCompleted: true,
+          bankStatementCompleted: true,
+          bankStatementReset: false,
+          bankDetailsCompleted: true,
+          referencesCompleted: true,
+          documentsNeeded: false
+        },
         applicationId,
         canProceed: true
       };
     }
     
+    // Normal flow - check prerequisites and determine step
     const prerequisites = await checkAllPrerequisites(applicationId);
     const duration = Date.now() - startTime;
     

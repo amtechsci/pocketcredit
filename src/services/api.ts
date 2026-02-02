@@ -910,8 +910,8 @@ class ApiService {
     return this.request('GET', '/loan-applications');
   }
 
-  async getLoanApplicationById(applicationId: number): Promise<ApiResponse<{ application: LoanApplication }>> {
-    return this.request('GET', `/loan-applications/${applicationId}`);
+  async getLoanApplicationById(applicationId: number, options?: { cache?: boolean; skipDeduplication?: boolean }): Promise<ApiResponse<{ application: LoanApplication }>> {
+    return this.request('GET', `/loan-applications/${applicationId}`, undefined, options);
   }
 
   async getLoanApplicationStats(): Promise<ApiResponse<{ statistics: LoanApplicationStats }>> {
