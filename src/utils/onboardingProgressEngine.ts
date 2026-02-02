@@ -78,7 +78,7 @@ export const STEP_ROUTES: Record<OnboardingStep, string> = {
   'bank-details': '/link-salary-bank-account', // Onboarding flow uses link-salary-bank-account
   'references': '/user-references',
   'upload-documents': '/loan-application/upload-documents',
-  'steps': '/loan-application/steps'
+  'steps': '/application-under-review'
 };
 
 /**
@@ -177,14 +177,29 @@ export async function checkAllPrerequisites(
     }
 
     // 4. Check credit analytics completion
+    // Credit analytics is complete only if:
+    // - Response is successful AND
+    // - Data exists AND
+    // - Credit score exists and is > 450 (eligible)
     try {
       const creditResponse = await apiService.getCreditAnalyticsData();
       if (creditResponse.status === 'success' && creditResponse.data) {
         const creditScore = creditResponse.data.credit_score;
-        const score = typeof creditScore === 'number' ? creditScore : parseInt(creditScore) || 0;
-        prerequisites.creditAnalyticsCompleted = score > 450;
+        const score = typeof creditScore === 'number' ? creditScore : (creditScore ? parseInt(String(creditScore)) : 0);
+        // Only mark as complete if score exists and is > 450 (eligible)
+        prerequisites.creditAnalyticsCompleted = score > 0 && score > 450;
+        console.log('[ProgressEngine] Credit analytics check:', { 
+          hasData: !!creditResponse.data, 
+          creditScore, 
+          score, 
+          completed: prerequisites.creditAnalyticsCompleted 
+        });
+      } else {
+        prerequisites.creditAnalyticsCompleted = false;
+        console.log('[ProgressEngine] Credit analytics check: No data or unsuccessful response');
       }
     } catch (error: any) {
+      prerequisites.creditAnalyticsCompleted = false;
       if (error?.response?.status !== 404) {
         console.error('[ProgressEngine] Error checking credit analytics:', error);
       }
@@ -481,33 +496,37 @@ export async function getOnboardingProgress(
       }
     }
     
-    // If application is in final review states, return 'steps' to prevent going back to incomplete steps
+    // Normal flow - check prerequisites first to see what's actually completed
+    const prerequisites = await checkAllPrerequisites(applicationId);
+    
+    // Only block navigation if application is in final status AND all prerequisites are complete
+    // If prerequisites are incomplete, allow user to continue onboarding even if status is "submitted"
     const finalStatuses = ['under_review', 'submitted', 'approved', 'disbursed', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal'];
-    if (applicationStatus && finalStatuses.includes(applicationStatus)) {
-      console.log('[ProgressEngine] 🚫 Application is in final status (' + applicationStatus + '), preventing step navigation - returning steps');
-      // Return steps immediately - don't check prerequisites to avoid unnecessary API calls
+    const allPrerequisitesComplete = 
+      prerequisites.kycVerified &&
+      prerequisites.panVerified &&
+      prerequisites.creditAnalyticsCompleted &&
+      prerequisites.employmentCompleted &&
+      prerequisites.bankStatementCompleted &&
+      prerequisites.bankDetailsCompleted &&
+      prerequisites.referencesCompleted &&
+      !prerequisites.documentsNeeded;
+    
+    if (applicationStatus && finalStatuses.includes(applicationStatus) && allPrerequisitesComplete) {
+      console.log('[ProgressEngine] 🚫 Application is in final status (' + applicationStatus + ') AND all prerequisites complete - returning steps');
       return {
         currentStep: 'steps',
         nextStep: null,
-        prerequisites: {
-          kycVerified: true,
-          rekycRequired: false,
-          panVerified: true,
-          creditAnalyticsCompleted: true,
-          employmentCompleted: true,
-          bankStatementCompleted: true,
-          bankStatementReset: false,
-          bankDetailsCompleted: true,
-          referencesCompleted: true,
-          documentsNeeded: false
-        },
+        prerequisites,
         applicationId,
         canProceed: true
       };
     }
     
-    // Normal flow - check prerequisites and determine step
-    const prerequisites = await checkAllPrerequisites(applicationId);
+    // If status is final but prerequisites incomplete, log and continue with normal flow
+    if (applicationStatus && finalStatuses.includes(applicationStatus) && !allPrerequisitesComplete) {
+      console.log('[ProgressEngine] ⚠️ Application status is ' + applicationStatus + ' but prerequisites incomplete - allowing onboarding to continue');
+    }
     const duration = Date.now() - startTime;
     
     console.log('[ProgressEngine] ✅ Prerequisites checked', {

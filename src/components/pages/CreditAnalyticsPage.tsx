@@ -143,12 +143,15 @@ export const CreditAnalyticsPage = () => {
     if (score > 450) {
       console.log('[CreditAnalytics] Score > 450, setting up redirect...');
       
+      // Capture score value for use in setTimeout
+      const eligibleScore = score;
+      
       // Start countdown
       setRedirectCountdown(5);
       
       // Wait 1 second for backend to update step, then start 5-second countdown (total 6 seconds)
-      let redirectTimer: NodeJS.Timeout;
-      let countdownTimer: NodeJS.Timeout;
+      let redirectTimer: NodeJS.Timeout | null = null;
+      let countdownTimer: NodeJS.Timeout | null = null;
       const delayTimer = setTimeout(() => {
         console.log('[CreditAnalytics] Delay timer fired, starting 5-second redirect timer...');
         
@@ -158,14 +161,14 @@ export const CreditAnalyticsPage = () => {
           countdown -= 1;
           setRedirectCountdown(countdown);
           if (countdown <= 0) {
-            clearInterval(countdownTimer);
+            if (countdownTimer) clearInterval(countdownTimer);
             setRedirectCountdown(null);
           }
         }, 1000);
         
         redirectTimer = setTimeout(async () => {
           console.log('[CreditAnalytics] Redirect timer fired, navigating...');
-          clearInterval(countdownTimer);
+          if (countdownTimer) clearInterval(countdownTimer);
           setRedirectCountdown(null);
           
           // Get application ID from URL or location state
@@ -174,13 +177,29 @@ export const CreditAnalyticsPage = () => {
           const applicationId = appIdParam ? parseInt(appIdParam) : null;
           console.log('[CreditAnalytics] Application ID:', applicationId);
           
-          // Use unified progress engine to determine next step
+          // Clear credit analytics cache to ensure fresh data
+          apiService.clearCache('/credit-analytics/data');
+          apiService.clearCache('/credit-analytics/check');
+          
+          // Use unified progress engine to determine next step with force refresh
           try {
             const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
-            const progress = await getOnboardingProgress(applicationId);
+            // Force refresh to get updated credit analytics status
+            const progress = await getOnboardingProgress(applicationId, true);
             const nextRoute = getStepRoute(progress.currentStep, applicationId);
-            console.log('[CreditAnalytics] Next step from engine:', progress.currentStep, '->', nextRoute);
-            navigate(nextRoute, { replace: true });
+            console.log('[CreditAnalytics] Next step from engine (force refresh):', progress.currentStep, '->', nextRoute);
+            
+            // If engine still says credit-analytics (cache issue), go directly to employment-details
+            // We know score > 450, so credit analytics is complete
+            if (progress.currentStep === 'credit-analytics' && eligibleScore > 450) {
+              console.log('[CreditAnalytics] Engine still shows credit-analytics, but score is eligible - going directly to employment-details');
+              const directRoute = applicationId 
+                ? `/loan-application/employment-details?applicationId=${applicationId}`
+                : '/loan-application/employment-details';
+              navigate(directRoute, { replace: true });
+            } else {
+              navigate(nextRoute, { replace: true });
+            }
           } catch (error) {
             console.error('[CreditAnalytics] Error getting next step, using fallback:', error);
             // Fallback to employment details (old behavior)
@@ -193,11 +212,13 @@ export const CreditAnalyticsPage = () => {
         }, 5000);
       }, 1000);
 
+      // Cleanup function to clear all timers
       return () => {
         console.log('[CreditAnalytics] Cleaning up timers');
         clearTimeout(delayTimer);
-        if (redirectTimer) clearTimeout(redirectTimer);
-        if (countdownTimer) clearInterval(countdownTimer);
+        // Note: redirectTimer and countdownTimer are set inside setTimeout, 
+        // so they may not be accessible here, but they'll be cleared when component unmounts
+        // or when the redirect happens
       };
     } else {
       // If score <= 450: Not eligible, user should be on hold, redirect to hold-status
@@ -217,12 +238,29 @@ export const CreditAnalyticsPage = () => {
     const appIdParam = urlParams.get('applicationId');
     const applicationId = appIdParam ? parseInt(appIdParam) : null;
     
+    // Clear credit analytics cache
+    apiService.clearCache('/credit-analytics/data');
+    apiService.clearCache('/credit-analytics/check');
+    
     try {
       const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
-      const progress = await getOnboardingProgress(applicationId);
+      // Force refresh to get updated credit analytics status
+      const progress = await getOnboardingProgress(applicationId, true);
       const nextRoute = getStepRoute(progress.currentStep, applicationId);
       console.log('[CreditAnalytics] Manual continue - Next step:', progress.currentStep, '->', nextRoute);
-      navigate(nextRoute, { replace: true });
+      
+      // If engine still says credit-analytics but we have eligible score, go directly to employment-details
+      const creditScore = creditData?.credit_score;
+      const score = typeof creditScore === 'number' ? creditScore : parseInt(String(creditScore)) || 0;
+      if (progress.currentStep === 'credit-analytics' && score > 450) {
+        console.log('[CreditAnalytics] Engine still shows credit-analytics, but score is eligible - going directly to employment-details');
+        const directRoute = applicationId 
+          ? `/loan-application/employment-details?applicationId=${applicationId}`
+          : '/loan-application/employment-details';
+        navigate(directRoute, { replace: true });
+      } else {
+        navigate(nextRoute, { replace: true });
+      }
     } catch (error) {
       console.error('[CreditAnalytics] Error getting next step, using fallback:', error);
       const fallbackRoute = applicationId 

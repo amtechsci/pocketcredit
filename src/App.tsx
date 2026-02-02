@@ -21,7 +21,6 @@ import { SimplifiedLoanApplicationPage } from './components/pages/SimplifiedLoan
 import LoanApplicationConfirmation from './components/pages/LoanApplicationConfirmation';
 import { LoanDocumentUploadPage } from './components/pages/LoanDocumentUploadPage';
 import { EnhancedUserReferencesPage } from './components/pages/EnhancedUserReferencesPage';
-import { LoanApplicationStepsPage } from './components/pages/LoanApplicationStepsPage';
 import { DigilockerKYCPage } from './components/pages/DigilockerKYCPage';
 import { KYCCheckPage } from './components/pages/KYCCheckPage';
 import { CreditAnalyticsPage } from './components/pages/CreditAnalyticsPage';
@@ -594,11 +593,6 @@ function AppContent() {
           )
         } />
 
-        <Route path="/loan-application/steps" element={
-          <DashboardLayout>
-            <LoanApplicationStepsPage />
-          </DashboardLayout>
-        } />
 
         <Route path="/admin-access" element={<AdminAccessPage />} />
 
