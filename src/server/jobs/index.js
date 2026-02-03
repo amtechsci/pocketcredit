@@ -9,6 +9,7 @@ const cronManager = require('../services/cronManager');
 const cronLogger = require('../services/cronLogger');
 const { calculateLoanInterestAndPenalty } = require('./loanCalculationJob');
 const { updateOverdueLoans } = require('./updateOverdueLoans');
+const { runSMSNotificationJob } = require('./smsNotificationJob');
 
 /**
  * Register all scheduled jobs
@@ -35,6 +36,15 @@ async function registerJobs() {
     timezone: 'Asia/Kolkata', // IST
     runOnInit: false // Don't run on server start
   });
+
+  // SMS Notification Job - DISABLED (OneXtel API authentication needs configuration)
+  // Uncomment when SMS API is properly configured
+  // cronManager.everyMinutes(1, 'sms-notifications', async () => {
+  //   await runSMSNotificationJob();
+  // }, {
+  //   timezone: 'Asia/Kolkata', // IST
+  //   runOnInit: false // Don't run on server start
+  // });
 
   // Add more jobs here as needed
   // Example:

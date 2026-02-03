@@ -12,6 +12,7 @@ import { AdminTeamManagement } from './admin/pages/AdminTeamManagement';
 import { AdminReports } from './admin/pages/AdminReports';
 import { AdminSettings } from './admin/pages/AdminSettings';
 import { SystemSettings } from './admin/pages/SystemSettings';
+import { SmsTemplatesPage } from './admin/pages/SmsTemplatesPage';
 import { KFSDocument } from './admin/pages/KFSDocument';
 import { LoanAgreementDocument } from './admin/pages/LoanAgreementDocument';
 import { ExtensionLetterDocument } from './admin/pages/ExtensionLetterDocument';
@@ -371,6 +372,11 @@ export default function AdminApp() {
         <Route path="system-settings" element={
           <ProtectedRoute>
             <SystemSettings />
+          </ProtectedRoute>
+        } />
+        <Route path="sms-templates" element={
+          <ProtectedRoute>
+            <SmsTemplatesPage />
           </ProtectedRoute>
         } />
         <Route path="kfs/:loanId" element={

@@ -519,11 +519,15 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
         const DAILY_INTEREST_RATE = 0.001; // 0.1% as a decimal
 
         // Try new structure first (payment_orders + loan_payments)
+        // Join with state_codes table to convert state code to state name
         let sql = `
             SELECT 
                 CONCAT('PC', LPAD(u.id, 5, '0')) as rcid, 
                 CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as pan_name,
-                (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state_code,
+                (SELECT sc.state_name FROM addresses a 
+                 LEFT JOIN state_codes sc ON sc.id = a.state 
+                 WHERE a.user_id = u.id 
+                 ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state_name,
                 la.id as lid, la.disbursal_amount as processed_amount, 
                 la.processing_fee as p_fee, la.total_interest as service_charge, 
                 la.processed_penalty as penality_charge,
@@ -598,7 +602,9 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
         csvRows.push(headers.map(escapeCSV).join(','));
 
         for (const row of rows) {
-            const voucher_no = 'CLL' + row.lid;
+            // Voucher No: PLL + last 4 digits of loan id (padded with zeros)
+            const loanIdStr = String(row.lid).padStart(4, '0');
+            const voucher_no = 'PLL' + loanIdStr.slice(-4);
             const loan_closure_type = row.transaction_flow;
 
             const processing_fee_collected = row.transaction_flow === 'part' ? 'P.P' : (row.processing_fees || row.p_fee || 0);
@@ -606,10 +612,9 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
 
             const principal_amt = parseFloat(row.principal_amount) || 0;
             const disbursed_amount = parseFloat(row.processed_amount) || 0;
+            const sanctioned_amount = principal_amt; // Sanctioned Amount = Principal loan amount only
 
             const pf_numeric = isNaN(row.processing_fees) ? (parseFloat(row.p_fee) || 0) : (parseFloat(row.processing_fees) || 0);
-            const gst_inclusive_pf = pf_numeric + (pf_numeric * GST_RATE);
-            const sanctioned_amount = principal_amt + gst_inclusive_pf;
 
             let interest_collected = 0;
             let penalty = 0;
@@ -664,7 +669,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 'received',
                 transactionDate,
                 'India',
-                (row.state_code || row.state || '') || '',
+                row.state_name || '',
                 row.pro_fee_per || '',
                 processing_fee_collected === 'P.P' ? 'P.P' : processing_fee_collected.toFixed(2),
                 gst_on_processing_fees === 'P.P' ? 'P.P' : gst_on_processing_fees.toFixed(2),
@@ -699,13 +704,19 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
     try {
         await initializeDatabase();
         const { from_date, to_date } = req.query;
+        
+        console.log('📊 BS Disbursal Report - Date filters:', { from_date, to_date });
 
         // Try new structure first (loan_applications)
+        // Join with state_codes table to convert state code to state name
         let sql = `
             SELECT 
                 CONCAT('PC', LPAD(u.id, 5, '0')) as rcid,
                 CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as pan_name,
-                (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state_code,
+                (SELECT sc.state_name FROM addresses a 
+                 LEFT JOIN state_codes sc ON sc.id = a.state 
+                 WHERE a.user_id = u.id 
+                 ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state_name,
                 la.id as lid, la.loan_amount as amount, la.processing_fee as processing_fees,
                 la.disbursal_amount as processed_amount, la.processing_fee as p_fee,
                 la.exhausted_period_days as exhausted_period, la.processed_at as processed_date,
@@ -724,6 +735,7 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
         let rows;
         try {
             rows = await executeQuery(sql, params);
+            console.log('📊 BS Disbursal Report - Query returned:', rows.length, 'rows');
         } catch (error) {
             // Fallback to old structure if new doesn't work
             console.warn('New loan_applications structure not found, trying old loan/loan_apply tables:', error.message);
@@ -758,7 +770,9 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
         csvRows.push(headers.map(escapeCSV).join(','));
 
         for (const row of rows) {
-            const voucher_no = 'CLL' + row.lid;
+            // Voucher No: PLL + last 4 digits of loan id (padded with zeros)
+            const loanIdStr = String(row.lid).padStart(4, '0');
+            const voucher_no = 'PLL' + loanIdStr.slice(-4);
 
             // Try to get transaction number from transactions table (loan_disbursement)
             let tno = 0;
@@ -775,8 +789,9 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
                 console.warn('Could not fetch transaction reference number:', error.message);
             }
 
-            const gst_amount = parseFloat(row.p_fee || row.processing_fees || 0) * 0.18;
-            const totalamount = parseFloat(row.amount || 0) + parseFloat(row.processing_fees || row.p_fee || 0) + gst_amount;
+            const sanctioned_amount = parseFloat(row.amount || 0); // Principal loan amount only
+            const processing_fee = parseFloat(row.p_fee || row.processing_fees || 0);
+            const gst_amount = processing_fee * 0.18;
             
             let loanDate = '';
             if (row.processed_date) {
@@ -792,17 +807,17 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
                 row.pan_name || '',
                 '', '', '',
                 voucher_no,
-                totalamount.toFixed(2),
+                sanctioned_amount,
                 row.processed_amount || 0,
                 tno,
                 '',
                 'Disbursed',
                 loanDate,
                 'India',
-                (row.state_code || row.state || '') || '',
+                row.state_name || '',
                 row.pro_fee_per || '',
                 30,
-                row.p_fee || row.processing_fees || 0,
+                processing_fee,
                 gst_amount.toFixed(2),
                 '',
                 ''

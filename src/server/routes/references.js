@@ -151,8 +151,9 @@ router.post('/', requireAuth, async (req, res) => {
     );
     console.log('✅ Updated user alternate data for user:', userId);
 
-    // After references saved, update loan application status to 'submitted' for admin review
-    // This marks that user has completed all required steps
+    // After references saved, update loan application status
+    // If status is 'submitted', change to 'under_review' (ready for admin review)
+    // If status is 'pending' or 'in_progress', change to 'submitted'
     try {
       const applications = await executeQuery(
         `SELECT id, status, current_step FROM loan_applications 
@@ -163,16 +164,27 @@ router.post('/', requireAuth, async (req, res) => {
 
       if (applications && applications.length > 0) {
         const application = applications[0];
-        // Only update if application is in a pre-review status and step is at references or later
-        if (['pending', 'in_progress', 'submitted'].includes(application.status) || 
-            ['bank-details', 'references'].includes(application.current_step)) {
+        let newStatus = null;
+        
+        // Determine new status based on current status
+        if (application.status === 'submitted') {
+          // If already submitted, move to under_review when references are updated
+          newStatus = 'under_review';
+        } else if (['pending', 'in_progress'].includes(application.status)) {
+          // If pending or in_progress, move to submitted
+          newStatus = 'submitted';
+        }
+        
+        // Only update if we have a valid status change and step is at references or later
+        if (newStatus && (['pending', 'in_progress', 'submitted'].includes(application.status) || 
+            ['bank-details', 'references'].includes(application.current_step))) {
           await executeQuery(
             `UPDATE loan_applications 
-             SET status = 'submitted', current_step = 'complete', updated_at = NOW() 
+             SET status = ?, current_step = 'complete', updated_at = NOW() 
              WHERE id = ?`,
-            [application.id]
+            [newStatus, application.id]
           );
-          console.log(`✅ Updated loan application ${application.id} to 'submitted' status - ready for admin review`);
+          console.log(`✅ Updated loan application ${application.id} from '${application.status}' to '${newStatus}' status after references update`);
         }
       }
     } catch (stepError) {

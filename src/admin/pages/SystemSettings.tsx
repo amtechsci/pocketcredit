@@ -353,6 +353,7 @@ export function SystemSettings() {
 
   const tabs = [
     { id: 'sms', label: 'SMS APIs', icon: MessageSquare, count: 0 },
+    { id: 'sms-templates', label: 'SMS Templates', icon: MessageSquare, count: 0, isLink: true, href: '/stpl/sms-templates' },
     { id: 'email', label: 'Email APIs', icon: Mail, count: 0 },
     { id: 'cloud', label: 'Cloud Storage', icon: Cloud, count: 0 }
   ];
@@ -716,6 +717,22 @@ export function SystemSettings() {
             <nav className="flex space-x-8 px-6">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
+                
+                // Handle link tabs (navigate to different page)
+                if ((tab as any).isLink && (tab as any).href) {
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => navigate((tab as any).href)}
+                      className="flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm transition-colors border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                    >
+                      <Icon className="w-4 h-4" />
+                      {tab.label}
+                      <ExternalLink className="w-3 h-3 ml-1" />
+                    </button>
+                  );
+                }
+                
                 return (
                   <button
                     key={tab.id}

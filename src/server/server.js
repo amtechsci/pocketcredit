@@ -282,6 +282,11 @@ app.use('/api/admin/loan-calculations', loanCalculationsRoutes); // Keep for bac
 app.use('/api/loan-extensions', loanExtensionsRoutes); // User extension APIs
 app.use('/api/admin/loan-extensions', loanExtensionsRoutes); // Admin extension APIs
 app.use('/api/admin/cron', cronManagerRoutes);
+
+// SMS Templates management
+const adminSmsTemplatesRoutes = require('./routes/adminSmsTemplates');
+app.use('/api/admin/sms-templates', adminSmsTemplatesRoutes);
+
 app.use('/api/kfs', kfsRoutes);
 app.use('/api/post-disbursal', postDisbursalRoutes);
 
