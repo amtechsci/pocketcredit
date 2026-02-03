@@ -152,13 +152,12 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
     }
     
     // Fetch loan data
-    // Use DATE() function to extract date portion directly from MySQL (avoids timezone conversion)
     const loans = await executeQuery(
       `SELECT 
         id, loan_amount, status, 
-        DATE(disbursed_at) as disbursed_at_date, disbursed_at,
-        DATE(processed_at) as processed_at_date, processed_at,
-        DATE(last_extension_date) as last_extension_date_date, last_extension_date,
+        disbursed_at,
+        processed_at,
+        last_extension_date,
         extension_count,
         processed_due_date, plan_snapshot, emi_schedule,
         interest_percent_per_day, fees_breakdown, user_id, loan_plan_id,
@@ -417,14 +416,9 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
     }
     
     // For processed loans, use processed_at if no calculationDate was provided
-    // Prefer processed_at_date (from SQL DATE() function) to avoid timezone issues
     if (!finalCalculationDate && loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
-      // Use processed_at_date if available (from SQL DATE() function - no timezone conversion)
-      if (loan.processed_at_date) {
-        finalCalculationDate = loan.processed_at_date;
-      } else {
-        finalCalculationDate = parseDateToStr(loan.processed_at);
-      }
+      // Parse processed_at as string to avoid timezone conversion
+      finalCalculationDate = parseDateToStr(loan.processed_at);
       if (!finalCalculationDate) {
         console.error('Invalid date format from processed_at. Expected YYYY-MM-DD, got:', loan.processed_at);
       }
@@ -586,8 +580,8 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
       // Otherwise use disbursed_at or current date
       const isProcessed = loan.processed_at && ['account_manager', 'cleared'].includes(loan.status);
       const dateSource = isProcessed 
-        ? (loan.processed_at_date || loan.processed_at)
-        : (loan.disbursed_at_date || loan.disbursed_at || null);
+        ? loan.processed_at
+        : (loan.disbursed_at || null);
       
       let baseDateStr = null;
       if (dateSource) {
@@ -1160,21 +1154,21 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
     
     // PRIORITY 1: If extension exists, use last_extension_date
     if (loan.last_extension_date && loan.extension_count > 0) {
-      baseDateStr = toDateString(loan.last_extension_date_date) || toDateString(loan.last_extension_date);
+      baseDateStr = toDateString(loan.last_extension_date);
       console.log(`[Exhausted Days] Extension exists, using last_extension_date: ${baseDateStr}`);
     }
     
-    // PRIORITY 2: Use processed_at_date (from SQL DATE() function - already local date)
+    // PRIORITY 2: Use processed_at (parse as string to avoid timezone conversion)
     // User's logic: if processed on Jan 31 and today is Jan 31, that's Day 1
-    if (!baseDateStr && (loan.processed_at_date || loan.processed_at)) {
-      baseDateStr = toDateString(loan.processed_at_date) || toDateString(loan.processed_at);
-      console.log(`[Exhausted Days] Using processed_at_date: ${baseDateStr}`);
+    if (!baseDateStr && loan.processed_at) {
+      baseDateStr = toDateString(loan.processed_at);
+      console.log(`[Exhausted Days] Using processed_at: ${baseDateStr}`);
     }
     
-    // FALLBACK: Use disbursed_at_date
-    if (!baseDateStr && (loan.disbursed_at_date || loan.disbursed_at)) {
-      baseDateStr = toDateString(loan.disbursed_at_date) || toDateString(loan.disbursed_at);
-      console.log(`[Exhausted Days] Using disbursed_at_date: ${baseDateStr}`);
+    // FALLBACK: Use disbursed_at (parse as string to avoid timezone conversion)
+    if (!baseDateStr && loan.disbursed_at) {
+      baseDateStr = toDateString(loan.disbursed_at);
+      console.log(`[Exhausted Days] Using disbursed_at: ${baseDateStr}`);
     }
     
     // Calculate exhausted days from base date to today

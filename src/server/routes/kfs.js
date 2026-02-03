@@ -48,8 +48,6 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     const fullLoans = await executeQuery(`
       SELECT 
         la.*,
-        DATE(la.processed_at) as processed_at_date,
-        DATE(la.disbursed_at) as disbursed_at_date,
         la.fees_breakdown,
         la.disbursal_amount,
         la.processed_at,
@@ -398,23 +396,8 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     // For processed loans, use processed_at; otherwise use disbursed_at
     let calculationDateForOptionsStr;
     if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
-      // For processed loans, use processed_at_date (from SQL DATE() function) to avoid timezone issues
-      // MySQL DATE() returns as Date object, so we need to parse it using UTC getters
-      if (loan.processed_at_date) {
-        if (typeof loan.processed_at_date === 'string') {
-          calculationDateForOptionsStr = loan.processed_at_date;
-        } else if (loan.processed_at_date instanceof Date) {
-          // MySQL DATE() returns as Date object - use UTC getters to avoid timezone conversion
-          const year = loan.processed_at_date.getUTCFullYear();
-          const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
-          const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
-          calculationDateForOptionsStr = `${year}-${month}-${day}`;
-        } else {
-          calculationDateForOptionsStr = parseDateToString(loan.processed_at) || getTodayString();
-        }
-      } else {
-        calculationDateForOptionsStr = parseDateToString(loan.processed_at) || getTodayString();
-      }
+      // Parse processed_at as string to avoid timezone conversion
+      calculationDateForOptionsStr = parseDateToString(loan.processed_at) || getTodayString();
     } else {
       calculationDateForOptionsStr = getTodayString();  // Use today for pending loans
     }
@@ -510,36 +493,11 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
     // This needs to be at a high scope so it's accessible in both calculations and schedule sections
     let baseDateStr;
     if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
-      // Use processed_at_date if available (from SQL DATE() - no timezone conversion)
-      if (loan.processed_at_date) {
-        if (typeof loan.processed_at_date === 'string') {
-          baseDateStr = loan.processed_at_date;
-        } else if (loan.processed_at_date instanceof Date) {
-          const year = loan.processed_at_date.getUTCFullYear();
-          const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
-          const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
-          baseDateStr = `${year}-${month}-${day}`;
-        } else {
-          baseDateStr = parseDateToString(loan.processed_at) || getTodayString();
-        }
-      } else {
-        baseDateStr = parseDateToString(loan.processed_at) || getTodayString();
-      }
+      // Parse processed_at as string to avoid timezone conversion
+      baseDateStr = parseDateToString(loan.processed_at) || getTodayString();
     } else {
-      if (loan.disbursed_at_date) {
-        if (typeof loan.disbursed_at_date === 'string') {
-          baseDateStr = loan.disbursed_at_date;
-        } else if (loan.disbursed_at_date instanceof Date) {
-          const year = loan.disbursed_at_date.getUTCFullYear();
-          const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
-          const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
-          baseDateStr = `${year}-${month}-${day}`;
-        } else {
-          baseDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
-        }
-      } else {
-        baseDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
-      }
+      // Parse disbursed_at as string to avoid timezone conversion
+      baseDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
     }
 
     const kfsData = {
@@ -721,37 +679,13 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         // This must match the base date used for EMI date generation
         let baseDate;
         if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
-          // Use processed_at_date if available (from SQL DATE() function), otherwise parse
-          // MySQL DATE() returns as Date object, so we need to handle both string and Date
-          if (loan.processed_at_date) {
-            if (typeof loan.processed_at_date === 'string') {
-              const [year, month, day] = loan.processed_at_date.split('-').map(Number);
-              baseDate = new Date(year, month - 1, day);
-            } else if (loan.processed_at_date instanceof Date) {
-              // MySQL DATE() returns as Date object - extract UTC components and create Date in UTC
-              // This ensures the Date represents the same calendar date regardless of server timezone
-              const year = loan.processed_at_date.getUTCFullYear();
-              const month = loan.processed_at_date.getUTCMonth();
-              const day = loan.processed_at_date.getUTCDate();
-              // Use Date.UTC() to create Date in UTC, matching the original date
-              baseDate = new Date(Date.UTC(year, month, day));
-            } else {
-              const processedDateStr = parseDateToString(loan.processed_at);
-              if (processedDateStr) {
-                const [year, month, day] = processedDateStr.split('-').map(Number);
-                baseDate = new Date(year, month - 1, day);
-              } else {
-                baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
-              }
-            }
+          // Parse processed_at as string to avoid timezone conversion
+          const processedDateStr = parseDateToString(loan.processed_at);
+          if (processedDateStr) {
+            const [year, month, day] = processedDateStr.split('-').map(Number);
+            baseDate = new Date(year, month - 1, day);
           } else {
-            const processedDateStr = parseDateToString(loan.processed_at);
-            if (processedDateStr) {
-              const [year, month, day] = processedDateStr.split('-').map(Number);
-              baseDate = new Date(year, month - 1, day);
-            } else {
-              baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
-            }
+            baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
           }
         } else {
           baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
@@ -805,40 +739,16 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           if (allEmiDates.length === 0 && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
             const salaryDate = parseInt(userData.salary_date);
             if (salaryDate >= 1 && salaryDate <= 31) {
-              // For processed loans, use processed_at_date (from SQL DATE()) to avoid timezone issues
-              // For non-processed loans, use disbursed_at_date
+              // Parse dates as strings to avoid timezone issues
               let baseDateForEmi;
-              if (loan.processed_at_date) {
-                // Use processed_at_date from SQL DATE() function (already extracted, no timezone issues)
-                let processedDateStr;
-                if (typeof loan.processed_at_date === 'string') {
-                  processedDateStr = loan.processed_at_date;
-                } else if (loan.processed_at_date instanceof Date) {
-                  // MySQL DATE() returns as Date object - extract UTC components to avoid timezone shift
-                  const year = loan.processed_at_date.getUTCFullYear();
-                  const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
-                  const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
-                  processedDateStr = `${year}-${month}-${day}`;
-                } else {
-                  // Fallback: parse from processed_at
-                  processedDateStr = parseDateToString(loan.processed_at) || getTodayString();
-                }
-                // Parse date components directly to avoid timezone issues
+              if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+                // For processed loans, parse processed_at as string
+                const processedDateStr = parseDateToString(loan.processed_at) || getTodayString();
                 const [year, month, day] = processedDateStr.split('-').map(Number);
                 baseDateForEmi = new Date(year, month - 1, day); // month is 0-indexed
-              } else if (loan.disbursed_at_date) {
-                // Use disbursed_at_date from SQL DATE() function
-                let disbursedDateStr;
-                if (typeof loan.disbursed_at_date === 'string') {
-                  disbursedDateStr = loan.disbursed_at_date;
-                } else if (loan.disbursed_at_date instanceof Date) {
-                  const year = loan.disbursed_at_date.getUTCFullYear();
-                  const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
-                  const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
-                  disbursedDateStr = `${year}-${month}-${day}`;
-                } else {
-                  disbursedDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
-                }
+              } else if (loan.disbursed_at) {
+                // For non-processed loans, parse disbursed_at as string
+                const disbursedDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
                 const [year, month, day] = disbursedDateStr.split('-').map(Number);
                 baseDateForEmi = new Date(year, month - 1, day);
               } else {
@@ -1592,7 +1502,6 @@ router.get('/user/:loanId/extension-letter', requireAuth, async (req, res) => {
     const loans = await executeQuery(`
       SELECT 
         la.*,
-        DATE(la.disbursed_at) as disbursed_at_date,
         la.processed_due_date,
         la.late_fee_structure,
         u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
@@ -2234,7 +2143,6 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
     const loans = await executeQuery(`
       SELECT 
         la.*,
-        DATE(la.disbursed_at) as disbursed_at_date,
         la.processed_due_date,
         la.late_fee_structure,
         u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
@@ -3254,7 +3162,6 @@ router.get('/user/:loanId/noc', requireAuth, async (req, res) => {
     const loans = await executeQuery(`
       SELECT 
         la.*,
-        DATE(la.disbursed_at) as disbursed_at_date,
         u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
         u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
       FROM loan_applications la
@@ -3307,7 +3214,7 @@ router.get('/user/:loanId/noc', requireAuth, async (req, res) => {
       loan_id: loan.application_number || loan.id,
       sanctioned_amount: loan.sanctioned_amount || loan.loan_amount || 0,
       loan_amount: loan.loan_amount || loan.sanctioned_amount || 0,
-      disbursed_at: loan.disbursed_at || loan.disbursed_at_date,
+      disbursed_at: parseDateToString(loan.disbursed_at) || loan.disbursed_at,
       status: loan.status
     };
 
@@ -3431,7 +3338,6 @@ router.post('/user/:loanId/noc/generate-pdf', requireAuth, async (req, res) => {
         const nocDataQuery = await executeQuery(`
           SELECT 
             la.*,
-            DATE(la.disbursed_at) as disbursed_at_date,
             u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
             u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
           FROM loan_applications la
@@ -3472,7 +3378,7 @@ router.post('/user/:loanId/noc/generate-pdf', requireAuth, async (req, res) => {
           loan_id: loanData.application_number || loanData.id,
           sanctioned_amount: loanData.sanctioned_amount || loanData.loan_amount || 0,
           loan_amount: loanData.loan_amount || loanData.sanctioned_amount || 0,
-          disbursed_at: loanData.disbursed_at || loanData.disbursed_at_date,
+          disbursed_at: parseDateToString(loanData.disbursed_at) || loanData.disbursed_at,
           status: loanData.status
         };
 
@@ -3611,7 +3517,6 @@ router.get('/:loanId/noc', authenticateAdmin, async (req, res) => {
     const loans = await executeQuery(`
       SELECT 
         la.*,
-        DATE(la.disbursed_at) as disbursed_at_date,
         u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
         u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
       FROM loan_applications la
@@ -3664,7 +3569,7 @@ router.get('/:loanId/noc', authenticateAdmin, async (req, res) => {
       loan_id: loan.application_number || loan.id,
       sanctioned_amount: loan.sanctioned_amount || loan.loan_amount || 0,
       loan_amount: loan.loan_amount || loan.sanctioned_amount || 0,
-      disbursed_at: loan.disbursed_at || loan.disbursed_at_date,
+      disbursed_at: parseDateToString(loan.disbursed_at) || loan.disbursed_at,
       status: loan.status
     };
 
@@ -4009,7 +3914,6 @@ async function generateAndSendNOCEmail(loanId) {
     const loans = await executeQuery(`
       SELECT 
         la.*,
-        DATE(la.disbursed_at) as disbursed_at_date,
         u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
         u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
       FROM loan_applications la
@@ -4065,7 +3969,7 @@ async function generateAndSendNOCEmail(loanId) {
       loan_id: loan.application_number || loan.id,
       sanctioned_amount: loan.sanctioned_amount || loan.loan_amount || 0,
       loan_amount: loan.loan_amount || loan.sanctioned_amount || 0,
-      disbursed_at: loan.disbursed_at || loan.disbursed_at_date,
+      disbursed_at: parseDateToString(loan.disbursed_at) || loan.disbursed_at,
       status: loan.status
     };
 
@@ -4161,12 +4065,9 @@ router.get('/:loanId', async (req, res, next) => {
     console.log('📄 Generating KFS for loan ID:', loanId, '(internal call:', isInternalCall(req), ')');
 
     // Fetch loan application details including dynamic fees
-    // Use DATE() function to extract date portion directly from MySQL (avoids timezone conversion)
     const loans = await executeQuery(`
       SELECT 
         la.*,
-        DATE(la.processed_at) as processed_at_date,
-        DATE(la.disbursed_at) as disbursed_at_date,
         la.fees_breakdown,
         la.disbursal_amount,
         la.processed_due_date,
@@ -4509,38 +4410,11 @@ router.get('/:loanId', async (req, res, next) => {
     // Use string-based date parsing to avoid timezone conversion
     let calculationDateStr = null;
     if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
-      // For processed loans, use processed_at_date (from SQL DATE() function) to avoid timezone issues
-      // MySQL DATE() returns as Date object, so we need to parse it using UTC getters
-      if (loan.processed_at_date) {
-        if (typeof loan.processed_at_date === 'string') {
-          calculationDateStr = loan.processed_at_date;
-        } else if (loan.processed_at_date instanceof Date) {
-          const year = loan.processed_at_date.getUTCFullYear();
-          const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
-          const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
-          calculationDateStr = `${year}-${month}-${day}`;
-        } else {
-          calculationDateStr = parseDateToString(loan.processed_at);
-        }
-      } else {
-        calculationDateStr = parseDateToString(loan.processed_at);
-      }
+      // Parse processed_at as string to avoid timezone conversion
+      calculationDateStr = parseDateToString(loan.processed_at);
     } else if (loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)) {
-      // MySQL DATE() returns as Date object, so we need to parse it using UTC getters
-      if (loan.disbursed_at_date) {
-        if (typeof loan.disbursed_at_date === 'string') {
-          calculationDateStr = loan.disbursed_at_date;
-        } else if (loan.disbursed_at_date instanceof Date) {
-          const year = loan.disbursed_at_date.getUTCFullYear();
-          const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
-          const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
-          calculationDateStr = `${year}-${month}-${day}`;
-        } else {
-          calculationDateStr = parseDateToString(loan.disbursed_at);
-        }
-      } else {
-        calculationDateStr = parseDateToString(loan.disbursed_at);
-      }
+      // Parse disbursed_at as string to avoid timezone conversion
+      calculationDateStr = parseDateToString(loan.disbursed_at);
     } else {
       calculationDateStr = getTodayString();
     }
@@ -4550,38 +4424,11 @@ router.get('/:loanId', async (req, res, next) => {
     // Use string-based date parsing to avoid timezone conversion
     let plannedTermCalculationDateStr = null;
     if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
-      // For processed loans, use processed_at_date (from SQL DATE() function) as base date
-      // MySQL DATE() returns as Date object, so we need to parse it using UTC getters
-      if (loan.processed_at_date) {
-        if (typeof loan.processed_at_date === 'string') {
-          plannedTermCalculationDateStr = loan.processed_at_date;
-        } else if (loan.processed_at_date instanceof Date) {
-          const year = loan.processed_at_date.getUTCFullYear();
-          const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
-          const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
-          plannedTermCalculationDateStr = `${year}-${month}-${day}`;
-        } else {
-          plannedTermCalculationDateStr = parseDateToString(loan.processed_at);
-        }
-      } else {
-        plannedTermCalculationDateStr = parseDateToString(loan.processed_at);
-      }
+      // Parse processed_at as string to avoid timezone conversion
+      plannedTermCalculationDateStr = parseDateToString(loan.processed_at);
     } else if (loan.disbursed_at && ['account_manager', 'cleared', 'active'].includes(loan.status)) {
-      // MySQL DATE() returns as Date object, so we need to parse it using UTC getters
-      if (loan.disbursed_at_date) {
-        if (typeof loan.disbursed_at_date === 'string') {
-          plannedTermCalculationDateStr = loan.disbursed_at_date;
-        } else if (loan.disbursed_at_date instanceof Date) {
-          const year = loan.disbursed_at_date.getUTCFullYear();
-          const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
-          const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
-          plannedTermCalculationDateStr = `${year}-${month}-${day}`;
-        } else {
-          plannedTermCalculationDateStr = parseDateToString(loan.disbursed_at);
-        }
-      } else {
-        plannedTermCalculationDateStr = parseDateToString(loan.disbursed_at);
-      }
+      // Parse disbursed_at as string to avoid timezone conversion
+      plannedTermCalculationDateStr = parseDateToString(loan.disbursed_at);
     } else {
       plannedTermCalculationDateStr = getTodayString();
     }
@@ -4661,38 +4508,11 @@ router.get('/:loanId', async (req, res, next) => {
     // Extract date as string first to avoid timezone issues, then convert to Date only when needed
     let baseDateStr;
     if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
-      // Use processed_at_date if available (from SQL DATE() function), otherwise parse
-      // MySQL DATE() returns as Date object, so we need to handle both string and Date
-      if (loan.processed_at_date) {
-        if (typeof loan.processed_at_date === 'string') {
-          baseDateStr = loan.processed_at_date;
-        } else if (loan.processed_at_date instanceof Date) {
-          // MySQL DATE() returns as Date object - extract UTC components as string
-          const year = loan.processed_at_date.getUTCFullYear();
-          const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
-          const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
-          baseDateStr = `${year}-${month}-${day}`;
-        } else {
-          baseDateStr = parseDateToString(loan.processed_at) || getTodayString();
-        }
-      } else {
-        baseDateStr = parseDateToString(loan.processed_at) || getTodayString();
-      }
+      // Parse processed_at as string to avoid timezone conversion
+      baseDateStr = parseDateToString(loan.processed_at) || getTodayString();
     } else {
-      if (loan.disbursed_at_date) {
-        if (typeof loan.disbursed_at_date === 'string') {
-          baseDateStr = loan.disbursed_at_date;
-        } else if (loan.disbursed_at_date instanceof Date) {
-          const year = loan.disbursed_at_date.getUTCFullYear();
-          const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
-          const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
-          baseDateStr = `${year}-${month}-${day}`;
-        } else {
-          baseDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
-        }
-      } else {
-        baseDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
-      }
+      // Parse disbursed_at as string to avoid timezone conversion
+      baseDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
     }
 
     // Convert string to Date for calendar arithmetic (using parsed components to avoid timezone shift)
@@ -4741,44 +4561,20 @@ router.get('/:loanId', async (req, res, next) => {
       if (allEmiDates.length === 0 && planData.emi_frequency === 'monthly' && planData.calculate_by_salary_date && userData.salary_date) {
         const salaryDate = parseInt(userData.salary_date);
         if (salaryDate >= 1 && salaryDate <= 31) {
-          // For processed loans, use processed_at_date (from SQL DATE()) to avoid timezone issues
-          // For non-processed loans, use disbursed_at_date
+          // Parse dates as strings to avoid timezone issues
           let baseDateForEmi;
-          if (loan.processed_at_date) {
-            // Use processed_at_date from SQL DATE() function (already extracted, no timezone issues)
-            let processedDateStr;
-            if (typeof loan.processed_at_date === 'string') {
-              processedDateStr = loan.processed_at_date;
-            } else if (loan.processed_at_date instanceof Date) {
-              // MySQL DATE() returns as Date object - extract UTC components to avoid timezone shift
-              const year = loan.processed_at_date.getUTCFullYear();
-              const month = String(loan.processed_at_date.getUTCMonth() + 1).padStart(2, '0');
-              const day = String(loan.processed_at_date.getUTCDate()).padStart(2, '0');
-              processedDateStr = `${year}-${month}-${day}`;
-            } else {
-              // Fallback: parse from processed_at
-              processedDateStr = parseDateToString(loan.processed_at) || getTodayString();
-            }
-            // Parse date components directly to avoid timezone issues
+          if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+            // For processed loans, parse processed_at as string
+            const processedDateStr = parseDateToString(loan.processed_at) || getTodayString();
             const [year, month, day] = processedDateStr.split('-').map(Number);
             baseDateForEmi = new Date(year, month - 1, day); // month is 0-indexed
-            console.log(`📅 [Admin] Using processed_at_date as base date for EMI calculation: ${processedDateStr}`);
-          } else if (loan.disbursed_at_date) {
-            // Use disbursed_at_date from SQL DATE() function
-            let disbursedDateStr;
-            if (typeof loan.disbursed_at_date === 'string') {
-              disbursedDateStr = loan.disbursed_at_date;
-            } else if (loan.disbursed_at_date instanceof Date) {
-              const year = loan.disbursed_at_date.getUTCFullYear();
-              const month = String(loan.disbursed_at_date.getUTCMonth() + 1).padStart(2, '0');
-              const day = String(loan.disbursed_at_date.getUTCDate()).padStart(2, '0');
-              disbursedDateStr = `${year}-${month}-${day}`;
-            } else {
-              disbursedDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
-            }
+            console.log(`📅 [Admin] Using processed_at as base date for EMI calculation: ${processedDateStr}`);
+          } else if (loan.disbursed_at) {
+            // For non-processed loans, parse disbursed_at as string
+            const disbursedDateStr = parseDateToString(loan.disbursed_at) || getTodayString();
             const [year, month, day] = disbursedDateStr.split('-').map(Number);
             baseDateForEmi = new Date(year, month - 1, day);
-            console.log(`📅 [Admin] Using disbursed_at_date as base date: ${disbursedDateStr}`);
+            console.log(`📅 [Admin] Using disbursed_at as base date: ${disbursedDateStr}`);
           } else {
             // Fallback: use today
             baseDateForEmi = new Date();

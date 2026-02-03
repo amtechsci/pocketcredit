@@ -135,7 +135,6 @@ async function generateAndSendNOCEmail(loanId) {
     const loans = await executeQuery(`
       SELECT 
         la.*,
-        DATE(la.disbursed_at) as disbursed_at_date,
         u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
         u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
       FROM loan_applications la
@@ -191,7 +190,25 @@ async function generateAndSendNOCEmail(loanId) {
       loan_id: loan.application_number || loan.id,
       sanctioned_amount: loan.sanctioned_amount || loan.loan_amount || 0,
       loan_amount: loan.loan_amount || loan.sanctioned_amount || 0,
-      disbursed_at: loan.disbursed_at || loan.disbursed_at_date,
+      disbursed_at: (() => {
+        // Parse disbursed_at as string to avoid timezone conversion
+        if (!loan.disbursed_at) return null;
+        if (typeof loan.disbursed_at === 'string') {
+          // Handle MySQL datetime format: "2025-12-15 15:00:00"
+          if (loan.disbursed_at.includes(' ')) {
+            return loan.disbursed_at.split(' ')[0];
+          }
+          // Handle ISO format: "2025-12-15T15:00:00.000Z"
+          if (loan.disbursed_at.includes('T')) {
+            return loan.disbursed_at.split('T')[0];
+          }
+          // Already YYYY-MM-DD format
+          if (/^\d{4}-\d{2}-\d{2}$/.test(loan.disbursed_at)) {
+            return loan.disbursed_at;
+          }
+        }
+        return loan.disbursed_at;
+      })(),
       status: loan.status
     };
 

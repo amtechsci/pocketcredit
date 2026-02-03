@@ -3111,7 +3111,6 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             const loanDetails = await executeQuery(`
               SELECT 
                 la.*,
-                DATE(la.disbursed_at) as disbursed_at_date,
                 u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
                 u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
               FROM loan_applications la
@@ -3380,7 +3379,6 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                   const loanDetails = await executeQuery(`
                     SELECT 
                       la.*,
-                      DATE(la.disbursed_at) as disbursed_at_date,
                       u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
                       u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
                     FROM loan_applications la
