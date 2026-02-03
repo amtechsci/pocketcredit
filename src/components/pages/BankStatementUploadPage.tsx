@@ -197,18 +197,50 @@ export const BankStatementUploadPage = () => {
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
-        // Redirect to link-salary-bank-account page after successful upload
-        // This matches the Account Aggregator flow behavior (see BankStatementSuccessPage.tsx)
-        // Include applicationId in URL if available from response
-        const applicationId = response.data?.applicationId;
-        const redirectUrl = applicationId 
-          ? `/link-salary-bank-account?applicationId=${applicationId}`
-          : '/link-salary-bank-account';
         
-        // Wait a bit to ensure backend step update is complete
-        setTimeout(() => {
-          navigate(redirectUrl, { replace: true });
-        }, 1500);
+        // Clear all relevant caches to ensure fresh data
+        apiService.clearCache('/user/bank-statement-status');
+        apiService.clearCache('/bank-statement/bank-statement-status');
+        
+        const applicationId = response.data?.applicationId;
+        
+        // Clear loan application cache if we have an applicationId
+        if (applicationId) {
+          apiService.clearCache(`/loan-applications/${applicationId}`);
+          apiService.clearCache('/loan-applications');
+        }
+        
+        // Use progress engine to determine next step instead of hardcoding
+        // This ensures we go to the correct step based on current state
+        try {
+          const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+          
+          // Wait a bit for backend to update, then check progress
+          setTimeout(async () => {
+            try {
+              const progress = await getOnboardingProgress(applicationId || null, true); // Force refresh
+              const nextRoute = getStepRoute(progress.currentStep, applicationId || null);
+              console.log('[BankStatementUpload] Next step from engine:', progress.currentStep, '->', nextRoute);
+              navigate(nextRoute, { replace: true });
+            } catch (progressError) {
+              console.error('[BankStatementUpload] Error getting next step, using fallback:', progressError);
+              // Fallback to link-salary-bank-account if progress engine fails
+              const fallbackRoute = applicationId 
+                ? `/link-salary-bank-account?applicationId=${applicationId}`
+                : '/link-salary-bank-account';
+              navigate(fallbackRoute, { replace: true });
+            }
+          }, 1500);
+        } catch (importError) {
+          console.error('[BankStatementUpload] Error importing progress engine, using fallback:', importError);
+          // Fallback if import fails
+          const fallbackRoute = applicationId 
+            ? `/link-salary-bank-account?applicationId=${applicationId}`
+            : '/link-salary-bank-account';
+          setTimeout(() => {
+            navigate(fallbackRoute, { replace: true });
+          }, 1500);
+        }
       } else {
         toast.error(response.message || 'Failed to upload bank statement');
       }

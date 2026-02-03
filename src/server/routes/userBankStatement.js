@@ -816,12 +816,19 @@ router.get('/bank-statement-status', requireAuth, async (req, res) => {
       }
     }
 
+    // For manual uploads, set userStatus to 'uploaded' to match progress engine expectations
+    // For online uploads, use the actual status
+    let userStatus = statement.status;
+    if (isManualUpload && statement.status === 'completed') {
+      userStatus = 'uploaded'; // Manual uploads should show as 'uploaded' for progress engine
+    }
+
     res.json({
       success: true,
       data: {
         hasStatement,
         status: statement.status,
-        userStatus: statement.status, // Use status as userStatus
+        userStatus: userStatus, // Use 'uploaded' for manual uploads, actual status for online
         verificationStatus: 'not_started', // Default verification status
         clientRefNum: statement.client_ref_num,
         requestId: statement.request_id,

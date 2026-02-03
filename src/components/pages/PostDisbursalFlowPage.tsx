@@ -229,13 +229,17 @@ export const PostDisbursalFlowPage = () => {
       if (appIdParam) {
         appId = parseInt(appIdParam);
         
-        // PRIORITY 0: Check if ReKYC is required - if yes, redirect to KYC page immediately
+        // PRIORITY 0: Check if ReKYC is required OR KYC is not verified - if yes, redirect to KYC page immediately
         try {
           const checkId = appId || '0';
+          // Clear cache to ensure fresh KYC status check
+          apiService.clearCache(`/digilocker/kyc-status/${checkId}`);
           const kycResponse = await apiService.getKYCStatus(checkId);
           
           if (kycResponse.success && kycResponse.data) {
             let rekycRequired = false;
+            const kycStatus = kycResponse.data.kyc_status;
+            const kycVerified = kycStatus === 'verified';
             
             // Check for ReKYC requirement
             if (kycResponse.data.verification_data) {
@@ -250,18 +254,22 @@ export const PostDisbursalFlowPage = () => {
               rekycRequired = verificationData?.rekyc_required === true;
             }
             
-            console.log('🔍 [Post-Disbursal] ReKYC check:', { rekycRequired });
+            console.log('🔍 [Post-Disbursal] KYC check:', { kycStatus, kycVerified, rekycRequired });
             
-            if (rekycRequired) {
-              console.log('🔄 [Post-Disbursal] ReKYC required - redirecting to KYC page');
-              toast.info('ReKYC verification required. Please complete KYC verification first.');
+            // If ReKYC is required OR KYC is not verified, redirect to KYC page
+            if (rekycRequired || !kycVerified) {
+              const reason = rekycRequired ? 'ReKYC required' : 'KYC not verified';
+              console.log(`🔄 [Post-Disbursal] ${reason} - redirecting to KYC page`);
+              toast.info(rekycRequired 
+                ? 'ReKYC verification required. Please complete KYC verification first.'
+                : 'KYC verification required. Please complete KYC verification first.');
               setLoading(false);
               navigate(`/loan-application/kyc-verification?applicationId=${appId}`, { replace: true });
               return;
             }
           }
         } catch (kycError) {
-          console.error('Error checking ReKYC status:', kycError);
+          console.error('Error checking KYC status:', kycError);
           // Continue with normal flow if check fails
         }
         

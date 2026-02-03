@@ -700,6 +700,32 @@ export function DynamicDashboardPage() {
                             if (loan.status === 'account_manager' || loan.status === 'overdue') {
                               navigate(`/repayment-schedule?applicationId=${loan.id}`);
                             } else if (loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal' || loan.status === 'ready_for_disbursement') {
+                              // Check progress engine first - ReKYC might be required
+                              try {
+                                const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                                const progress = await getOnboardingProgress(loan.id, true); // Force refresh to check ReKYC
+                                console.log(`📊 [View Status] Progress for ${loan.status}:`, progress.currentStep, 'ReKYC:', progress.prerequisites.rekycRequired);
+                                
+                                // If ReKYC is required or KYC is not verified, redirect to KYC page
+                                if (progress.prerequisites.rekycRequired || !progress.prerequisites.kycVerified) {
+                                  const kycRoute = getStepRoute('kyc-verification', loan.id);
+                                  console.log(`🔄 [View Status] ReKYC required or KYC not verified, redirecting to: ${kycRoute}`);
+                                  navigate(kycRoute, { replace: true });
+                                  return;
+                                }
+                                
+                                // If there's a pending onboarding step, redirect to it
+                                if (progress.currentStep !== 'steps') {
+                                  const route = getStepRoute(progress.currentStep, loan.id);
+                                  console.log(`📊 [View Status] Pending step found, redirecting to: ${route}`);
+                                  navigate(route, { replace: true });
+                                  return;
+                                }
+                              } catch (progressError) {
+                                console.error('❌ [View Status] Error checking progress for post-disbursal:', progressError);
+                                // Fallback to post-disbursal if progress check fails
+                              }
+                              // All prerequisites complete - go to post-disbursal
                               navigate(`/post-disbursal?applicationId=${loan.id}`);
                             } else if (loan.status === 'follow_up' || loan.status === 'under_review' || loan.status === 'submitted' || loan.status === 'pending') {
                               // Use unified progress engine to determine next step for all in-progress/review statuses
@@ -853,6 +879,32 @@ export function DynamicDashboardPage() {
                         if (loan.status === 'account_manager' || loan.status === 'overdue') {
                           navigate(`/repayment-schedule?applicationId=${loan.id}`);
                         } else if (loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal') {
+                          // Check progress engine first - ReKYC might be required
+                          try {
+                            const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                            const progress = await getOnboardingProgress(loan.id, true); // Force refresh to check ReKYC
+                            console.log(`📊 [View Status] Progress for ${loan.status}:`, progress.currentStep, 'ReKYC:', progress.prerequisites.rekycRequired);
+                            
+                            // If ReKYC is required or KYC is not verified, redirect to KYC page
+                            if (progress.prerequisites.rekycRequired || !progress.prerequisites.kycVerified) {
+                              const kycRoute = getStepRoute('kyc-verification', loan.id);
+                              console.log(`🔄 [View Status] ReKYC required or KYC not verified, redirecting to: ${kycRoute}`);
+                              navigate(kycRoute, { replace: true });
+                              return;
+                            }
+                            
+                            // If there's a pending onboarding step, redirect to it
+                            if (progress.currentStep !== 'steps') {
+                              const route = getStepRoute(progress.currentStep, loan.id);
+                              console.log(`📊 [View Status] Pending step found, redirecting to: ${route}`);
+                              navigate(route, { replace: true });
+                              return;
+                            }
+                          } catch (progressError) {
+                            console.error('❌ [View Status] Error checking progress for post-disbursal:', progressError);
+                            // Fallback to post-disbursal if progress check fails
+                          }
+                          // All prerequisites complete - go to post-disbursal
                           navigate(`/post-disbursal?applicationId=${loan.id}`);
                         } else if (loan.status === 'follow_up') {
                           navigate('/loan-application/upload-documents', {
@@ -898,7 +950,32 @@ export function DynamicDashboardPage() {
                             navigate('/application-under-review');
                           }
                         } else if (loan.status === 'ready_for_disbursement') {
-                          // Loan is ready for disbursement - navigate to post-disbursal flow
+                          // Check progress engine first - ReKYC might be required
+                          try {
+                            const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                            const progress = await getOnboardingProgress(loan.id, true); // Force refresh to check ReKYC
+                            console.log(`📊 [View Status] Progress for ${loan.status}:`, progress.currentStep, 'ReKYC:', progress.prerequisites.rekycRequired);
+                            
+                            // If ReKYC is required or KYC is not verified, redirect to KYC page
+                            if (progress.prerequisites.rekycRequired || !progress.prerequisites.kycVerified) {
+                              const kycRoute = getStepRoute('kyc-verification', loan.id);
+                              console.log(`🔄 [View Status] ReKYC required or KYC not verified, redirecting to: ${kycRoute}`);
+                              navigate(kycRoute, { replace: true });
+                              return;
+                            }
+                            
+                            // If there's a pending onboarding step, redirect to it
+                            if (progress.currentStep !== 'steps') {
+                              const route = getStepRoute(progress.currentStep, loan.id);
+                              console.log(`📊 [View Status] Pending step found, redirecting to: ${route}`);
+                              navigate(route, { replace: true });
+                              return;
+                            }
+                          } catch (progressError) {
+                            console.error('❌ [View Status] Error checking progress for post-disbursal:', progressError);
+                            // Fallback to post-disbursal if progress check fails
+                          }
+                          // All prerequisites complete - navigate to post-disbursal flow
                           console.log('✅ Loan ready for disbursement, navigating to post-disbursal flow');
                           navigate(`/post-disbursal?applicationId=${loan.id}`);
                         } else {

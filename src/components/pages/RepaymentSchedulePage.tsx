@@ -2109,15 +2109,19 @@ export const RepaymentSchedulePage = () => {
                     <div className={`flex items-stretch gap-3 rounded-xl overflow-hidden transition-all ${
                       isCurrentStage 
                         ? 'bg-gradient-to-r from-blue-500 to-blue-600 shadow-md' 
+                        : isNextStage
+                        ? 'bg-gradient-to-r from-green-50 to-emerald-100 border border-green-200'
                         : 'bg-gray-100 hover:bg-gray-200'
                     }`}>
                       {/* Left: Stage Number Circle */}
                       <div className={`flex items-center justify-center w-16 sm:w-20 ${
-                        isCurrentStage ? 'bg-blue-700' : 'bg-gray-200'
+                        isCurrentStage ? 'bg-blue-700' : isNextStage ? 'bg-green-100' : 'bg-gray-200'
                       }`}>
                         <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center ${
                           isCurrentStage 
                             ? 'bg-white text-blue-600' 
+                            : isNextStage
+                            ? 'bg-white text-green-600'
                             : 'bg-white text-gray-400'
                         }`}>
                           {isCurrentStage ? (
@@ -2131,13 +2135,13 @@ export const RepaymentSchedulePage = () => {
                       </div>
 
                       {/* Right: Content */}
-                      <div className={`flex-1 py-3 pr-3 ${isCurrentStage ? 'text-white' : 'text-gray-700'}`}>
+                      <div className={`flex-1 py-3 pr-3 ${isCurrentStage ? 'text-white' : isNextStage ? 'text-green-800' : 'text-gray-700'}`}>
                         <div className="flex items-start justify-between gap-2">
                           {/* Left Content */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
                               <span className={`text-xs font-bold ${
-                                isCurrentStage ? 'text-blue-100' : 'text-gray-500'
+                                isCurrentStage ? 'text-blue-100' : isNextStage ? 'text-green-600' : 'text-gray-500'
                               }`}>
                                 {`Stage ${String(stageNumber).padStart(2, '0')}`}
                               </span>
@@ -2148,23 +2152,23 @@ export const RepaymentSchedulePage = () => {
                                 </span>
                               )}
                               {isNextStage && (
-                                <span className="text-[10px] font-medium text-gray-500">Next</span>
+                                <span className="text-[10px] font-medium bg-green-500 text-white px-2 py-0.5 rounded-full">Next</span>
                               )}
                             </div>
                             <div className={`text-xl sm:text-2xl font-bold mb-0.5 ${
-                              isCurrentStage ? 'text-white' : 'text-gray-900'
+                              isCurrentStage ? 'text-white' : isNextStage ? 'text-green-900' : 'text-gray-900'
                             }`}>
                               {formatCurrency(stage.limit).replace('.00', '')}
                             </div>
                             <div className={`text-xs ${
-                              isCurrentStage ? 'text-blue-100' : 'text-gray-500'
+                              isCurrentStage ? 'text-blue-100' : isNextStage ? 'text-green-600' : 'text-gray-500'
                             }`}>
                               {isCurrentStage 
                                 ? `Current loan amount` 
                                 : isUltimateStage 
                                 ? 'Personal loan with 24 months tenure' 
                                 : isNextStage
-                                ? `Current limit`
+                                ? `Limit unlocked`
                                 : `Stage ${stageNumber} limit`}
                             </div>
                           </div>

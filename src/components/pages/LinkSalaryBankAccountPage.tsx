@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, Plus, CheckCircle, ArrowLeft } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
@@ -33,6 +33,7 @@ export const LinkSalaryBankAccountPage = () => {
   const [showAddNew, setShowAddNew] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [hasCheckedBank, setHasCheckedBank] = useState(false); // Prevent multiple redirects
+  const isLinkingInProgress = useRef(false); // Prevent duplicate auto-linking calls
 
   // Log component mount - this should ALWAYS show if component renders
   // This runs on EVERY render, so if we don't see this, component isn't rendering
@@ -122,26 +123,39 @@ export const LinkSalaryBankAccountPage = () => {
                 try {
                   const appResponse = await apiService.getLoanApplicationById(applicationId);
                   const app = appResponse.data?.application || appResponse.data;
-                  const isLinked = app?.user_bank_id === primaryBank.id;
+                  const isLinked = (app as any)?.user_bank_id === primaryBank.id;
                   
-                  if (!isLinked) {
+                  if (!isLinked && !isLinkingInProgress.current) {
+                    // Prevent duplicate linking calls
+                    isLinkingInProgress.current = true;
                     console.log('🔗 Bank exists but not linked to application - auto-linking...');
-                    // Auto-link the bank to the application
-                    const linkResponse = await apiService.chooseBankDetails({
-                      application_id: applicationId,
-                      bank_details_id: primaryBank.id
-                    });
-                    if (linkResponse.success) {
-                      console.log('✅ Bank auto-linked to application');
-                      // Clear cache to ensure fresh data
-                      apiService.clearCache(`/loan-applications/${applicationId}`);
-                      apiService.clearCache('/loan-applications');
+                    
+                    try {
+                      // Auto-link the bank to the application
+                      const linkResponse = await apiService.chooseBankDetails({
+                        application_id: applicationId,
+                        bank_details_id: primaryBank.id
+                      });
+                      if (linkResponse.success) {
+                        console.log('✅ Bank auto-linked to application');
+                        // Clear cache to ensure fresh data
+                        apiService.clearCache(`/loan-applications/${applicationId}`);
+                        apiService.clearCache('/loan-applications');
+                      }
+                    } finally {
+                      // Reset after a delay to allow the operation to complete
+                      setTimeout(() => {
+                        isLinkingInProgress.current = false;
+                      }, 2000);
                     }
-                  } else {
+                  } else if (isLinked) {
                     console.log('✅ Bank already linked to application');
+                  } else if (isLinkingInProgress.current) {
+                    console.log('⏳ Bank linking already in progress, skipping duplicate call');
                   }
                 } catch (linkError) {
                   console.error('❌ Error checking/linking bank to application:', linkError);
+                  isLinkingInProgress.current = false; // Reset on error
                   // Continue anyway - user can manually link if needed
                 }
               }

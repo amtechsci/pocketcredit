@@ -71,7 +71,39 @@ export function EnhancedUserReferencesPage({
       const response = await apiService.getUserReferences();
 
       if (response.data) {
-        // Load existing references
+        // Check if references are already completed
+        const referencesList = response.data.references || [];
+        const alternateData = response.data.alternate_data;
+        const hasThreeReferences = Array.isArray(referencesList) && referencesList.length >= 3;
+        const hasAlternateMobile = alternateData?.alternate_mobile ? true : false;
+        const referencesCompleted = hasThreeReferences && hasAlternateMobile;
+
+        if (referencesCompleted && !embedded) {
+          // References are already completed - redirect to appropriate page
+          console.log('✅ References already completed - redirecting away from references page');
+          
+          // Get application ID from URL
+          const urlParams = new URLSearchParams(window.location.search);
+          const appIdParam = urlParams.get('applicationId');
+          const applicationId = appIdParam ? parseInt(appIdParam) : null;
+          
+          // Use progress engine to determine where to redirect
+          try {
+            const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+            const progress = await getOnboardingProgress(applicationId, true); // Force refresh
+            const nextRoute = getStepRoute(progress.currentStep, applicationId);
+            console.log('[UserReferences] References completed - redirecting to:', nextRoute);
+            navigate(nextRoute, { replace: true });
+            return; // Exit early - don't load the form
+          } catch (error) {
+            console.error('[UserReferences] Error getting next step, using fallback:', error);
+            // Fallback to application under review
+            navigate('/application-under-review', { replace: true });
+            return;
+          }
+        }
+
+        // Load existing references (only if not completed or embedded mode)
         if (response.data.references && response.data.references.length > 0) {
           const existingRefs = response.data.references.slice(0, 3);
           const newRefs = [...references];
