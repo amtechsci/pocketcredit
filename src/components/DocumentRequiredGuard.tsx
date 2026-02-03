@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { apiService } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -18,52 +18,55 @@ export function DocumentRequiredGuard({ children }: { children: React.ReactNode 
   const [isChecking, setIsChecking] = useState(true);
   const [hasPendingDocuments, setHasPendingDocuments] = useState(false);
   const [applicationId, setApplicationId] = useState<number | null>(null);
-
-  console.log('🔒 🔒 🔒 DocumentRequiredGuard COMPONENT RENDERED 🔒 🔒 🔒', location.pathname);
+  
+  // Refs to prevent duplicate API calls and infinite loops
+  const hasCheckedRef = useRef(false);
+  const lastUserIdRef = useRef<number | null>(null);
+  const isCheckingRef = useRef(false);
 
   useEffect(() => {
-    console.log('🔒 DocumentRequiredGuard: useEffect triggered', { 
-      isAuthenticated, 
-      hasUser: !!user, 
-      pathname: location.pathname 
-    });
+    // Skip check if user hasn't changed and we've already checked
+    const userId = user?.id || null;
+    if (hasCheckedRef.current && lastUserIdRef.current === userId) {
+      // Already checked for this user, skip API call
+      return;
+    }
 
     if (!isAuthenticated || !user) {
-      console.log('🔒 DocumentRequiredGuard: User not authenticated, skipping check');
       setIsChecking(false);
+      return;
+    }
+    
+    // Prevent concurrent checks
+    if (isCheckingRef.current) {
       return;
     }
 
     const checkDocumentRequirement = async () => {
+      // Double-check to prevent race conditions
+      if (isCheckingRef.current) return;
+      isCheckingRef.current = true;
+      
       try {
-        console.log('🔒 DocumentRequiredGuard: Starting document requirement check...');
         setIsChecking(true);
         
         // Get all loan applications
-        console.log('🔒 DocumentRequiredGuard: Fetching loan applications...');
         const applicationsResponse = await apiService.getLoanApplications();
-        console.log('🔒 DocumentRequiredGuard: Applications response:', applicationsResponse);
-        
         // Check for both success formats: success: true OR status: 'success'
         const isSuccess = applicationsResponse.success === true || applicationsResponse.status === 'success';
-        console.log('🔒 DocumentRequiredGuard: Response success check:', isSuccess, 'has data?', !!applicationsResponse.data?.applications);
         
         if (isSuccess && applicationsResponse.data?.applications) {
           const applications = applicationsResponse.data.applications;
-          console.log('🔒 DocumentRequiredGuard: Found', applications.length, 'applications');
           
           // Check each application for pending document requests
           for (const app of applications) {
-            console.log('🔒 DocumentRequiredGuard: Checking app', app.id, 'status:', app.status);
             try {
               // Check validation history for need_document actions
-              console.log('🔒 DocumentRequiredGuard: Fetching validation history for app', app.id);
               const validationResponse = await (apiService as any).request(
                 'GET',
                 `/validation/user/history?loanApplicationId=${app.id}`,
                 {}
               );
-              console.log('🔒 DocumentRequiredGuard: Validation response for app', app.id, ':', validationResponse);
               
               if (validationResponse.status === 'success' && validationResponse.data && Array.isArray(validationResponse.data)) {
                 const documentActions = validationResponse.data.filter(
@@ -71,18 +74,14 @@ export function DocumentRequiredGuard({ children }: { children: React.ReactNode 
                     action.action_type === 'need_document' && 
                     action.loan_application_id === app.id
                 );
-                console.log('🔒 DocumentRequiredGuard: Found', documentActions.length, 'document actions for app', app.id);
                 
                 if (documentActions.length > 0) {
                   const latestAction = documentActions[0];
                   const documents = latestAction.action_details?.documents || [];
-                  console.log('🔒 DocumentRequiredGuard: Required documents:', documents);
                   
                   if (documents.length > 0) {
                     // Check if all documents are uploaded
-                    console.log('🔒 DocumentRequiredGuard: Checking uploaded documents for app', app.id);
                     const docsResponse = await apiService.getLoanDocuments(app.id);
-                    console.log('🔒 DocumentRequiredGuard: Uploaded documents response:', docsResponse);
                     
                     if (docsResponse.success || docsResponse.status === 'success') {
                       const uploadedDocs = docsResponse.data?.documents || [];
@@ -101,59 +100,54 @@ export function DocumentRequiredGuard({ children }: { children: React.ReactNode 
                         });
                       });
                       
-                      console.log('🔒 DocumentRequiredGuard: All uploaded?', allUploaded);
-                      
                       if (!allUploaded) {
                         // Documents are pending - enforce restriction
-                        console.log('🚫 DocumentRequiredGuard: Pending documents found - enforcing upload requirement');
-                        console.log('🚫 DocumentRequiredGuard: Missing documents detected');
                         setHasPendingDocuments(true);
                         setApplicationId(app.id);
                         
+                        // Mark check complete before redirect
+                        hasCheckedRef.current = true;
+                        lastUserIdRef.current = userId;
+                        
                         // If user is not on the upload page, redirect them
                         if (!location.pathname.includes('/loan-application/upload-documents')) {
-                          console.log('🚫 DocumentRequiredGuard: Blocking access to:', location.pathname);
-                          console.log('🚫 DocumentRequiredGuard: Redirecting to upload page for app', app.id);
                           navigate(`/loan-application/upload-documents?applicationId=${app.id}`, { replace: true });
-                        } else {
-                          console.log('✅ DocumentRequiredGuard: Already on upload page, allowing access');
                         }
                         
                         setIsChecking(false);
+                        isCheckingRef.current = false;
                         return;
-                      } else {
-                        console.log('✅ DocumentRequiredGuard: All required documents uploaded for app', app.id);
                       }
                     }
                   }
                 }
-              } else {
-                console.log('🔒 DocumentRequiredGuard: No validation data for app', app.id);
               }
             } catch (error) {
-              console.error('🔒 DocumentRequiredGuard: Error checking validation history for app:', app.id, error);
+              console.error('DocumentRequiredGuard: Error checking app:', app.id, error);
             }
           }
-        } else {
-          console.log('🔒 DocumentRequiredGuard: No applications found or invalid response');
         }
         
         // No pending documents found - allow access
-        console.log('✅ DocumentRequiredGuard: No pending documents found - allowing access');
         setHasPendingDocuments(false);
         setApplicationId(null);
       } catch (error) {
-        console.error('🔒 DocumentRequiredGuard: Error checking document requirement:', error);
+        console.error('DocumentRequiredGuard: Error checking document requirement:', error);
         // On error, allow access (fail open)
         setHasPendingDocuments(false);
       } finally {
-        console.log('🔒 DocumentRequiredGuard: Check complete, isChecking = false');
+        // Mark check as complete
+        hasCheckedRef.current = true;
+        lastUserIdRef.current = userId;
+        isCheckingRef.current = false;
         setIsChecking(false);
       }
     };
 
     checkDocumentRequirement();
-  }, [isAuthenticated, user, location.pathname, navigate]);
+  // Only re-run when user changes, NOT on every route change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, user?.id]);
 
   // Show loading spinner while checking
   if (isChecking) {

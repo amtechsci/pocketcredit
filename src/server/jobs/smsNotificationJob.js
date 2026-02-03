@@ -234,16 +234,26 @@ async function loadTemplatesFromDB() {
       SELECT * FROM sms_templates WHERE is_active = 1
     `);
     
-    // Parse JSON fields with safe parsing
+    // Parse JSON fields with safe parsing - no warnings for valid edge cases
     const safeJsonParse = (value, defaultValue = null) => {
+      // Handle null/empty values
       if (!value || value === '' || value === 'null') return defaultValue;
-      if (typeof value === 'object') return value; // Already parsed by MySQL
-      try {
-        return JSON.parse(value);
-      } catch (e) {
-        console.warn('[SMS Cron] Failed to parse JSON:', value);
-        return defaultValue;
+      
+      // Already parsed by MySQL JSON column - return as-is
+      if (typeof value === 'object') return value;
+      
+      // String value - try to parse
+      if (typeof value === 'string') {
+        try {
+          return JSON.parse(value);
+        } catch (e) {
+          // Silently return default - data may have been stored in wrong format
+          // Run the fixSmsTemplatesJson migration script to fix this
+          return defaultValue;
+        }
       }
+      
+      return defaultValue;
     };
     
     return templates.map(t => ({

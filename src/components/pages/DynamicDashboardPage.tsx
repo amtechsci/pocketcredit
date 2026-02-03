@@ -186,8 +186,29 @@ export function DynamicDashboardPage() {
         }
       } else if (response.status === 'profile_incomplete') {
         const incompleteData = response.data as any;
-        console.log('Profile incomplete, redirecting to completion:', incompleteData);
-        navigate('/profile-completion');
+        console.log('Profile incomplete:', incompleteData);
+        
+        // Prevent infinite redirect loop - check if we were just redirected from profile-completion
+        const redirectCount = parseInt(sessionStorage.getItem('profileRedirectCount') || '0', 10);
+        const lastRedirectTime = parseInt(sessionStorage.getItem('profileRedirectTime') || '0', 10);
+        const now = Date.now();
+        
+        // Reset counter if more than 5 seconds have passed
+        if (now - lastRedirectTime > 5000) {
+          sessionStorage.setItem('profileRedirectCount', '1');
+          sessionStorage.setItem('profileRedirectTime', now.toString());
+          navigate('/profile-completion');
+        } else if (redirectCount < 2) {
+          // Allow up to 2 redirects within 5 seconds
+          sessionStorage.setItem('profileRedirectCount', (redirectCount + 1).toString());
+          navigate('/profile-completion');
+        } else {
+          // Too many redirects - show error and stay on dashboard
+          console.error('Redirect loop detected, staying on dashboard');
+          setError('Profile setup incomplete. Please contact support if this issue persists.');
+          sessionStorage.removeItem('profileRedirectCount');
+          sessionStorage.removeItem('profileRedirectTime');
+        }
         return;
       } else {
         setError('Failed to load dashboard data');

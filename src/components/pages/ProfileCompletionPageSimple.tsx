@@ -354,26 +354,41 @@ const ProfileCompletionPageSimple = () => {
 
       if (response && response.data) {
         if (response.data.eligible) {
+          // Refresh user to get latest profile state
           await refreshUser();
-
-          // OLD: For salaried users, pre-fetch Digitap data for next step
-          /*
-          if (employmentQuickCheckData.employment_type === 'salaried' && !digitapCalled) {
-            console.log('🔄 Pre-fetching Digitap data after employment verification...');
-            // Don't await this - let it run in background
+          
+          // Check if profile is actually complete before redirecting to dashboard
+          const profileResponse = await apiService.getUserProfile();
+          const updatedUser = profileResponse?.data?.user;
+          
+          if (updatedUser?.profile_completed) {
+            // Profile is fully complete, safe to go to dashboard
+            console.log('Profile complete, redirecting to dashboard...');
+            toast.success('Profile completed successfully!');
             setTimeout(() => {
-              if (currentStep === 2 && !digitapCalled) {
-                fetchDigitapData();
-              }
+              navigate('/dashboard', { replace: true });
             }, 500);
+          } else {
+            // Profile not complete - proceed to next step based on employment type
+            // For salaried users: usually need KYC/Digilocker
+            // For students: need college details
+            const empType = employmentQuickCheckData.employment_type;
+            
+            if (empType === 'student') {
+              // Students need to complete college details (step 3)
+              console.log('Student profile, moving to college details step');
+              setCurrentStep(3);
+              toast.success('Employment verification complete! Please fill in your college details.');
+            } else {
+              // Salaried/self-employed: Go to dashboard, let the onboarding flow handle next steps
+              // Dashboard will route to KYC/Digilocker if needed
+              console.log('Salaried profile, checking next onboarding step...');
+              toast.success('Employment verification complete!');
+              setTimeout(() => {
+                navigate('/dashboard', { replace: true });
+              }, 500);
+            }
           }
-          */
-
-          // NEW: Skip everything and go to dashboard
-          console.log('Skipping API calls, redirecting to dashboard...');
-          setTimeout(() => {
-            window.location.href = '/dashboard';
-          }, 1000);
         } else {
           // Handle hold status - check for hold indicators in response
           const responseData = response.data as any;

@@ -398,6 +398,18 @@ router.patch('/:id/toggle', authenticateAdmin, async (req, res) => {
   }
 });
 
+/**
+ * Seed default templates (no-op function)
+ * Templates are managed via admin UI - this is kept for backwards compatibility
+ */
+async function seedDefaultTemplates() {
+  // Templates are now managed via admin UI
+  // This function exists for backwards compatibility with smsNotificationJob.js
+  console.log('[SMS Templates] Templates are managed via admin UI - no seeding needed');
+  return;
+}
+
 // Export for use in cron job
 module.exports = router;
 module.exports.initSmsTemplatesTable = initSmsTemplatesTable;
+module.exports.seedDefaultTemplates = seedDefaultTemplates;
