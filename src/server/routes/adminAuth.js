@@ -6,7 +6,6 @@ const { validate, schemas } = require('../middleware/validation');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { getRedisClient, set, get, del } = require('../config/redis');
 const { v4: uuidv4 } = require('uuid');
-const { smsService } = require('../utils/smsService');
 const router = express.Router();
 
 // Initialize database connection
@@ -192,23 +191,17 @@ router.post('/send-otp', async (req, res) => {
       });
     }
 
-    // Send SMS using OneXtel service
-    const message = `${otp} is your OTP for Pocketcredit login verification. This code is valid for 5 min. Do not share this OTP with anyone for security reasons.`;
-    const OTP_TEMPLATE_ID = '1107900001243800002';
+    // Send SMS using smswala API
+    const message = `${otp} is OTP for Creditlab login verification & valid till 2min. Don't share this OTP with anyone.`;
+    const template_id = '1407174844163241940';
+    const sender = 'CREDLB';
+
+    const smsUrl = `https://sms.smswala.in/app/smsapi/index.php?key=2683C705E7CB39&campaign=16613&routeid=30&type=text&contacts=${mobile}&senderid=${sender}&msg=${encodeURIComponent(message)}&template_id=${template_id}&pe_id=1401337620000065797`;
 
     try {
-      const result = await smsService.sendSMS({
-        to: mobile,
-        message: message,
-        templateId: OTP_TEMPLATE_ID,
-        senderId: 'PKTCRD'
-      });
-      
-      if (result.success) {
-        console.log(`✅ Admin OTP SMS sent to ${mobile}`);
-      } else {
-        console.error(`❌ Admin OTP SMS failed for ${mobile}:`, result.description);
-      }
+      const response = await fetch(smsUrl);
+      const result = await response.text();
+      console.log('Admin OTP SMS sent:', result);
     } catch (error) {
       console.error('SMS sending failed:', error);
       // Log OTP to console as fallback for development
