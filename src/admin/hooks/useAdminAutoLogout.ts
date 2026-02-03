@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react';
 
 const INACTIVITY_TIMEOUT = 20 * 60 * 1000; // 20 minutes in milliseconds
 const WARNING_TIMEOUT = 18 * 60 * 1000; // Show warning 2 minutes before logout (18 minutes)
+const THROTTLE_DELAY = 1000; // Throttle activity detection to once per second
 
 interface UseAdminAutoLogoutOptions {
   onLogout: () => void;
@@ -12,8 +13,27 @@ export function useAdminAutoLogout({ onLogout, enabled = true }: UseAdminAutoLog
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const warningTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const warningShownRef = useRef(false);
+  const lastActivityRef = useRef<number>(Date.now());
+  const throttleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const onLogoutRef = useRef(onLogout);
+  const enabledRef = useRef(enabled);
+
+  // Keep refs in sync
+  useEffect(() => {
+    onLogoutRef.current = onLogout;
+    enabledRef.current = enabled;
+  }, [onLogout, enabled]);
 
   const resetTimer = useCallback(() => {
+    const now = Date.now();
+    
+    // Throttle: only reset if at least THROTTLE_DELAY ms have passed since last reset
+    if (now - lastActivityRef.current < THROTTLE_DELAY) {
+      return;
+    }
+    
+    lastActivityRef.current = now;
+
     // Clear existing timers
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
@@ -23,9 +43,13 @@ export function useAdminAutoLogout({ onLogout, enabled = true }: UseAdminAutoLog
       clearTimeout(warningTimeoutRef.current);
       warningTimeoutRef.current = null;
     }
+    if (throttleTimeoutRef.current) {
+      clearTimeout(throttleTimeoutRef.current);
+      throttleTimeoutRef.current = null;
+    }
     warningShownRef.current = false;
 
-    if (!enabled) return;
+    if (!enabledRef.current) return;
 
     // Set warning timer (18 minutes)
     warningTimeoutRef.current = setTimeout(() => {
@@ -36,7 +60,7 @@ export function useAdminAutoLogout({ onLogout, enabled = true }: UseAdminAutoLog
       );
       
       if (!shouldContinue) {
-        onLogout();
+        onLogoutRef.current();
         return;
       }
       
@@ -46,37 +70,81 @@ export function useAdminAutoLogout({ onLogout, enabled = true }: UseAdminAutoLog
 
     // Set logout timer (20 minutes)
     timeoutRef.current = setTimeout(() => {
-      onLogout();
+      onLogoutRef.current();
     }, INACTIVITY_TIMEOUT);
-  }, [enabled, onLogout]);
+  }, []);
+
+  // Throttled reset function for high-frequency events
+  const throttledResetTimer = useCallback(() => {
+    if (throttleTimeoutRef.current) {
+      return; // Already scheduled
+    }
+
+    throttleTimeoutRef.current = setTimeout(() => {
+      throttleTimeoutRef.current = null;
+      resetTimer();
+    }, THROTTLE_DELAY);
+  }, [resetTimer]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      // Clear timers when disabled
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      if (warningTimeoutRef.current) {
+        clearTimeout(warningTimeoutRef.current);
+        warningTimeoutRef.current = null;
+      }
+      return;
+    }
 
-    // List of events that indicate user activity
-    const activityEvents = [
+    // High-frequency events that need throttling
+    const throttledEvents = ['mousemove', 'scroll'];
+    
+    // Low-frequency events that can reset immediately
+    const immediateEvents = [
       'mousedown',
-      'mousemove',
       'keypress',
-      'scroll',
       'touchstart',
       'click',
-      'keydown'
+      'keydown',
+      'focus',
+      'input',
+      'change'
     ];
 
-    // Add event listeners
-    activityEvents.forEach(event => {
+    // Add throttled event listeners
+    throttledEvents.forEach(event => {
+      window.addEventListener(event, throttledResetTimer, { passive: true });
+    });
+
+    // Add immediate event listeners
+    immediateEvents.forEach(event => {
       window.addEventListener(event, resetTimer, true);
     });
+
+    // Also listen to visibility change (when user switches tabs)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        resetTimer();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Initialize timer
     resetTimer();
 
     // Cleanup
     return () => {
-      activityEvents.forEach(event => {
+      throttledEvents.forEach(event => {
+        window.removeEventListener(event, throttledResetTimer);
+      });
+      immediateEvents.forEach(event => {
         window.removeEventListener(event, resetTimer, true);
       });
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -84,8 +152,11 @@ export function useAdminAutoLogout({ onLogout, enabled = true }: UseAdminAutoLog
       if (warningTimeoutRef.current) {
         clearTimeout(warningTimeoutRef.current);
       }
+      if (throttleTimeoutRef.current) {
+        clearTimeout(throttleTimeoutRef.current);
+      }
     };
-  }, [enabled, resetTimer]);
+  }, [enabled, resetTimer, throttledResetTimer]);
 
   return {
     resetTimer
