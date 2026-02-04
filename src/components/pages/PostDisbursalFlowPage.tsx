@@ -53,7 +53,6 @@ export const PostDisbursalFlowPage = () => {
   const [isWaitingForDisbursement, setIsWaitingForDisbursement] = useState(false); // Track if loan is ready_for_disbursement
   const isWaitingForDisbursementRef = useRef(false); // Ref to track waiting state synchronously
   const isProcessingEnachCallbackRef = useRef(false); // Track if we're processing eNACH callback
-  const isProcessingSelfieVerificationRef = useRef(false); // Track if we're processing selfie verification
   const isProcessingKfsViewRef = useRef(false); // Track if we're processing KFS view completion
   const [progress, setProgress] = useState<PostDisbursalProgress>({
     enach_done: false,
@@ -455,13 +454,6 @@ export const PostDisbursalFlowPage = () => {
       return;
     }
     
-    // Don't fetch progress if we're processing selfie verification
-    // This prevents auto-advancing to next step after selfie verification
-    if (isProcessingSelfieVerificationRef.current) {
-      console.log('⏸️ Skipping fetchProgress - processing selfie verification');
-      return;
-    }
-    
     // Don't fetch progress if we're processing KFS view completion
     // This prevents auto-advancing to next step after KFS acceptance
     if (isProcessingKfsViewRef.current) {
@@ -562,17 +554,8 @@ export const PostDisbursalFlowPage = () => {
   };
 
   const handleStepComplete = async (stepNumber: number, stepData: Partial<PostDisbursalProgress>) => {
-    // Check if this is selfie verification (step 2 with selfie_verified)
-    const isSelfieVerification = stepNumber === 2 && stepData.selfie_verified === true;
-    
     // Check if this is KFS view completion (step 4 with kfs_viewed)
     const isKfsViewCompletion = stepNumber === 4 && stepData.kfs_viewed === true;
-    
-    if (isSelfieVerification) {
-      // Set flag to prevent auto-advance
-      isProcessingSelfieVerificationRef.current = true;
-      console.log('🔄 Processing selfie verification, preventing auto-advance');
-    }
     
     if (isKfsViewCompletion) {
       // Set flag to prevent auto-advance
@@ -584,21 +567,7 @@ export const PostDisbursalFlowPage = () => {
     const saved = await saveProgress(stepData);
 
     if (saved) {
-      if (isSelfieVerification) {
-        // For selfie verification, stay on step 2 and show success
-        // Don't auto-advance - let user see success message
-        setCurrentStep(2);
-        
-        // Clear post-disbursal progress cache so next fetch gets fresh data
-        apiService.clearCache('/post-disbursal');
-        
-        // Clear the flag after a delay to allow user to see success message
-        // Then they can refresh or manually proceed
-        setTimeout(() => {
-          isProcessingSelfieVerificationRef.current = false;
-          console.log('✅ Selfie verification processing complete, fetchProgress will work normally now');
-        }, 3000); // 3 seconds delay
-      } else if (isKfsViewCompletion) {
+      if (isKfsViewCompletion) {
         // For KFS view completion, stay on step 4 and show success
         // Don't auto-advance - let user see success message
         setCurrentStep(4);
@@ -613,7 +582,8 @@ export const PostDisbursalFlowPage = () => {
           console.log('✅ KFS view completion processing complete, fetchProgress will work normally now');
         }, 3000); // 3 seconds delay
       } else {
-        // For other steps, re-fetch progress to get updated step based on columns
+        // For other steps (including selfie and eNACH), re-fetch progress to get updated step
+        // This will auto-advance to the next step
         if (applicationId) {
           await fetchProgress(applicationId);
         } else if (stepNumber < 6) {
