@@ -53,7 +53,6 @@ export const PostDisbursalFlowPage = () => {
   const [isWaitingForDisbursement, setIsWaitingForDisbursement] = useState(false); // Track if loan is ready_for_disbursement
   const isWaitingForDisbursementRef = useRef(false); // Ref to track waiting state synchronously
   const isProcessingEnachCallbackRef = useRef(false); // Track if we're processing eNACH callback
-  const isProcessingKfsViewRef = useRef(false); // Track if we're processing KFS view completion
   const [progress, setProgress] = useState<PostDisbursalProgress>({
     enach_done: false,
     selfie_captured: false,
@@ -454,13 +453,6 @@ export const PostDisbursalFlowPage = () => {
       return;
     }
     
-    // Don't fetch progress if we're processing KFS view completion
-    // This prevents auto-advancing to next step after KFS acceptance
-    if (isProcessingKfsViewRef.current) {
-      console.log('⏸️ Skipping fetchProgress - processing KFS view completion');
-      return;
-    }
-    
     try {
       // Clear cache before fetching to ensure fresh data
       apiService.clearCache('/post-disbursal');
@@ -565,50 +557,25 @@ export const PostDisbursalFlowPage = () => {
   };
 
   const handleStepComplete = async (stepNumber: number, stepData: Partial<PostDisbursalProgress>) => {
-    // Check if this is KFS view completion (step 4 with kfs_viewed)
-    const isKfsViewCompletion = stepNumber === 4 && stepData.kfs_viewed === true;
-    
-    if (isKfsViewCompletion) {
-      // Set flag to prevent auto-advance
-      isProcessingKfsViewRef.current = true;
-      console.log('🔄 Processing KFS view completion, preventing auto-advance');
-    }
-    
     // Save progress with the step data (don't increment current_step - we determine it from columns)
     const saved = await saveProgress(stepData);
 
     if (saved) {
-      if (isKfsViewCompletion) {
-        // For KFS view completion, stay on step 4 and show success
-        // Don't auto-advance - let user see success message
-        setCurrentStep(4);
-        
-        // Clear post-disbursal progress cache so next fetch gets fresh data
+      // For all steps (eNACH, selfie, KFS, etc.), re-fetch progress to get updated step
+      // This will auto-advance to the next step
+      if (applicationId) {
+        // Clear cache to ensure we get fresh data
         apiService.clearCache('/post-disbursal');
+        console.log(`🔄 Step ${stepNumber} complete, fetching updated progress to determine next step...`);
         
-        // Clear the flag after a delay to allow user to see success message
-        // Then they can refresh or manually proceed
-        setTimeout(() => {
-          isProcessingKfsViewRef.current = false;
-          console.log('✅ KFS view completion processing complete, fetchProgress will work normally now');
-        }, 3000); // 3 seconds delay
-      } else {
-        // For other steps (including selfie and eNACH), re-fetch progress to get updated step
-        // This will auto-advance to the next step
-        if (applicationId) {
-          // Clear cache to ensure we get fresh data
-          apiService.clearCache('/post-disbursal');
-          console.log(`🔄 Step ${stepNumber} complete, fetching updated progress to determine next step...`);
-          
-          // Small delay to ensure database is updated before fetching
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
-          await fetchProgress(applicationId);
-        } else if (stepNumber < 6) {
-          // Fallback: manually advance if we can't fetch
-          console.log(`🔄 Step ${stepNumber} complete, manually advancing to step ${stepNumber + 1}`);
-          setCurrentStep(stepNumber + 1);
-        }
+        // Small delay to ensure database is updated before fetching
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        await fetchProgress(applicationId);
+      } else if (stepNumber < 6) {
+        // Fallback: manually advance if we can't fetch
+        console.log(`🔄 Step ${stepNumber} complete, manually advancing to step ${stepNumber + 1}`);
+        setCurrentStep(stepNumber + 1);
       }
     }
   };
