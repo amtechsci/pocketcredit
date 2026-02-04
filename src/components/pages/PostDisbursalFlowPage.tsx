@@ -648,23 +648,16 @@ export const PostDisbursalFlowPage = () => {
           }
           setLoading(false);
           
-          // Update database but DON'T auto-advance to next step
-          // Use handleStepComplete which will handle the flag properly
-          await handleStepComplete(1, { enach_done: true });
+          // Clear the flag BEFORE calling handleStepComplete so fetchProgress can run
+          isProcessingEnachCallbackRef.current = false;
+          console.log('✅ eNACH callback verified, allowing progression');
           
-          // Force stay on eNACH step (step 1) so user sees the success
-          // User can manually proceed or refresh page to see next step
-          setCurrentStep(1);
+          // Update database and allow auto-advance to next step
+          // handleStepComplete will call fetchProgress which will determine the next step
+          await handleStepComplete(1, { enach_done: true });
           
           // Clear post-disbursal progress cache so next fetch gets fresh data
           apiService.clearCache('/post-disbursal');
-          
-          // Clear the flag after a delay to allow user to see success message
-          // Then they can refresh or manually proceed
-          setTimeout(() => {
-            isProcessingEnachCallbackRef.current = false;
-            console.log('✅ eNACH callback processing complete, fetchProgress will work normally now');
-          }, 3000); // 3 seconds delay
           
           return;
         }
