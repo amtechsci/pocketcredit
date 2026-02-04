@@ -1442,7 +1442,7 @@ const KFSViewStep = ({ applicationId, onComplete, saving }: StepProps) => {
       }
 
       console.log('✅ KFS accepted:', response.data);
-      toast.success('KFS accepted successfully! PDF will be generated when loan is disbursed.');
+      toast.success('KFS accepted successfully!');
       
       // Reset generating state first
       setGenerating(false);
