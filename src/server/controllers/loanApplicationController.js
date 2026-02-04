@@ -59,6 +59,83 @@ const applyForLoan = async (req, res) => {
       });
     }
 
+    // Check if user's loan limit has reached cooling period threshold (>= ₹45,600)
+    const userLoanLimit = parseFloat(user.loan_limit) || 0;
+    if (userLoanLimit >= 45600) {
+      // User has reached or exceeded the maximum regular limit threshold
+      // Mark them in cooling period if not already marked
+      if (user.status !== 'on_hold') {
+        const { checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
+        // Calculate credit limit to get full data for cooling period check
+        const { calculateCreditLimitFor2EMI } = require('../utils/creditLimitCalculator');
+        try {
+          const creditLimitData = await calculateCreditLimitFor2EMI(userId);
+          await checkAndMarkCoolingPeriod(userId, null, creditLimitData);
+          console.log(`[LoanApplication] User ${userId} with limit ₹${userLoanLimit} marked in cooling period during application attempt`);
+        } catch (coolingPeriodError) {
+          console.error('❌ Error marking cooling period (non-fatal):', coolingPeriodError);
+          // Continue to block even if marking fails
+        }
+      }
+      
+      return res.status(403).json({
+        success: false,
+        status: 'error',
+        message: 'Your Profile is under cooling period. We will let you know once you are eligible.',
+        hold_status: {
+          is_on_hold: true,
+          hold_type: 'permanent',
+          hold_reason: 'Your Profile is under cooling period. We will let you know once you are eligible.',
+          can_reapply: false,
+          loan_limit: userLoanLimit,
+          threshold: 45600
+        }
+      });
+    }
+
+    // Check if user is on hold (cooling period or other hold reasons)
+    if (user.status === 'on_hold') {
+      const holdReason = user.application_hold_reason || 'Your account is on hold';
+      
+      // Check if it's a temporary hold (has hold_until_date)
+      if (user.hold_until_date) {
+        const holdUntil = new Date(user.hold_until_date);
+        const now = new Date();
+        
+        if (now <= holdUntil) {
+          // Still on hold - calculate remaining days
+          const remainingDays = Math.ceil((holdUntil - now) / (1000 * 60 * 60 * 24));
+          
+          return res.status(403).json({
+            success: false,
+            status: 'error',
+            message: holdReason,
+            hold_status: {
+              is_on_hold: true,
+              hold_type: 'temporary',
+              hold_reason: holdReason,
+              hold_until: holdUntil.toISOString(),
+              remaining_days: remainingDays
+            }
+          });
+        }
+        // Hold expired - continue (will be updated by middleware or other process)
+      } else {
+        // Permanent hold (no hold_until_date) - block application
+        return res.status(403).json({
+          success: false,
+          status: 'error',
+          message: holdReason,
+          hold_status: {
+            is_on_hold: true,
+            hold_type: 'permanent',
+            hold_reason: holdReason,
+            can_reapply: false
+          }
+        });
+      }
+    }
+
     // Check if user has pending applications
     const hasPending = await hasPendingApplications(userId);
     if (hasPending) {

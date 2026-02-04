@@ -954,7 +954,9 @@ class ApiService {
       id: number;
       name: string;
       phone: string;
-      email: string;
+      email: string | null;
+      personal_email?: string | null;
+      official_email?: string | null;
       member_since: string;
     };
     summary: {

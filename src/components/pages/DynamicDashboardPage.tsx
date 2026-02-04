@@ -134,6 +134,7 @@ export function DynamicDashboardPage() {
   const [runningLoans, setRunningLoans] = useState<any[]>([]);
   const [allLoans, setAllLoans] = useState<any[]>([]); // All loans including cleared
   const [canApplyForLoan, setCanApplyForLoan] = useState(true);
+  const [isInCoolingPeriod, setIsInCoolingPeriod] = useState(false);
   const [selectedLoanDetails, setSelectedLoanDetails] = useState<any>(null);
   const [showLoanDetailsModal, setShowLoanDetailsModal] = useState(false);
   const [loanDocumentStatus, setLoanDocumentStatus] = useState<{ [loanId: number]: { allUploaded: boolean; hasPending: boolean } }>({});
@@ -186,8 +187,15 @@ export function DynamicDashboardPage() {
 
       if (response.status === 'success' && response.data) {
         setDashboardData(response.data);
-        if ((response.data as any).loan_status) {
-          setCanApplyForLoan((response.data as any).loan_status.can_apply);
+        const data = response.data as any;
+        if (data.loan_status) {
+          // Also check loan_limit from user data as additional safety check
+          const userLoanLimit = parseFloat(data.user?.loan_limit) || 0;
+          const isLimitAboveThreshold = userLoanLimit >= 45600;
+          // User cannot apply if limit >= ₹45,600 OR if loan_status says they can't
+          setCanApplyForLoan(data.loan_status.can_apply && !isLimitAboveThreshold);
+          // Set cooling period flag for display
+          setIsInCoolingPeriod(isLimitAboveThreshold || (data.hold_info?.is_on_hold && data.hold_info?.hold_type === 'cooling_period'));
         }
       } else if (response.status === 'profile_incomplete') {
         const incompleteData = response.data as any;
@@ -819,19 +827,31 @@ export function DynamicDashboardPage() {
                 </div>
               ) : (
                 <div className="text-center py-8">
-                  <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Loans</h3>
-                  <p className="text-gray-600 mb-4">You don't have any active loans at the moment.</p>
-                  {canApplyForLoan && !hasActiveOrPendingLoans() && (
-                    <Button
-                      onClick={() => {
-                        console.log('Apply for a Loan button clicked');
-                        navigate('/application');
-                      }}
-                      style={{ backgroundColor: '#0052FF' }}
-                    >
-                      Apply for a Loan
-                    </Button>
+                  {isInCoolingPeriod ? (
+                    <>
+                      <AlertCircle className="w-16 h-16 text-orange-500 mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">Account Under Cooling Period</h3>
+                      <p className="text-gray-600 mb-4">
+                        Your Profile is under cooling period. We will let you know once you are eligible.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Loans</h3>
+                      <p className="text-gray-600 mb-4">You don't have any active loans at the moment.</p>
+                      {canApplyForLoan && !hasActiveOrPendingLoans() && (
+                        <Button
+                          onClick={() => {
+                            console.log('Apply for a Loan button clicked');
+                            navigate('/application');
+                          }}
+                          style={{ backgroundColor: '#0052FF' }}
+                        >
+                          Apply for a Loan
+                        </Button>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -1048,18 +1068,30 @@ export function DynamicDashboardPage() {
           ) : (
             <div className="text-center py-8">
               <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Loans</h3>
-              <p className="text-gray-600 mb-4">You don't have any active loans at the moment.</p>
-              {canApplyForLoan && (
-                <Button
-                  onClick={() => {
-                    console.log('Apply for a Loan button clicked');
-                    navigate('/application');
-                  }}
-                  style={{ backgroundColor: '#0052FF' }}
-                >
-                  Apply for a Loan
-                </Button>
+              {isInCoolingPeriod ? (
+                <>
+                  <AlertCircle className="w-16 h-16 text-orange-500 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Account Under Cooling Period</h3>
+                  <p className="text-gray-600 mb-4">
+                    Your Profile is under cooling period. We will let you know once you are eligible.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No Active Loans</h3>
+                  <p className="text-gray-600 mb-4">You don't have any active loans at the moment.</p>
+                  {canApplyForLoan && (
+                    <Button
+                      onClick={() => {
+                        console.log('Apply for a Loan button clicked');
+                        navigate('/application');
+                      }}
+                      style={{ backgroundColor: '#0052FF' }}
+                    >
+                      Apply for a Loan
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -1351,7 +1383,9 @@ export function DynamicDashboardPage() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-blue-100 text-[10px] mb-0.5">Email Address</p>
-                            <p className="font-medium text-white truncate text-xs">{userData.email || 'N/A'}</p>
+                            <p className="font-medium text-white truncate text-xs">
+                              {userData.email || userData.personal_email || userData.official_email || 'N/A'}
+                            </p>
                           </div>
                         </div>
                       </div>

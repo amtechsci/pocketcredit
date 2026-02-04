@@ -171,7 +171,7 @@ const getDashboardSummary = async (req, res) => {
 const fetchDashboardData = async (userId) => {
   const userQuery = `
     SELECT 
-      id, first_name, last_name, phone, email, created_at, 
+      id, first_name, last_name, phone, email, personal_email, official_email, created_at, 
       credit_score, experian_score, loan_limit, status, eligibility_status,
       application_hold_reason, hold_until_date,
       employment_type, graduation_status
@@ -211,7 +211,7 @@ const fetchDashboardData = async (userId) => {
         id: user.id,
         name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'User',
         phone: user.phone,
-        email: user.email || '',
+        email: user.email || user.personal_email || user.official_email || '',
         status: 'deleted'
       },
       deleted: true,
@@ -412,8 +412,13 @@ const fetchDashboardData = async (userId) => {
   const hasPendingApplication = pendingApplications && pendingApplications.length > 0;
   const pendingApplicationInfo = hasPendingApplication ? pendingApplications[0] : null;
 
-  // User can apply for new loan only if they have no active loans AND no pending applications
-  const canApplyForLoan = !hasPendingApplication && (activeLoans.length === 0);
+  // User can apply for new loan only if:
+  // 1. They have no active loans AND no pending applications
+  // 2. They are not on hold
+  // 3. Their loan limit is below ₹45,600 (cooling period threshold)
+  const userLoanLimit = parseFloat(user.loan_limit) || 0;
+  const isLimitAboveThreshold = userLoanLimit >= 45600;
+  const canApplyForLoan = !hasPendingApplication && (activeLoans.length === 0) && !isLimitAboveThreshold;
 
   // Get recent notifications (notifications table doesn't exist yet)
   const notifications = [];
@@ -432,7 +437,9 @@ const fetchDashboardData = async (userId) => {
       id: user.id,
       name: `${user.first_name || ''} ${user.last_name || ''}`.trim(),
       phone: user.phone,
-      email: user.email,
+      email: user.email || user.personal_email || user.official_email || null,
+      personal_email: user.personal_email || null,
+      official_email: user.official_email || null,
       member_since: user.created_at,
       employment_type: user.employment_type,
       graduation_status: user.graduation_status,

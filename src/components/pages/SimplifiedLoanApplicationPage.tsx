@@ -82,7 +82,41 @@ export function SimplifiedLoanApplicationPage() {
       setCheckingEligibility(true);
       console.log('🚀 [Application Page] Starting eligibility check...');
       try {
-        // PRIORITY 0: Check if user has any pending/active loans (only cleared or cancelled loans allow new applications)
+        // PRIORITY 0: Check if user is on hold (cooling period or other hold reasons) OR has limit >= ₹45,600
+        try {
+          const dashboardResponse = await apiService.getDashboardSummary();
+          if (dashboardResponse.status === 'success' && dashboardResponse.data) {
+            const data = dashboardResponse.data as any;
+            const holdInfo = data.hold_info;
+            const userData = data.user;
+            const userLoanLimit = parseFloat(userData?.loan_limit) || 0;
+            
+            // Check if user's loan limit has reached cooling period threshold (>= ₹45,600)
+            if (userLoanLimit >= 45600) {
+              console.log('🚫 [Application Page] User loan limit reached threshold:', userLoanLimit);
+              toast.error('Your Profile is under cooling period. We will let you know once you are eligible.');
+              setCanApply(false);
+              setCheckingEligibility(false);
+              navigate('/dashboard', { replace: true });
+              return;
+            }
+            
+            // Check if user is on hold
+            if (holdInfo && holdInfo.is_on_hold) {
+              console.log('🚫 [Application Page] User is on hold:', holdInfo);
+              toast.error(holdInfo.hold_reason || 'Your account is on hold. You cannot apply for a new loan at this time.');
+              setCanApply(false);
+              setCheckingEligibility(false);
+              navigate('/dashboard', { replace: true });
+              return;
+            }
+          }
+        } catch (holdCheckError) {
+          console.error('Error checking hold status:', holdCheckError);
+          // Continue with other checks if hold check fails
+        }
+
+        // PRIORITY 1: Check if user has any pending/active loans (only cleared or cancelled loans allow new applications)
         try {
           const applicationsResponse = await apiService.getLoanApplications();
           console.log('🔍 Application eligibility check - API response:', applicationsResponse);
@@ -140,7 +174,8 @@ export function SimplifiedLoanApplicationPage() {
               try {
                 const validationResponse = await apiService.request('GET', `/validation/user/history?loanApplicationId=${app.id}`, {});
                 if (validationResponse.status === 'success' && validationResponse.data) {
-                  const documentActions = validationResponse.data.filter(
+                  const validationData = Array.isArray(validationResponse.data) ? validationResponse.data : [];
+                  const documentActions = validationData.filter(
                     (action: any) => action.action_type === 'need_document' && action.loan_application_id === app.id
                   );
                   if (documentActions.length > 0) {

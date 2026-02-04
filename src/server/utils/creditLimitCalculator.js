@@ -484,8 +484,10 @@ async function adjustFirstTimeLoanAmount(userId, monthlySalary) {
 }
 
 /**
- * Check if user should be marked in cooling period after reaching premium limit (32.1% = ₹1,50,000)
- * This triggers when user reaches 32.1% (after 5th 2 EMI loan cleared) OR accepts premium limit
+ * Check if user should be marked in cooling period
+ * This triggers when:
+ * 1. User reaches 6th loan (32.1% = ₹1,50,000 premium limit)
+ * 2. User's limit reaches or exceeds ₹45,600 (max regular limit threshold)
  * @param {number} userId - User ID
  * @param {number} loanId - Loan ID that was just cleared (optional, for logging)
  * @param {object} creditLimitData - Credit limit calculation data (optional)
@@ -494,13 +496,27 @@ async function adjustFirstTimeLoanAmount(userId, monthlySalary) {
 async function checkAndMarkCoolingPeriod(userId, loanId = null, creditLimitData = null) {
   try {
     let shouldMarkCoolingPeriod = false;
+    let coolingPeriodReason = '';
     
-    // Method 1: Check if credit limit data shows premium limit (32.1% reached)
+    // Method 1: Check if credit limit data shows conditions for cooling period
     if (creditLimitData) {
-      // If new limit is ₹1,50,000 (premium) and percentage is 32.1%, mark cooling period
+      // Condition 1: Premium limit (6th loan) - ₹1,50,000 with 32.1%
       if (creditLimitData.newLimit === 150000 && creditLimitData.percentage === 32.1) {
         shouldMarkCoolingPeriod = true;
+        coolingPeriodReason = 'reached premium limit (6th loan - 32.1% = ₹1,50,000)';
         console.log(`[CreditLimit] User ${userId} reached premium limit (32.1%) - will mark in cooling period`);
+      }
+      // Condition 2: Limit reaches or exceeds ₹45,600 (max regular limit threshold)
+      else if (creditLimitData.newLimit >= 45600 && creditLimitData.newLimit < 150000) {
+        shouldMarkCoolingPeriod = true;
+        coolingPeriodReason = `reached maximum regular limit (₹${creditLimitData.newLimit.toLocaleString('en-IN')})`;
+        console.log(`[CreditLimit] User ${userId} reached maximum regular limit (₹${creditLimitData.newLimit}) - will mark in cooling period`);
+      }
+      // Condition 3: Check if calculated limit would cross ₹45,600 threshold
+      else if (creditLimitData.calculatedLimit && creditLimitData.calculatedLimit >= 45600 && creditLimitData.newLimit < 150000) {
+        shouldMarkCoolingPeriod = true;
+        coolingPeriodReason = `calculated limit crossed threshold (₹${creditLimitData.calculatedLimit.toLocaleString('en-IN')})`;
+        console.log(`[CreditLimit] User ${userId} calculated limit crossed ₹45,600 threshold (₹${creditLimitData.calculatedLimit}) - will mark in cooling period`);
       }
     }
     
@@ -552,7 +568,7 @@ async function checkAndMarkCoolingPeriod(userId, loanId = null, creditLimitData 
         [userId]
       );
 
-      console.log(`[CreditLimit] User ${userId} marked in cooling period after reaching premium limit (32.1% = ₹1,50,000)`);
+      console.log(`[CreditLimit] User ${userId} marked in cooling period - ${coolingPeriodReason || 'reached premium limit (32.1% = ₹1,50,000)'}`);
       return true;
     }
 

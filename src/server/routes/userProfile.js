@@ -3154,17 +3154,25 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
           console.log(`✅ Loan #${loanIdInt} marked as cleared (${txType} received)`);
 
           // Check if user should be moved to cooling period after clearing this loan
-          // Cooling period triggers when user reaches 32.1% (₹1,50,000) after clearing a loan
+          // Cooling period triggers when:
+          // 1. User reaches 32.1% (₹1,50,000) - 6th loan condition
+          // 2. User's limit reaches or exceeds ₹45,600 - max regular limit threshold
           try {
             const { calculateCreditLimitFor2EMI, checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
             
-            // Recalculate credit limit to check if user reached premium limit (32.1%)
+            // Recalculate credit limit to check if user reached cooling period conditions
             const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
             
-            if (creditLimitData.newLimit === 150000 && creditLimitData.percentage === 32.1) {
-              // User has reached premium limit (32.1% = ₹1,50,000) - mark in cooling period
+            // Check both conditions: premium limit (₹1,50,000) OR max regular limit (₹45,600+)
+            const shouldCheckCoolingPeriod = 
+              (creditLimitData.newLimit === 150000 && creditLimitData.percentage === 32.1) || // 6th loan condition
+              (creditLimitData.newLimit >= 45600 && creditLimitData.newLimit < 150000) || // Max regular limit condition
+              (creditLimitData.calculatedLimit && creditLimitData.calculatedLimit >= 45600 && creditLimitData.newLimit < 150000); // Calculated limit threshold
+            
+            if (shouldCheckCoolingPeriod) {
+              // User has reached cooling period condition - mark in cooling period
               await checkAndMarkCoolingPeriod(loan.user_id, loanIdInt, creditLimitData);
-              console.log(`[UserProfile] User ${loan.user_id} moved to cooling period after clearing loan #${loanIdInt} (reached 32.1% = ₹1,50,000)`);
+              console.log(`[UserProfile] User ${loan.user_id} moved to cooling period after clearing loan #${loanIdInt} (new limit: ₹${creditLimitData.newLimit}, calculated: ₹${creditLimitData.calculatedLimit || 'N/A'})`);
             }
           } catch (coolingPeriodError) {
             console.error('❌ Error checking cooling period after loan clearance (non-fatal):', coolingPeriodError);
@@ -3431,9 +3439,15 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                   
                   const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
                   
-                  if (creditLimitData.newLimit === 150000 && creditLimitData.percentage === 32.1) {
+                  // Check both conditions: premium limit (₹1,50,000) OR max regular limit (₹45,600+)
+                  const shouldCheckCoolingPeriod = 
+                    (creditLimitData.newLimit === 150000 && creditLimitData.percentage === 32.1) || // 6th loan condition
+                    (creditLimitData.newLimit >= 45600 && creditLimitData.newLimit < 150000) || // Max regular limit condition
+                    (creditLimitData.calculatedLimit && creditLimitData.calculatedLimit >= 45600 && creditLimitData.newLimit < 150000); // Calculated limit threshold
+                  
+                  if (shouldCheckCoolingPeriod) {
                     await checkAndMarkCoolingPeriod(loan.user_id, loanIdInt, creditLimitData);
-                    console.log(`[UserProfile] User ${loan.user_id} moved to cooling period after clearing loan #${loanIdInt} (reached 32.1% = ₹1,50,000)`);
+                    console.log(`[UserProfile] User ${loan.user_id} moved to cooling period after clearing loan #${loanIdInt} (new limit: ₹${creditLimitData.newLimit}, calculated: ₹${creditLimitData.calculatedLimit || 'N/A'})`);
                   }
                 } catch (coolingPeriodError) {
                   console.error('❌ Error checking cooling period after loan clearance (non-fatal):', coolingPeriodError);
