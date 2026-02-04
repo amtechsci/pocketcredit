@@ -72,6 +72,10 @@ router.post('/login', validate(schemas.adminLogin), async (req, res) => {
       role: admin.role
     }, '20m'); // Admin tokens expire in 20 minutes
 
+    // Set initial activity timestamp in Redis (20 minutes TTL)
+    const activityKey = `admin:activity:${admin.id}`;
+    await set(activityKey, Date.now(), 20 * 60); // 20 minutes in seconds
+
     // Log admin login in MySQL
     const loginId = uuidv4();
     await executeQuery(`
@@ -117,11 +121,37 @@ router.post('/login', validate(schemas.adminLogin), async (req, res) => {
 });
 
 // Admin Logout
-router.post('/logout', (req, res) => {
-  res.json({
-    status: 'success',
-    message: 'Admin logged out successfully'
-  });
+router.post('/logout', async (req, res) => {
+  try {
+    // Get admin ID from token if available
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    
+    if (token) {
+      try {
+        const { verifyToken } = require('../middleware/auth');
+        const decoded = verifyToken(token);
+        
+        // Clear activity timestamp from Redis
+        const activityKey = `admin:activity:${decoded.id}`;
+        await del(activityKey);
+      } catch (error) {
+        // Token might be invalid, but we still want to respond successfully
+        console.log('Logout: Could not decode token, but proceeding with logout');
+      }
+    }
+    
+    res.json({
+      status: 'success',
+      message: 'Admin logged out successfully'
+    });
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.json({
+      status: 'success',
+      message: 'Admin logged out successfully'
+    });
+  }
 });
 
 // Admin Send OTP (Mobile)
@@ -355,6 +385,10 @@ router.post('/verify-otp', async (req, res) => {
       email: admin.email,
       role: admin.role
     }, '20m'); // Admin tokens expire in 20 minutes
+
+    // Set initial activity timestamp in Redis (20 minutes TTL)
+    const activityKey = `admin:activity:${admin.id}`;
+    await set(activityKey, Date.now(), 20 * 60); // 20 minutes in seconds
 
     // Log admin login in MySQL
     const loginId = uuidv4();

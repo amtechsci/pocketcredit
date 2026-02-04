@@ -502,7 +502,7 @@ export function AdminUsersPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => navigate(`/stpl/user-profile/${user.id}`)}
+                          onClick={() => window.open(`/stpl/user-profile/${user.id}`, '_blank')}
                           className="text-blue-600 hover:text-blue-900 p-1"
                           title="View Details"
                         >

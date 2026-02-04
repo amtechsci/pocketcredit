@@ -63,7 +63,7 @@ export function SearchResultsPage() {
   };
 
   const handleResultClick = (userId: number) => {
-    navigate(`/stpl/users/${userId}`);
+    window.open(`/stpl/user-profile/${userId}`, '_blank');
   };
 
   return (

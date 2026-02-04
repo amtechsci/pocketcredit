@@ -435,7 +435,7 @@ export function LoanApplicationsQueue() {
   };
 
   const handleViewDetails = (application: any) => {
-    navigate(`/stpl/user-profile/${application.userId}`);
+    window.open(`/stpl/user-profile/${application.userId}`, '_blank');
   };
 
   const handleAssignApplication = (applicationId: string) => {
@@ -609,17 +609,17 @@ export function LoanApplicationsQueue() {
 
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-3 sm:p-4 lg:p-6 space-y-4 sm:space-y-6">
 
       {/* Search and Status Tabs */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4 lg:p-6">
         <div className="space-y-4">
           {/* Status Filter Buttons - First Row */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1">
+          <div className="flex overflow-x-auto scrollbar-hide items-center gap-2 pb-2 -mx-3 sm:mx-0 px-3 sm:px-0">
+            <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('all')}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
                   statusFilter === 'all'
                     ? 'bg-blue-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
@@ -630,16 +630,16 @@ export function LoanApplicationsQueue() {
               <button
                 onClick={() => handleExportExcel('all')}
                 disabled={downloadingExcel === 'all'}
-                className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
                 title="Download Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'all' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('submitted')}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
                   statusFilter === 'submitted'
                     ? 'bg-purple-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
@@ -650,16 +650,16 @@ export function LoanApplicationsQueue() {
               <button
                 onClick={() => handleExportExcel('submitted')}
                 disabled={downloadingExcel === 'submitted'}
-                className="p-2 text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50"
+                className="p-2 text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
                 title="Download Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'submitted' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('under_review')}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
                   statusFilter === 'under_review'
                     ? 'bg-orange-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
@@ -670,16 +670,16 @@ export function LoanApplicationsQueue() {
               <button
                 onClick={() => handleExportExcel('under_review')}
                 disabled={downloadingExcel === 'under_review'}
-                className="p-2 text-gray-600 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors disabled:opacity-50"
+                className="p-2 text-gray-600 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
                 title="Download Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'under_review' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('follow_up')}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
                   statusFilter === 'follow_up'
                     ? 'bg-green-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
@@ -690,16 +690,16 @@ export function LoanApplicationsQueue() {
               <button
                 onClick={() => handleExportExcel('follow_up')}
                 disabled={downloadingExcel === 'follow_up'}
-                className="p-2 text-gray-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50"
+                className="p-2 text-gray-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
                 title="Download Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'follow_up' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('disbursal')}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
                   statusFilter === 'disbursal'
                     ? 'bg-teal-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
@@ -710,16 +710,16 @@ export function LoanApplicationsQueue() {
               <button
                 onClick={() => handleExportExcel('disbursal')}
                 disabled={downloadingExcel === 'disbursal'}
-                className="p-2 text-gray-600 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors disabled:opacity-50"
+                className="p-2 text-gray-600 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
                 title="Download Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'disbursal' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('ready_for_disbursement')}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
                   statusFilter === 'ready_for_disbursement'
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
@@ -730,16 +730,16 @@ export function LoanApplicationsQueue() {
               <button
                 onClick={() => handleExportExcel('ready_for_disbursement')}
                 disabled={downloadingExcel === 'ready_for_disbursement'}
-                className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50"
+                className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
                 title="Download Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'ready_for_disbursement' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('repeat_disbursal')}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
                   statusFilter === 'repeat_disbursal'
                     ? 'bg-cyan-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
@@ -750,16 +750,16 @@ export function LoanApplicationsQueue() {
               <button
                 onClick={() => handleExportExcel('repeat_disbursal')}
                 disabled={downloadingExcel === 'repeat_disbursal'}
-                className="p-2 text-gray-600 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors disabled:opacity-50"
+                className="p-2 text-gray-600 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
                 title="Download Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'repeat_disbursal' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('ready_to_repeat_disbursal')}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
                   statusFilter === 'ready_to_repeat_disbursal'
                     ? 'bg-blue-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
@@ -770,16 +770,16 @@ export function LoanApplicationsQueue() {
               <button
                 onClick={() => handleExportExcel('ready_to_repeat_disbursal')}
                 disabled={downloadingExcel === 'ready_to_repeat_disbursal'}
-                className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
                 title="Download Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'ready_to_repeat_disbursal' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('account_manager')}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
                   statusFilter === 'account_manager'
                     ? 'bg-purple-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
@@ -790,16 +790,16 @@ export function LoanApplicationsQueue() {
               <button
                 onClick={() => handleExportExcel('account_manager')}
                 disabled={downloadingExcel === 'account_manager'}
-                className="p-2 text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50"
+                className="p-2 text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
                 title="Download Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'account_manager' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('overdue')}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
                   statusFilter === 'overdue'
                     ? 'bg-red-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
@@ -810,16 +810,16 @@ export function LoanApplicationsQueue() {
               <button
                 onClick={() => handleExportExcel('overdue')}
                 disabled={downloadingExcel === 'overdue'}
-                className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
                 title="Download Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'overdue' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('cleared')}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
                   statusFilter === 'cleared'
                     ? 'bg-gray-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
@@ -830,16 +830,16 @@ export function LoanApplicationsQueue() {
               <button
                 onClick={() => handleExportExcel('cleared')}
                 disabled={downloadingExcel === 'cleared'}
-                className="p-2 text-gray-600 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors disabled:opacity-50"
+                className="p-2 text-gray-600 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
                 title="Download Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'cleared' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('rejected')}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
                   statusFilter === 'rejected'
                     ? 'bg-red-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
@@ -850,7 +850,7 @@ export function LoanApplicationsQueue() {
               <button
                 onClick={() => handleExportExcel('rejected')}
                 disabled={downloadingExcel === 'rejected'}
-                className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
                 title="Download Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'rejected' ? 'animate-pulse' : ''}`} />
@@ -885,8 +885,8 @@ export function LoanApplicationsQueue() {
       </div>
 
       {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Total Applications</p>

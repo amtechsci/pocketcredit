@@ -2115,15 +2115,15 @@ export function UserProfileDetail() {
     return (
       <div className="space-y-6">
         {/* Verification Status Card */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">KYC Verification Details</h3>
-            <div className="flex items-center gap-3">
+        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900">KYC Verification Details</h3>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               {canEditUsers && (
                 <button
                   onClick={handleTriggerReKYC}
                   disabled={triggeringReKYC}
-                  className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-orange-600 text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   <RefreshCw className={`w-4 h-4 ${triggeringReKYC ? 'animate-spin' : ''}`} />
                   {triggeringReKYC ? 'Triggering...' : 'ReKYC'}
@@ -2133,13 +2133,13 @@ export function UserProfileDetail() {
                 <button
                   onClick={handleRefetchKYC}
                   disabled={refetchingKYC}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   <RefreshCw className={`w-4 h-4 ${refetchingKYC ? 'animate-spin' : ''}`} />
                   {refetchingKYC ? 'Refetching...' : 'Refetch KYC Data'}
                 </button>
               )}
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusColor}`}>
+              <span className={`px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap ${statusColor}`}>
                 {displayStatus}
               </span>
             </div>
@@ -2227,7 +2227,7 @@ export function UserProfileDetail() {
         </div>
 
         {/* KYC Documents Card */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">KYC Documents</h3>
           {kycDocs.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -2276,7 +2276,7 @@ export function UserProfileDetail() {
         </div>
 
         {/* Selfie Verification Card */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Selfie Verification</h3>
             {canEditUsers && getUserData('selfieData')?.selfie_verified && (
@@ -3231,7 +3231,7 @@ export function UserProfileDetail() {
     return (
       <div className="space-y-6">
         {/* Upload Document Section */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Upload Document</h3>
             <button
@@ -3245,7 +3245,7 @@ export function UserProfileDetail() {
         </div>
 
         {/* Document Verification Section */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Document Verification</h3>
             <div className="flex items-center gap-2">
@@ -3440,14 +3440,14 @@ export function UserProfileDetail() {
   const renderBankTab = () => (
     <div className="space-y-6">
       {/* Bank Account Details Section */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Bank Account Details</h3>
-          <div className="flex items-center gap-3">
+      <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+          <h3 className="text-base sm:text-lg font-semibold text-gray-900">Bank Account Details</h3>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             {getUserData('bankInfo.id') && (
               <button
                 onClick={handleEditBankDetails}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-gray-600 text-white text-xs sm:text-sm rounded-lg hover:bg-gray-700 transition-colors whitespace-nowrap"
               >
                 <Edit className="w-4 h-4" />
                 Edit Bank Details
@@ -3455,14 +3455,14 @@ export function UserProfileDetail() {
             )}
             <button
               onClick={() => setShowAddBankModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white text-xs sm:text-sm rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap"
             >
               <Plus className="w-4 h-4" />
               Add Bank Details
             </button>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600">Verification Status</span>
-              <span className={`px-2 py-1 text-xs font-medium rounded-full ${getUserData('bankInfo.verificationStatus') === 'verified' ? 'bg-green-100 text-green-800' :
+              <span className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">Verification Status</span>
+              <span className={`px-2 py-1 text-xs font-medium rounded-full whitespace-nowrap ${getUserData('bankInfo.verificationStatus') === 'verified' ? 'bg-green-100 text-green-800' :
                 getUserData('bankInfo.verificationStatus') === 'pending' ? 'bg-yellow-100 text-yellow-800' :
                   getUserData('bankInfo.verificationStatus') === 'rejected' ? 'bg-red-100 text-red-800' :
                     'bg-gray-100 text-gray-800'
@@ -3510,28 +3510,28 @@ export function UserProfileDetail() {
         {/* Admin Actions for Bank Details */}
         {getUserData('bankInfo.verificationStatus') !== 'verified' && (
           <div className="mt-6 pt-6 border-t border-gray-200">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-gray-700">Admin Actions:</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => handleApproveBankDetails(getUserData('bankInfo.id') || getUserData('bankDetails.0.id'))}
-                  className="flex items-center gap-1 text-green-600 hover:text-green-800 text-sm px-4 py-2 bg-green-50 border border-green-200 rounded-md hover:bg-green-100"
+                  className="flex items-center gap-1 text-green-600 hover:text-green-800 text-xs sm:text-sm px-3 sm:px-4 py-2 bg-green-50 border border-green-200 rounded-md hover:bg-green-100 whitespace-nowrap"
                 >
                   <CheckCircle className="w-4 h-4" />
                   Approve
                 </button>
                 <button
                   onClick={() => handleRejectBankDetails(getUserData('bankInfo.id') || getUserData('bankDetails.0.id'))}
-                  className="flex items-center gap-1 text-red-600 hover:text-red-800 text-sm px-4 py-2 bg-red-50 border border-red-200 rounded-md hover:bg-red-100"
+                  className="flex items-center gap-1 text-red-600 hover:text-red-800 text-xs sm:text-sm px-3 sm:px-4 py-2 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 whitespace-nowrap"
                 >
                   <XCircle className="w-4 h-4" />
                   Reject
                 </button>
                 <button
                   onClick={() => handleAddBankComment(getUserData('bankInfo.id') || getUserData('bankDetails.0.id'))}
-                  className="flex items-center gap-1 text-gray-600 hover:text-gray-800 text-sm px-4 py-2 bg-gray-50 border border-gray-200 rounded-md hover:bg-gray-100"
+                  className="flex items-center gap-1 text-gray-600 hover:text-gray-800 text-xs sm:text-sm px-3 sm:px-4 py-2 bg-gray-50 border border-gray-200 rounded-md hover:bg-gray-100 whitespace-nowrap"
                 >
                   <MessageSquare className="w-4 h-4" />
                   Add Comment
@@ -3565,8 +3565,8 @@ export function UserProfileDetail() {
       </div>
 
       {/* Bank Details History */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Bank Details History</h3>
+      <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
+        <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-4">Bank Details History</h3>
         <div className="space-y-4">
           <div className="border border-gray-200 rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">
@@ -3942,17 +3942,17 @@ export function UserProfileDetail() {
     return (
       <div className="space-y-6">
         {/* Add New Statement Button */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <div className="flex items-center justify-between">
+        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
-              <h4 className="text-md font-semibold text-gray-900">Bank Statement Verification</h4>
-              <p className="text-sm text-gray-500 mt-1">Add and manage bank statements for verification</p>
+              <h4 className="text-base sm:text-md font-semibold text-gray-900">Bank Statement Verification</h4>
+              <p className="text-xs sm:text-sm text-gray-500 mt-1">Add and manage bank statements for verification</p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <Button
                 onClick={handleAddNewFromUser}
                 disabled={verifyingStatement}
-                className="bg-orange-600 hover:bg-orange-700"
+                className="bg-orange-600 hover:bg-orange-700 text-xs sm:text-sm px-3 sm:px-4 whitespace-nowrap"
               >
                 {verifyingStatement ? (
                   <>
@@ -3969,7 +3969,7 @@ export function UserProfileDetail() {
               <Button
                 onClick={handleAddNewStatement}
                 disabled={verifyingStatement}
-                className="bg-blue-600 hover:bg-blue-700"
+                className="bg-blue-600 hover:bg-blue-700 text-xs sm:text-sm px-3 sm:px-4 whitespace-nowrap"
               >
                 {verifyingStatement ? (
                   <>
@@ -3988,7 +3988,7 @@ export function UserProfileDetail() {
         </div>
 
         {/* Statement Details Table */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
           <h4 className="text-md font-semibold text-gray-900 mb-4">Statement Details</h4>
           
           {!hasStatements ? (
@@ -4174,7 +4174,7 @@ export function UserProfileDetail() {
 
         {/* Verification History - Show for latest statement if available */}
         {bankStatement && bankStatement.verified_at && (
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
             <h4 className="text-md font-semibold text-gray-900 mb-4">Verification History</h4>
             <div className="space-y-2 text-sm">
               <div>
@@ -4360,19 +4360,19 @@ export function UserProfileDetail() {
 
     return (
       <div className="space-y-6">
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">Reference Details</h3>
-            <div className="flex items-center gap-3">
+        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900">Reference Details</h3>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <button
                 onClick={() => setShowAddReferenceModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-xs sm:text-sm whitespace-nowrap"
               >
                 <Plus className="w-4 h-4" />
                 Add Reference
               </button>
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-600">
+                <span className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">
                   {allReferences.filter((ref: any) => ref.status === 'verified').length} of {allReferences.length} verified
                 </span>
                 <div className="w-2 h-2 bg-green-500 rounded-full"></div>
@@ -5022,7 +5022,7 @@ export function UserProfileDetail() {
   const renderEnachTab = () => {
     return (
       <div className="space-y-6">
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
           <div className="flex items-center justify-between mb-6">
             <div>
               <h3 className="text-lg font-semibold text-gray-900">E-NACH Subscriptions</h3>
@@ -5537,7 +5537,7 @@ export function UserProfileDetail() {
     return (
       <div className="space-y-6">
         {/* Applied Loans Header */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
           <div className="mb-6">
             <h3 className="text-lg font-semibold text-gray-900">Applied Loans</h3>
             <p className="text-sm text-gray-600 mt-1">All loan applications for this user</p>
@@ -6124,7 +6124,7 @@ export function UserProfileDetail() {
     return (
       <div className="space-y-6">
         {/* Loan Application Review Header */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
           <div className="mb-6">
             <h3 className="text-lg font-semibold text-gray-900">Loans (Account Manager)</h3>
             <p className="text-sm text-gray-600 mt-1">Loans assigned to account manager</p>
@@ -6885,7 +6885,7 @@ export function UserProfileDetail() {
 
     return (
       <div className="space-y-6">
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-semibold text-gray-900">Validation Status</h3>
           </div>
@@ -6900,10 +6900,10 @@ export function UserProfileDetail() {
           )}
 
           {/* Quick Follow-up Form and History Layout */}
-          <div className="flex gap-6">
+          <div className="flex flex-col lg:flex-row gap-4 lg:gap-6">
             {/* Quick Follow-up Form - 1/3 width */}
-            <div className="bg-white border border-gray-200 rounded-lg p-6 w-1/3">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Follow-up</h3>
+            <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4 lg:p-6 w-full lg:w-1/3">
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-4">Quick Follow-up</h3>
 
               <div className="space-y-4">
                 {/* Action Selection */}
@@ -7276,8 +7276,8 @@ export function UserProfileDetail() {
             </div>
 
             {/* Validation History Table - 2/3 width */}
-            <div className="bg-white border border-gray-200 rounded-lg p-6 w-2/3">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Validation History</h3>
+            <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4 lg:p-6 w-full lg:w-2/3">
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-4">Validation History</h3>
 
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -7917,18 +7917,18 @@ export function UserProfileDetail() {
         </div>
 
         {/* Experian Credit Score */}
-        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200 p-6">
-          <div className="flex items-center justify-between mb-4">
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200 p-3 sm:p-4 lg:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
             <div className="flex items-center gap-2">
-              <CheckCircle className="w-6 h-6 text-blue-600" />
-              <h3 className="text-lg font-semibold text-gray-900">Experian Credit Score</h3>
+              <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900">Experian Credit Score</h3>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {/* Refetch Credit Button */}
               <button
                 onClick={() => handlePerformCreditCheck(true)}
                 disabled={performingCreditCheck || !userData?.id}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white text-xs sm:text-sm rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
                 title="Refetch credit data from Experian API"
               >
                 {performingCreditCheck ? (
@@ -7953,7 +7953,7 @@ export function UserProfileDetail() {
                       toast.error('PDF URL not available');
                     }
                   }}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white text-xs sm:text-sm rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap"
                 >
                   <Download className="w-4 h-4" />
                   Download Experian PDF
@@ -7965,7 +7965,7 @@ export function UserProfileDetail() {
                     console.log('📄 Full Report Structure:', JSON.stringify(full_report, null, 2));
                     toast.info('Check browser console for full report structure. PDF URL may be in a different location.');
                   }}
-                  className="flex items-center gap-2 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-yellow-600 text-white text-xs sm:text-sm rounded-lg hover:bg-yellow-700 transition-colors whitespace-nowrap"
                   title="PDF URL not found - Click to see report structure in console"
                 >
                   <FileText className="w-4 h-4" />
@@ -7974,18 +7974,18 @@ export function UserProfileDetail() {
               ) : null}
             </div>
           </div>
-          <p className="text-sm text-orange-600 italic mb-6">Your Experian Credit Report is summarized in the form of Experian Credit Score which ranges from 300 - 900.</p>
+          <p className="text-xs sm:text-sm text-orange-600 italic mb-4 sm:mb-6">Your Experian Credit Report is summarized in the form of Experian Credit Score which ranges from 300 - 900.</p>
 
-          <div className="flex items-center gap-8">
+          <div className="flex flex-col lg:flex-row items-center gap-4 lg:gap-8">
             {/* Credit Score Display - Show Old vs New if previous_credit_score exists in database */}
             {previous_credit_score !== null && previous_credit_score !== undefined ? (
-              <div className="flex items-center gap-6">
+              <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6">
                 {/* Old Credit Score */}
                 <div className="relative">
-                  <div className="w-32 h-32 rounded-full bg-gradient-to-r from-gray-400 via-gray-500 to-gray-600 flex items-center justify-center">
-                    <div className="w-28 h-28 rounded-full bg-white flex items-center justify-center">
+                  <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-gradient-to-r from-gray-400 via-gray-500 to-gray-600 flex items-center justify-center">
+                    <div className="w-20 h-20 sm:w-28 sm:h-28 rounded-full bg-white flex items-center justify-center">
                       <div className="text-center">
-                        <div className="text-3xl font-bold text-gray-600">{previous_credit_score}</div>
+                        <div className="text-2xl sm:text-3xl font-bold text-gray-600">{previous_credit_score}</div>
                         <div className="text-xs text-gray-500 mt-1">Previous Score</div>
                       </div>
                     </div>
@@ -7997,15 +7997,15 @@ export function UserProfileDetail() {
                 </div>
                 
                 {/* Arrow */}
-                <div className="flex flex-col items-center">
-                  <ArrowRight className="w-8 h-8 text-gray-500" />
-                  <span className="text-xs text-gray-600 mt-1">Updated</span>
+                <div className="flex flex-row sm:flex-col items-center gap-2">
+                  <ArrowRight className="w-6 h-6 sm:w-8 sm:h-8 text-gray-500 rotate-90 sm:rotate-0" />
+                  <span className="text-xs text-gray-600">Updated</span>
                 </div>
 
                 {/* New Credit Score */}
                 <div className="relative">
-                  <div className="w-40 h-40 rounded-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 flex items-center justify-center">
-                    <div className="w-36 h-36 rounded-full bg-white flex items-center justify-center">
+                  <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 flex items-center justify-center">
+                    <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-full bg-white flex items-center justify-center">
                       <div className="text-center">
                         {(() => {
                           const newScoreNum = typeof displayScore === 'number' ? displayScore : (displayScore && displayScore !== 'N/A' ? parseInt(String(displayScore)) : null);
@@ -8014,7 +8014,7 @@ export function UserProfileDetail() {
                             ? (newScoreNum > oldScoreNum ? 'text-green-600' : newScoreNum < oldScoreNum ? 'text-red-600' : 'text-blue-600')
                             : 'text-blue-600';
                           return (
-                            <div className={`text-5xl font-bold ${scoreColor}`}>
+                            <div className={`text-3xl sm:text-5xl font-bold ${scoreColor}`}>
                               {displayScore}
                             </div>
                           );
@@ -8040,28 +8040,28 @@ export function UserProfileDetail() {
                       if (diff > 0) {
                         return (
                           <div className="flex items-center gap-1 text-green-600">
-                            <TrendingUp className="w-5 h-5" />
-                            <span className="font-semibold">+{diff} points</span>
+                            <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5" />
+                            <span className="text-xs sm:text-sm font-semibold">+{diff} points</span>
                           </div>
                         );
                       } else if (diff < 0) {
                         return (
                           <div className="flex items-center gap-1 text-red-600">
-                            <TrendingDown className="w-5 h-5" />
-                            <span className="font-semibold">{diff} points</span>
+                            <TrendingDown className="w-4 h-4 sm:w-5 sm:h-5" />
+                            <span className="text-xs sm:text-sm font-semibold">{diff} points</span>
                           </div>
                         );
                       } else {
                         return (
                           <div className="flex items-center gap-1 text-gray-600">
-                            <span className="font-semibold">No change</span>
+                            <span className="text-xs sm:text-sm font-semibold">No change</span>
                           </div>
                         );
                       }
                     } else {
                       return (
                         <div className="flex items-center gap-1 text-gray-600">
-                          <span className="font-semibold">Score comparison unavailable</span>
+                          <span className="text-xs sm:text-sm font-semibold">Score comparison unavailable</span>
                         </div>
                       );
                     }
@@ -8072,10 +8072,10 @@ export function UserProfileDetail() {
             ) : (
               /* Single Credit Score Gauge (when not refetched) */
               <div className="relative">
-                <div className="w-40 h-40 rounded-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 flex items-center justify-center">
-                  <div className="w-36 h-36 rounded-full bg-white flex items-center justify-center">
+                <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 flex items-center justify-center">
+                  <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-full bg-white flex items-center justify-center">
                     <div className="text-center">
-                      <div className="text-5xl font-bold text-blue-600">{displayScore}</div>
+                      <div className="text-3xl sm:text-5xl font-bold text-blue-600">{displayScore}</div>
                       <div className="text-xs text-gray-500 mt-1">Credit Score</div>
                     </div>
                   </div>
@@ -8088,36 +8088,36 @@ export function UserProfileDetail() {
             )}
 
             {/* Score Factors */}
-            <div className="flex-1 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-700">1. Recency:</span>
-                <span className="text-sm text-gray-900">Recent Credit Account Defaults</span>
+            <div className="flex-1 space-y-2 sm:space-y-3 w-full lg:w-auto">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span className="text-xs sm:text-sm text-gray-700">1. Recency:</span>
+                <span className="text-xs sm:text-sm text-gray-900">Recent Credit Account Defaults</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-700">2. Leverage:</span>
-                <span className="text-sm text-gray-900">Credit Accounts with on-time re-payment history</span>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span className="text-xs sm:text-sm text-gray-700">2. Leverage:</span>
+                <span className="text-xs sm:text-sm text-gray-900">Credit Accounts with on-time re-payment history</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-700">3. Coverage:</span>
-                <span className="text-sm text-gray-900">Non-delinquent and delinquent Credit Accounts</span>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span className="text-xs sm:text-sm text-gray-700">3. Coverage:</span>
+                <span className="text-xs sm:text-sm text-gray-900">Non-delinquent and delinquent Credit Accounts</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-700">4. Delinquency Status:</span>
-                <span className="text-sm text-gray-900">Defaults on Credit Accounts (current & recent periodic intervals)</span>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <span className="text-xs sm:text-sm text-gray-700">4. Delinquency Status:</span>
+                <span className="text-xs sm:text-sm text-gray-900">Defaults on Credit Accounts (current & recent periodic intervals)</span>
               </div>
             </div>
 
             {/* Eligibility Badge */}
-            <div className="text-center">
-              <div className={`inline-flex items-center justify-center w-24 h-24 rounded-full shadow-lg mb-2 ${is_eligible ? 'bg-green-100' : 'bg-red-100'
+            <div className="text-center w-full lg:w-auto">
+              <div className={`inline-flex items-center justify-center w-20 h-20 sm:w-24 sm:h-24 rounded-full shadow-lg mb-2 ${is_eligible ? 'bg-green-100' : 'bg-red-100'
                 }`}>
                 {is_eligible ? (
-                  <CheckCircle className="w-12 h-12 text-green-600" />
+                  <CheckCircle className="w-10 h-10 sm:w-12 sm:h-12 text-green-600" />
                 ) : (
-                  <XCircle className="w-12 h-12 text-red-600" />
+                  <XCircle className="w-10 h-10 sm:w-12 sm:h-12 text-red-600" />
                 )}
               </div>
-              <p className="text-sm font-semibold text-gray-900">
+              <p className="text-xs sm:text-sm font-semibold text-gray-900">
                 {is_eligible ? 'Eligible' : 'Not Eligible'}
               </p>
             </div>
@@ -8144,7 +8144,7 @@ export function UserProfileDetail() {
 
         {/* Report Summary */}
         {reportData.CAIS_Account?.CAIS_Summary && (
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
             <div className="flex items-center gap-2 mb-4">
               <CheckCircle className="w-6 h-6 text-green-600" />
               <h3 className="text-lg font-semibold text-gray-900">Report Summary</h3>
@@ -8351,7 +8351,7 @@ export function UserProfileDetail() {
 
         {/* Credit Utilization Chart */}
         {accountSummary && accountSummary.length > 0 && (
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
             <div className="flex items-center gap-2 mb-4">
               <CheckCircle className="w-6 h-6 text-purple-600" />
               <h3 className="text-lg font-semibold text-gray-900">Credit Utilization Analysis</h3>
@@ -8398,7 +8398,7 @@ export function UserProfileDetail() {
 
         {/* Account Age Analysis */}
         {accountSummary && accountSummary.length > 0 && (
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
             <div className="flex items-center gap-2 mb-4">
               <CheckCircle className="w-6 h-6 text-indigo-600" />
               <h3 className="text-lg font-semibold text-gray-900">Account Age Analysis</h3>
@@ -8457,7 +8457,7 @@ export function UserProfileDetail() {
 
         {/* Detailed CAPS Enquiry History */}
         {capsApplications && capsApplications.length > 0 && (
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
             <div className="flex items-center gap-2 mb-4">
               <CheckCircle className="w-6 h-6 text-orange-600" />
               <h3 className="text-lg font-semibold text-gray-900">Credit Enquiry History (CAPS)</h3>
@@ -8497,7 +8497,7 @@ export function UserProfileDetail() {
 
         {/* Payment History Timeline */}
         {accountSummary && accountSummary.length > 0 && (
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
             <div className="flex items-center gap-2 mb-4">
               <CheckCircle className="w-6 h-6 text-teal-600" />
               <h3 className="text-lg font-semibold text-gray-900">Payment History Timeline</h3>
@@ -8600,22 +8600,22 @@ export function UserProfileDetail() {
   // Follow Up Tab
   const renderFollowUpTab = () => (
     <div className="space-y-6">
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Follow Up Management</h3>
-          <div className="flex items-center gap-3">
+      <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <h3 className="text-base sm:text-lg font-semibold text-gray-900">Follow Up Management</h3>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <button
               onClick={() => setShowAddFollowUpModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs sm:text-sm whitespace-nowrap"
             >
               <Plus className="w-4 h-4" />
               Add Follow Up
             </button>
-            <button className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+            <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
               <Download className="w-4 h-4" />
               Export
             </button>
-            <button className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+            <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
               <Calendar className="w-4 h-4" />
               Schedule
             </button>
@@ -8707,7 +8707,7 @@ export function UserProfileDetail() {
 
     return (
       <div className="space-y-6">
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-semibold text-gray-900">Account Manager</h3>
             <div className="flex items-center gap-3">
@@ -9168,22 +9168,22 @@ export function UserProfileDetail() {
   // Notes Tab
   const renderNotesTab = () => (
     <div className="space-y-6">
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Admin Notes Management</h3>
-          <div className="flex items-center gap-3">
+      <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <h3 className="text-base sm:text-lg font-semibold text-gray-900">Admin Notes Management</h3>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <button
               onClick={() => setShowAddNoteModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs sm:text-sm whitespace-nowrap"
             >
               <Plus className="w-4 h-4" />
               Add Note
             </button>
-            <button className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+            <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
               <Download className="w-4 h-4" />
               Export
             </button>
-            <button className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+            <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
               <Filter className="w-4 h-4" />
               Filter
             </button>
@@ -9279,52 +9279,52 @@ export function UserProfileDetail() {
         </div>
 
         {/* Summary Cards */}
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-blue-50 p-4 rounded-lg">
+        <div className="mt-4 sm:mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <div className="bg-blue-50 p-3 sm:p-4 rounded-lg">
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                <FileText className="w-8 h-8 text-blue-600" />
+                <FileText className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600" />
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-blue-600">Total Notes</p>
-                <p className="text-2xl font-semibold text-blue-900">{getUserData('notes')?.length || 0}</p>
+              <div className="ml-3 sm:ml-4">
+                <p className="text-xs sm:text-sm font-medium text-blue-600">Total Notes</p>
+                <p className="text-xl sm:text-2xl font-semibold text-blue-900">{getUserData('notes')?.length || 0}</p>
               </div>
             </div>
           </div>
-          <div className="bg-green-50 p-4 rounded-lg">
+          <div className="bg-green-50 p-3 sm:p-4 rounded-lg">
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                <CheckCircle className="w-8 h-8 text-green-600" />
+                <CheckCircle className="w-6 h-6 sm:w-8 sm:h-8 text-green-600" />
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-green-600">Active</p>
-                <p className="text-2xl font-semibold text-green-900">
+              <div className="ml-3 sm:ml-4">
+                <p className="text-xs sm:text-sm font-medium text-green-600">Active</p>
+                <p className="text-xl sm:text-2xl font-semibold text-green-900">
                   {getArray('notes').filter(note => note.status === 'active').length}
                 </p>
               </div>
             </div>
           </div>
-          <div className="bg-red-50 p-4 rounded-lg">
+          <div className="bg-red-50 p-3 sm:p-4 rounded-lg">
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                <Flag className="w-8 h-8 text-red-600" />
+                <Flag className="w-6 h-6 sm:w-8 sm:h-8 text-red-600" />
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-red-600">Flagged</p>
-                <p className="text-2xl font-semibold text-red-900">
+              <div className="ml-3 sm:ml-4">
+                <p className="text-xs sm:text-sm font-medium text-red-600">Flagged</p>
+                <p className="text-xl sm:text-2xl font-semibold text-red-900">
                   {getArray('notes').filter(note => note.status === 'flagged').length}
                 </p>
               </div>
             </div>
           </div>
-          <div className="bg-purple-50 p-4 rounded-lg">
+          <div className="bg-purple-50 p-3 sm:p-4 rounded-lg">
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                <User className="w-8 h-8 text-purple-600" />
+                <User className="w-6 h-6 sm:w-8 sm:h-8 text-purple-600" />
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-purple-600">Admins</p>
-                <p className="text-2xl font-semibold text-purple-900">
+              <div className="ml-3 sm:ml-4">
+                <p className="text-xs sm:text-sm font-medium text-purple-600">Admins</p>
+                <p className="text-xl sm:text-2xl font-semibold text-purple-900">
                   {new Set(getArray('notes').map(note => note.admin)).size}
                 </p>
               </div>
@@ -9338,24 +9338,24 @@ export function UserProfileDetail() {
   // SMS Tab
   const renderSmsTab = () => (
     <div className="space-y-6">
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">SMS Communication Management</h3>
-          <div className="flex items-center gap-3">
+      <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <h3 className="text-base sm:text-lg font-semibold text-gray-900">SMS Communication Management</h3>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <button
               onClick={() => setShowSendSmsModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs sm:text-sm whitespace-nowrap"
             >
               <Plus className="w-4 h-4" />
               Send SMS
             </button>
-            <button className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+            <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
               <Download className="w-4 h-4" />
               Export
             </button>
             <button
               onClick={() => setShowTemplatesModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-xs sm:text-sm whitespace-nowrap"
             >
               <MessageSquare className="w-4 h-4" />
               Templates
@@ -9511,18 +9511,18 @@ export function UserProfileDetail() {
   // Transactions Tab
   const renderTransactionsTab = () => (
     <div className="space-y-6">
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Transaction History</h3>
-          <div className="flex items-center gap-3">
+      <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <h3 className="text-base sm:text-lg font-semibold text-gray-900">Transaction History</h3>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <button
               onClick={() => setShowAddTransactionModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs sm:text-sm whitespace-nowrap"
             >
               <Plus className="w-4 h-4" />
               Add Transaction
             </button>
-            <button className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+            <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
               <Download className="w-4 h-4" />
               Export
             </button>
@@ -11928,18 +11928,15 @@ export function UserProfileDetail() {
   return (
     <div className="min-h-screen" style={{ backgroundColor: '#F5F7FA' }}>
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
+      <div className="bg-white border-b border-gray-200 px-3 sm:px-6 py-4">
         <div className="flex items-center justify-between">
           <button
             onClick={() => navigate('/stpl/applications')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
-            Back to Applications
+            <span className="hidden sm:inline">Back to Applications</span>
           </button>
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-gray-900">User Profile Detail - {getUserData('name')}</span>
-          </div>
         </div>
       </div>
 
@@ -12023,19 +12020,19 @@ export function UserProfileDetail() {
         )}
 
       {/* Simplified Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-6">
-        <div className="flex items-center justify-between">
+      <div className="bg-white border-b border-gray-200 px-3 sm:px-4 lg:px-6 py-4 sm:py-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           {/* Left: Basic Info */}
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 bg-gray-300 rounded-full flex items-center justify-center">
-              <User className="w-8 h-8 text-gray-600" />
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gray-300 rounded-full flex items-center justify-center flex-shrink-0">
+              <User className="w-6 h-6 sm:w-8 sm:h-8 text-gray-600" />
             </div>
-            <div>
-              <div className="flex items-center gap-3 mb-1">
-                <h1 className="text-xl font-bold text-gray-900">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-1">
+                <h1 className="text-lg sm:text-xl font-bold text-gray-900 truncate">
                   {getUserData('name')}
                   {getUserData('clid') && (
-                    <span className="ml-2 text-sm font-normal text-gray-500">({getUserData('clid')})</span>
+                    <span className="ml-2 text-xs sm:text-sm font-normal text-gray-500">({getUserData('clid')})</span>
                   )}
                 </h1>
                 <div className="flex items-center gap-2">
@@ -12070,18 +12067,18 @@ export function UserProfileDetail() {
                   )}
                 </div>
               </div>
-              <div className="flex items-center gap-4 text-sm text-gray-600">
-                {getUserData('clid') && <span>CLID: {getUserData('clid')}</span>}
-                <span className="flex items-center gap-1">
+              <div className="flex overflow-x-auto scrollbar-hide items-center gap-2 sm:gap-4 text-xs sm:text-sm text-gray-600 pb-2 -mx-3 sm:mx-0 px-3 sm:px-0">
+                {getUserData('clid') && <span className="whitespace-nowrap flex-shrink-0">CLID: {getUserData('clid')}</span>}
+                <span className="flex items-center gap-1 whitespace-nowrap flex-shrink-0">
                   <Phone className="w-3 h-3" />
                   {getUserData('mobile')}
                 </span>
-                <span className="flex items-center gap-1">
-                  <Mail className="w-3 h-3" />
-                  {getUserData('email')}
+                <span className="flex items-center gap-1 whitespace-nowrap flex-shrink-0">
+                  <Mail className="w-3 h-3 flex-shrink-0" />
+                  <span>{getUserData('email')}</span>
                 </span>
                 {getUserData('creditScore') && (
-                  <span className="flex items-center gap-1">
+                  <span className="flex items-center gap-1 whitespace-nowrap flex-shrink-0">
                     <span className="font-semibold">Pocket Score:</span> {getUserData('creditScore')}
                   </span>
                 )}
@@ -12115,7 +12112,7 @@ export function UserProfileDetail() {
                   // Always display Experian score if we have any value (including from creditAnalyticsData)
                   if (experianScore !== null && experianScore !== undefined && experianScore !== '') {
                     return (
-                      <span className="flex items-center gap-1">
+                      <span className="flex items-center gap-1 whitespace-nowrap flex-shrink-0">
                         <span className="font-semibold">Experian:</span> {experianScore}
                       </span>
                     );
@@ -12123,20 +12120,20 @@ export function UserProfileDetail() {
                   return null;
                 })()}
                 {getUserData('limitVsSalaryPercent') && (
-                  <span className="flex items-center gap-1">
+                  <span className="flex items-center gap-1 whitespace-nowrap flex-shrink-0">
                     <span className="font-semibold">Limit vs Salary:</span> {getUserData('limitVsSalaryPercent')}%
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 mt-2">
-                <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getUserData('status') === 'under_review' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
+              <div className="flex overflow-x-auto scrollbar-hide items-center gap-2 mt-2 pb-2 -mx-3 sm:mx-0 px-3 sm:px-0">
+                <span className={`px-2 py-1 text-xs font-semibold rounded-full whitespace-nowrap flex-shrink-0 ${getUserData('status') === 'under_review' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
                   }`}>
                   {getUserData('status')?.replace('_', ' ')?.toUpperCase() || 'N/A'}
                 </span>
-                <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-semibold rounded">
+                <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-semibold rounded whitespace-nowrap flex-shrink-0">
                   {getUserData('kycStatus')?.toUpperCase() || 'N/A'}
                 </span>
-                <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-semibold rounded">
+                <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-semibold rounded whitespace-nowrap flex-shrink-0">
                   Score: {getUserData('creditScore')}
                 </span>
                 {(() => {
@@ -12165,7 +12162,7 @@ export function UserProfileDetail() {
                   const displayStatus = getEnachStatusDisplay(enachStatus);
 
                   return (
-                    <span className={`px-2 py-1 text-xs font-semibold rounded ${displayStatus === 'Success' || displayStatus === 'Active' ? 'bg-green-100 text-green-800' :
+                    <span className={`px-2 py-1 text-xs font-semibold rounded whitespace-nowrap flex-shrink-0 ${displayStatus === 'Success' || displayStatus === 'Active' ? 'bg-green-100 text-green-800' :
                       displayStatus === 'Cancelled' || displayStatus === 'Failed' ? 'bg-red-100 text-red-800' :
                         displayStatus === 'Bank Approval Pending' || displayStatus === 'Initialized' || displayStatus === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
                           'bg-gray-100 text-gray-800'
@@ -12209,7 +12206,7 @@ export function UserProfileDetail() {
 
       {/* Tab Navigation */}
       <div className="bg-white border-b border-gray-200">
-        <div className="px-6">
+        <div className="px-3 sm:px-4 lg:px-6">
           <div className="flex overflow-x-auto scrollbar-hide mobile-scroll">
             <div className="flex space-x-0 min-w-max">
               {tabs.map((tab) => {
@@ -12218,13 +12215,14 @@ export function UserProfileDetail() {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors flex-shrink-0 ${activeTab === tab.id
+                    className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium whitespace-nowrap border-b-2 transition-colors flex-shrink-0 ${activeTab === tab.id
                       ? 'border-blue-600 text-blue-600 bg-blue-50'
                       : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300 hover:bg-gray-50'
                       }`}
                   >
-                    <Icon className="w-4 h-4" />
-                    {tab.label}
+                    <Icon className="w-3 h-3 sm:w-4 sm:h-4" />
+                    <span className="hidden xs:inline">{tab.label}</span>
+                    <span className="xs:hidden">{tab.label.split(' ')[0]}</span>
                   </button>
                 );
               })}
@@ -12233,7 +12231,7 @@ export function UserProfileDetail() {
         </div>
 
         {/* Scroll Indicator for Mobile */}
-        <div className="block md:hidden px-6 py-1">
+        <div className="block md:hidden px-3 sm:px-4 lg:px-6 py-1">
           <div className="flex justify-center">
             <div className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
               ← Scroll for more tabs →
@@ -12243,7 +12241,7 @@ export function UserProfileDetail() {
       </div>
 
       {/* Content Area */}
-      <div className="p-6">
+      <div className="p-3 sm:p-4 lg:p-6">
         {activeTab === 'personal' && renderPersonalTab()}
         {activeTab === 'kyc' && renderKYCTab()}
         {activeTab === 'documents' && renderDocumentsTab()}

@@ -340,6 +340,21 @@ html {
     display: none;
   }
 
+  /* Mobile table wrapper for horizontal scrolling */
+  .table-wrapper {
+    @apply overflow-x-auto -mx-3 sm:mx-0;
+  }
+
+  .table-wrapper table {
+    @apply min-w-full;
+  }
+
+  @media (max-width: 640px) {
+    .table-wrapper {
+      @apply px-3;
+    }
+  }
+
   /* Mobile-friendly focus states */
   .mobile-focus {
     @apply focus:outline-none focus:ring-2 focus:ring-offset-2;

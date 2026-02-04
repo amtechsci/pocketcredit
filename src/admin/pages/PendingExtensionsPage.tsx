@@ -346,7 +346,7 @@ export function PendingExtensionsPage() {
                       Reject
                     </button>
                     <button
-                      onClick={() => navigate(`/stpl/user-profile/${extension.user_id}`)}
+                      onClick={() => window.open(`/stpl/user-profile/${extension.user_id}`, '_blank')}
                       className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
                     >
                       <FileText className="w-4 h-4" />

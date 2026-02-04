@@ -1,7 +1,10 @@
 const jwt = require('jsonwebtoken');
 const { executeQuery, initializeDatabase } = require('../config/database');
+const { get, set, del } = require('../config/redis');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'pocket-credit-secret-key-2025';
+const INACTIVITY_TIMEOUT = 20 * 60 * 1000; // 20 minutes in milliseconds
+const WARNING_THRESHOLD = 18 * 60 * 1000; // 18 minutes in milliseconds
 
 // Authentication middleware
 const authenticateToken = (req, res, next) => {
@@ -28,7 +31,7 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// Admin authentication middleware
+// Admin authentication middleware with inactivity tracking
 const authenticateAdmin = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
@@ -60,6 +63,40 @@ const authenticateAdmin = async (req, res, next) => {
     }
 
     const admin = admins[0];
+    const adminId = admin.id;
+    
+    // Check inactivity timeout using Redis
+    const activityKey = `admin:activity:${adminId}`;
+    const lastActivity = await get(activityKey);
+    const now = Date.now();
+    
+    if (lastActivity) {
+      const timeSinceLastActivity = now - lastActivity;
+      
+      // If inactive for more than 20 minutes, reject the request
+      if (timeSinceLastActivity > INACTIVITY_TIMEOUT) {
+        // Clear the activity record
+        await del(activityKey);
+        
+        return res.status(401).json({
+          status: 'error',
+          message: 'Session expired due to inactivity. Please login again.',
+          code: 'SESSION_EXPIRED'
+        });
+      }
+      
+      // Check if we should send a warning (18 minutes of inactivity)
+      const timeUntilExpiry = INACTIVITY_TIMEOUT - timeSinceLastActivity;
+      if (timeSinceLastActivity > WARNING_THRESHOLD && timeUntilExpiry > 0) {
+        // Add warning header to response
+        res.setHeader('X-Session-Warning', 'true');
+        res.setHeader('X-Session-Time-Remaining', Math.ceil(timeUntilExpiry / 1000).toString()); // seconds
+      }
+    }
+    
+    // Update last activity timestamp (extend TTL to 20 minutes)
+    await set(activityKey, now, 20 * 60); // 20 minutes TTL in seconds
+    
     req.admin = {
       id: admin.id,
       name: admin.name,
@@ -70,6 +107,14 @@ const authenticateAdmin = async (req, res, next) => {
 
     next();
   } catch (error) {
+    // Handle JWT errors specifically
+    if (error.name === 'TokenExpiredError' || error.name === 'JsonWebTokenError') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Invalid or expired admin token'
+      });
+    }
+    
     return res.status(403).json({
       status: 'error',
       message: 'Invalid or expired admin token'

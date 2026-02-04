@@ -114,6 +114,21 @@ class AdminApiService {
     this.api.interceptors.response.use(
       (response: AxiosResponse) => {
         console.log('Admin API Response:', response.status, response.config.url);
+        
+        // Check for session warning headers
+        const warningHeader = response.headers['x-session-warning'];
+        const timeRemaining = response.headers['x-session-time-remaining'];
+        
+        if (warningHeader === 'true' && timeRemaining) {
+          const secondsRemaining = parseInt(timeRemaining, 10);
+          const minutesRemaining = Math.ceil(secondsRemaining / 60);
+          
+          // Dispatch custom event for frontend to handle warning
+          window.dispatchEvent(new CustomEvent('admin-session-warning', {
+            detail: { secondsRemaining, minutesRemaining }
+          }));
+        }
+        
         return response;
       },
       (error) => {
@@ -123,8 +138,30 @@ class AdminApiService {
         if (error.response) {
           const status = error.response.status;
           const message = error.response.data?.message || '';
+          const code = error.response.data?.code || '';
 
-          // Check for auth-related errors
+          // Check for session expired due to inactivity
+          if (code === 'SESSION_EXPIRED' || message.toLowerCase().includes('session expired due to inactivity')) {
+            console.log('Session expired due to inactivity, clearing credentials and redirecting to login');
+            
+            // Clear authentication data
+            this.token = null;
+            this.clearAuthHeader();
+            localStorage.removeItem('adminToken');
+            localStorage.removeItem('adminUser');
+
+            // Show alert before redirecting
+            alert('Your session has expired due to inactivity. Please login again.');
+            
+            // Redirect to admin login page
+            setTimeout(() => {
+              window.location.href = '/stpl/login';
+            }, 100);
+            
+            return Promise.reject(error);
+          }
+
+          // Check for other auth-related errors
           if (
             status === 401 ||
             status === 403 ||

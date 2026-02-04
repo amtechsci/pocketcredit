@@ -136,20 +136,20 @@ export function AdminDashboard() {
 
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-3 sm:p-4 lg:p-6 space-y-4 sm:space-y-6">
       {/* Header with Global Search */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600">Welcome back, {currentUser?.name || 'Admin'}</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Dashboard</h1>
+          <p className="text-sm sm:text-base text-gray-600">Welcome back, {currentUser?.name || 'Admin'}</p>
         </div>
         
-        <div className="flex items-center gap-4">
-          <div className="relative">
+        <div className="flex items-center gap-2 sm:gap-4 w-full lg:w-auto">
+          <div className="relative flex-1 lg:flex-initial">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <input
               type="text"
-              placeholder="Search by name, PAN, mobile, UTR, bank account, loan ID..."
+              placeholder="Search by name, PAN, mobile..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => {
@@ -157,10 +157,10 @@ export function AdminDashboard() {
                   window.open(`/stpl/search?q=${encodeURIComponent(searchQuery)}`, '_blank');
                 }
               }}
-              className="pl-10 pr-4 py-2 w-80 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="pl-10 pr-4 py-2 w-full lg:w-80 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
             />
           </div>
-          <button className="relative p-2 text-gray-400 hover:text-gray-600">
+          <button className="relative p-2 text-gray-400 hover:text-gray-600 flex-shrink-0">
             <Bell className="w-5 h-5" />
             <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
               3
@@ -170,37 +170,37 @@ export function AdminDashboard() {
       </div>
 
 
-      <div className="grid grid-cols-1 lg:grid-cols-10 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-10 gap-4 sm:gap-6">
         {/* Dashboard Cards - 70% width */}
         <div className="lg:col-span-7 bg-white rounded-lg shadow-sm border border-gray-200">
-          <div className="p-6 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">Dashboard Overview</h2>
+          <div className="p-4 sm:p-6 border-b border-gray-200">
+            <h2 className="text-base sm:text-lg font-semibold text-gray-900">Dashboard Overview</h2>
           </div>
-          <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div className="p-4 sm:p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
               {keyMetrics.map((metric, index) => {
                 const Icon = metric.icon;
                 return (
-                  <div key={index} className="bg-gray-50 rounded-lg p-4">
+                  <div key={index} className="bg-gray-50 rounded-lg p-3 sm:p-4">
                     <div className="flex items-center justify-between mb-2">
                       <div className={`p-2 rounded-lg ${getMetricColor(metric.color)}`}>
-                        <Icon className="w-5 h-5 text-white" />
+                        <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                       </div>
-                      <div className={`flex items-center text-sm ${
+                      <div className={`flex items-center text-xs sm:text-sm ${
                         metric.trend === 'up' ? 'text-green-600' : 'text-red-600'
                       }`}>
                         {metric.trend === 'up' ? (
-                          <TrendingUp className="w-4 h-4 mr-1" />
+                          <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
                         ) : (
-                          <TrendingDown className="w-4 h-4 mr-1" />
+                          <TrendingDown className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
                         )}
-                        {metric.change}
+                        <span className="truncate">{metric.change}</span>
                       </div>
                     </div>
-                    <div className="text-2xl font-bold text-gray-900 mb-1">
+                    <div className="text-xl sm:text-2xl font-bold text-gray-900 mb-1">
                       {metric.value}
                     </div>
-                    <div className="text-sm font-medium text-gray-600">{metric.title}</div>
+                    <div className="text-xs sm:text-sm font-medium text-gray-600">{metric.title}</div>
                     <div className="text-xs text-gray-500">{metric.subtitle}</div>
                   </div>
                 );
@@ -211,18 +211,18 @@ export function AdminDashboard() {
 
         {/* Quick Actions - 30% width */}
         <div className="lg:col-span-3 bg-white rounded-lg shadow-sm border border-gray-200">
-          <div className="p-6 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">Quick Actions</h2>
+          <div className="p-4 sm:p-6 border-b border-gray-200">
+            <h2 className="text-base sm:text-lg font-semibold text-gray-900">Quick Actions</h2>
           </div>
-          <div className="p-6 space-y-4">
+          <div className="p-4 sm:p-6 space-y-3 sm:space-y-4">
             {quickActions.map((action, index) => (
               <button
                 key={index}
                 onClick={action.action}
                 className="w-full flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
               >
-                <span className="text-sm font-medium text-gray-700">{action.title}</span>
-                <span className="bg-blue-600 text-white text-xs font-semibold px-2 py-1 rounded-full">
+                <span className="text-xs sm:text-sm font-medium text-gray-700">{action.title}</span>
+                <span className="bg-blue-600 text-white text-xs font-semibold px-2 py-1 rounded-full flex-shrink-0">
                   {action.count}
                 </span>
               </button>

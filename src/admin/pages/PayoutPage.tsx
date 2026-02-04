@@ -300,7 +300,7 @@ export function PayoutPage() {
                           {loan.user.phone}
                         </div>
                         <button
-                          onClick={() => navigate(`/stpl/user-profile/${loan.user.id}`)}
+                          onClick={() => window.open(`/stpl/user-profile/${loan.user.id}`, '_blank')}
                           className="text-xs text-blue-600 hover:text-blue-800 mt-1 flex items-center gap-1"
                         >
                           <Eye className="w-3 h-3" />
@@ -378,7 +378,7 @@ export function PayoutPage() {
                               User must add bank details before disbursement
                             </div>
                             <button
-                              onClick={() => navigate(`/stpl/user-profile/${loan.user.id}`)}
+                              onClick={() => window.open(`/stpl/user-profile/${loan.user.id}`, '_blank')}
                               className="text-xs text-blue-600 hover:text-blue-800 mt-1 flex items-center gap-1"
                             >
                               Add Bank Details
@@ -421,7 +421,7 @@ export function PayoutPage() {
                     </div>
                   )}
                   <button
-                    onClick={() => navigate(`/stpl/user-profile/${loan.user.id}?loanId=${loan.id}`)}
+                    onClick={() => window.open(`/stpl/user-profile/${loan.user.id}?loanId=${loan.id}`, '_blank')}
                     className="px-6 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors text-sm"
                   >
                     View Details

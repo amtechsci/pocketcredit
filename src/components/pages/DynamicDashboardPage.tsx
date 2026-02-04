@@ -831,9 +831,14 @@ export function DynamicDashboardPage() {
                     <>
                       <AlertCircle className="w-16 h-16 text-orange-500 mx-auto mb-4" />
                       <h3 className="text-lg font-semibold text-gray-900 mb-2">Account Under Cooling Period</h3>
-                      <p className="text-gray-600 mb-4">
-                        Your Profile is under cooling period. We will let you know once you are eligible.
-                      </p>
+                      <div className="space-y-2">
+                        <p className="text-gray-600">
+                          Your profile is under cooling period. We will let you know if a new loan offer is available.
+                        </p>
+                        <p className="text-gray-500 text-sm">
+                          You can check the status after 30 days.
+                        </p>
+                      </div>
                     </>
                   ) : (
                     <>
@@ -1072,9 +1077,14 @@ export function DynamicDashboardPage() {
                 <>
                   <AlertCircle className="w-16 h-16 text-orange-500 mx-auto mb-4" />
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">Account Under Cooling Period</h3>
-                  <p className="text-gray-600 mb-4">
-                    Your Profile is under cooling period. We will let you know once you are eligible.
-                  </p>
+                  <div className="space-y-2">
+                    <p className="text-gray-600">
+                      Your profile is under cooling period. We will let you know if a new loan offer is available.
+                    </p>
+                    <p className="text-gray-500 text-sm">
+                      You can check the status after 30 days.
+                    </p>
+                  </div>
                 </>
               ) : (
                 <>
