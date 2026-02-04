@@ -357,12 +357,37 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       for (const loan of clearedLoans) {
         // Check if loan was cleared on or before due date
         if (loan.disbursed_at) {
-          const disbursedDate = new Date(loan.disbursed_at);
+          // Parse date as string first to avoid timezone conversion
+          const { parseDateToString } = require('../utils/loanCalculations');
+          let disbursedDate;
+          const disbursedDateStr = parseDateToString(loan.disbursed_at);
+          if (disbursedDateStr) {
+            const [year, month, day] = disbursedDateStr.split('-').map(Number);
+            disbursedDate = new Date(year, month - 1, day);
+          } else {
+            disbursedDate = new Date();
+          }
+          disbursedDate.setHours(0, 0, 0, 0);
+          
           const dueDate = new Date(disbursedDate);
           // Assuming tenure in months, calculate due date
           const tenureDays = loan.tenure_months ? loan.tenure_months * 30 : 30;
           dueDate.setDate(dueDate.getDate() + tenureDays);
-          const clearedDate = loan.updated_at ? new Date(loan.updated_at) : new Date();
+          dueDate.setHours(0, 0, 0, 0);
+          
+          let clearedDate;
+          if (loan.updated_at) {
+            const clearedDateStr = parseDateToString(loan.updated_at);
+            if (clearedDateStr) {
+              const [year, month, day] = clearedDateStr.split('-').map(Number);
+              clearedDate = new Date(year, month - 1, day);
+            } else {
+              clearedDate = new Date();
+            }
+          } else {
+            clearedDate = new Date();
+          }
+          clearedDate.setHours(0, 0, 0, 0);
 
           if (clearedDate <= dueDate) {
             pocketCreditScore += 6;
@@ -1478,10 +1503,10 @@ router.post('/:userId/addresses', authenticateAdmin, async (req, res) => {
     const { address_line1, address_line2, city, state, pincode, country = 'India', address_type = 'current', is_primary = false } = req.body;
 
     // Validation
-    if (!address_line1 || !city || !state || !pincode) {
+    if (!address_line1 || !state || !pincode) {
       return res.status(400).json({
         status: 'error',
-        message: 'Address line 1, city, state, and pincode are required'
+        message: 'Address line 1, state, and pincode are required'
       });
     }
 
@@ -1504,7 +1529,7 @@ router.post('/:userId/addresses', authenticateAdmin, async (req, res) => {
     const result = await executeQuery(
       `INSERT INTO addresses (user_id, address_type, address_line1, address_line2, city, state, pincode, country, is_primary, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [userId, address_type, address_line1, address_line2 || null, city, state, pincode, country, is_primary ? 1 : 0]
+      [userId, address_type, address_line1, address_line2 || null, city || null, state, pincode, country, is_primary ? 1 : 0]
     );
 
     // Fetch the created address
@@ -1564,10 +1589,10 @@ router.put('/:userId/addresses/:addressId', authenticateAdmin, async (req, res) 
     const { address_line1, address_line2, city, state, pincode, country = 'India', address_type = 'current', is_primary = false } = req.body;
 
     // Validation
-    if (!address_line1 || !city || !state || !pincode) {
+    if (!address_line1 || !state || !pincode) {
       return res.status(400).json({
         status: 'error',
-        message: 'Address line 1, city, state, and pincode are required'
+        message: 'Address line 1, state, and pincode are required'
       });
     }
 
@@ -1591,7 +1616,7 @@ router.put('/:userId/addresses/:addressId', authenticateAdmin, async (req, res) 
       `UPDATE addresses 
        SET address_type = ?, address_line1 = ?, address_line2 = ?, city = ?, state = ?, pincode = ?, country = ?, is_primary = ?, updated_at = NOW()
        WHERE id = ? AND user_id = ?`,
-      [address_type, address_line1, address_line2 || null, city, state, pincode, country, is_primary ? 1 : 0, addressId, userId]
+      [address_type, address_line1, address_line2 || null, city || null, state, pincode, country, is_primary ? 1 : 0, addressId, userId]
     );
 
     // Fetch the updated address
@@ -2627,7 +2652,20 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 const userSalaryDate = userResult[0]?.salary_date || null;
 
                 // Calculate base date (disbursement date or today)
-                const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+                // Parse date as string first to avoid timezone conversion
+                const { parseDateToString } = require('../utils/loanCalculations');
+                let baseDate;
+                if (loan.disbursed_at) {
+                  const dateStr = parseDateToString(loan.disbursed_at);
+                  if (dateStr) {
+                    const [year, month, day] = dateStr.split('-').map(Number);
+                    baseDate = new Date(year, month - 1, day);
+                  } else {
+                    baseDate = new Date();
+                  }
+                } else {
+                  baseDate = new Date();
+                }
                 baseDate.setHours(0, 0, 0, 0);
 
                 // Generate all EMI dates
@@ -2745,8 +2783,20 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 // Log EMI calculation inputs for debugging
 
                 // Calculate base date for interest calculation (processed_at takes priority over disbursed_at)
-                // Reuse existing baseDate variable but update it if processed_at exists
-                const interestBaseDate = loan.processed_at ? new Date(loan.processed_at) : baseDate;
+                // Parse date as string first to avoid timezone conversion
+                // parseDateToString and getTodayString are already imported above
+                let interestBaseDate;
+                if (loan.processed_at) {
+                  const dateStr = parseDateToString(loan.processed_at);
+                  if (dateStr) {
+                    const [year, month, day] = dateStr.split('-').map(Number);
+                    interestBaseDate = new Date(year, month - 1, day);
+                  } else {
+                    interestBaseDate = baseDate;
+                  }
+                } else {
+                  interestBaseDate = baseDate;
+                }
                 interestBaseDate.setHours(0, 0, 0, 0);
                 const baseDateStr = formatDateToString(interestBaseDate) || getTodayString();
 
@@ -2809,9 +2859,28 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 const userSalaryDate = userResult[0]?.salary_date || null;
 
                 // Calculate base date (use processed_at if available, otherwise disbursed_at or today)
-                const baseDate = loan.processed_at
-                  ? new Date(loan.processed_at)
-                  : (loan.disbursed_at ? new Date(loan.disbursed_at) : new Date());
+                // Parse date as string first to avoid timezone conversion
+                // parseDateToString is already imported above
+                let baseDate;
+                if (loan.processed_at) {
+                  const dateStr = parseDateToString(loan.processed_at);
+                  if (dateStr) {
+                    const [year, month, day] = dateStr.split('-').map(Number);
+                    baseDate = new Date(year, month - 1, day);
+                  } else {
+                    baseDate = new Date();
+                  }
+                } else if (loan.disbursed_at) {
+                  const dateStr = parseDateToString(loan.disbursed_at);
+                  if (dateStr) {
+                    const [year, month, day] = dateStr.split('-').map(Number);
+                    baseDate = new Date(year, month - 1, day);
+                  } else {
+                    baseDate = new Date();
+                  }
+                } else {
+                  baseDate = new Date();
+                }
                 baseDate.setHours(0, 0, 0, 0);
                 const baseDateStr = formatDateToString(baseDate);
 

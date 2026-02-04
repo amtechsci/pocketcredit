@@ -516,7 +516,13 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       loan: {
         loan_id: loan.loan_id || loan.application_number || `LOAN${loan.id}`,
         application_number: loan.application_number || loan.loan_id || `LOAN${loan.id}`,
-        application_date: loan.created_at ? new Date(loan.created_at).toLocaleDateString('en-IN') : 'N/A',
+        application_date: (() => {
+          if (!loan.created_at) return 'N/A';
+          const dateStr = parseDateToString(loan.created_at);
+          if (!dateStr) return 'N/A';
+          const [year, month, day] = dateStr.split('-');
+          return `${day}/${month}/${year}`;
+        })(),
         sanctioned_amount: loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0,
         principal_amount: loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0,
         disbursal_amount: loanValues.disbursal?.amount || loan.disbursal_amount || 0,
@@ -649,7 +655,27 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         } else if (loanValues.interest?.repayment_date) {
           firstDueDate = new Date(loanValues.interest.repayment_date);
         } else {
-          const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+          // Parse date as string first to avoid timezone conversion
+          let baseDate;
+          if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+            const dateStr = parseDateToString(loan.processed_at);
+            if (dateStr) {
+              const [year, month, day] = dateStr.split('-').map(Number);
+              baseDate = new Date(year, month - 1, day);
+            } else {
+              baseDate = new Date();
+            }
+          } else if (loan.disbursed_at) {
+            const dateStr = parseDateToString(loan.disbursed_at);
+            if (dateStr) {
+              const [year, month, day] = dateStr.split('-').map(Number);
+              baseDate = new Date(year, month - 1, day);
+            } else {
+              baseDate = new Date();
+            }
+          } else {
+            baseDate = new Date();
+          }
           baseDate.setHours(0, 0, 0, 0);
           firstDueDate = new Date(baseDate);
           firstDueDate.setDate(firstDueDate.getDate() + plannedTermDays);
@@ -685,10 +711,48 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             const [year, month, day] = processedDateStr.split('-').map(Number);
             baseDate = new Date(year, month - 1, day);
           } else {
-            baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+            // Parse date as string first to avoid timezone conversion
+            if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+              const dateStr = parseDateToString(loan.processed_at);
+              if (dateStr) {
+                const [year, month, day] = dateStr.split('-').map(Number);
+                baseDate = new Date(year, month - 1, day);
+              } else {
+                baseDate = new Date();
+              }
+            } else if (loan.disbursed_at) {
+              const dateStr = parseDateToString(loan.disbursed_at);
+              if (dateStr) {
+                const [year, month, day] = dateStr.split('-').map(Number);
+                baseDate = new Date(year, month - 1, day);
+              } else {
+                baseDate = new Date();
+              }
+            } else {
+              baseDate = new Date();
+            }
           }
         } else {
-          baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+          // Parse date as string first to avoid timezone conversion
+          if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+            const dateStr = parseDateToString(loan.processed_at);
+            if (dateStr) {
+              const [year, month, day] = dateStr.split('-').map(Number);
+              baseDate = new Date(year, month - 1, day);
+            } else {
+              baseDate = new Date();
+            }
+          } else if (loan.disbursed_at) {
+            const dateStr = parseDateToString(loan.disbursed_at);
+            if (dateStr) {
+              const [year, month, day] = dateStr.split('-').map(Number);
+              baseDate = new Date(year, month - 1, day);
+            } else {
+              baseDate = new Date();
+            }
+          } else {
+            baseDate = new Date();
+          }
         }
         if (baseDate && !isNaN(baseDate.getTime())) {
           baseDate.setHours(0, 0, 0, 0);
@@ -816,7 +880,27 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           // Calculate loan term days for APR using actual EMI dates
           if (emiCount > 1 && allEmiDates.length === emiCount) {
             // Use the last EMI date from allEmiDates (which comes from processed_due_date if available)
-            const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+            // Parse date as string first to avoid timezone conversion
+            let baseDate;
+            if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+              const dateStr = parseDateToString(loan.processed_at);
+              if (dateStr) {
+                const [year, month, day] = dateStr.split('-').map(Number);
+                baseDate = new Date(year, month - 1, day);
+              } else {
+                baseDate = new Date();
+              }
+            } else if (loan.disbursed_at) {
+              const dateStr = parseDateToString(loan.disbursed_at);
+              if (dateStr) {
+                const [year, month, day] = dateStr.split('-').map(Number);
+                baseDate = new Date(year, month - 1, day);
+              } else {
+                baseDate = new Date();
+              }
+            } else {
+              baseDate = new Date();
+            }
             baseDate.setHours(0, 0, 0, 0);
             
             // Get last EMI date from allEmiDates array
@@ -988,7 +1072,27 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         } else if (loanValues.interest?.repayment_date) {
           firstDueDate = new Date(loanValues.interest.repayment_date);
         } else {
-          const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+          // Parse date as string first to avoid timezone conversion
+          let baseDate;
+          if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+            const dateStr = parseDateToString(loan.processed_at);
+            if (dateStr) {
+              const [year, month, day] = dateStr.split('-').map(Number);
+              baseDate = new Date(year, month - 1, day);
+            } else {
+              baseDate = new Date();
+            }
+          } else if (loan.disbursed_at) {
+            const dateStr = parseDateToString(loan.disbursed_at);
+            if (dateStr) {
+              const [year, month, day] = dateStr.split('-').map(Number);
+              baseDate = new Date(year, month - 1, day);
+            } else {
+              baseDate = new Date();
+            }
+          } else {
+            baseDate = new Date();
+          }
           baseDate.setHours(0, 0, 0, 0);
           firstDueDate = new Date(baseDate);
           firstDueDate.setDate(firstDueDate.getDate() + plannedTermDays);
@@ -1046,16 +1150,34 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               } else if (loan.processed_at instanceof Date) {
                 processedDateStr = loan.processed_at.toISOString().split('T')[0];
               } else {
-                // Fallback: try to convert to Date first
-                const processedDate = new Date(loan.processed_at);
-                processedDateStr = processedDate.toISOString().split('T')[0];
+                // Fallback: parse as string to avoid timezone conversion
+                processedDateStr = parseDateToString(loan.processed_at) || getTodayString();
               }
               // Parse date components directly to avoid timezone issues
               // processedDateStr is in format "YYYY-MM-DD"
               const [year, month, day] = processedDateStr.split('-').map(Number);
               baseDate = new Date(year, month - 1, day); // month is 0-indexed
             } else {
-              baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+              // Parse date as string first to avoid timezone conversion
+              if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+                const dateStr = parseDateToString(loan.processed_at);
+                if (dateStr) {
+                  const [year, month, day] = dateStr.split('-').map(Number);
+                  baseDate = new Date(year, month - 1, day);
+                } else {
+                  baseDate = new Date();
+                }
+              } else if (loan.disbursed_at) {
+                const dateStr = parseDateToString(loan.disbursed_at);
+                if (dateStr) {
+                  const [year, month, day] = dateStr.split('-').map(Number);
+                  baseDate = new Date(year, month - 1, day);
+                } else {
+                  baseDate = new Date();
+                }
+              } else {
+                baseDate = new Date();
+              }
             }
             baseDate.setHours(0, 0, 0, 0);
             let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
@@ -2502,13 +2624,32 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
 
       // Use processed_at as the start date (processed_at is day 1)
       // If processed_at is not available, use disbursed_at or created_at
+      // Parse date as string first to avoid timezone conversion
       let processedDate;
       if (loan.processed_at) {
-        processedDate = new Date(loan.processed_at);
+        const dateStr = parseDateToString(loan.processed_at);
+        if (dateStr) {
+          const [year, month, day] = dateStr.split('-').map(Number);
+          processedDate = new Date(year, month - 1, day);
+        } else {
+          processedDate = new Date();
+        }
       } else if (loan.disbursed_at) {
-        processedDate = new Date(loan.disbursed_at);
+        const dateStr = parseDateToString(loan.disbursed_at);
+        if (dateStr) {
+          const [year, month, day] = dateStr.split('-').map(Number);
+          processedDate = new Date(year, month - 1, day);
+        } else {
+          processedDate = new Date();
+        }
       } else {
-        processedDate = new Date(loan.created_at);
+        const dateStr = parseDateToString(loan.created_at);
+        if (dateStr) {
+          const [year, month, day] = dateStr.split('-').map(Number);
+          processedDate = new Date(year, month - 1, day);
+        } else {
+          processedDate = new Date();
+        }
       }
 
       // Normalize dates to start of day (ignore time)
@@ -2840,7 +2981,27 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
     // For single payment: Extension Period = New Due Date - Original Due Date (before any extensions)
     // For multi-EMI salary date-based: Extension Period = Gap between first and second EMI (e.g., 28 days)
     // For multi-EMI fixed days: Extension Period = 15 days (fixed)
-    const originalDueDateObj = originalDueDate ? new Date(originalDueDate) : new Date(loan.processed_at);
+    // Parse date as string first to avoid timezone conversion
+    let originalDueDateObj;
+    if (originalDueDate) {
+      const dateStr = parseDateToString(originalDueDate);
+      if (dateStr) {
+        const [year, month, day] = dateStr.split('-').map(Number);
+        originalDueDateObj = new Date(year, month - 1, day);
+      } else {
+        originalDueDateObj = new Date();
+      }
+    } else if (loan.processed_at) {
+      const dateStr = parseDateToString(loan.processed_at);
+      if (dateStr) {
+        const [year, month, day] = dateStr.split('-').map(Number);
+        originalDueDateObj = new Date(year, month - 1, day);
+      } else {
+        originalDueDateObj = new Date();
+      }
+    } else {
+      originalDueDateObj = new Date();
+    }
     originalDueDateObj.setHours(0, 0, 0, 0);
     const newDueDateObj = new Date(newDueDate);
     newDueDateObj.setHours(0, 0, 0, 0);
@@ -2874,7 +3035,27 @@ router.get('/:loanId/extension-letter', authenticateAdmin, async (req, res) => {
     const newDueDateStr = parseDateToString(newDueDate);
 
     // Create disbursementDateObj for console.log (always needed)
-    const disbursementDateObj = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date(loan.processed_at);
+    // Parse date as string first to avoid timezone conversion
+    let disbursementDateObj;
+    if (loan.disbursed_at) {
+      const dateStr = parseDateToString(loan.disbursed_at);
+      if (dateStr) {
+        const [year, month, day] = dateStr.split('-').map(Number);
+        disbursementDateObj = new Date(year, month - 1, day);
+      } else {
+        disbursementDateObj = new Date();
+      }
+    } else if (loan.processed_at) {
+      const dateStr = parseDateToString(loan.processed_at);
+      if (dateStr) {
+        const [year, month, day] = dateStr.split('-').map(Number);
+        disbursementDateObj = new Date(year, month - 1, day);
+      } else {
+        disbursementDateObj = new Date();
+      }
+    } else {
+      disbursementDateObj = new Date();
+    }
     disbursementDateObj.setHours(0, 0, 0, 0);
 
     let totalTenureDays = 0;
@@ -4471,7 +4652,27 @@ router.get('/:loanId', async (req, res, next) => {
       firstDueDate = new Date(calculations.interest.repayment_date);
     } else {
       // Use disbursed date (or today if not disbursed) + planned term days
-      const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+      // Parse date as string first to avoid timezone conversion
+      let baseDate;
+      if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+        const dateStr = parseDateToString(loan.processed_at);
+        if (dateStr) {
+          const [year, month, day] = dateStr.split('-').map(Number);
+          baseDate = new Date(year, month - 1, day);
+        } else {
+          baseDate = new Date();
+        }
+      } else if (loan.disbursed_at) {
+        const dateStr = parseDateToString(loan.disbursed_at);
+        if (dateStr) {
+          const [year, month, day] = dateStr.split('-').map(Number);
+          baseDate = new Date(year, month - 1, day);
+        } else {
+          baseDate = new Date();
+        }
+      } else {
+        baseDate = new Date();
+      }
       baseDate.setHours(0, 0, 0, 0);
       firstDueDate = new Date(baseDate);
       firstDueDate.setDate(firstDueDate.getDate() + plannedTermDays);
@@ -4703,7 +4904,27 @@ router.get('/:loanId', async (req, res, next) => {
         // Calculate loan term days for APR using actual EMI dates
         if (emiCount > 1 && allEmiDates.length === emiCount) {
           // Use the last EMI date from allEmiDates (which comes from processed_due_date if available)
-          const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+          // Parse date as string first to avoid timezone conversion
+          let baseDate;
+          if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+            const dateStr = parseDateToString(loan.processed_at);
+            if (dateStr) {
+              const [year, month, day] = dateStr.split('-').map(Number);
+              baseDate = new Date(year, month - 1, day);
+            } else {
+              baseDate = new Date();
+            }
+          } else if (loan.disbursed_at) {
+            const dateStr = parseDateToString(loan.disbursed_at);
+            if (dateStr) {
+              const [year, month, day] = dateStr.split('-').map(Number);
+              baseDate = new Date(year, month - 1, day);
+            } else {
+              baseDate = new Date();
+            }
+          } else {
+            baseDate = new Date();
+          }
           baseDate.setHours(0, 0, 0, 0);
           
           // Get last EMI date from allEmiDates array
@@ -4932,13 +5153,32 @@ router.get('/:loanId', async (req, res, next) => {
               } else if (loan.processed_at instanceof Date) {
                 processedDateStr = loan.processed_at.toISOString().split('T')[0];
               } else {
-                const processedDate = new Date(loan.processed_at);
-                processedDateStr = processedDate.toISOString().split('T')[0];
+                // Parse as string to avoid timezone conversion
+                processedDateStr = parseDateToString(loan.processed_at) || getTodayString();
               }
               const [year, month, day] = processedDateStr.split('-').map(Number);
               baseDate = new Date(year, month - 1, day);
             } else {
-              baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+              // Parse date as string first to avoid timezone conversion
+              if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+                const dateStr = parseDateToString(loan.processed_at);
+                if (dateStr) {
+                  const [year, month, day] = dateStr.split('-').map(Number);
+                  baseDate = new Date(year, month - 1, day);
+                } else {
+                  baseDate = new Date();
+                }
+              } else if (loan.disbursed_at) {
+                const dateStr = parseDateToString(loan.disbursed_at);
+                if (dateStr) {
+                  const [year, month, day] = dateStr.split('-').map(Number);
+                  baseDate = new Date(year, month - 1, day);
+                } else {
+                  baseDate = new Date();
+                }
+              } else {
+                baseDate = new Date();
+              }
             }
             baseDate.setHours(0, 0, 0, 0);
             let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);

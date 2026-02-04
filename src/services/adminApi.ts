@@ -1678,9 +1678,9 @@ class AdminApiService {
     }
   }
 
-  async performCreditCheck(userId: number): Promise<ApiResponse<any>> {
+  async performCreditCheck(userId: number, forceRefetch: boolean = false): Promise<ApiResponse<any>> {
     try {
-      const response = await axios.post(`/api/admin/users/${userId}/perform-credit-check`, {}, {
+      const response = await axios.post(`/api/admin/users/${userId}/perform-credit-check`, { force: forceRefetch }, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
         }

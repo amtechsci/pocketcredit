@@ -604,7 +604,7 @@ class ApiService {
     return this.request('POST', '/references', data);
   }
 
-  async getUserReferences(): Promise<ApiResponse<{
+  async getUserReferences(options?: { cache?: boolean; skipDeduplication?: boolean }): Promise<ApiResponse<{
     references: Array<{
       id: number;
       user_id: number;
@@ -622,7 +622,10 @@ class ApiService {
       company_email: string | null;
     } | null;
   }>> {
-    return this.request('GET', '/references');
+    const stepCriticalOptions = options?.cache === false 
+      ? options 
+      : { ...options, cacheTTL: 10000 };
+    return this.request('GET', '/references', undefined, stepCriticalOptions);
   }
 
   async updateUserReference(id: number, referenceData: {
@@ -845,7 +848,7 @@ class ApiService {
     return responseData;
   }
 
-  async getLoanDocuments(loanApplicationId: number): Promise<ApiResponse<{
+  async getLoanDocuments(loanApplicationId: number, options?: { cache?: boolean; skipDeduplication?: boolean }): Promise<ApiResponse<{
     documents: Array<{
       id: number;
       document_name: string;
@@ -859,7 +862,10 @@ class ApiService {
       verification_notes?: string;
     }>;
   }>> {
-    return this.request('GET', `/loan-documents/${loanApplicationId}`);
+    const stepCriticalOptions = options?.cache === false 
+      ? options 
+      : { ...options, cacheTTL: 10000 };
+    return this.request('GET', `/loan-documents/${loanApplicationId}`, undefined, stepCriticalOptions);
   }
 
   async getLoanDocumentUrl(documentId: number): Promise<ApiResponse<{
@@ -911,7 +917,11 @@ class ApiService {
   }
 
   async getLoanApplicationById(applicationId: number, options?: { cache?: boolean; skipDeduplication?: boolean }): Promise<ApiResponse<{ application: LoanApplication }>> {
-    return this.request('GET', `/loan-applications/${applicationId}`, undefined, options);
+    // Use shorter cache TTL (2 seconds) for step-critical application status checks
+    const stepCriticalOptions = options?.cache === false 
+      ? options 
+      : { ...options, cacheTTL: 2000 }; // 2 seconds for extra safety
+    return this.request('GET', `/loan-applications/${applicationId}`, undefined, stepCriticalOptions);
   }
 
   async getLoanApplicationStats(): Promise<ApiResponse<{ statistics: LoanApplicationStats }>> {
@@ -939,7 +949,7 @@ class ApiService {
   }
 
   // Dashboard APIs
-  async getDashboardSummary(): Promise<ApiResponse<{
+  async getDashboardSummary(options?: { cache?: boolean; skipDeduplication?: boolean }): Promise<ApiResponse<{
     user: {
       id: number;
       name: string;
@@ -995,11 +1005,11 @@ class ApiService {
       icon: string;
     }>;
   }>> {
-    // Cache dashboard summary for 30 seconds
-    return this.request('GET', '/dashboard', undefined, {
-      cache: true,
-      cacheTTL: 30000 // 30 seconds
-    });
+    // Use shorter cache TTL (2 seconds) for profile status checks unless explicitly disabled
+    const dashboardOptions = options?.cache === false 
+      ? options 
+      : { ...options, cacheTTL: 2000 }; // 2 seconds for faster profile status detection
+    return this.request('GET', '/dashboard', undefined, dashboardOptions);
   }
 
   async getLoanDetails(loanId: number): Promise<ApiResponse<{
@@ -1171,13 +1181,17 @@ class ApiService {
   /**
    * Get KYC Status for an application
    */
-  async getKYCStatus(applicationId: number | string): Promise<ApiResponse<{
+  async getKYCStatus(applicationId: number | string, options?: { cache?: boolean; skipDeduplication?: boolean }): Promise<ApiResponse<{
     kyc_status: string;
     kyc_method: string | null;
     verified_at: string | null;
     verification_data?: any; // Can be object or string, contains rekyc_required flag
   }>> {
-    return this.request('GET', `/digilocker/kyc-status/${applicationId}`);
+    // Use shorter cache TTL (2 seconds) for step-critical calls unless explicitly disabled
+    const stepCriticalOptions = options?.cache === false 
+      ? options 
+      : { ...options, cacheTTL: 2000 }; // 2 seconds for extra safety
+    return this.request('GET', `/digilocker/kyc-status/${applicationId}`, undefined, stepCriticalOptions);
   }
 
   /**
@@ -1197,11 +1211,14 @@ class ApiService {
   /**
    * Digilocker - Check if PAN document exists
    */
-  async checkPanDocument(applicationId: string): Promise<ApiResponse<{
+  async checkPanDocument(applicationId: string, options?: { cache?: boolean; skipDeduplication?: boolean }): Promise<ApiResponse<{
     hasPanDocument: boolean;
     transactionId: string | null;
   }>> {
-    return this.request('GET', `/digilocker/check-pan-document/${applicationId}`);
+    const stepCriticalOptions = options?.cache === false 
+      ? options 
+      : { ...options, cacheTTL: 10000 };
+    return this.request('GET', `/digilocker/check-pan-document/${applicationId}`, undefined, stepCriticalOptions);
   }
 
   /**
@@ -1224,13 +1241,16 @@ class ApiService {
   /**
    * Check Employment Details Status (user-specific, no longer requires applicationId)
    */
-  async getEmploymentDetailsStatus(): Promise<ApiResponse<{
+  async getEmploymentDetailsStatus(options?: { cache?: boolean; skipDeduplication?: boolean }): Promise<ApiResponse<{
     completed: boolean;
     hasEmploymentDetails: boolean;
     hasUserEmploymentDetails: boolean;
     employmentData: any;
   }>> {
-    return this.request('GET', '/employment-details/status');
+    const stepCriticalOptions = options?.cache === false 
+      ? options 
+      : { ...options, cacheTTL: 10000 };
+    return this.request('GET', '/employment-details/status', undefined, stepCriticalOptions);
   }
 
   /**
@@ -1282,8 +1302,11 @@ class ApiService {
   /**
    * Get Credit Analytics Data (full report)
    */
-  async getCreditAnalyticsData(): Promise<ApiResponse<any>> {
-    return this.request('GET', '/credit-analytics/data');
+  async getCreditAnalyticsData(options?: { cache?: boolean; skipDeduplication?: boolean }): Promise<ApiResponse<any>> {
+    const stepCriticalOptions = options?.cache === false 
+      ? options 
+      : { ...options, cacheTTL: 10000 };
+    return this.request('GET', '/credit-analytics/data', undefined, stepCriticalOptions);
   }
 
   /**
@@ -1356,8 +1379,8 @@ class ApiService {
   /**
    * Account Aggregator - Get AA status
    */
-  async getAccountAggregatorStatus(applicationId: number): Promise<ApiResponse<any>> {
-    return this.request('GET', `/aa/status/${applicationId}`);
+  async getAccountAggregatorStatus(applicationId: number, options?: { cache?: boolean; skipDeduplication?: boolean }): Promise<ApiResponse<any>> {
+    return this.request('GET', `/aa/status/${applicationId}`, undefined, options);
   }
 
   /**
@@ -1394,7 +1417,7 @@ class ApiService {
   /**
    * User Bank Statement - Get Status
    */
-  async getUserBankStatementStatus(): Promise<ApiResponse<{
+  async getUserBankStatementStatus(options?: { cache?: boolean; skipDeduplication?: boolean }): Promise<ApiResponse<{
     hasStatement: boolean;
     status: string | null;
     clientRefNum?: string;
@@ -1407,7 +1430,10 @@ class ApiService {
     createdAt?: string;
     updatedAt?: string;
   }>> {
-    return this.request('GET', '/bank-statement/bank-statement-status');
+    const stepCriticalOptions = options?.cache === false 
+      ? options 
+      : { ...options, cacheTTL: 10000 };
+    return this.request('GET', '/bank-statement/bank-statement-status', undefined, stepCriticalOptions);
   }
 
   /**

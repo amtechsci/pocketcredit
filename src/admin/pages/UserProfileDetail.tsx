@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, Fragment } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
+  ArrowRight,
   User,
   Phone,
   Mail,
@@ -389,6 +390,7 @@ export function UserProfileDetail() {
   const [creditAnalyticsData, setCreditAnalyticsData] = useState<any>(null);
   const [creditAnalyticsLoading, setCreditAnalyticsLoading] = useState(false);
   const [performingCreditCheck, setPerformingCreditCheck] = useState(false);
+  const [oldCreditScore, setOldCreditScore] = useState<number | null>(null);
 
   // EMI Details modal state
   const [showEmiDetailsModal, setShowEmiDetailsModal] = useState(false);
@@ -488,6 +490,13 @@ export function UserProfileDetail() {
 
       if (response.status === 'success') {
         setCreditAnalyticsData(response.data);
+        // Clear old credit score if it was set (after showing comparison)
+        // Keep it for a bit so user can see the comparison, then clear after 10 seconds
+        if (oldCreditScore !== null) {
+          setTimeout(() => {
+            setOldCreditScore(null);
+          }, 10000); // Clear after 10 seconds
+        }
       }
     } catch (error) {
       console.error('Error fetching credit analytics:', error);
@@ -498,31 +507,49 @@ export function UserProfileDetail() {
   };
 
   // Perform credit check for user
-  const handlePerformCreditCheck = async () => {
+  const handlePerformCreditCheck = async (forceRefetch: boolean = false) => {
     if (!userData?.id) return;
 
-    if (!confirm('Are you sure you want to perform a credit check for this user? This will fetch credit analytics data from Experian.')) {
+    const confirmMessage = forceRefetch 
+      ? 'Are you sure you want to refetch credit data? This will call the credit API again and fetch new data from Experian.'
+      : 'Are you sure you want to perform a credit check for this user? This will fetch credit analytics data from Experian.';
+
+    if (!confirm(confirmMessage)) {
       return;
     }
 
     try {
       setPerformingCreditCheck(true);
-      const response = await adminApiService.performCreditCheck(userData.id);
+      
+      // Store old credit score before refetching
+      if (forceRefetch && creditAnalyticsData) {
+        const oldScore = creditAnalyticsData.credit_score || 
+                        creditAnalyticsData.full_report?.result?.result_json?.INProfileResponse?.SCORE?.BureauScore ||
+                        null;
+        setOldCreditScore(oldScore);
+      } else {
+        setOldCreditScore(null);
+      }
+
+      const response = await adminApiService.performCreditCheck(userData.id, forceRefetch);
 
       if (response.status === 'success') {
-        if (response.data?.already_checked) {
-          alert('Credit check already performed for this user. Refreshing data...');
+        if (response.data?.already_checked && !forceRefetch) {
+          alert('Credit check already performed for this user. Use "Refetch Credit" button to get new data.');
         } else {
-          alert(`Credit check completed! Score: ${response.data?.credit_score || 'N/A'}, Eligible: ${response.data?.is_eligible ? 'Yes' : 'No'}`);
+          const message = forceRefetch 
+            ? `Credit check refetched! New Score: ${response.data?.credit_score || 'N/A'}, Eligible: ${response.data?.is_eligible ? 'Yes' : 'No'}`
+            : `Credit check completed! Score: ${response.data?.credit_score || 'N/A'}, Eligible: ${response.data?.is_eligible ? 'Yes' : 'No'}`;
+          toast.success(message);
         }
         // Refresh credit analytics data
         await fetchCreditAnalytics();
       } else {
-        alert(response.message || 'Failed to perform credit check');
+        toast.error(response.message || 'Failed to perform credit check');
       }
     } catch (error: any) {
       console.error('Error performing credit check:', error);
-      alert(error.response?.data?.message || error.message || 'Failed to perform credit check');
+      toast.error(error.response?.data?.message || error.message || 'Failed to perform credit check');
     } finally {
       setPerformingCreditCheck(false);
     }
@@ -8159,9 +8186,240 @@ export function UserProfileDetail() {
     // Extract PAN from report if not in userData
     const panNumber = userData?.panNumber || userData?.pan_number || userData?.pan || currentApplication.CreditReportInquiry?.InquiryPurpose || '-';
 
+    // Filter flagged loans: Written_off_Settled_Status (00-17) OR SuitFiled_WilfulDefault (00-03)
+    const writtenOffCodes = ['00', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17'];
+    const suitFiledCodes = ['00', '01', '02', '03'];
+    
+    // Helper function to get status descriptions
+    const getWrittenOffStatusDescription = (code: string) => {
+      const descriptions: { [key: string]: string } = {
+        '00': 'Restructured Loan',
+        '01': 'Restructured Loan - Loss',
+        '02': 'Suit Filed',
+        '03': 'Wilful Default',
+        '04': 'Suit Filed (Wilful Default)',
+        '05': 'Written-Off',
+        '06': 'Written-Off (Wilful Default)',
+        '07': 'Settled',
+        '08': 'Settled (Wilful Default)',
+        '09': 'Post (WO) Settled',
+        '10': 'Post (WO) Settled (Wilful Default)',
+        '11': 'Account Sold',
+        '12': 'Account Sold (Wilful Default)',
+        '13': 'Account Purchased',
+        '14': 'Account Purchased (Wilful Default)',
+        '15': 'RBI-DCCO',
+        '16': 'RBI-DCCO (Wilful Default)',
+        '17': 'Satisfaction of Decree'
+      };
+      return descriptions[code] || `Unknown (${code})`;
+    };
+
+    const getSuitFiledDescription = (code: string) => {
+      const descriptions: { [key: string]: string } = {
+        '00': 'No Suit Filed',
+        '01': 'Suit Filed',
+        '02': 'Wilful Default',
+        '03': 'Suit Filed and Wilful Default'
+      };
+      return descriptions[code] || `Unknown (${code})`;
+    };
+
+    // Filter and deduplicate flagged loans
+    const flaggedLoansMap = new Map();
+    
+    if (accountSummary && accountSummary.length > 0) {
+      accountSummary.forEach((account: any) => {
+        const accountNumber = account.Account_Number || '';
+        const writtenOffStatus = account.Written_off_Settled_Status;
+        const suitFiledStatus = account.SuitFiled_WilfulDefault;
+        
+        // Check if loan matches either condition
+        const matchesWrittenOff = writtenOffStatus && writtenOffCodes.includes(String(writtenOffStatus));
+        const matchesSuitFiled = suitFiledStatus && suitFiledCodes.includes(String(suitFiledStatus));
+        
+        if (matchesWrittenOff || matchesSuitFiled) {
+          // Use account number as key to deduplicate
+          if (!flaggedLoansMap.has(accountNumber)) {
+            flaggedLoansMap.set(accountNumber, {
+              ...account,
+              flagReasons: []
+            });
+          }
+          
+          // Add flag reasons
+          const loan = flaggedLoansMap.get(accountNumber);
+          if (matchesWrittenOff) {
+            loan.flagReasons.push(`Written Off/Settled: ${getWrittenOffStatusDescription(String(writtenOffStatus))} (${writtenOffStatus})`);
+          }
+          if (matchesSuitFiled) {
+            loan.flagReasons.push(`Suit Filed/Wilful Default: ${getSuitFiledDescription(String(suitFiledStatus))} (${suitFiledStatus})`);
+          }
+        }
+      });
+    }
+    
+    const flaggedLoans = Array.from(flaggedLoansMap.values());
 
     return (
       <div className="space-y-6">
+        {/* Flagged Loans Section - At the Top */}
+        {flaggedLoans.length > 0 && (
+          <div className="bg-red-50 rounded-lg border-2 border-red-300 p-6 shadow-lg">
+            <div className="flex items-center gap-2 mb-4">
+              <AlertCircle className="w-7 h-7 text-red-600" />
+              <h3 className="text-xl font-bold text-red-900">⚠️ Flagged Loans - Critical Review Required</h3>
+            </div>
+            <p className="text-sm text-red-800 mb-4 font-semibold">
+              The following loans have Written Off/Settled Status (00-17) or Suit Filed/Wilful Default (00-03) indicators. Please review these accounts carefully.
+            </p>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse border border-red-300">
+                <thead>
+                  <tr className="bg-red-600 text-white">
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">#</th>
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">Flag Reasons</th>
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">Lender</th>
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">Account Type</th>
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">Account Number</th>
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">Ownership</th>
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">Account Status</th>
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">Date Opened</th>
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">Date Reported</th>
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">Date Closed</th>
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">Last Payment Date</th>
+                    <th className="border border-red-400 px-3 py-3 text-right font-bold">Sanction Amount</th>
+                    <th className="border border-red-400 px-3 py-3 text-right font-bold">Current Balance</th>
+                    <th className="border border-red-400 px-3 py-3 text-right font-bold">Amount Past Due</th>
+                    <th className="border border-red-400 px-3 py-3 text-right font-bold">Written Off Amount</th>
+                    <th className="border border-red-400 px-3 py-3 text-right font-bold">Settlement Amount</th>
+                    <th className="border border-red-400 px-3 py-3 text-right font-bold">Credit Limit</th>
+                    <th className="border border-red-400 px-3 py-3 text-right font-bold">DPD</th>
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">Written Off Status</th>
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">Suit Filed Status</th>
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">Repayment Tenure</th>
+                    <th className="border border-red-400 px-3 py-3 text-left font-bold">Payment History Profile</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flaggedLoans.map((account: any, index: number) => {
+                    const latestHistory = account.CAIS_Account_History && account.CAIS_Account_History.length > 0 
+                      ? account.CAIS_Account_History[0] 
+                      : null;
+                    const dpd = latestHistory ? parseInt(latestHistory.Days_Past_Due || 0) : 0;
+                    
+                    // Format dates from YYYYMMDD to DD/MM/YYYY
+                    const formatDate = (dateStr: string) => {
+                      if (!dateStr || dateStr.length !== 8) return '-';
+                      return `${dateStr.substring(6, 8)}/${dateStr.substring(4, 6)}/${dateStr.substring(0, 4)}`;
+                    };
+
+                    return (
+                      <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-red-50'}>
+                        <td className="border border-red-300 px-3 py-3 font-bold text-red-900">
+                          {index + 1}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3">
+                          <div className="space-y-1">
+                            {account.flagReasons.map((reason: string, idx: number) => (
+                              <div key={idx} className="text-xs font-semibold text-red-800">
+                                • {reason}
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="border border-red-300 px-3 py-3 text-blue-700 font-semibold">
+                          {account.Subscriber_Name || 'N/A'}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3">
+                          {account.Account_Type || 'N/A'}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3 font-mono text-xs">
+                          {account.Account_Number ? account.Account_Number.replace(/\d(?=\d{4})/g, 'X') : 'N/A'}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3">
+                          {account.Ownership_Indicator || 'Individual'}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3">
+                          <span className="px-2 py-1 rounded text-xs font-semibold bg-gray-200 text-gray-700">
+                            {account.Account_Status || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="border border-red-300 px-3 py-3">
+                          {formatDate(account.Open_Date || '')}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3">
+                          {formatDate(account.Date_Reported || '')}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3">
+                          {formatDate(account.Date_Closed || '')}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3">
+                          {formatDate(account.Date_of_Last_Payment || '')}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3 text-right font-semibold">
+                          {account.Highest_Credit_or_Original_Loan_Amount ?
+                            `₹${parseInt(account.Highest_Credit_or_Original_Loan_Amount).toLocaleString('en-IN')}` :
+                            '-'}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3 text-right font-semibold text-red-700">
+                          {account.Current_Balance ?
+                            `₹${parseInt(account.Current_Balance).toLocaleString('en-IN')}` :
+                            '₹0'}
+                        </td>
+                        <td className={`border border-red-300 px-3 py-3 text-right font-semibold ${account.Amount_Past_Due && parseInt(account.Amount_Past_Due) > 0 ? 'text-red-700' : 'text-gray-600'}`}>
+                          {account.Amount_Past_Due && parseInt(account.Amount_Past_Due) > 0 ?
+                            `₹${parseInt(account.Amount_Past_Due).toLocaleString('en-IN')}` :
+                            '₹0'}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3 text-right font-semibold text-red-700">
+                          {account.Written_Off_Amt_Total && parseInt(account.Written_Off_Amt_Total) > 0 ?
+                            `₹${parseInt(account.Written_Off_Amt_Total).toLocaleString('en-IN')}` :
+                            '₹0'}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3 text-right font-semibold">
+                          {account.Settlement_Amount && parseInt(account.Settlement_Amount) > 0 ?
+                            `₹${parseInt(account.Settlement_Amount).toLocaleString('en-IN')}` :
+                            '₹0'}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3 text-right">
+                          {account.Credit_Limit_Amount && parseInt(account.Credit_Limit_Amount) > 0 ?
+                            `₹${parseInt(account.Credit_Limit_Amount).toLocaleString('en-IN')}` :
+                            '-'}
+                        </td>
+                        <td className={`border border-red-300 px-3 py-3 text-right font-semibold ${dpd > 0 ? 'text-red-700' : 'text-gray-600'}`}>
+                          {dpd}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3">
+                          {account.Written_off_Settled_Status ? (
+                            <span className="px-2 py-1 rounded text-xs font-semibold bg-orange-100 text-orange-800">
+                              {account.Written_off_Settled_Status} - {getWrittenOffStatusDescription(String(account.Written_off_Settled_Status))}
+                            </span>
+                          ) : '-'}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3">
+                          {account.SuitFiled_WilfulDefault ? (
+                            <span className="px-2 py-1 rounded text-xs font-semibold bg-purple-100 text-purple-800">
+                              {account.SuitFiled_WilfulDefault} - {getSuitFiledDescription(String(account.SuitFiled_WilfulDefault))}
+                            </span>
+                          ) : '-'}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3">
+                          {account.Repayment_Tenure ? `${account.Repayment_Tenure} ${account.Terms_Duration || 'months'}` : '-'}
+                        </td>
+                        <td className="border border-red-300 px-3 py-3">
+                          {account.Payment_History_Profile || '-'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* Current Application Information */}
         <div className="bg-green-50 rounded-lg border border-green-200 p-6">
           <div className="flex items-center gap-2 mb-4">
@@ -8197,54 +8455,169 @@ export function UserProfileDetail() {
               <CheckCircle className="w-6 h-6 text-blue-600" />
               <h3 className="text-lg font-semibold text-gray-900">Experian Credit Score</h3>
             </div>
-            {/* Experian PDF Download Button */}
-            {experianPdfUrl ? (
+            <div className="flex items-center gap-2">
+              {/* Refetch Credit Button */}
               <button
-                onClick={() => {
-                  if (experianPdfUrl) {
-                    window.open(experianPdfUrl, '_blank');
-                  } else {
-                    toast.error('PDF URL not available');
-                  }
-                }}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                onClick={() => handlePerformCreditCheck(true)}
+                disabled={performingCreditCheck || !userData?.id}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                title="Refetch credit data from Experian API"
               >
-                <Download className="w-4 h-4" />
-                Download Experian PDF
+                {performingCreditCheck ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Refetching...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4" />
+                    Refetch Credit
+                  </>
+                )}
               </button>
-            ) : full_report ? (
-              // Show debug button if PDF URL not found but report exists
-              <button
-                onClick={() => {
-                  console.log('📄 Full Report Structure:', JSON.stringify(full_report, null, 2));
-                  toast.info('Check browser console for full report structure. PDF URL may be in a different location.');
-                }}
-                className="flex items-center gap-2 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
-                title="PDF URL not found - Click to see report structure in console"
-              >
-                <FileText className="w-4 h-4" />
-                Debug: View Report Structure
-              </button>
-            ) : null}
+              {/* Experian PDF Download Button */}
+              {experianPdfUrl ? (
+                <button
+                  onClick={() => {
+                    if (experianPdfUrl) {
+                      window.open(experianPdfUrl, '_blank');
+                    } else {
+                      toast.error('PDF URL not available');
+                    }
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  Download Experian PDF
+                </button>
+              ) : full_report ? (
+                // Show debug button if PDF URL not found but report exists
+                <button
+                  onClick={() => {
+                    console.log('📄 Full Report Structure:', JSON.stringify(full_report, null, 2));
+                    toast.info('Check browser console for full report structure. PDF URL may be in a different location.');
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
+                  title="PDF URL not found - Click to see report structure in console"
+                >
+                  <FileText className="w-4 h-4" />
+                  Debug: View Report Structure
+                </button>
+              ) : null}
+            </div>
           </div>
           <p className="text-sm text-orange-600 italic mb-6">Your Experian Credit Report is summarized in the form of Experian Credit Score which ranges from 300 - 900.</p>
 
           <div className="flex items-center gap-8">
-            {/* Credit Score Gauge */}
-            <div className="relative">
-              <div className="w-40 h-40 rounded-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 flex items-center justify-center">
-                <div className="w-36 h-36 rounded-full bg-white flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="text-5xl font-bold text-blue-600">{displayScore}</div>
-                    <div className="text-xs text-gray-500 mt-1">Credit Score</div>
+            {/* Credit Score Display - Show Old vs New if refetched */}
+            {oldCreditScore !== null ? (
+              <div className="flex items-center gap-6">
+                {/* Old Credit Score */}
+                <div className="relative">
+                  <div className="w-32 h-32 rounded-full bg-gradient-to-r from-gray-400 via-gray-500 to-gray-600 flex items-center justify-center">
+                    <div className="w-28 h-28 rounded-full bg-white flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="text-3xl font-bold text-gray-600">{oldCreditScore}</div>
+                        <div className="text-xs text-gray-500 mt-1">Old Score</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-600 mt-2">
+                    <span>300</span>
+                    <span>900</span>
                   </div>
                 </div>
+                
+                {/* Arrow */}
+                <div className="flex flex-col items-center">
+                  <ArrowRight className="w-8 h-8 text-gray-500" />
+                  <span className="text-xs text-gray-600 mt-1">Updated</span>
+                </div>
+
+                {/* New Credit Score */}
+                <div className="relative">
+                  <div className="w-40 h-40 rounded-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 flex items-center justify-center">
+                    <div className="w-36 h-36 rounded-full bg-white flex items-center justify-center">
+                      <div className="text-center">
+                        {(() => {
+                          const newScoreNum = typeof displayScore === 'number' ? displayScore : (displayScore && displayScore !== 'N/A' ? parseInt(String(displayScore)) : null);
+                          const oldScoreNum = typeof oldCreditScore === 'number' ? oldCreditScore : (oldCreditScore && oldCreditScore !== 'N/A' ? parseInt(String(oldCreditScore)) : null);
+                          const scoreColor = newScoreNum !== null && oldScoreNum !== null 
+                            ? (newScoreNum > oldScoreNum ? 'text-green-600' : newScoreNum < oldScoreNum ? 'text-red-600' : 'text-blue-600')
+                            : 'text-blue-600';
+                          return (
+                            <div className={`text-5xl font-bold ${scoreColor}`}>
+                              {displayScore}
+                            </div>
+                          );
+                        })()}
+                        <div className="text-xs text-gray-500 mt-1">New Score</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-600 mt-2">
+                    <span>300</span>
+                    <span>900</span>
+                  </div>
+                </div>
+
+                {/* Score Change Indicator */}
+                <div className="flex flex-col gap-1">
+                  {(() => {
+                    const newScoreNum = typeof displayScore === 'number' ? displayScore : (displayScore && displayScore !== 'N/A' ? parseInt(String(displayScore)) : null);
+                    const oldScoreNum = typeof oldCreditScore === 'number' ? oldCreditScore : (oldCreditScore && oldCreditScore !== 'N/A' ? parseInt(String(oldCreditScore)) : null);
+                    
+                    if (newScoreNum !== null && oldScoreNum !== null) {
+                      const diff = newScoreNum - oldScoreNum;
+                      if (diff > 0) {
+                        return (
+                          <div className="flex items-center gap-1 text-green-600">
+                            <TrendingUp className="w-5 h-5" />
+                            <span className="font-semibold">+{diff} points</span>
+                          </div>
+                        );
+                      } else if (diff < 0) {
+                        return (
+                          <div className="flex items-center gap-1 text-red-600">
+                            <TrendingDown className="w-5 h-5" />
+                            <span className="font-semibold">{diff} points</span>
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <div className="flex items-center gap-1 text-gray-600">
+                            <span className="font-semibold">No change</span>
+                          </div>
+                        );
+                      }
+                    } else {
+                      return (
+                        <div className="flex items-center gap-1 text-gray-600">
+                          <span className="font-semibold">Score comparison unavailable</span>
+                        </div>
+                      );
+                    }
+                  })()}
+                  <span className="text-xs text-gray-500">Score comparison</span>
+                </div>
               </div>
-              <div className="flex justify-between text-xs text-gray-600 mt-2">
-                <span>300</span>
-                <span>900</span>
+            ) : (
+              /* Single Credit Score Gauge (when not refetched) */
+              <div className="relative">
+                <div className="w-40 h-40 rounded-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 flex items-center justify-center">
+                  <div className="w-36 h-36 rounded-full bg-white flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="text-5xl font-bold text-blue-600">{displayScore}</div>
+                      <div className="text-xs text-gray-500 mt-1">Credit Score</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex justify-between text-xs text-gray-600 mt-2">
+                  <span>300</span>
+                  <span>900</span>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Score Factors */}
             <div className="flex-1 space-y-3">

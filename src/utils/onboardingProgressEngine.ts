@@ -83,10 +83,15 @@ export const STEP_ROUTES: Record<OnboardingStep, string> = {
 
 /**
  * Check all prerequisites for onboarding
+ * @param applicationId - The loan application ID
+ * @param forceRefresh - If true, bypasses cache for all API calls to get fresh data
  */
 export async function checkAllPrerequisites(
-  applicationId: number | null
+  applicationId: number | null,
+  forceRefresh: boolean = false
 ): Promise<OnboardingPrerequisites> {
+  // Cache bypass options for all API calls when forceRefresh is true
+  const cacheOptions = forceRefresh ? { cache: false, skipDeduplication: true } : undefined;
   const prerequisites: OnboardingPrerequisites = {
     kycVerified: false,
     rekycRequired: false,
@@ -105,7 +110,7 @@ export async function checkAllPrerequisites(
     // 1. Check KYC status (user-level, not application-level)
     // Also check for ReKYC requirement (admin-triggered reset)
     try {
-      const kycResponse = await apiService.getKYCStatus(applicationId || '0');
+      const kycResponse = await apiService.getKYCStatus(applicationId || '0', cacheOptions);
       if (kycResponse.success && kycResponse.data) {
         prerequisites.kycVerified = kycResponse.data.kyc_status === 'verified';
         
@@ -136,7 +141,7 @@ export async function checkAllPrerequisites(
     // 2. Check PAN verification (after KYC)
     if (prerequisites.kycVerified && applicationId) {
       try {
-        const panResponse = await apiService.checkPanDocument(String(applicationId));
+        const panResponse = await apiService.checkPanDocument(String(applicationId), cacheOptions);
         if (panResponse.success && panResponse.data) {
           prerequisites.panVerified = panResponse.data.hasPanDocument === true;
         }
@@ -150,7 +155,7 @@ export async function checkAllPrerequisites(
     // If AA endpoint fails, we'll check bank statement status instead
     if (applicationId) {
       try {
-        const aaResponse = await apiService.getAccountAggregatorStatus(applicationId);
+        const aaResponse = await apiService.getAccountAggregatorStatus(applicationId, cacheOptions);
         if (aaResponse.success && aaResponse.data) {
           // AA consent is given if status is 'approved' or we have a consent_id
           prerequisites.aaConsentGiven = 
@@ -182,7 +187,7 @@ export async function checkAllPrerequisites(
     // - Data exists AND
     // - Credit score exists and is > 450 (eligible)
     try {
-      const creditResponse = await apiService.getCreditAnalyticsData();
+      const creditResponse = await apiService.getCreditAnalyticsData(cacheOptions);
       if (creditResponse.status === 'success' && creditResponse.data) {
         const creditScore = creditResponse.data.credit_score;
         const score = typeof creditScore === 'number' ? creditScore : (creditScore ? parseInt(String(creditScore)) : 0);
@@ -207,7 +212,7 @@ export async function checkAllPrerequisites(
 
     // 5. Check employment details completion
     try {
-      const employmentResponse = await apiService.getEmploymentDetailsStatus();
+      const employmentResponse = await apiService.getEmploymentDetailsStatus(cacheOptions);
       prerequisites.employmentCompleted = 
         employmentResponse.status === 'success' && 
         employmentResponse.data?.completed === true;
@@ -219,7 +224,7 @@ export async function checkAllPrerequisites(
 
     // 6. Check bank statement completion and admin resets
     try {
-      const bankStatementResponse = await apiService.getUserBankStatementStatus();
+      const bankStatementResponse = await apiService.getUserBankStatementStatus(cacheOptions);
       if (bankStatementResponse.success && bankStatementResponse.data) {
         const data = bankStatementResponse.data as any;
         const status = data.status;
@@ -253,7 +258,7 @@ export async function checkAllPrerequisites(
     // 7. Check bank details completion
     if (applicationId) {
       try {
-        const appResponse = await apiService.getLoanApplicationById(applicationId);
+        const appResponse = await apiService.getLoanApplicationById(applicationId, cacheOptions);
         if ((appResponse.success || appResponse.status === 'success') && appResponse.data?.application) {
           const userBankId = (appResponse.data.application as any).user_bank_id;
           prerequisites.bankDetailsCompleted = !!userBankId;
@@ -270,7 +275,7 @@ export async function checkAllPrerequisites(
 
     // 8. Check references completion
     try {
-      const refsResponse = await apiService.getUserReferences();
+      const refsResponse = await apiService.getUserReferences(cacheOptions);
       if (refsResponse.success && refsResponse.data) {
         const referencesList = refsResponse.data.references || [];
         const alternateData = refsResponse.data.alternate_data;
@@ -301,7 +306,7 @@ export async function checkAllPrerequisites(
             if (docs.length > 0) {
               // Check if all documents are already uploaded
               try {
-                const docsResponse = await apiService.getLoanDocuments(applicationId);
+                const docsResponse = await apiService.getLoanDocuments(applicationId, cacheOptions);
                 if (docsResponse.success || docsResponse.status === 'success') {
                   const uploadedDocs = docsResponse.data?.documents || [];
                   const normalize = (str: string) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -447,10 +452,25 @@ export async function getOnboardingProgress(
     forceRefresh
   });
   
-  // If forceRefresh is true, clear cache for loan application
-  if (forceRefresh && applicationId) {
-    apiService.clearCache(`/loan-applications/${applicationId}`);
+  // If forceRefresh is true, clear ALL relevant caches to ensure fresh data
+  if (forceRefresh) {
+    // Clear all step-related caches comprehensively
+    apiService.clearCache('/digilocker'); // KYC, PAN
+    apiService.clearCache('/credit-analytics'); // Credit check
+    apiService.clearCache('/employment-details'); // Employment
+    apiService.clearCache('/bank-statement'); // Bank statement
+    apiService.clearCache('/aa/status'); // Account Aggregator
+    apiService.clearCache('/references'); // References
+    apiService.clearCache('/loan-documents'); // Documents
+    apiService.clearCache('/validation'); // Validation history
+    
+    // Clear loan application caches
+    if (applicationId) {
+      apiService.clearCache(`/loan-applications/${applicationId}`);
+    }
     apiService.clearCache('/loan-applications');
+    
+    console.log('[ProgressEngine] 🔄 Force refresh: Cleared all step-related caches');
   }
   
   try {
@@ -460,12 +480,12 @@ export async function getOnboardingProgress(
     
     if (applicationId) {
       try {
-        // Clear cache first
-        apiService.clearCache(`/loan-applications/${applicationId}`);
-        apiService.clearCache('/loan-applications');
-        
+        // If forceRefresh, cache is already cleared above
         // Fetch application with NO CACHE - bypass cache for critical status check
-        const appResponse = await apiService.getLoanApplicationById(applicationId, { cache: false, skipDeduplication: true });
+        const appResponse = await apiService.getLoanApplicationById(applicationId, { 
+          cache: forceRefresh ? false : undefined, 
+          skipDeduplication: forceRefresh ? true : undefined 
+        });
         
         console.log('[ProgressEngine] 🔍 Status check response:', {
           hasSuccess: 'success' in appResponse,
@@ -497,7 +517,8 @@ export async function getOnboardingProgress(
     }
     
     // Normal flow - check prerequisites first to see what's actually completed
-    const prerequisites = await checkAllPrerequisites(applicationId);
+    // Pass forceRefresh to bypass cache when needed
+    const prerequisites = await checkAllPrerequisites(applicationId, forceRefresh);
     
     // Only block navigation if application is in final status AND all prerequisites are complete
     // If prerequisites are incomplete, allow user to continue onboarding even if status is "submitted"

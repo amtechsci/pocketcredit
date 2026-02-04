@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
 import { toast } from 'sonner';
@@ -122,6 +122,7 @@ interface DashboardData {
 
 export function DynamicDashboardPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, isAuthenticated } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
   const [showLoanApplication, setShowLoanApplication] = useState(false);
@@ -177,7 +178,11 @@ export function DynamicDashboardPage() {
       // Note: Status-based redirects (on_hold, deleted) are now handled by StatusGuard in App.tsx
       // No need to check here - StatusGuard will redirect before this component renders
 
-      const response = await apiService.getDashboardSummary();
+      // Clear dashboard cache and fetch fresh data to get accurate profile status
+      apiService.clearCache('/dashboard');
+      
+      // Fetch with cache bypass to ensure fresh profile status
+      const response = await apiService.getDashboardSummary({ cache: false, skipDeduplication: true });
 
       if (response.status === 'success' && response.data) {
         setDashboardData(response.data);
@@ -188,26 +193,36 @@ export function DynamicDashboardPage() {
         const incompleteData = response.data as any;
         console.log('Profile incomplete:', incompleteData);
         
-        // Prevent infinite redirect loop - check if we were just redirected from profile-completion
-        const redirectCount = parseInt(sessionStorage.getItem('profileRedirectCount') || '0', 10);
-        const lastRedirectTime = parseInt(sessionStorage.getItem('profileRedirectTime') || '0', 10);
-        const now = Date.now();
-        
-        // Reset counter if more than 5 seconds have passed
-        if (now - lastRedirectTime > 5000) {
-          sessionStorage.setItem('profileRedirectCount', '1');
-          sessionStorage.setItem('profileRedirectTime', now.toString());
-          navigate('/profile-completion');
-        } else if (redirectCount < 2) {
-          // Allow up to 2 redirects within 5 seconds
-          sessionStorage.setItem('profileRedirectCount', (redirectCount + 1).toString());
-          navigate('/profile-completion');
+        // Only redirect if we're actually on the dashboard page
+        // Don't redirect if already on profile-completion or other pages
+        if (location.pathname !== '/profile-completion') {
+          // Check if we're in a redirect loop
+          const redirectCount = parseInt(sessionStorage.getItem('profileRedirectCount') || '0', 10);
+          const lastRedirectTime = parseInt(sessionStorage.getItem('profileRedirectTime') || '0', 10);
+          const now = Date.now();
+          
+          // Reset counter if more than 10 seconds have passed (give more time)
+          if (now - lastRedirectTime > 10000) {
+            sessionStorage.setItem('profileRedirectCount', '1');
+            sessionStorage.setItem('profileRedirectTime', now.toString());
+            console.log('Redirecting to profile-completion (first time or after timeout)');
+            navigate('/profile-completion', { replace: true });
+          } else if (redirectCount < 3) {
+            // Allow up to 3 redirects within 10 seconds
+            sessionStorage.setItem('profileRedirectCount', (redirectCount + 1).toString());
+            console.log(`Redirecting to profile-completion (attempt ${redirectCount + 1})`);
+            navigate('/profile-completion', { replace: true });
+          } else {
+            // Too many redirects - show error and stay on dashboard
+            console.error('Redirect loop detected, staying on dashboard');
+            setError('Profile setup incomplete. Please complete your profile to continue.');
+            sessionStorage.removeItem('profileRedirectCount');
+            sessionStorage.removeItem('profileRedirectTime');
+          }
         } else {
-          // Too many redirects - show error and stay on dashboard
-          console.error('Redirect loop detected, staying on dashboard');
-          setError('Profile setup incomplete. Please contact support if this issue persists.');
-          sessionStorage.removeItem('profileRedirectCount');
-          sessionStorage.removeItem('profileRedirectTime');
+          // Already on profile-completion page, just show error
+          console.log('Already on profile-completion page, not redirecting');
+          setError('Please complete your profile to continue.');
         }
         return;
       } else {

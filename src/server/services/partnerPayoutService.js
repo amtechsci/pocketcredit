@@ -33,8 +33,36 @@ const calculatePayoutEligibility = async (leadId) => {
     }
 
     // Calculate days between lead share and disbursal
-    const leadShareDate = new Date(leadData.lead_shared_at);
-    const disbursalDate = new Date(leadData.disbursed_at);
+    // Parse dates as strings first to avoid timezone conversion
+    const { parseDateToString } = require('../utils/loanCalculations');
+    let leadShareDate;
+    if (leadData.lead_shared_at) {
+      const dateStr = parseDateToString(leadData.lead_shared_at);
+      if (dateStr) {
+        const [year, month, day] = dateStr.split('-').map(Number);
+        leadShareDate = new Date(year, month - 1, day);
+      } else {
+        leadShareDate = new Date();
+      }
+    } else {
+      leadShareDate = new Date();
+    }
+    leadShareDate.setHours(0, 0, 0, 0);
+    
+    let disbursalDate;
+    if (leadData.disbursed_at) {
+      const dateStr = parseDateToString(leadData.disbursed_at);
+      if (dateStr) {
+        const [year, month, day] = dateStr.split('-').map(Number);
+        disbursalDate = new Date(year, month - 1, day);
+      } else {
+        disbursalDate = new Date();
+      }
+    } else {
+      disbursalDate = new Date();
+    }
+    disbursalDate.setHours(0, 0, 0, 0);
+    
     const daysDiff = Math.floor((disbursalDate - leadShareDate) / (1000 * 60 * 60 * 24));
 
     // Payout eligible if disbursed within 20 days

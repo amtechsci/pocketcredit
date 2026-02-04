@@ -1112,8 +1112,12 @@ router.post('/:extensionId/check-payment', requireAuth, async (req, res) => {
     
     // Check if order is expired (Cashfree orders expire after 30 minutes)
     // Use 25 minutes as threshold to be safe (create new order before expiry)
-    const orderCreatedAt = new Date(paymentOrder.created_at);
+    // For time calculations, we need full datetime, but ensure consistent timezone handling
+    // Since we're calculating time difference, both timestamps should be in same timezone context
+    const orderCreatedAt = paymentOrder.created_at ? new Date(paymentOrder.created_at) : new Date();
     const now = new Date();
+    // Calculate difference in milliseconds, then convert to minutes
+    // Both dates are in server timezone (IST), so difference calculation is accurate
     const minutesSinceCreation = (now - orderCreatedAt) / (1000 * 60);
     const isExpired = minutesSinceCreation > 25; // Create new order if older than 25 minutes (before 30 min expiry)
 

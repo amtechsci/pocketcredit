@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { AdminLogin } from './admin/AdminLogin';
@@ -68,12 +68,12 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
     }
   }, [navigate, location.pathname, isInternalCall]);
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     localStorage.removeItem('adminUser');
     localStorage.removeItem('adminToken');
     setCurrentUser(null);
     navigate(`${BASE_PATH}/login`);
-  };
+  }, [navigate]);
 
   // Auto-logout after 20 minutes of inactivity
   useAdminAutoLogout({

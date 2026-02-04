@@ -198,7 +198,8 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
       }
 
       // Get progress from unified engine
-      const progress = await getOnboardingProgress(applicationId);
+      // Use forceRefresh when skipRedirect is true (polling) to get fresh data
+      const progress = await getOnboardingProgress(applicationId, skipRedirect);
 
       // Map engine step to hook step
       const currentStep = mapEngineStepToHookStep(progress.currentStep);

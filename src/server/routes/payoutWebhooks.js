@@ -215,10 +215,25 @@ async function processPayoutWebhookAsync(reqBody, requestId, eventId, signature)
                                 
                                 if (partnerLeads && partnerLeads.length > 0) {
                                     const disbursalAmount = loan[0].disbursal_amount || loan[0].loan_amount;
+                                    // Parse date as string first to avoid timezone conversion
+                                    const { parseDateToString } = require('../utils/loanCalculations');
+                                    let disbursedAt;
+                                    if (loan[0].disbursed_at) {
+                                      const dateStr = parseDateToString(loan[0].disbursed_at);
+                                      if (dateStr) {
+                                        const [year, month, day] = dateStr.split('-').map(Number);
+                                        disbursedAt = new Date(year, month - 1, day);
+                                      } else {
+                                        disbursedAt = new Date();
+                                      }
+                                    } else {
+                                      disbursedAt = new Date();
+                                    }
+                                    disbursedAt.setHours(0, 0, 0, 0);
                                     await updateLeadPayout(
                                         partnerLeads[0].id,
                                         disbursalAmount,
-                                        new Date(loan[0].disbursed_at)
+                                        disbursedAt
                                     );
                                     console.log(`[PayoutWebhook ${requestId}] Updated partner lead payout for lead ${partnerLeads[0].id} (from webhook)`);
                                 }

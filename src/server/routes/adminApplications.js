@@ -629,8 +629,30 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
             const userResult = await execQuery('SELECT salary_date FROM users WHERE id = ?', [loan.user_id]);
             const userSalaryDate = userResult[0]?.salary_date || null;
             
-            // Calculate base date (disbursement date or today)
-            const baseDate = loan.disbursed_at ? new Date(loan.disbursed_at) : new Date();
+            // Calculate base date (processed_at for processed loans, otherwise disbursed_at or today)
+            // Parse date as string first to avoid timezone conversion
+            const { parseDateToString } = require('../utils/loanCalculations');
+            let baseDate;
+            // For processed loans, use processed_at as base date (per rulebook)
+            if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+              const dateStr = parseDateToString(loan.processed_at);
+              if (dateStr) {
+                const [year, month, day] = dateStr.split('-').map(Number);
+                baseDate = new Date(year, month - 1, day);
+              } else {
+                baseDate = new Date();
+              }
+            } else if (loan.disbursed_at) {
+              const dateStr = parseDateToString(loan.disbursed_at);
+              if (dateStr) {
+                const [year, month, day] = dateStr.split('-').map(Number);
+                baseDate = new Date(year, month - 1, day);
+              } else {
+                baseDate = new Date();
+              }
+            } else {
+              baseDate = new Date();
+            }
             baseDate.setHours(0, 0, 0, 0);
             
             // Generate all EMI dates
@@ -783,8 +805,20 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
             // Log EMI calculation inputs for debugging
             
             // Calculate base date for interest calculation (processed_at takes priority over disbursed_at)
-            // Reuse existing baseDate variable but update it if processed_at exists
-            const interestBaseDate = loan.processed_at ? new Date(loan.processed_at) : baseDate;
+            // Parse date as string first to avoid timezone conversion
+            // parseDateToString and getTodayString are already imported above
+            let interestBaseDate;
+            if (loan.processed_at) {
+              const dateStr = parseDateToString(loan.processed_at);
+              if (dateStr) {
+                const [year, month, day] = dateStr.split('-').map(Number);
+                interestBaseDate = new Date(year, month - 1, day);
+              } else {
+                interestBaseDate = baseDate;
+              }
+            } else {
+              interestBaseDate = baseDate;
+            }
             interestBaseDate.setHours(0, 0, 0, 0);
             const baseDateStr = formatDateToString(interestBaseDate) || getTodayString();
             
@@ -848,9 +882,27 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
             const userSalaryDate = userResult[0]?.salary_date || null;
             
             // Calculate base date (use processed_at if available, otherwise disbursed_at or today)
-            const baseDate = loan.processed_at 
-              ? new Date(loan.processed_at) 
-              : (loan.disbursed_at ? new Date(loan.disbursed_at) : new Date());
+            // Parse date as string first to avoid timezone conversion
+            let baseDate;
+            if (loan.processed_at) {
+              const dateStr = parseDateToString(loan.processed_at);
+              if (dateStr) {
+                const [year, month, day] = dateStr.split('-').map(Number);
+                baseDate = new Date(year, month - 1, day);
+              } else {
+                baseDate = new Date();
+              }
+            } else if (loan.disbursed_at) {
+              const dateStr = parseDateToString(loan.disbursed_at);
+              if (dateStr) {
+                const [year, month, day] = dateStr.split('-').map(Number);
+                baseDate = new Date(year, month - 1, day);
+              } else {
+                baseDate = new Date();
+              }
+            } else {
+              baseDate = new Date();
+            }
             baseDate.setHours(0, 0, 0, 0);
             const baseDateStr = formatDateToString(baseDate);
             
@@ -963,7 +1015,21 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
           
           if (partnerLeads && partnerLeads.length > 0) {
             const disbursalAmount = updatedLoan[0].disbursal_amount || updatedLoan[0].loan_amount;
-            const disbursedAt = new Date(updatedLoan[0].disbursed_at);
+            // Parse date as string first to avoid timezone conversion
+            const { parseDateToString } = require('../utils/loanCalculations');
+            let disbursedAt;
+            if (updatedLoan[0].disbursed_at) {
+              const dateStr = parseDateToString(updatedLoan[0].disbursed_at);
+              if (dateStr) {
+                const [year, month, day] = dateStr.split('-').map(Number);
+                disbursedAt = new Date(year, month - 1, day);
+              } else {
+                disbursedAt = new Date();
+              }
+            } else {
+              disbursedAt = new Date();
+            }
+            disbursedAt.setHours(0, 0, 0, 0);
             await updateLeadPayout(
               partnerLeads[0].id,
               disbursalAmount,

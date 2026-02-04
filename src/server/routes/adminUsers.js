@@ -589,13 +589,17 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
       });
     }
 
+    // Check if force parameter is provided to allow refetching
+    const forceRefetch = req.body?.force === true || req.query?.force === 'true';
+
     // Check if credit check already exists for this user
     const existingCheck = await executeQuery(
       'SELECT id, credit_score, is_eligible, checked_at FROM credit_checks WHERE user_id = ?',
       [userId]
     );
 
-    if (existingCheck.length > 0) {
+    // If credit check exists and not forcing refetch, return existing data
+    if (existingCheck.length > 0 && !forceRefetch) {
       return res.json({
         status: 'success',
         message: 'Credit check already performed for this user',

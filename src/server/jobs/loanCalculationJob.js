@@ -18,7 +18,7 @@
 
 const { executeQuery } = require('../config/database');
 const cronLogger = require('../services/cronLogger');
-const { toDecimal2 } = require('../utils/loanCalculations');
+const { toDecimal2, parseDateToString } = require('../utils/loanCalculations');
 
 /**
  * Parse due dates from processed_due_date field
@@ -180,9 +180,20 @@ async function calculateLoanInterestAndPenalty() {
     for (const loan of processedLoans) {
       try {
         // Determine calculation start date
-        const lastCalcDate = loan.last_calculated_at 
-          ? new Date(loan.last_calculated_at)
-          : new Date(loan.processed_at);
+        // Parse date as string first to avoid timezone conversion
+        let lastCalcDate;
+        const dateSource = loan.last_calculated_at || loan.processed_at;
+        if (dateSource) {
+          const dateStr = parseDateToString(dateSource);
+          if (dateStr) {
+            const [year, month, day] = dateStr.split('-').map(Number);
+            lastCalcDate = new Date(year, month - 1, day);
+          } else {
+            lastCalcDate = new Date();
+          }
+        } else {
+          lastCalcDate = new Date();
+        }
         lastCalcDate.setHours(0, 0, 0, 0);
 
         // Calculate days (inclusive)
