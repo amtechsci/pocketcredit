@@ -462,6 +462,8 @@ export const PostDisbursalFlowPage = () => {
     }
     
     try {
+      // Clear cache before fetching to ensure fresh data
+      apiService.clearCache('/post-disbursal');
       const response = await apiService.getPostDisbursalProgress(appId);
       console.log('📊 Post-disbursal progress response:', response);
 
@@ -515,8 +517,17 @@ export const PostDisbursalFlowPage = () => {
           bank_confirm_done: progressData.bank_confirm_done,
           kfs_viewed: progressData.kfs_viewed,
           agreement_signed: progressData.agreement_signed,
-          determinedStep
+          determinedStep,
+          currentStepBeforeUpdate: currentStep
         });
+        
+        setProgress(progressData);
+        
+        if (determinedStep !== currentStep) {
+          console.log(`🔄 Step changed: ${currentStep} → ${determinedStep}`);
+        } else {
+          console.log(`ℹ️ Step unchanged: ${currentStep}`);
+        }
         
         setCurrentStep(determinedStep);
         setLoading(false);
@@ -585,9 +596,17 @@ export const PostDisbursalFlowPage = () => {
         // For other steps (including selfie and eNACH), re-fetch progress to get updated step
         // This will auto-advance to the next step
         if (applicationId) {
+          // Clear cache to ensure we get fresh data
+          apiService.clearCache('/post-disbursal');
+          console.log(`🔄 Step ${stepNumber} complete, fetching updated progress to determine next step...`);
+          
+          // Small delay to ensure database is updated before fetching
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
           await fetchProgress(applicationId);
         } else if (stepNumber < 6) {
           // Fallback: manually advance if we can't fetch
+          console.log(`🔄 Step ${stepNumber} complete, manually advancing to step ${stepNumber + 1}`);
           setCurrentStep(stepNumber + 1);
         }
       }
