@@ -2,6 +2,7 @@ const otpGenerator = require('otp-generator');
 const { getRedisClient, set, get, del } = require('../config/redis');
 const { findUserByMobileNumber, findUserById, createUser, updateLastLogin, getProfileSummary } = require('../models/user');
 const { initializeDatabase, executeQuery } = require('../config/database');
+const { smsService } = require('../utils/smsService');
 
 // Try to load loginDataParser, but don't fail if it doesn't exist
 let extractLoginData = null;
@@ -62,20 +63,29 @@ const sendOtp = async (req, res) => {
       });
     }
 
-    // Send SMS using smswala API
-    const message = `${otp} is OTP for Creditlab login verification & valid till 2min. Don't share this OTP with anyone.`;
-    const template_id = '1407174844163241940';
-    const sender = 'CREDLB';
-    
-    const smsUrl = `https://sms.smswala.in/app/smsapi/index.php?key=2683C705E7CB39&campaign=16613&routeid=30&type=text&contacts=${mobile}&senderid=${sender}&msg=${encodeURIComponent(message)}&template_id=${template_id}&pe_id=1401337620000065797`;
+    // Send SMS using OneXtel service
+    const message = `${otp} is your OTP for Pocketcredit login verification. This code is valid for 5 min. Do not share this OTP with anyone for security reasons.`;
+    const OTP_TEMPLATE_ID = '1107900001243800002';
     
     try {
-      const response = await fetch(smsUrl);
-      const result = await response.text();
-      console.log(`✅ OTP SMS sent to ${mobile}`);
+      const result = await smsService.sendSMS({
+        to: mobile,
+        message: message,
+        templateId: OTP_TEMPLATE_ID,
+        senderId: 'PKTCRD'
+      });
+      
+      if (result.success) {
+        console.log(`✅ OTP SMS sent to ${mobile}`);
+      } else {
+        console.error(`❌ OTP SMS failed for ${mobile}:`, result.description);
+        // Log OTP to console as fallback
+        console.log(`📱 OTP (Development fallback): ${otp}`);
+      }
     } catch (error) {
       console.error('SMS sending failed:', error);
       // Log OTP to console as fallback
+      console.log(`📱 OTP (Development fallback): ${otp}`);
     }
 
     res.json({

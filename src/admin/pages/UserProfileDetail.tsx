@@ -390,7 +390,6 @@ export function UserProfileDetail() {
   const [creditAnalyticsData, setCreditAnalyticsData] = useState<any>(null);
   const [creditAnalyticsLoading, setCreditAnalyticsLoading] = useState(false);
   const [performingCreditCheck, setPerformingCreditCheck] = useState(false);
-  const [oldCreditScore, setOldCreditScore] = useState<number | null>(null);
 
   // EMI Details modal state
   const [showEmiDetailsModal, setShowEmiDetailsModal] = useState(false);
@@ -490,13 +489,6 @@ export function UserProfileDetail() {
 
       if (response.status === 'success') {
         setCreditAnalyticsData(response.data);
-        // Clear old credit score if it was set (after showing comparison)
-        // Keep it for a bit so user can see the comparison, then clear after 10 seconds
-        if (oldCreditScore !== null) {
-          setTimeout(() => {
-            setOldCreditScore(null);
-          }, 10000); // Clear after 10 seconds
-        }
       }
     } catch (error) {
       console.error('Error fetching credit analytics:', error);
@@ -521,15 +513,8 @@ export function UserProfileDetail() {
     try {
       setPerformingCreditCheck(true);
       
-      // Store old credit score before refetching
-      if (forceRefetch && creditAnalyticsData) {
-        const oldScore = creditAnalyticsData.credit_score || 
-                        creditAnalyticsData.full_report?.result?.result_json?.INProfileResponse?.SCORE?.BureauScore ||
-                        null;
-        setOldCreditScore(oldScore);
-      } else {
-        setOldCreditScore(null);
-      }
+      // Old credit score will now be saved in database (previous_credit_score field)
+      // No need to store in state anymore - it's permanently saved in DB
 
       const response = await adminApiService.performCreditCheck(userData.id, forceRefetch);
 
@@ -8028,7 +8013,7 @@ export function UserProfileDetail() {
       );
     }
 
-    const { credit_score, is_eligible, rejection_reasons, full_report, pdf_url, checked_at, request_id, client_ref_num, result_code, api_message } = creditAnalyticsData;
+    const { credit_score, previous_credit_score, is_eligible, rejection_reasons, full_report, pdf_url, checked_at, request_id, client_ref_num, result_code, api_message } = creditAnalyticsData;
 
     // Check if result_code is 102 (mobile number mismatch)
     // Check both from database field and from full_report
@@ -8509,16 +8494,16 @@ export function UserProfileDetail() {
           <p className="text-sm text-orange-600 italic mb-6">Your Experian Credit Report is summarized in the form of Experian Credit Score which ranges from 300 - 900.</p>
 
           <div className="flex items-center gap-8">
-            {/* Credit Score Display - Show Old vs New if refetched */}
-            {oldCreditScore !== null ? (
+            {/* Credit Score Display - Show Old vs New if previous_credit_score exists in database */}
+            {previous_credit_score !== null && previous_credit_score !== undefined ? (
               <div className="flex items-center gap-6">
                 {/* Old Credit Score */}
                 <div className="relative">
                   <div className="w-32 h-32 rounded-full bg-gradient-to-r from-gray-400 via-gray-500 to-gray-600 flex items-center justify-center">
                     <div className="w-28 h-28 rounded-full bg-white flex items-center justify-center">
                       <div className="text-center">
-                        <div className="text-3xl font-bold text-gray-600">{oldCreditScore}</div>
-                        <div className="text-xs text-gray-500 mt-1">Old Score</div>
+                        <div className="text-3xl font-bold text-gray-600">{previous_credit_score}</div>
+                        <div className="text-xs text-gray-500 mt-1">Previous Score</div>
                       </div>
                     </div>
                   </div>
@@ -8541,7 +8526,7 @@ export function UserProfileDetail() {
                       <div className="text-center">
                         {(() => {
                           const newScoreNum = typeof displayScore === 'number' ? displayScore : (displayScore && displayScore !== 'N/A' ? parseInt(String(displayScore)) : null);
-                          const oldScoreNum = typeof oldCreditScore === 'number' ? oldCreditScore : (oldCreditScore && oldCreditScore !== 'N/A' ? parseInt(String(oldCreditScore)) : null);
+                          const oldScoreNum = typeof previous_credit_score === 'number' ? previous_credit_score : (previous_credit_score && previous_credit_score !== 'N/A' ? parseInt(String(previous_credit_score)) : null);
                           const scoreColor = newScoreNum !== null && oldScoreNum !== null 
                             ? (newScoreNum > oldScoreNum ? 'text-green-600' : newScoreNum < oldScoreNum ? 'text-red-600' : 'text-blue-600')
                             : 'text-blue-600';
@@ -8551,7 +8536,7 @@ export function UserProfileDetail() {
                             </div>
                           );
                         })()}
-                        <div className="text-xs text-gray-500 mt-1">New Score</div>
+                        <div className="text-xs text-gray-500 mt-1">Current Score</div>
                       </div>
                     </div>
                   </div>
@@ -8565,7 +8550,7 @@ export function UserProfileDetail() {
                 <div className="flex flex-col gap-1">
                   {(() => {
                     const newScoreNum = typeof displayScore === 'number' ? displayScore : (displayScore && displayScore !== 'N/A' ? parseInt(String(displayScore)) : null);
-                    const oldScoreNum = typeof oldCreditScore === 'number' ? oldCreditScore : (oldCreditScore && oldCreditScore !== 'N/A' ? parseInt(String(oldCreditScore)) : null);
+                    const oldScoreNum = typeof previous_credit_score === 'number' ? previous_credit_score : (previous_credit_score && previous_credit_score !== 'N/A' ? parseInt(String(previous_credit_score)) : null);
                     
                     if (newScoreNum !== null && oldScoreNum !== null) {
                       const diff = newScoreNum - oldScoreNum;

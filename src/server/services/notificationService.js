@@ -5,6 +5,7 @@
 
 const EmailService = require('./emailService');
 const { initializeDatabase, executeQuery } = require('../config/database');
+const { smsService } = require('../utils/smsService');
 
 class NotificationService {
   constructor() {
@@ -12,29 +13,33 @@ class NotificationService {
   }
 
   /**
-   * Send SMS via smswala API
+   * Send SMS via OneXtel API
    * @param {string} mobile - Mobile number
    * @param {string} message - SMS message
+   * @param {string} templateId - DLT Template ID (optional)
    * @returns {Promise<boolean>}
    */
-  async sendSMS(mobile, message) {
+  async sendSMS(mobile, message, templateId = null) {
     try {
       if (!mobile || !/^[6-9]\d{9}$/.test(mobile)) {
         console.warn(`[Notification] Invalid mobile number: ${mobile}`);
         return false;
       }
 
-      // Use the same SMS API configuration as OTP sending
-      const template_id = '1407174844163241940'; // Default template ID
-      const sender = 'CREDLB';
+      const result = await smsService.sendSMS({
+        to: mobile,
+        message: message,
+        templateId: templateId || process.env.ONEXTEL_DEFAULT_TEMPLATE_ID,
+        senderId: 'PKTCRD'
+      });
       
-      const smsUrl = `https://sms.smswala.in/app/smsapi/index.php?key=2683C705E7CB39&campaign=16613&routeid=30&type=text&contacts=${mobile}&senderid=${sender}&msg=${encodeURIComponent(message)}&template_id=${template_id}&pe_id=1401337620000065797`;
-      
-      const response = await fetch(smsUrl);
-      const result = await response.text();
-      
-      console.log(`[Notification] SMS sent to ${mobile}: ${result}`);
-      return true;
+      if (result.success) {
+        console.log(`[Notification] SMS sent to ${mobile}`);
+        return true;
+      } else {
+        console.error(`[Notification] SMS failed for ${mobile}:`, result.description);
+        return false;
+      }
 
     } catch (error) {
       console.error(`[Notification] SMS sending failed for ${mobile}:`, error);

@@ -15,6 +15,9 @@ const cronLogger = require('../services/cronLogger');
 const { smsService } = require('../utils/smsService');
 const { initSmsTemplatesTable, seedDefaultTemplates } = require('../routes/adminSmsTemplates');
 
+// Dry-run mode: Set SMS_DRY_RUN=true in .env to enable (logs what would be sent without actually sending)
+const DRY_RUN = process.env.SMS_DRY_RUN === 'true' || process.env.SMS_DRY_RUN === '1';
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
@@ -166,7 +169,7 @@ async function logSMSSent(userId, loanId, templateKey, mobile, message, status, 
 }
 
 /**
- * Send SMS to a user
+ * Send SMS to a user (or log in dry-run mode)
  */
 async function sendSMSToUser(user, loan, template, message) {
   const mobiles = [];
@@ -190,35 +193,87 @@ async function sendSMSToUser(user, loan, template, message) {
       // Check if already sent today
       const alreadySent = await wasSMSSentToday(user.id, template.template_key, mobile.type);
       if (alreadySent) {
-        console.log(`[SMS Cron] Already sent ${template.template_key} to user ${user.id} (${mobile.type}) today, skipping`);
+        if (DRY_RUN) {
+          console.log(`[SMS Cron DRY-RUN] ⏭️  Would skip: Already sent ${template.template_key} to user ${user.id} (${mobile.type}) today`);
+        } else {
+          console.log(`[SMS Cron] Already sent ${template.template_key} to user ${user.id} (${mobile.type}) today, skipping`);
+        }
         continue;
       }
       
       // Skip if template ID not configured
       if (!template.template_id) {
-        console.log(`[SMS Cron] DLT Template ID not configured for ${template.template_key}, skipping`);
-        await logSMSSent(user.id, loan?.id, `${template.template_key}_${mobile.type}`, mobile.number, message, 'skipped', { reason: 'DLT Template ID not configured' });
+        if (DRY_RUN) {
+          console.log(`[SMS Cron DRY-RUN] ⏭️  Would skip: DLT Template ID not configured for ${template.template_key}`);
+        } else {
+          console.log(`[SMS Cron] DLT Template ID not configured for ${template.template_key}, skipping`);
+          await logSMSSent(user.id, loan?.id, `${template.template_key}_${mobile.type}`, mobile.number, message, 'skipped', { reason: 'DLT Template ID not configured' });
+        }
         continue;
       }
       
-      const result = await smsService.sendSMS({
-        to: mobile.number,
-        message: message,
-        templateId: template.template_id,
-        senderId: template.sender_id || 'PKTCRD'
-      });
-      
-      await logSMSSent(user.id, loan?.id, `${template.template_key}_${mobile.type}`, mobile.number, message, result.success ? 'sent' : 'failed', result);
-      
-      if (result.success) {
+      if (DRY_RUN) {
+        // DRY-RUN MODE: Log what would be sent
+        console.log('\n' + '='.repeat(80));
+        console.log(`[SMS Cron DRY-RUN] 📱 WOULD SEND SMS`);
+        console.log('='.repeat(80));
+        console.log(`Template: ${template.template_name} (${template.template_key})`);
+        console.log(`Category: ${template.category || 'N/A'}`);
+        console.log(`Trigger Type: ${template.trigger_type}`);
+        console.log(`DLT Template ID: ${template.template_id}`);
+        console.log(`Sender ID: ${template.sender_id || 'PKTCRD'}`);
+        console.log(`Send To: ${template.send_to} (${mobile.type})`);
+        console.log(`Mobile: ${mobile.number}`);
+        console.log(`User ID: ${user.id}`);
+        console.log(`User Name: ${user.first_name || ''} ${user.last_name || ''}`.trim() || 'N/A');
+        if (loan) {
+          console.log(`Loan ID: ${loan.id}`);
+          console.log(`Loan Status: ${loan.status || 'N/A'}`);
+          console.log(`Loan Amount: ₹${loan.loan_amount || 0}`);
+        }
+        console.log(`\nMessage:`);
+        console.log(`"${message}"`);
+        console.log(`\nTemplate Variables Used:`);
+        const variables = message.match(/\{[^}]+\}/g) || [];
+        if (variables.length > 0) {
+          variables.forEach(v => console.log(`  - ${v}`));
+        } else {
+          console.log(`  (No variables found)`);
+        }
+        console.log('='.repeat(80) + '\n');
+        
+        // Still log to database in dry-run mode for tracking
+        await logSMSSent(user.id, loan?.id, `${template.template_key}_${mobile.type}`, mobile.number, message, 'dry_run', { 
+          dryRun: true,
+          templateName: template.template_name,
+          category: template.category,
+          triggerType: template.trigger_type
+        });
+        
         sentCount++;
-        console.log(`[SMS Cron] Sent ${template.template_key} to ${mobile.number} (${mobile.type})`);
       } else {
-        console.error(`[SMS Cron] Failed to send ${template.template_key} to ${mobile.number}: ${result.description}`);
+        // NORMAL MODE: Actually send SMS
+        const result = await smsService.sendSMS({
+          to: mobile.number,
+          message: message,
+          templateId: template.template_id,
+          senderId: template.sender_id || 'PKTCRD'
+        });
+        
+        await logSMSSent(user.id, loan?.id, `${template.template_key}_${mobile.type}`, mobile.number, message, result.success ? 'sent' : 'failed', result);
+        
+        if (result.success) {
+          sentCount++;
+          console.log(`[SMS Cron] ✅ Sent ${template.template_key} to ${mobile.number} (${mobile.type})`);
+        } else {
+          console.error(`[SMS Cron] ❌ Failed to send ${template.template_key} to ${mobile.number}: ${result.description}`);
+        }
       }
     } catch (error) {
       console.error(`[SMS Cron] Error sending SMS to ${mobile.number}:`, error.message);
-      await logSMSSent(user.id, loan?.id, `${template.template_key}_${mobile.type}`, mobile.number, message, 'error', { error: error.message });
+      if (!DRY_RUN) {
+        await logSMSSent(user.id, loan?.id, `${template.template_key}_${mobile.type}`, mobile.number, message, 'error', { error: error.message });
+      }
     }
   }
   
@@ -545,15 +600,22 @@ async function runSMSNotificationJob() {
     }
     
     const currentTime = getCurrentTimeIST();
-    console.log(`[SMS Cron] Running SMS notification job at ${currentTime} IST`);
+    if (DRY_RUN) {
+      console.log(`\n${'='.repeat(80)}`);
+      console.log(`[SMS Cron DRY-RUN] 🔍 TESTING MODE - No SMS will be sent`);
+      console.log(`[SMS Cron DRY-RUN] Running at ${currentTime} IST`);
+      console.log(`${'='.repeat(80)}\n`);
+    } else {
+      console.log(`[SMS Cron] Running SMS notification job at ${currentTime} IST`);
+    }
     
     // Load templates from database
     const templates = await loadTemplatesFromDB();
-    console.log(`[SMS Cron] Loaded ${templates.length} active templates`);
+    console.log(`[SMS Cron${DRY_RUN ? ' DRY-RUN' : ''}] Loaded ${templates.length} active templates`);
     
     if (templates.length === 0) {
-      console.log('[SMS Cron] No active templates found');
-      return { success: true, totalSent: 0, duration: Date.now() - startTime };
+      console.log(`[SMS Cron${DRY_RUN ? ' DRY-RUN' : ''}] No active templates found`);
+      return { success: true, totalSent: 0, duration: Date.now() - startTime, dryRun: DRY_RUN };
     }
     
     // Process DPD-based SMS
@@ -567,13 +629,28 @@ async function runSMSNotificationJob() {
     const duration = Date.now() - startTime;
     
     if (totalSent > 0) {
-      await cronLogger.info(`SMS notification job completed: ${totalSent} SMS sent in ${duration}ms`);
+      if (DRY_RUN) {
+        console.log(`\n${'='.repeat(80)}`);
+        console.log(`[SMS Cron DRY-RUN] 📊 SUMMARY`);
+        console.log(`${'='.repeat(80)}`);
+        console.log(`Would send: ${totalSent} SMS`);
+        console.log(`Duration: ${duration}ms`);
+        console.log(`${'='.repeat(80)}\n`);
+        await cronLogger.info(`SMS notification job (DRY-RUN): ${totalSent} SMS would be sent in ${duration}ms`);
+      } else {
+        await cronLogger.info(`SMS notification job completed: ${totalSent} SMS sent in ${duration}ms`);
+      }
+    } else {
+      if (DRY_RUN) {
+        console.log(`[SMS Cron DRY-RUN] No SMS would be sent at this time`);
+      }
     }
     
     return {
       success: true,
       totalSent,
-      duration
+      duration,
+      dryRun: DRY_RUN
     };
     
   } catch (error) {
@@ -585,7 +662,8 @@ async function runSMSNotificationJob() {
       success: false,
       totalSent,
       duration,
-      error: error.message
+      error: error.message,
+      dryRun: DRY_RUN
     };
   }
 }

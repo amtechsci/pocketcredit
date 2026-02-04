@@ -482,6 +482,7 @@ router.get('/:id/credit-analytics', authenticateAdmin, async (req, res) => {
         request_id,
         client_ref_num,
         credit_score,
+        previous_credit_score,
         result_code,
         api_message,
         is_eligible,
@@ -860,17 +861,31 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
 
     // Save credit check to database (update if exists, insert if new)
     try {
+      // If force refetch, get the old credit score before updating
+      let previousCreditScore = null;
+      if (forceRefetch) {
+        const existingCheck = await executeQuery(
+          'SELECT credit_score FROM credit_checks WHERE user_id = ?',
+          [userId]
+        );
+        if (existingCheck.length > 0 && existingCheck[0].credit_score !== null) {
+          previousCreditScore = existingCheck[0].credit_score;
+          console.log(`📊 Saving previous credit score: ${previousCreditScore}`);
+        }
+      }
+
       await executeQuery(
         `INSERT INTO credit_checks (
           user_id, request_id, client_ref_num, 
-          credit_score, result_code, api_message, 
+          credit_score, previous_credit_score, result_code, api_message, 
           is_eligible, rejection_reasons,
           has_settlements, has_writeoffs, has_suit_files, has_wilful_default,
           negative_indicators, full_report, pdf_url, checked_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
         ON DUPLICATE KEY UPDATE
           request_id = VALUES(request_id),
           client_ref_num = VALUES(client_ref_num),
+          previous_credit_score = IF(VALUES(previous_credit_score) IS NOT NULL, VALUES(previous_credit_score), previous_credit_score),
           credit_score = VALUES(credit_score),
           result_code = VALUES(result_code),
           api_message = VALUES(api_message),
@@ -890,6 +905,7 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
           creditReportResponse.request_id || null,
           clientRefNum,
           validation.creditScore || null,
+          previousCreditScore, // Save previous score when refetching
           creditReportResponse.result_code || null,
           creditReportResponse.message || null,
           validation.isEligible ? 1 : 0,

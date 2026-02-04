@@ -52,6 +52,9 @@ export const PostDisbursalFlowPage = () => {
   const [redirecting, setRedirecting] = useState(false);
   const [isWaitingForDisbursement, setIsWaitingForDisbursement] = useState(false); // Track if loan is ready_for_disbursement
   const isWaitingForDisbursementRef = useRef(false); // Ref to track waiting state synchronously
+  const isProcessingEnachCallbackRef = useRef(false); // Track if we're processing eNACH callback
+  const isProcessingSelfieVerificationRef = useRef(false); // Track if we're processing selfie verification
+  const isProcessingKfsViewRef = useRef(false); // Track if we're processing KFS view completion
   const [progress, setProgress] = useState<PostDisbursalProgress>({
     enach_done: false,
     selfie_captured: false,
@@ -158,6 +161,49 @@ export const PostDisbursalFlowPage = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applicationId, isWaitingForDisbursement]);
+
+  // Check if returning from eNACH authorization (bank redirect)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const enachComplete = urlParams.get('enach');
+    const subscriptionIdParam = urlParams.get('subscription_id');
+    const subscriptionId = subscriptionIdParam || sessionStorage.getItem('enach_subscription_id');
+    const savedApplicationId = sessionStorage.getItem('enach_application_id');
+
+    // Only process if we're returning from eNACH authorization
+    if (enachComplete === 'complete' && subscriptionId && applicationId) {
+      console.log('🔄 User returned from eNACH authorization, checking status...');
+      
+      // Set flag to prevent fetchProgress from auto-advancing
+      isProcessingEnachCallbackRef.current = true;
+      
+      // IMPORTANT: Force stay on eNACH step (step 1) until verification completes
+      // This prevents fetchProgress from auto-advancing to next step
+      setCurrentStep(1);
+      
+      setLoading(true);
+      
+      // Verify application ID matches
+      if (savedApplicationId && savedApplicationId !== applicationId.toString()) {
+        console.warn('Application ID mismatch, using saved ID');
+      }
+
+      // Check authorization status with polling
+      // This will call handleStepComplete when verified, which updates the database
+      // But we stay on step 1 until user manually proceeds or page refreshes
+      checkAuthorizationStatusWithPolling(subscriptionId);
+      
+      // Clean up session storage
+      sessionStorage.removeItem('enach_subscription_id');
+      sessionStorage.removeItem('enach_application_id');
+      sessionStorage.removeItem('enach_return_url');
+      
+      // Remove query params but keep applicationId
+      const newUrl = window.location.pathname + `?applicationId=${applicationId}`;
+      window.history.replaceState({}, '', newUrl);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applicationId]);
 
   // Check status and redirect if needed
   const checkStatusAndRedirect = async (appId: number) => {
@@ -402,6 +448,27 @@ export const PostDisbursalFlowPage = () => {
       return;
     }
     
+    // Don't fetch progress if we're processing eNACH callback
+    // This prevents auto-advancing to next step when user returns from bank
+    if (isProcessingEnachCallbackRef.current) {
+      console.log('⏸️ Skipping fetchProgress - processing eNACH callback');
+      return;
+    }
+    
+    // Don't fetch progress if we're processing selfie verification
+    // This prevents auto-advancing to next step after selfie verification
+    if (isProcessingSelfieVerificationRef.current) {
+      console.log('⏸️ Skipping fetchProgress - processing selfie verification');
+      return;
+    }
+    
+    // Don't fetch progress if we're processing KFS view completion
+    // This prevents auto-advancing to next step after KFS acceptance
+    if (isProcessingKfsViewRef.current) {
+      console.log('⏸️ Skipping fetchProgress - processing KFS view completion');
+      return;
+    }
+    
     try {
       const response = await apiService.getPostDisbursalProgress(appId);
       console.log('📊 Post-disbursal progress response:', response);
@@ -495,17 +562,154 @@ export const PostDisbursalFlowPage = () => {
   };
 
   const handleStepComplete = async (stepNumber: number, stepData: Partial<PostDisbursalProgress>) => {
+    // Check if this is selfie verification (step 2 with selfie_verified)
+    const isSelfieVerification = stepNumber === 2 && stepData.selfie_verified === true;
+    
+    // Check if this is KFS view completion (step 4 with kfs_viewed)
+    const isKfsViewCompletion = stepNumber === 4 && stepData.kfs_viewed === true;
+    
+    if (isSelfieVerification) {
+      // Set flag to prevent auto-advance
+      isProcessingSelfieVerificationRef.current = true;
+      console.log('🔄 Processing selfie verification, preventing auto-advance');
+    }
+    
+    if (isKfsViewCompletion) {
+      // Set flag to prevent auto-advance
+      isProcessingKfsViewRef.current = true;
+      console.log('🔄 Processing KFS view completion, preventing auto-advance');
+    }
+    
     // Save progress with the step data (don't increment current_step - we determine it from columns)
     const saved = await saveProgress(stepData);
 
     if (saved) {
-      // Re-fetch progress to get updated step based on columns
-      if (applicationId) {
-        await fetchProgress(applicationId);
-      } else if (stepNumber < 6) {
-        // Fallback: manually advance if we can't fetch
-        setCurrentStep(stepNumber + 1);
+      if (isSelfieVerification) {
+        // For selfie verification, stay on step 2 and show success
+        // Don't auto-advance - let user see success message
+        setCurrentStep(2);
+        
+        // Clear post-disbursal progress cache so next fetch gets fresh data
+        apiService.clearCache('/post-disbursal');
+        
+        // Clear the flag after a delay to allow user to see success message
+        // Then they can refresh or manually proceed
+        setTimeout(() => {
+          isProcessingSelfieVerificationRef.current = false;
+          console.log('✅ Selfie verification processing complete, fetchProgress will work normally now');
+        }, 3000); // 3 seconds delay
+      } else if (isKfsViewCompletion) {
+        // For KFS view completion, stay on step 4 and show success
+        // Don't auto-advance - let user see success message
+        setCurrentStep(4);
+        
+        // Clear post-disbursal progress cache so next fetch gets fresh data
+        apiService.clearCache('/post-disbursal');
+        
+        // Clear the flag after a delay to allow user to see success message
+        // Then they can refresh or manually proceed
+        setTimeout(() => {
+          isProcessingKfsViewRef.current = false;
+          console.log('✅ KFS view completion processing complete, fetchProgress will work normally now');
+        }, 3000); // 3 seconds delay
+      } else {
+        // For other steps, re-fetch progress to get updated step based on columns
+        if (applicationId) {
+          await fetchProgress(applicationId);
+        } else if (stepNumber < 6) {
+          // Fallback: manually advance if we can't fetch
+          setCurrentStep(stepNumber + 1);
+        }
       }
+    }
+  };
+
+  // Define checkAuthorizationStatusWithPolling after handleStepComplete so it can access it
+  // This function handles eNACH callback verification
+  const checkAuthorizationStatusWithPolling = async (subscriptionId: string, attempt: number = 1, maxAttempts: number = 10) => {
+    try {
+      console.log(`[eNACH] Checking status (attempt ${attempt}/${maxAttempts})...`);
+      const response = await apiService.getEnachSubscriptionStatus(subscriptionId);
+
+      if (response.success && response.data) {
+        const status = response.data.subscription_status;
+        const mandateStatus = response.data.mandate_status;
+
+        console.log(`[eNACH] Current status: ${status}, Mandate: ${mandateStatus}`);
+
+        // Success states - mandate is authorized
+        // BANK_APPROVAL_PENDING means user approved, waiting for bank (24 hours) - allow progression
+        if (status === 'ACTIVE' || status === 'AUTHENTICATED' || status === 'BANK_APPROVAL_PENDING' || 
+            mandateStatus === 'APPROVED') {
+          if (status === 'BANK_APPROVAL_PENDING') {
+            toast.success('✅ eNACH mandate approved! Waiting for bank confirmation (24 hours).');
+          } else {
+            toast.success('✅ eNACH mandate authorized successfully!');
+          }
+          setLoading(false);
+          
+          // Update database but DON'T auto-advance to next step
+          // Use handleStepComplete which will handle the flag properly
+          await handleStepComplete(1, { enach_done: true });
+          
+          // Force stay on eNACH step (step 1) so user sees the success
+          // User can manually proceed or refresh page to see next step
+          setCurrentStep(1);
+          
+          // Clear post-disbursal progress cache so next fetch gets fresh data
+          apiService.clearCache('/post-disbursal');
+          
+          // Clear the flag after a delay to allow user to see success message
+          // Then they can refresh or manually proceed
+          setTimeout(() => {
+            isProcessingEnachCallbackRef.current = false;
+            console.log('✅ eNACH callback processing complete, fetchProgress will work normally now');
+          }, 3000); // 3 seconds delay
+          
+          return;
+        }
+
+        // Failed states
+        if (status === 'CANCELLED' || status === 'FAILED' || mandateStatus === 'REJECTED') {
+          toast.error('eNACH authorization failed. Please try again.');
+          setLoading(false);
+          isProcessingEnachCallbackRef.current = false; // Clear flag on error
+          return;
+        }
+
+        // Still pending - poll again if within limit
+        if ((status === 'INITIALIZED' || status === 'PENDING' || !mandateStatus) && attempt < maxAttempts) {
+          // Wait 2 seconds before next check
+          setTimeout(() => {
+            checkAuthorizationStatusWithPolling(subscriptionId, attempt + 1, maxAttempts);
+          }, 2000);
+          return;
+        }
+
+        // Max attempts reached but still pending
+        if (attempt >= maxAttempts) {
+          toast.warning('eNACH authorization is taking longer than expected. We will notify you once it is confirmed.');
+          setLoading(false);
+          // Don't auto-complete - wait for webhook to update status
+          // User can manually check status later
+        }
+      } else {
+        throw new Error(response.message || 'Failed to fetch subscription status');
+      }
+    } catch (err: any) {
+      console.error('Error checking authorization status:', err);
+      
+      // Retry if it's a network error and we haven't exceeded max attempts
+      if (attempt < maxAttempts && (err.message?.includes('network') || err.message?.includes('timeout'))) {
+        setTimeout(() => {
+          checkAuthorizationStatusWithPolling(subscriptionId, attempt + 1, maxAttempts);
+        }, 2000);
+        return;
+      }
+
+      toast.error('Failed to verify eNACH authorization status. Please refresh the page.');
+      setLoading(false);
+      isProcessingEnachCallbackRef.current = false; // Clear flag on error
     }
   };
 
@@ -858,108 +1062,6 @@ const ENachStep = ({ applicationId, onComplete, saving }: StepProps) => {
       setLoading(false);
     }
     // Note: Don't set loading to false here since we're redirecting
-  };
-
-  // Check if returning from authorization (dashboard redirect)
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const enachComplete = urlParams.get('enach');
-    const subscriptionIdParam = urlParams.get('subscription_id');
-    const subscriptionId = subscriptionIdParam || sessionStorage.getItem('enach_subscription_id');
-    const savedApplicationId = sessionStorage.getItem('enach_application_id');
-
-    // Only process if we're returning from eNACH authorization
-    if (enachComplete === 'complete' && subscriptionId) {
-      console.log('🔄 User returned from eNACH authorization, checking status...');
-      setLoading(true);
-      
-      // Verify application ID matches
-      if (savedApplicationId && savedApplicationId !== applicationId.toString()) {
-        console.warn('Application ID mismatch, using saved ID');
-      }
-
-      // Check authorization status with polling
-      checkAuthorizationStatusWithPolling(subscriptionId);
-      
-      // Clean up session storage
-      sessionStorage.removeItem('enach_subscription_id');
-      sessionStorage.removeItem('enach_application_id');
-      sessionStorage.removeItem('enach_return_url');
-      
-      // Remove query params
-      const newUrl = window.location.pathname + `?applicationId=${applicationId}`;
-      window.history.replaceState({}, '', newUrl);
-    }
-  }, [applicationId]);
-
-  const checkAuthorizationStatusWithPolling = async (subscriptionId: string, attempt: number = 1, maxAttempts: number = 10) => {
-    try {
-      console.log(`[eNACH] Checking status (attempt ${attempt}/${maxAttempts})...`);
-      const response = await apiService.getEnachSubscriptionStatus(subscriptionId);
-
-      if (response.success && response.data) {
-        const status = response.data.subscription_status;
-        const mandateStatus = response.data.mandate_status;
-
-        console.log(`[eNACH] Current status: ${status}, Mandate: ${mandateStatus}`);
-
-        // Success states - mandate is authorized
-        // BANK_APPROVAL_PENDING means user approved, waiting for bank (24 hours) - allow progression
-        if (status === 'ACTIVE' || status === 'AUTHENTICATED' || status === 'BANK_APPROVAL_PENDING' || 
-            mandateStatus === 'APPROVED') {
-          if (status === 'BANK_APPROVAL_PENDING') {
-            toast.success('eNACH mandate approved! Waiting for bank confirmation (24 hours). You can proceed to the next step.');
-          } else {
-            toast.success('eNACH mandate authorized successfully!');
-          }
-          setLoading(false);
-          // Proceed to next step - user has approved, bank approval is pending
-          onComplete();
-          return;
-        }
-
-        // Failed states
-        if (status === 'CANCELLED' || status === 'FAILED' || mandateStatus === 'REJECTED') {
-          toast.error('eNACH authorization failed. Please try again.');
-          setLoading(false);
-          setError('eNACH mandate authorization was rejected. Please try again.');
-          return;
-        }
-
-        // Still pending - poll again if within limit
-        if ((status === 'INITIALIZED' || status === 'PENDING' || !mandateStatus) && attempt < maxAttempts) {
-          // Wait 2 seconds before next check
-          setTimeout(() => {
-            checkAuthorizationStatusWithPolling(subscriptionId, attempt + 1, maxAttempts);
-          }, 2000);
-          return;
-        }
-
-        // Max attempts reached but still pending
-        if (attempt >= maxAttempts) {
-          toast.warning('eNACH authorization is taking longer than expected. We will notify you once it is confirmed.');
-          setLoading(false);
-          // Don't auto-complete - wait for webhook to update status
-          // User can manually check status later
-        }
-      } else {
-        throw new Error(response.message || 'Failed to fetch subscription status');
-      }
-    } catch (err: any) {
-      console.error('Error checking authorization status:', err);
-      
-      // Retry if it's a network error and we haven't exceeded max attempts
-      if (attempt < maxAttempts && (err.message?.includes('network') || err.message?.includes('timeout'))) {
-        setTimeout(() => {
-          checkAuthorizationStatusWithPolling(subscriptionId, attempt + 1, maxAttempts);
-        }, 2000);
-        return;
-      }
-
-      toast.error('Failed to verify eNACH authorization status. Please refresh the page.');
-      setLoading(false);
-      setError('Unable to verify authorization status. Please contact support if the issue persists.');
-    }
   };
 
   const handleAddBankAccount = () => {

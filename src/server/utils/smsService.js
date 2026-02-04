@@ -26,8 +26,7 @@ class OneXtelSMSService {
   constructor(config = {}) {
     // Configuration from environment or passed config
     this.apiKey = config.apiKey || process.env.ONEXTEL_API_KEY;
-    this.password = config.password || process.env.ONEXTEL_PASSWORD;
-    this.baseUrl = config.baseUrl || process.env.ONEXTEL_BASE_URL || 'https://api.onexaura.com';
+    this.baseUrl = config.baseUrl || process.env.ONEXTEL_BASE_URL || 'http://apin.onex-aura.com';
     this.senderId = config.senderId || process.env.ONEXTEL_SENDER_ID || 'PKTCRD';
     this.entityId = config.entityId || process.env.ONEXTEL_ENTITY_ID;
     this.defaultTemplateId = config.defaultTemplateId || process.env.ONEXTEL_DEFAULT_TEMPLATE_ID;
@@ -35,9 +34,6 @@ class OneXtelSMSService {
     // Validate required configuration
     if (!this.apiKey) {
       console.warn('[OneXtel SMS] Warning: ONEXTEL_API_KEY not configured');
-    }
-    if (!this.password) {
-      console.warn('[OneXtel SMS] Warning: ONEXTEL_PASSWORD not configured');
     }
     if (!this.entityId) {
       console.warn('[OneXtel SMS] Warning: ONEXTEL_ENTITY_ID not configured');
@@ -147,10 +143,9 @@ class OneXtelSMSService {
         };
       }
 
-      // Build URL parameters
+      // Build URL parameters (using working format: no password, lowercase params)
       const params = new URLSearchParams({
         key: this.apiKey,
-        pwd: this.password,
         to: mobile,
         from: senderId || this.senderId,
         body: message,
@@ -167,7 +162,7 @@ class OneXtelSMSService {
       const url = `${this.baseUrl}/api/sms?${params.toString()}`;
 
       console.log(`[OneXtel SMS] Sending SMS to ${mobile}`);
-      console.log(`[OneXtel SMS] URL: ${this.baseUrl}/api/sms?key=***&pwd=***&to=${mobile}&from=${senderId || this.senderId}&entityid=${finalEntityId}&templateid=${finalTemplateId}`);
+      console.log(`[OneXtel SMS] URL: ${this.baseUrl}/api/sms?key=***&to=${mobile}&from=${senderId || this.senderId}&entityid=${finalEntityId}&templateid=${finalTemplateId}`);
 
       const response = await fetch(url, {
         method: 'GET',
