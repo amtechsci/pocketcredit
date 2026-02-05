@@ -128,6 +128,220 @@ interface LateFee {
   updated_at: string;
 }
 
+// Change Password Form Component
+const ChangePasswordForm: React.FC = () => {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isChanging, setIsChanging] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+
+    // Validation
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setError('All fields are required');
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setError('New password must be at least 8 characters long');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setError('New password and confirm password do not match');
+      return;
+    }
+
+    if (currentPassword === newPassword) {
+      setError('New password must be different from current password');
+      return;
+    }
+
+    setIsChanging(true);
+
+    try {
+      await adminApiService.changePassword(currentPassword, newPassword);
+      setSuccess('Password changed successfully!');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err: any) {
+      setError(err.message || 'Failed to change password. Please check your current password.');
+    } finally {
+      setIsChanging(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleChangePassword} className="space-y-6">
+      {error && (
+        <div className="bg-red-50 border-l-4 border-red-400 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-red-800">Error</p>
+              <p className="text-sm text-red-700 mt-1">{error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {success && (
+        <div className="bg-green-50 border-l-4 border-green-400 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-green-800">Success</p>
+              <p className="text-sm text-green-700 mt-1">{success}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-5">
+        <div>
+          <label htmlFor="current-password" className="block text-sm font-semibold text-gray-700 mb-2">
+            Current Password <span className="text-red-500">*</span>
+          </label>
+          <div className="relative">
+            <input
+              id="current-password"
+              type={showCurrentPassword ? 'text' : 'password'}
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              placeholder="Enter your current password"
+              required
+              disabled={isChanging}
+            />
+            <button
+              type="button"
+              onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors p-1"
+              tabIndex={-1}
+            >
+              {showCurrentPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label htmlFor="new-password" className="block text-sm font-semibold text-gray-700 mb-2">
+            New Password <span className="text-red-500">*</span>
+          </label>
+          <div className="relative">
+            <input
+              id="new-password"
+              type={showNewPassword ? 'text' : 'password'}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              placeholder="Enter your new password"
+              required
+              minLength={8}
+              disabled={isChanging}
+            />
+            <button
+              type="button"
+              onClick={() => setShowNewPassword(!showNewPassword)}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors p-1"
+              tabIndex={-1}
+            >
+              {showNewPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+            <Info className="w-3 h-3" />
+            Password must be at least 8 characters long
+          </p>
+        </div>
+
+        <div>
+          <label htmlFor="confirm-password" className="block text-sm font-semibold text-gray-700 mb-2">
+            Confirm New Password <span className="text-red-500">*</span>
+          </label>
+          <div className="relative">
+            <input
+              id="confirm-password"
+              type={showConfirmPassword ? 'text' : 'password'}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              placeholder="Confirm your new password"
+              required
+              minLength={8}
+              disabled={isChanging}
+            />
+            <button
+              type="button"
+              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors p-1"
+              tabIndex={-1}
+            >
+              {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+            </button>
+          </div>
+          {confirmPassword && newPassword && confirmPassword !== newPassword && (
+            <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
+              <AlertCircle className="w-3 h-3" />
+              Passwords do not match
+            </p>
+          )}
+          {confirmPassword && newPassword && confirmPassword === newPassword && (
+            <p className="text-xs text-green-600 mt-2 flex items-center gap-1">
+              <CheckCircle className="w-3 h-3" />
+              Passwords match
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-end gap-3 pt-6 border-t border-gray-200">
+        <button
+          type="button"
+          onClick={() => {
+            setCurrentPassword('');
+            setNewPassword('');
+            setConfirmPassword('');
+            setError('');
+            setSuccess('');
+          }}
+          disabled={isChanging}
+          className="px-6 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Clear
+        </button>
+        <button
+          type="submit"
+          disabled={isChanging || !currentPassword || !newPassword || !confirmPassword}
+          className="flex items-center gap-2 px-6 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+        >
+          {isChanging ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              Changing Password...
+            </>
+          ) : (
+            <>
+              <Lock className="w-4 h-4" />
+              Change Password
+            </>
+          )}
+        </button>
+      </div>
+    </form>
+  );
+};
+
 // Cloud Test Form Component
 const CloudTestForm: React.FC<{
   configId: number;
@@ -682,7 +896,8 @@ export function AdminSettings() {
     { id: 'user-config', label: 'User Config', icon: Settings, count: 0 },
     { id: 'eligibility', label: 'Eligibility Criteria', icon: CheckCircle, count: 0 },
     { id: 'policies', label: 'Policies', icon: FileText, count: 0 },
-    { id: 'cron', label: 'Cron Jobs', icon: Clock, count: 0 }
+    { id: 'cron', label: 'Cron Jobs', icon: Clock, count: 0 },
+    { id: 'change-password', label: 'Change Password', icon: Key, count: 0 }
   ];
 
   const getStatusColor = (status: string) => {
@@ -1942,24 +2157,32 @@ export function AdminSettings() {
 
       <div className="p-3 sm:p-4 lg:p-6">
         {/* Tabs */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">
-          <div className="border-b border-gray-200">
-            <nav className="flex space-x-8 px-6">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 overflow-hidden">
+          <div className="overflow-x-auto scrollbar-hide -mx-3 sm:mx-0 px-3 sm:px-0 pb-2">
+            <nav className="flex space-x-0 min-w-max">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
                 return (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                      activeTab === tab.id
-                        ? 'border-blue-500 text-blue-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    className={`relative flex items-center gap-2 py-3 sm:py-4 px-3 sm:px-5 border-b-2 font-medium text-sm transition-all whitespace-nowrap ${
+                      isActive
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
                     }`}
                   >
-                    <Icon className="w-4 h-4" />
-                    {tab.label}
-                    <span className="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded-full">
+                    <Icon className={`w-4 h-4 flex-shrink-0 transition-colors ${
+                      isActive ? 'text-blue-600' : 'text-gray-500'
+                    }`} />
+                    <span className="hidden sm:inline">{tab.label}</span>
+                    <span className="sm:hidden text-xs font-medium">{tab.label.split(' ')[0]}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold flex-shrink-0 transition-colors ${
+                      isActive
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-gray-100 text-gray-600'
+                    }`}>
                       {tab.count}
                     </span>
                   </button>
@@ -3879,6 +4102,25 @@ export function AdminSettings() {
         {activeTab === 'policies' && (
           <div className="space-y-6">
             <PoliciesManagement hideHeader={true} />
+          </div>
+        )}
+
+        {/* Change Password Tab */}
+        {activeTab === 'change-password' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 sm:p-8">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-8">
+                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
+                  <Key className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">Change Password</h2>
+                  <p className="text-sm text-gray-600 mt-1">Update your admin account password securely</p>
+                </div>
+              </div>
+
+              <ChangePasswordForm />
+            </div>
           </div>
         )}
 

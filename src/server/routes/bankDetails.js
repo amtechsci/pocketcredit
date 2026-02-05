@@ -244,6 +244,26 @@ router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
     );
     console.log(`✅ Updated loan application ${application_id} step to 'references' - user needs to complete references`);
 
+    // Trigger automatic event-based SMS (bank_linked)
+    try {
+      const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+      // Get last 4 digits of account number for masking
+      const maskedAccount = account_number.length > 4 
+        ? `****${account_number.slice(-4)}` 
+        : '****';
+      await triggerEventSMS('bank_linked', {
+        userId: userId,
+        loanId: application_id,
+        variables: {
+          bank_name: bankName,
+          account_number: maskedAccount
+        }
+      });
+    } catch (smsError) {
+      console.error('❌ Error sending bank_linked SMS (non-fatal):', smsError);
+      // Don't fail - SMS failure shouldn't block bank linking
+    }
+
     res.json({
       success: true,
       message: 'Bank details saved successfully',
@@ -472,6 +492,25 @@ router.post('/user', requireAuth, async (req, res) => {
       [userId, account_number, ifsc_code.toUpperCase(), finalBankName, accountHolderName]
     );
     const bankDetailsId = result.insertId;
+
+    // Trigger automatic event-based SMS (bank_linked)
+    try {
+      const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+      // Get last 4 digits of account number for masking
+      const maskedAccount = account_number.length > 4 
+        ? `****${account_number.slice(-4)}` 
+        : '****';
+      await triggerEventSMS('bank_linked', {
+        userId: userId,
+        variables: {
+          bank_name: finalBankName,
+          account_number: maskedAccount
+        }
+      });
+    } catch (smsError) {
+      console.error('❌ Error sending bank_linked SMS (non-fatal):', smsError);
+      // Don't fail - SMS failure shouldn't block bank linking
+    }
 
     res.json({
       success: true,

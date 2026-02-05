@@ -452,6 +452,20 @@ router.post('/admin/:userId/recalculate', authenticateAdmin, async (req, res) =>
           result.notificationSent = false;
           result.notificationError = notifError.message;
         }
+        
+        // Trigger automatic event-based SMS (limit_increase)
+        try {
+          const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+          await triggerEventSMS('limit_increase', {
+            userId: userId,
+            variables: {
+              new_limit: `₹${creditLimitData.newLimit.toLocaleString('en-IN')}`
+            }
+          });
+        } catch (smsError) {
+          console.error('❌ Error sending limit_increase SMS (non-fatal):', smsError);
+          // Don't fail - SMS failure shouldn't block credit limit update
+        }
       }
 
       console.log(`[Admin] Manually triggered credit limit recalculation for user ${userId}: ₹${currentLimit} → ₹${creditLimitData.newLimit}`);

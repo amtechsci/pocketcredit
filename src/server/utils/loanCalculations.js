@@ -653,7 +653,23 @@ async function getLoanCalculation(loanIdOrDb, loanIdParam, customDays = null) {
           
           // Calculate interest till today
           const principal = calculations.principal || parseFloat(loanData.processed_amount || loanData.loan_amount || loan.loan_amount || 0);
-          const ratePerDay = calculations.interestPercentPerDay || parseFloat(loan.interest_percent_per_day || 0.001);
+          
+          // Get rate from plan_snapshot first (same priority as route), then fall back to other sources
+          let planData = null;
+          if (loan.plan_snapshot) {
+            try {
+              planData = typeof loan.plan_snapshot === 'string' 
+                ? JSON.parse(loan.plan_snapshot) 
+                : loan.plan_snapshot;
+            } catch (e) {
+              console.warn('Error parsing plan_snapshot in getLoanCalculation:', e);
+            }
+          }
+          
+          // Use rate_per_day from calculations.interest if available (correct decimal format like 0.001)
+          // Otherwise use planData.interest_percent_per_day (from plan snapshot) or loan.interest_percent_per_day
+          // Do NOT use calculations.interestPercentPerDay as it might be incorrectly converted
+          const ratePerDay = calculations.interest?.rate_per_day || parseFloat(planData?.interest_percent_per_day || loan.interest_percent_per_day || 0.001);
           
           // Ensure at least 1 day if same day (exhaustedDays = 0 means same day = 1 day for interest)
           const daysForInterest = exhaustedDays === 0 ? 1 : exhaustedDays;

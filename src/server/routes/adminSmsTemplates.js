@@ -10,6 +10,40 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 const { authenticateAdmin } = require('../middleware/auth');
 
 /**
+ * Initialize SMS logs table
+ */
+async function initSmsLogsTable() {
+  await executeQuery(`
+    CREATE TABLE IF NOT EXISTS sms_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT,
+      loan_id INT,
+      template_id VARCHAR(100),
+      mobile VARCHAR(15),
+      message TEXT,
+      status ENUM('sent', 'failed', 'skipped', 'error', 'dry_run', 'manual', 'auto') DEFAULT 'sent',
+      response JSON,
+      sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_user_id (user_id),
+      INDEX idx_loan_id (loan_id),
+      INDEX idx_sent_at (sent_at),
+      INDEX idx_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  
+  // Add 'auto' to ENUM if table already exists (migration)
+  try {
+    await executeQuery(`
+      ALTER TABLE sms_logs 
+      MODIFY COLUMN status ENUM('sent', 'failed', 'skipped', 'error', 'dry_run', 'manual', 'auto') DEFAULT 'sent'
+    `);
+  } catch (error) {
+    // Ignore error if column doesn't exist or ENUM already has 'auto'
+    // This is safe to ignore for migration purposes
+  }
+}
+
+/**
  * Initialize SMS templates table
  */
 async function initSmsTemplatesTable() {
@@ -409,7 +443,201 @@ async function seedDefaultTemplates() {
   return;
 }
 
+/**
+ * POST /api/admin/sms-templates/:templateKey/trigger
+ * Manually trigger an event-based SMS template for a user
+ */
+router.post('/:templateKey/trigger', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { templateKey } = req.params;
+    const { userId, loanId, variables } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required'
+      });
+    }
+
+    // Get template
+    const templates = await executeQuery(
+      'SELECT * FROM sms_templates WHERE template_key = ? AND trigger_type = ?',
+      [templateKey, 'event']
+    );
+
+    if (!templates || templates.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Event-based template not found'
+      });
+    }
+
+    const template = templates[0];
+
+    if (!template.template_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Template does not have a DLT Template ID configured'
+      });
+    }
+
+    // Get user details
+    const users = await executeQuery(
+      'SELECT id, first_name, last_name, phone, alternate_mobile FROM users WHERE id = ?',
+      [userId]
+    );
+
+    if (!users || users.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const user = users[0];
+    const userName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Customer';
+
+    // Get loan details if loanId provided
+    let loan = null;
+    if (loanId) {
+      const loans = await executeQuery(
+        'SELECT id, loan_amount, status, due_date, emi_amount FROM loan_applications WHERE id = ? AND user_id = ?',
+        [loanId, userId]
+      );
+      if (loans && loans.length > 0) {
+        loan = loans[0];
+      }
+    }
+
+    // Prepare variables for message replacement
+    const messageData = {
+      name: userName,
+      user_name: userName,
+      url: 'https://pocketcredit.in',
+      email: 'support@pocketcredit.in',
+      due_date: loan?.due_date ? new Date(loan.due_date).toLocaleDateString('en-IN') : '',
+      emi_amount: loan?.emi_amount || '0',
+      amount: loan?.loan_amount || '0',
+      days_passed: '0',
+      savings: '0',
+      otp: '1234',
+      validity: '5',
+      emi_number: '1',
+      bank_name: 'Bank',
+      account_number: '****',
+      acc_manager_name: 'Account Manager',
+      acc_manager_phone: '',
+      reference_name: 'Reference',
+      new_limit: '0',
+      ...variables // Override with provided variables
+    };
+
+    // Replace variables in message
+    const replaceTemplateVariables = (message, data) => {
+      return message
+        .replace(/{name}/g, data.name || 'Customer')
+        .replace(/{user_name}/g, data.name || 'Customer')
+        .replace(/{url}/g, data.url || 'https://pocketcredit.in')
+        .replace(/{email}/g, data.email || 'support@pocketcredit.in')
+        .replace(/{due_date}/g, data.due_date || '')
+        .replace(/{emi_amount}/g, data.emi_amount || '0')
+        .replace(/{amount}/g, data.amount || '0')
+        .replace(/{days_passed}/g, data.days_passed || '0')
+        .replace(/{savings}/g, data.savings || '0')
+        .replace(/{otp}/g, data.otp || '1234')
+        .replace(/{validity}/g, data.validity || '5')
+        .replace(/{emi_number}/g, data.emi_number || '1')
+        .replace(/{bank_name}/g, data.bank_name || 'Bank')
+        .replace(/{account_number}/g, data.account_number || '****')
+        .replace(/{acc_manager_name}/g, data.acc_manager_name || 'Account Manager')
+        .replace(/{acc_manager_phone}/g, data.acc_manager_phone || '')
+        .replace(/{reference_name}/g, data.reference_name || 'Reference')
+        .replace(/{new_limit}/g, data.new_limit || '0');
+    };
+
+    const finalMessage = replaceTemplateVariables(template.message_template, messageData);
+
+    // Determine which mobile number to use
+    let mobile = null;
+    if (template.send_to === 'alternate') {
+      mobile = user.alternate_mobile || user.phone;
+    } else if (template.send_to === 'both') {
+      mobile = user.phone; // Send to primary first
+    } else {
+      mobile = user.phone;
+    }
+
+    if (!mobile || !/^[6-9]\d{9}$/.test(mobile)) {
+      return res.status(400).json({
+        success: false,
+        message: 'User does not have a valid mobile number'
+      });
+    }
+
+    // Send SMS
+    const { smsService } = require('../utils/smsService');
+    const result = await smsService.sendSMS({
+      to: mobile,
+      message: finalMessage,
+      templateId: template.template_id,
+      senderId: template.sender_id || 'PKTCRD'
+    });
+
+    // Log to database
+    await initSmsLogsTable();
+    await executeQuery(`
+      INSERT INTO sms_logs (user_id, loan_id, template_id, mobile, message, status, response, sent_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+    `, [
+      userId,
+      loanId || loan?.id || null,
+      template.template_key,
+      mobile,
+      finalMessage,
+      result.success ? 'manual' : 'failed',
+      JSON.stringify(result)
+    ]);
+
+    // Log to cron logger
+    const cronLogger = require('../services/cronLogger');
+    if (result.success) {
+      await cronLogger.info(`Manual SMS Trigger: Sent ${template.template_key} to user ${userId} (${mobile})`);
+    } else {
+      await cronLogger.error(`Manual SMS Trigger: Failed to send ${template.template_key} to user ${userId}: ${result.description}`, result);
+    }
+
+    if (result.success) {
+      res.json({
+        success: true,
+        message: `SMS sent successfully to ${mobile}`,
+        data: {
+          mobile,
+          message: finalMessage,
+          template: template.template_name
+        }
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: `Failed to send SMS: ${result.description}`,
+        data: result
+      });
+    }
+
+  } catch (error) {
+    const cronLogger = require('../services/cronLogger');
+    await cronLogger.error(`Manual SMS Trigger: Error: ${error.message}`, error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to trigger SMS',
+      error: error.message
+    });
+  }
+});
+
 // Export for use in cron job
 module.exports = router;
 module.exports.initSmsTemplatesTable = initSmsTemplatesTable;
+module.exports.initSmsLogsTable = initSmsLogsTable;
 module.exports.seedDefaultTemplates = seedDefaultTemplates;

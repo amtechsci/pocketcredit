@@ -318,6 +318,26 @@ class AdminApiService {
     return response;
   }
 
+  async changePassword(currentPassword: string, newPassword: string): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.put('/api/admin/auth/change-password', {
+        currentPassword,
+        newPassword
+      }, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.data;
+    } catch (error: any) {
+      if (error.response) {
+        throw new Error(error.response.data?.message || 'Failed to change password');
+      }
+      throw error;
+    }
+  }
+
   // Dashboard APIs
   async getDashboardStats(period: string = '30d'): Promise<ApiResponse<DashboardStats>> {
     return this.request<DashboardStats>('GET', `/dashboard?period=${period}`);
@@ -524,6 +544,15 @@ class AdminApiService {
 
   async sendSMS(userId: string, smsData: any): Promise<ApiResponse<any>> {
     return this.request('POST', `/user-profile/${userId}/send-sms`, smsData);
+  }
+
+  // Trigger event-based SMS template manually
+  async triggerEventSMS(templateKey: string, data: {
+    userId: string;
+    loanId?: string | number;
+    variables?: Record<string, any>;
+  }): Promise<ApiResponse<any>> {
+    return this.request('POST', `/sms-templates/${templateKey}/trigger`, data);
   }
 
   // Login History Management

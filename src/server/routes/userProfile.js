@@ -3095,6 +3095,20 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                       newLimit: creditLimitData.newLimit
                     });
                     console.log(`[UserProfile] Notification sent for credit limit increase`);
+                    
+                    // Trigger automatic event-based SMS (limit_increase)
+                    try {
+                      const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+                      await triggerEventSMS('limit_increase', {
+                        userId: loan.user_id,
+                        variables: {
+                          new_limit: `₹${creditLimitData.newLimit.toLocaleString('en-IN')}`
+                        }
+                      });
+                    } catch (smsError) {
+                      console.error('❌ Error sending limit_increase SMS (non-fatal):', smsError);
+                      // Don't fail - SMS failure shouldn't block credit limit update
+                    }
                   }
                 } catch (notificationError) {
                   // Don't fail the credit limit increase if notification fails
@@ -3152,6 +3166,18 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
           `, [loanIdInt]);
 
           console.log(`✅ Loan #${loanIdInt} marked as cleared (${txType} received)`);
+
+          // Trigger automatic event-based SMS (loan_cleared)
+          try {
+            const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+            await triggerEventSMS('loan_cleared', {
+              userId: userIdInt,
+              loanId: loanIdInt
+            });
+          } catch (smsError) {
+            console.error('❌ Error sending loan_cleared SMS (non-fatal):', smsError);
+            // Don't fail - SMS failure shouldn't block loan clearance
+          }
 
           // Check if user should be moved to cooling period after clearing this loan
           // Cooling period triggers when:
@@ -3419,6 +3445,25 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
               console.log(`📊 EMI status: ${paidEmis}/${totalEmis} paid. All paid: ${allEmisPaid}`);
 
               if (allEmisPaid) {
+                // All EMIs paid - will trigger loan_cleared SMS below
+              } else {
+                // EMI paid but loan not fully cleared - trigger emi_cleared SMS
+                try {
+                  const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+                  await triggerEventSMS('emi_cleared', {
+                    userId: loan.user_id,
+                    loanId: loanIdInt,
+                    variables: {
+                      emi_number: emiNumber.toString()
+                    }
+                  });
+                } catch (smsError) {
+                  console.error('❌ Error sending emi_cleared SMS (non-fatal):', smsError);
+                  // Don't fail - SMS failure shouldn't block payment processing
+                }
+              }
+
+              if (allEmisPaid) {
                 // All EMIs paid - treat like full_payment: clear loan, send NOC, etc.
                 console.log(`💰 All ${totalEmis} EMIs paid - clearing loan and sending NOC`);
 
@@ -3432,6 +3477,18 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 `, [loanIdInt]);
 
                 console.log(`✅ Loan #${loanIdInt} marked as cleared (all EMIs paid)`);
+
+                // Trigger automatic event-based SMS (loan_cleared)
+                try {
+                  const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+                  await triggerEventSMS('loan_cleared', {
+                    userId: loan.user_id,
+                    loanId: loanIdInt
+                  });
+                } catch (smsError) {
+                  console.error('❌ Error sending loan_cleared SMS (non-fatal):', smsError);
+                  // Don't fail - SMS failure shouldn't block loan clearance
+                }
 
                 // Check if user should be moved to cooling period after clearing this loan
                 try {

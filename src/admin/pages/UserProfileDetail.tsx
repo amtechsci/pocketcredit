@@ -184,6 +184,7 @@ export function UserProfileDetail() {
   const [showSendSmsModal, setShowSendSmsModal] = useState(false);
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
   const [showAddTemplateModal, setShowAddTemplateModal] = useState(false);
+  const [triggeringSMS, setTriggeringSMS] = useState<{ [key: string]: boolean }>({});
   
   // Profile Comments State
   const [profileComments, setProfileComments] = useState<{ qa_comments: any[], tvr_comments: any[] }>({ qa_comments: [], tvr_comments: [] });
@@ -1689,6 +1690,30 @@ export function UserProfileDetail() {
     } catch (error) {
       console.error('Error sending SMS:', error);
       alert('Error sending SMS');
+    }
+  };
+
+  // Trigger event-based SMS
+  const handleTriggerEventSMS = async (templateKey: string, loanId?: string) => {
+    if (!params.userId) return;
+    
+    try {
+      setTriggeringSMS(prev => ({ ...prev, [templateKey]: true }));
+      const response = await adminApiService.triggerEventSMS(templateKey, {
+        userId: params.userId!,
+        loanId: loanId
+      });
+      
+      if (response.status === 'success' || (response as any).success) {
+        toast.success('SMS sent successfully!');
+      } else {
+        toast.error((response as any).message || 'Failed to send SMS');
+      }
+    } catch (error: any) {
+      console.error('Error triggering SMS:', error);
+      toast.error(error.message || 'Failed to send SMS');
+    } finally {
+      setTriggeringSMS(prev => ({ ...prev, [templateKey]: false }));
     }
   };
 
@@ -7654,9 +7679,9 @@ export function UserProfileDetail() {
     // Extract PAN from report if not in userData
     const panNumber = userData?.panNumber || userData?.pan_number || userData?.pan || currentApplication.CreditReportInquiry?.InquiryPurpose || '-';
 
-    // Filter flagged loans: Written_off_Settled_Status (00-17) OR SuitFiled_WilfulDefault (00-03)
+    // Filter flagged loans: Written_off_Settled_Status (00-17) OR SuitFiled_WilfulDefault (01-03, excluding 00)
     const writtenOffCodes = ['00', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17'];
-    const suitFiledCodes = ['00', '01', '02', '03'];
+    const suitFiledCodes = ['01', '02', '03']; // Exclude '00' (No Suit Filed)
     
     // Helper function to get status descriptions
     const getWrittenOffStatusDescription = (code: string) => {
@@ -7739,7 +7764,7 @@ export function UserProfileDetail() {
               <h3 className="text-xl font-bold text-red-900">⚠️ Flagged Loans - Critical Review Required</h3>
             </div>
             <p className="text-sm text-red-800 mb-4 font-semibold">
-              The following loans have Written Off/Settled Status (00-17) or Suit Filed/Wilful Default (00-03) indicators. Please review these accounts carefully.
+              The following loans have Written Off/Settled Status (00-17) or Suit Filed/Wilful Default (01-03) indicators. Please review these accounts carefully.
             </p>
 
             <div className="overflow-x-auto">
@@ -9359,6 +9384,69 @@ export function UserProfileDetail() {
             >
               <MessageSquare className="w-4 h-4" />
               Templates
+            </button>
+          </div>
+        </div>
+
+        {/* Event-Based SMS Triggers */}
+        <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 mb-6">
+          <h4 className="text-sm font-semibold text-gray-900 mb-3">Event-Based SMS Triggers</h4>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+            <button
+              onClick={() => handleTriggerEventSMS('otp')}
+              disabled={triggeringSMS['otp']}
+              className="px-3 py-2 text-xs sm:text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+            >
+              {triggeringSMS['otp'] ? 'Sending...' : 'OTP Verification'}
+            </button>
+            <button
+              onClick={() => handleTriggerEventSMS('acc_manager_assigned')}
+              disabled={triggeringSMS['acc_manager_assigned']}
+              className="px-3 py-2 text-xs sm:text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+            >
+              {triggeringSMS['acc_manager_assigned'] ? 'Sending...' : 'Account Manager Assigned'}
+            </button>
+            <button
+              onClick={() => handleTriggerEventSMS('bank_linked')}
+              disabled={triggeringSMS['bank_linked']}
+              className="px-3 py-2 text-xs sm:text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+            >
+              {triggeringSMS['bank_linked'] ? 'Sending...' : 'Bank Account Linked'}
+            </button>
+            <button
+              onClick={() => handleTriggerEventSMS('emi_cleared')}
+              disabled={triggeringSMS['emi_cleared']}
+              className="px-3 py-2 text-xs sm:text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+            >
+              {triggeringSMS['emi_cleared'] ? 'Sending...' : 'EMI Cleared'}
+            </button>
+            <button
+              onClick={() => handleTriggerEventSMS('loan_cleared')}
+              disabled={triggeringSMS['loan_cleared']}
+              className="px-3 py-2 text-xs sm:text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+            >
+              {triggeringSMS['loan_cleared'] ? 'Sending...' : 'Loan Cleared'}
+            </button>
+            <button
+              onClick={() => handleTriggerEventSMS('membership_update')}
+              disabled={triggeringSMS['membership_update']}
+              className="px-3 py-2 text-xs sm:text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+            >
+              {triggeringSMS['membership_update'] ? 'Sending...' : 'Membership Update'}
+            </button>
+            <button
+              onClick={() => handleTriggerEventSMS('part_payment')}
+              disabled={triggeringSMS['part_payment']}
+              className="px-3 py-2 text-xs sm:text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+            >
+              {triggeringSMS['part_payment'] ? 'Sending...' : 'Part Payment Received'}
+            </button>
+            <button
+              onClick={() => handleTriggerEventSMS('limit_increase')}
+              disabled={triggeringSMS['limit_increase']}
+              className="px-3 py-2 text-xs sm:text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+            >
+              {triggeringSMS['limit_increase'] ? 'Sending...' : 'Credit Limit Update'}
             </button>
           </div>
         </div>

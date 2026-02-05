@@ -489,4 +489,92 @@ router.get('/verify', async (req, res) => {
   }
 });
 
+// Change Admin Password
+router.put('/change-password', async (req, res) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'No token provided'
+      });
+    }
+
+    const decoded = verifyToken(token);
+    const { currentPassword, newPassword } = req.body;
+
+    // Validate input
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Current password and new password are required'
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'New password must be at least 8 characters long'
+      });
+    }
+
+    await ensureDbInitialized();
+
+    // Get admin with password
+    const admins = await executeQuery(
+      'SELECT id, password, is_active FROM admins WHERE id = ?',
+      [decoded.id]
+    );
+
+    if (admins.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Admin not found'
+      });
+    }
+
+    const admin = admins[0];
+
+    if (!admin.is_active) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Admin account is deactivated'
+      });
+    }
+
+    // Verify current password
+    const isValidPassword = await bcrypt.compare(currentPassword, admin.password);
+    if (!isValidPassword) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Current password is incorrect'
+      });
+    }
+
+    // Hash new password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update password
+    await executeQuery(
+      'UPDATE admins SET password = ?, updated_at = NOW() WHERE id = ?',
+      [hashedPassword, decoded.id]
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Password changed successfully'
+    });
+
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to change password'
+    });
+  }
+});
+
 module.exports = router;

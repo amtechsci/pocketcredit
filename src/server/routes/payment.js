@@ -317,13 +317,12 @@ async function calculatePaymentAmount(loan, paymentType) {
     if (paymentType === 'pre-close') {
       // Pre-close: Principal + Interest Till Today + Pre-close Fee (10% of principal) + GST on Pre-close Fee (18%)
       // NOTE: Pre-close does NOT include post service fees - those are waived on pre-close
-      const principal = parseFloat(loan.processed_amount || loan.sanctioned_amount || loan.loan_amount || loan.principal_amount || 0);
+      // NOTE: Pre-close does NOT include penalty - penalty is waived on pre-close
+      // Use principal from calculation API (same source as frontend) for consistency
+      const principal = parseFloat(calculationData.principal || loan.processed_amount || loan.sanctioned_amount || loan.loan_amount || loan.principal_amount || 0);
       
       // Get interest till today from calculation API (main source of truth)
       const interestTillToday = calculationData.interest?.interestTillToday || 0;
-      
-      // For pre-close, also include penalty if overdue
-      const penaltyTotal = calculationData.penalty?.penalty_total || 0;
       
       // Pre-close fee: 10% of principal
       const preCloseFeePercent = 10;
@@ -332,10 +331,11 @@ async function calculatePaymentAmount(loan, paymentType) {
       // GST on pre-close fee: 18% of pre-close fee
       const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
       
-      // Pre-close amount = Principal + Interest Till Today + Pre-close Fee + GST on Pre-close Fee + Penalty (if any)
-      const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST + penaltyTotal;
+      // Pre-close amount = Principal + Interest Till Today + Pre-close Fee + GST on Pre-close Fee
+      // Penalty is NOT included in pre-close (waived)
+      const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
       
-      console.log(`💰 Pre-close calculation: Principal (₹${principal}) + Interest Till Today (₹${interestTillToday}) + Pre-close Fee (₹${preCloseFee}) + GST on Pre-close Fee (₹${preCloseFeeGST}) + Penalty (₹${penaltyTotal}) = ₹${precloseAmount}`);
+      console.log(`💰 Pre-close calculation: Principal (₹${principal}) + Interest Till Today (₹${interestTillToday}) + Pre-close Fee (₹${preCloseFee}) + GST on Pre-close Fee (₹${preCloseFeeGST}) = ₹${precloseAmount}`);
       
       return precloseAmount;
     } else if (paymentType === 'full_payment') {
@@ -873,6 +873,18 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                                     console.log(`✅ Loan #${loanId} fully paid and marked as CLEARED`);
                                     
                                     // Credit limit recalculation removed - now happens on loan disbursement, not on loan clearance
+                                    
+                                    // Trigger automatic event-based SMS (loan_cleared)
+                                    try {
+                                        const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+                                        await triggerEventSMS('loan_cleared', {
+                                            userId: loan.user_id,
+                                            loanId: loanId
+                                        });
+                                    } catch (smsError) {
+                                        console.error('❌ Error sending loan_cleared SMS (non-fatal):', smsError);
+                                        // Don't fail - SMS failure shouldn't block loan clearance
+                                    }
                                     
                                     // Check if user should be moved to cooling period after clearing this loan
                                     // Cooling period triggers when user reaches 32.1% (₹1,50,000) after clearing a loan
@@ -1683,6 +1695,21 @@ router.post('/webhook', async (req, res) => {
                                         console.log(`💰 Last EMI (${currentEmiNumber}/${emiCount}) paid - loan will be cleared`);
                                     } else {
                                         console.log(`ℹ️ EMI ${currentEmiNumber}/${emiCount} paid - loan will not be cleared yet`);
+                                        
+                                        // Trigger automatic event-based SMS (emi_cleared) - only if not the last EMI
+                                        try {
+                                            const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+                                            await triggerEventSMS('emi_cleared', {
+                                                userId: paymentOrder.user_id,
+                                                loanId: paymentOrder.loan_id,
+                                                variables: {
+                                                    emi_number: currentEmiNumber.toString()
+                                                }
+                                            });
+                                        } catch (smsError) {
+                                            console.error('❌ Error sending emi_cleared SMS (non-fatal):', smsError);
+                                            // Don't fail - SMS failure shouldn't block payment processing
+                                        }
                                     }
                                 } else {
                                     // Fallback: Use old logic (sum all payments)
@@ -1742,8 +1769,37 @@ router.post('/webhook', async (req, res) => {
                                         console.error('❌ Error sending NOC email (non-fatal):', nocEmailError);
                                         // Don't fail - email failure shouldn't block loan clearance
                                     }
+                                    
+                                    // Trigger automatic event-based SMS (loan_cleared)
+                                    try {
+                                        const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+                                        await triggerEventSMS('loan_cleared', {
+                                            userId: paymentOrder.user_id,
+                                            loanId: paymentOrder.loan_id
+                                        });
+                                    } catch (smsError) {
+                                        console.error('❌ Error sending loan_cleared SMS (non-fatal):', smsError);
+                                        // Don't fail - SMS failure shouldn't block loan clearance
+                                    }
                                 } else {
                                     console.log(`ℹ️ Loan #${paymentOrder.loan_id} payment received but not cleared yet (${paymentType})`);
+                                    
+                                    // Trigger part_payment SMS if this is a general repayment (not EMI, not full payment)
+                                    if (paymentType === 'loan_repayment') {
+                                        try {
+                                            const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+                                            await triggerEventSMS('part_payment', {
+                                                userId: paymentOrder.user_id,
+                                                loanId: paymentOrder.loan_id,
+                                                variables: {
+                                                    amount: `₹${orderAmount.toLocaleString('en-IN')}`
+                                                }
+                                            });
+                                        } catch (smsError) {
+                                            console.error('❌ Error sending part_payment SMS (non-fatal):', smsError);
+                                            // Don't fail - SMS failure shouldn't block payment processing
+                                        }
+                                    }
                                 }
                             } else {
                                 console.log(`ℹ️ Loan #${paymentOrder.loan_id} status is '${loan.status}', skipping clearance check`);
@@ -2129,6 +2185,21 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                                     console.log(`💰 Last EMI (${currentEmiNumber}/${emiCount}) paid - loan will be cleared`);
                                                 } else {
                                                     console.log(`ℹ️ EMI ${currentEmiNumber}/${emiCount} paid - loan will not be cleared yet`);
+                                                    
+                                                    // Trigger automatic event-based SMS (emi_cleared) - only if not the last EMI
+                                                    try {
+                                                        const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+                                                        await triggerEventSMS('emi_cleared', {
+                                                            userId: paymentOrder.user_id,
+                                                            loanId: paymentOrder.loan_id,
+                                                            variables: {
+                                                                emi_number: currentEmiNumber.toString()
+                                                            }
+                                                        });
+                                                    } catch (smsError) {
+                                                        console.error('❌ Error sending emi_cleared SMS (non-fatal):', smsError);
+                                                        // Don't fail - SMS failure shouldn't block payment processing
+                                                    }
                                                 }
                                             } else {
                                                 // Fallback: Use old logic (sum all payments)
@@ -2188,8 +2259,38 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                                     console.error('❌ Error sending NOC email (non-fatal):', nocEmailError);
                                                     // Don't fail - email failure shouldn't block loan clearance
                                                 }
+                                                
+                                                // Trigger automatic event-based SMS (loan_cleared)
+                                                try {
+                                                    const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+                                                    await triggerEventSMS('loan_cleared', {
+                                                        userId: paymentOrder.user_id,
+                                                        loanId: paymentOrder.loan_id
+                                                    });
+                                                } catch (smsError) {
+                                                    console.error('❌ Error sending loan_cleared SMS (non-fatal):', smsError);
+                                                    // Don't fail - SMS failure shouldn't block loan clearance
+                                                }
                                             } else {
                                                 console.log(`ℹ️ Loan #${paymentOrder.loan_id} payment received but not cleared yet (${paymentType})`);
+                                                
+                                                // Trigger part_payment SMS if this is a general repayment (not EMI, not full payment)
+                                                if (paymentType === 'loan_repayment') {
+                                                    try {
+                                                        const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+                                                        const paymentAmount = paymentOrder.amount || 0;
+                                                        await triggerEventSMS('part_payment', {
+                                                            userId: paymentOrder.user_id,
+                                                            loanId: paymentOrder.loan_id,
+                                                            variables: {
+                                                                amount: `₹${paymentAmount.toLocaleString('en-IN')}`
+                                                            }
+                                                        });
+                                                    } catch (smsError) {
+                                                        console.error('❌ Error sending part_payment SMS (non-fatal):', smsError);
+                                                        // Don't fail - SMS failure shouldn't block payment processing
+                                                    }
+                                                }
                                             }
                                         } else {
                                             console.log(`ℹ️ Loan #${paymentOrder.loan_id} status is '${loan.status}', skipping clearance check`);
