@@ -103,11 +103,47 @@ async function triggerEventSMS(templateKey, options = {}) {
     let loan = null;
     if (loanId) {
       const loans = await executeQuery(
-        'SELECT id, loan_amount, status, due_date, emi_amount, application_number FROM loan_applications WHERE id = ? AND user_id = ?',
+        'SELECT id, loan_amount, status, processed_due_date, emi_amount, application_number, emi_schedule FROM loan_applications WHERE id = ? AND user_id = ?',
         [loanId, userId]
       );
       if (loans && loans.length > 0) {
         loan = loans[0];
+        
+        // Extract due_date from processed_due_date or emi_schedule
+        if (!loan.due_date) {
+          if (loan.processed_due_date) {
+            // processed_due_date can be a single date string or JSON array
+            try {
+              const dueDateData = typeof loan.processed_due_date === 'string' 
+                ? JSON.parse(loan.processed_due_date) 
+                : loan.processed_due_date;
+              
+              if (Array.isArray(dueDateData) && dueDateData.length > 0) {
+                // Multi-EMI: use first due date
+                loan.due_date = dueDateData[0];
+              } else if (typeof dueDateData === 'string') {
+                // Single date
+                loan.due_date = dueDateData;
+              }
+            } catch (e) {
+              // If it's already a date string, use it directly
+              loan.due_date = loan.processed_due_date;
+            }
+          } else if (loan.emi_schedule) {
+            // Try to get due date from emi_schedule
+            try {
+              const emiSchedule = typeof loan.emi_schedule === 'string' 
+                ? JSON.parse(loan.emi_schedule) 
+                : loan.emi_schedule;
+              
+              if (Array.isArray(emiSchedule) && emiSchedule.length > 0) {
+                loan.due_date = emiSchedule[0].due_date || emiSchedule[0].date;
+              }
+            } catch (e) {
+              // Ignore parsing errors
+            }
+          }
+        }
       }
     }
 

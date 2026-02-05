@@ -3,13 +3,13 @@
  * Handles SMS and Email notifications for credit limit updates
  */
 
-const EmailService = require('./emailService');
+const emailService = require('./emailService');
 const { initializeDatabase, executeQuery } = require('../config/database');
 const { smsService } = require('../utils/smsService');
 
 class NotificationService {
   constructor() {
-    this.emailService = new EmailService();
+    this.emailService = emailService; // Use the exported instance directly
   }
 
   /**
