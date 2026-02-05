@@ -68,8 +68,8 @@ export const LoanDocumentUploadPage = () => {
               return;
             }
             
-            // Get current step from loan application
-            const appResponse = await apiService.getLoanApplicationById(id);
+            // Get current step from loan application - use forceRefresh to bypass cache
+            const appResponse = await apiService.getLoanApplicationById(id, { cache: false, skipDeduplication: true });
             if (appResponse.success && appResponse.data?.application) {
               const currentStep = appResponse.data.application.current_step;
               
@@ -136,9 +136,9 @@ export const LoanDocumentUploadPage = () => {
     try {
       setLoading(true);
       
-      // Try to fetch validation history from user endpoint
+      // Try to fetch validation history from user endpoint - use forceRefresh to bypass cache
       try {
-        const response = await apiService.request('GET', `/validation/user/history?loanApplicationId=${appId}`, {});
+        const response = await apiService.request('GET', `/validation/user/history?loanApplicationId=${appId}`, {}, { cache: false, skipDeduplication: true });
         
         if (response.status === 'success' && response.data) {
           // Find the latest "need_document" action for this application
@@ -152,9 +152,9 @@ export const LoanDocumentUploadPage = () => {
             if (documents.length > 0) {
               setRequiredDocuments(documents);
               
-              // Fetch existing uploaded documents
+              // Fetch existing uploaded documents - use forceRefresh to bypass cache
               try {
-                const docsResponse = await apiService.getLoanDocuments(appId);
+                const docsResponse = await apiService.getLoanDocuments(appId, { cache: false, skipDeduplication: true });
                 console.log('📄 Documents response:', docsResponse);
                 if ((docsResponse.success || docsResponse.status === 'success') && docsResponse.data?.documents) {
                   const uploadedDocsMap: { [key: string]: any } = {};
@@ -210,31 +210,45 @@ export const LoanDocumentUploadPage = () => {
                         return;
                       }
                       
-                      // Get current step from loan application
-                      const appResponse = await apiService.getLoanApplicationById(appId);
-                      if (appResponse.success && appResponse.data?.application) {
-                        const currentStep = appResponse.data.application.current_step;
-                        // Map current_step to route
-                        const stepRoutes: { [key: string]: string } = {
-                          'kyc-verification': `/loan-application/kyc-verification?applicationId=${appId}`,
-                          'employment-details': `/loan-application/employment-details?applicationId=${appId}`,
-                          'bank-statement': `/loan-application/bank-statement?applicationId=${appId}`,
-                          'bank-details': `/link-salary-bank-account?applicationId=${appId}`,
-                          'references': '/user-references',
-                          'upload-documents': `/loan-application/upload-documents?applicationId=${appId}`,
-                          'steps': `/application-under-review?applicationId=${appId}`
-                        };
-                        const route = stepRoutes[currentStep] || `/application-under-review?applicationId=${appId}`;
+                      // Use progress engine with forceRefresh to determine next step
+                      try {
+                        const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                        const progress = await getOnboardingProgress(appId, true); // forceRefresh = true
+                        const nextRoute = getStepRoute(progress.currentStep, appId);
+                        console.log('[LoanDocumentUpload] All documents uploaded, next step:', progress.currentStep, '->', nextRoute);
                         
                         toast.success('All required documents have been uploaded!');
                         setTimeout(() => {
-                          navigate(route);
+                          navigate(nextRoute, { replace: true });
                         }, 1500);
-                      } else {
-                        toast.success('All required documents have been uploaded!');
-                        setTimeout(() => {
-                          navigate('/application-under-review');
-                        }, 1500);
+                      } catch (progressError) {
+                        console.error('[LoanDocumentUpload] Error getting progress, using fallback:', progressError);
+                        // Fallback: get current step from loan application
+                        const appResponse = await apiService.getLoanApplicationById(appId, { cache: false, skipDeduplication: true });
+                        if (appResponse.success && appResponse.data?.application) {
+                          const currentStep = appResponse.data.application.current_step;
+                          // Map current_step to route
+                          const stepRoutes: { [key: string]: string } = {
+                            'kyc-verification': `/loan-application/kyc-verification?applicationId=${appId}`,
+                            'employment-details': `/loan-application/employment-details?applicationId=${appId}`,
+                            'bank-statement': `/loan-application/bank-statement?applicationId=${appId}`,
+                            'bank-details': `/link-salary-bank-account?applicationId=${appId}`,
+                            'references': '/user-references',
+                            'upload-documents': `/loan-application/upload-documents?applicationId=${appId}`,
+                            'steps': `/application-under-review?applicationId=${appId}`
+                          };
+                          const route = stepRoutes[currentStep] || `/application-under-review?applicationId=${appId}`;
+                          
+                          toast.success('All required documents have been uploaded!');
+                          setTimeout(() => {
+                            navigate(route, { replace: true });
+                          }, 1500);
+                        } else {
+                          toast.success('All required documents have been uploaded!');
+                          setTimeout(() => {
+                            navigate('/application-under-review');
+                          }, 1500);
+                        }
                       }
                     } catch (error) {
                       console.error('Error getting loan application:', error);
@@ -271,9 +285,9 @@ export const LoanDocumentUploadPage = () => {
         'PAN card'
       ]);
       
-      // Try to fetch existing documents even with defaults
+      // Try to fetch existing documents even with defaults - use forceRefresh to bypass cache
       try {
-        const docsResponse = await apiService.getLoanDocuments(appId);
+        const docsResponse = await apiService.getLoanDocuments(appId, { cache: false, skipDeduplication: true });
         console.log('📄 Documents response (fallback):', docsResponse);
         if ((docsResponse.success || docsResponse.status === 'success') && docsResponse.data?.documents) {
           const uploadedDocsMap: { [key: string]: any } = {};
@@ -345,9 +359,14 @@ export const LoanDocumentUploadPage = () => {
   const handleDocumentUpload = async (documentName: string, documentData: any) => {
     if (!applicationId) return;
     
-    // Refresh the documents list to ensure we have the latest data
+    // Clear caches related to documents and validation to ensure fresh data
+    apiService.clearCache('/loan-documents');
+    apiService.clearCache('/validation');
+    apiService.clearCache(`/loan-applications/${applicationId}`);
+    
+    // Refresh the documents list to ensure we have the latest data - use forceRefresh to bypass cache
     try {
-      const docsResponse = await apiService.getLoanDocuments(applicationId);
+      const docsResponse = await apiService.getLoanDocuments(applicationId, { cache: false, skipDeduplication: true });
       console.log('📄 Documents response (after upload):', docsResponse);
       if ((docsResponse.success || docsResponse.status === 'success') && docsResponse.data?.documents) {
         const uploadedDocsMap: { [key: string]: any } = {};
@@ -406,8 +425,8 @@ export const LoanDocumentUploadPage = () => {
     try {
       setSubmitting(true);
       
-      // Refresh documents list to verify all are uploaded
-      const docsResponse = await apiService.getLoanDocuments(applicationId);
+      // Refresh documents list to verify all are uploaded - use forceRefresh to bypass cache
+      const docsResponse = await apiService.getLoanDocuments(applicationId, { cache: false, skipDeduplication: true });
       
       if (docsResponse.success || docsResponse.status === 'success') {
         const uploadedDocs = docsResponse.data?.documents || [];
@@ -461,12 +480,12 @@ export const LoanDocumentUploadPage = () => {
             return;
           }
           
-          // Use unified progress engine to determine next step
+          // Use unified progress engine with forceRefresh to determine next step
           toast.success('All documents uploaded successfully!');
           setTimeout(async () => {
             try {
               const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
-              const progress = await getOnboardingProgress(applicationId);
+              const progress = await getOnboardingProgress(applicationId, true); // forceRefresh = true
               const nextRoute = getStepRoute(progress.currentStep, applicationId);
               console.log('[LoanDocumentUpload] Next step from engine:', progress.currentStep, '->', nextRoute);
               navigate(nextRoute, { replace: true });

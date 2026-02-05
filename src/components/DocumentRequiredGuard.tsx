@@ -27,9 +27,20 @@ export function DocumentRequiredGuard({ children }: { children: React.ReactNode 
   useEffect(() => {
     // Skip check if user hasn't changed and we've already checked
     const userId = user?.id || null;
-    if (hasCheckedRef.current && lastUserIdRef.current === userId) {
-      // Already checked for this user, skip API call
+    const currentPath = location.pathname;
+    
+    // If we're on the upload page, always allow (don't block or check)
+    if (currentPath.includes('/loan-application/upload-documents')) {
+      setIsChecking(false);
       return;
+    }
+    
+    // Only skip if same user AND already checked
+    // This allows re-checking when navigating between routes to catch document uploads
+    if (hasCheckedRef.current && lastUserIdRef.current === userId) {
+      // Reset the check flag to force a fresh check when navigating away from upload page
+      // This ensures we catch document uploads after user completes them
+      hasCheckedRef.current = false;
     }
 
     if (!isAuthenticated || !user) {
@@ -61,11 +72,12 @@ export function DocumentRequiredGuard({ children }: { children: React.ReactNode 
           // Check each application for pending document requests
           for (const app of applications) {
             try {
-              // Check validation history for need_document actions
+              // Check validation history for need_document actions - use forceRefresh to bypass cache
               const validationResponse = await (apiService as any).request(
                 'GET',
                 `/validation/user/history?loanApplicationId=${app.id}`,
-                {}
+                {},
+                { cache: false, skipDeduplication: true }
               );
               
               if (validationResponse.status === 'success' && validationResponse.data && Array.isArray(validationResponse.data)) {
@@ -80,8 +92,11 @@ export function DocumentRequiredGuard({ children }: { children: React.ReactNode 
                   const documents = latestAction.action_details?.documents || [];
                   
                   if (documents.length > 0) {
-                    // Check if all documents are uploaded
-                    const docsResponse = await apiService.getLoanDocuments(app.id);
+                    // Check if all documents are uploaded - use forceRefresh to bypass cache
+                    const docsResponse = await apiService.getLoanDocuments(app.id, { 
+                      cache: false, 
+                      skipDeduplication: true 
+                    });
                     
                     if (docsResponse.success || docsResponse.status === 'success') {
                       const uploadedDocs = docsResponse.data?.documents || [];
@@ -145,9 +160,9 @@ export function DocumentRequiredGuard({ children }: { children: React.ReactNode 
     };
 
     checkDocumentRequirement();
-  // Only re-run when user changes, NOT on every route change
+  // Re-run when user changes OR when location changes (to catch document uploads)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, user?.id]);
+  }, [isAuthenticated, user?.id, location.pathname]);
 
   // Show loading spinner while checking
   if (isChecking) {

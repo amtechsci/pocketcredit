@@ -592,7 +592,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
 
         const csvRows = [];
         const headers = [
-            'CLID', 'Name', 'Ledger Name', 'Reg.Type', 'Master type', 'Voucher No. (or CLLID)',
+            'PCID', 'Name', 'Ledger Name', 'Reg.Type', 'Master type', 'Voucher No. (or PLLID)',
             'Loan Process Date', 'Exhausted Days',
             'Sanctioned Amount', 'Disbursal Amount', 'Narration Journal', 'Reference No. (or Payout ID)',
             'Mode', 'Status', 'LoanDate', 'Country', 'State', 'Processing fee(%)', 'Processing Fees Collected',
@@ -762,7 +762,7 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
 
         const csvRows = [];
         const headers = [
-            'CLID (Account ID)', 'Name', 'Ledger Name', 'Reg.Type', 'Master type', 'Voucher No. (or CLLID)',
+            'PCID (Account ID)', 'Name', 'Ledger Name', 'Reg.Type', 'Master type', 'Voucher No. (or PLLID)',
             'Sanctioned Amount', 'Disbursal Amount', 'Reference No. (or Payout ID)', 'Mode', 'Status', 'LoanDate',
             'Country', 'State', 'Processing fee(%)', 'Tenure', 'Processing Fees Collected', 'GST Amount on Processing Fees',
             'Check', 'Remarks'

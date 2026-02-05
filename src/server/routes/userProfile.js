@@ -3075,17 +3075,17 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 // Store as pending credit limit (requires user acceptance)
                 await storePendingCreditLimit(loan.user_id, creditLimitData.newLimit, creditLimitData);
                 
+                // Get user details for notifications
+                const userQuery = await executeQuery(
+                  `SELECT first_name, last_name, phone, email FROM users WHERE id = ?`,
+                  [loan.user_id]
+                );
+                const user = userQuery && userQuery.length > 0 ? userQuery[0] : null;
+                
                 // Try to send notification (but don't fail if it doesn't work)
-                try {
-                  const notificationService = require('../services/notificationService');
-                  const userQuery = await executeQuery(
-                    `SELECT first_name, last_name, phone, email FROM users WHERE id = ?`,
-                    [loan.user_id]
-                  );
-                  const user = userQuery && userQuery.length > 0 ? userQuery[0] : null;
-                  
-                  if (user) {
-                    // Send SMS and Email notification
+                if (user) {
+                  try {
+                    const notificationService = require('../services/notificationService');
                     const recipientName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Customer';
                     await notificationService.sendCreditLimitNotification({
                       userId: loan.user_id,
@@ -3095,24 +3095,25 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                       newLimit: creditLimitData.newLimit
                     });
                     console.log(`[UserProfile] Notification sent for credit limit increase`);
-                    
-                    // Trigger automatic event-based SMS (limit_increase)
-                    try {
-                      const { triggerEventSMS } = require('../utils/eventSmsTrigger');
-                      await triggerEventSMS('limit_increase', {
-                        userId: loan.user_id,
-                        variables: {
-                          new_limit: `₹${creditLimitData.newLimit.toLocaleString('en-IN')}`
-                        }
-                      });
-                    } catch (smsError) {
-                      console.error('❌ Error sending limit_increase SMS (non-fatal):', smsError);
-                      // Don't fail - SMS failure shouldn't block credit limit update
-                    }
+                  } catch (notificationError) {
+                    // Don't fail the credit limit increase if notification fails
+                    console.warn(`[UserProfile] Failed to send notification (non-fatal):`, notificationError.message);
                   }
-                } catch (notificationError) {
-                  // Don't fail the credit limit increase if notification fails
-                  console.warn(`[UserProfile] Failed to send notification (non-fatal):`, notificationError.message);
+                  
+                  // Trigger automatic event-based SMS (limit_increase) - separate from notification service
+                  try {
+                    const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+                    await triggerEventSMS('limit_increase', {
+                      userId: loan.user_id,
+                      variables: {
+                        new_limit: `₹${creditLimitData.newLimit.toLocaleString('en-IN')}`
+                      }
+                    });
+                    console.log(`[UserProfile] limit_increase SMS triggered for user ${loan.user_id}`);
+                  } catch (smsError) {
+                    console.error('❌ Error sending limit_increase SMS (non-fatal):', smsError);
+                    // Don't fail - SMS failure shouldn't block credit limit update
+                  }
                 }
                 
                 console.log(`[UserProfile] Pending credit limit stored (₹${creditLimitData.newLimit}) for user ${loan.user_id} after loan disbursement`);
