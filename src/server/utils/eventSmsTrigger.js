@@ -70,8 +70,8 @@ async function triggerEventSMS(templateKey, options = {}) {
 
     // Get template
     const templates = await executeQuery(
-      'SELECT * FROM sms_templates WHERE template_key = ? AND trigger_type = ? AND status = ?',
-      [templateKey, 'event', 'active']
+      'SELECT * FROM sms_templates WHERE template_key = ? AND trigger_type = ? AND is_active = 1',
+      [templateKey, 'event']
     );
 
     if (!templates || templates.length === 0) {
