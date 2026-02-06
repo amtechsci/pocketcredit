@@ -151,6 +151,12 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // Capture UTM params as early as possible (e.g. ?utm_source=PARTNER_UUID&utm_medium=partner_api)
+  // so partner attribution works when user registers via partner link
+  useEffect(() => {
+    initializeUTMTracking();
+  }, []);
+
   useEffect(() => {
     const hostname = window.location.hostname;
     // Only treat pkk.pocketcredit.in as admin subdomain, not localhost (for development)
@@ -229,11 +235,12 @@ function BankDetailsRedirect() {
 
 function AppContent() {
   const { isAuthenticated, user, isLoading } = useAuth();
+  const location = useLocation();
 
-  // Initialize UTM tracking on app load
+  // Initialize UTM tracking on app load and whenever URL search (e.g. partner link) changes
   useEffect(() => {
     initializeUTMTracking();
-  }, []);
+  }, [location.search]);
 
   // Show loading spinner while checking authentication
   if (isLoading) {

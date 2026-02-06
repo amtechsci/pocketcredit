@@ -55,6 +55,7 @@ async function linkOrCreatePartnerLead(userId, mobile, utmSource) {
     partner = await findPartnerByClientId(utmSource);
   }
   if (!partner) {
+    console.warn(`Partner not found for utm_source=${utmSource} (user ${userId}). Check that partner exists and is_active=1.`);
     return;
   }
 

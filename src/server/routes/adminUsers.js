@@ -1355,6 +1355,8 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
         u.phone,
         u.alternate_mobile,
         u.salary_date,
+        u.loan_limit,
+        u.monthly_net_income,
         la.id as loan_application_id,
         la.application_number,
         la.loan_amount,
@@ -1365,6 +1367,7 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
         la.plan_snapshot,
         la.processed_post_service_fee,
         la.fees_breakdown,
+        la.emi_schedule,
         la.status as loan_status,
         DATE_FORMAT(la.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
         DATE_FORMAT(la.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
@@ -1400,10 +1403,11 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
     const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
 
     const userIds = [...new Set(rows.map((r) => r.user_id))];
+    // Count all disbursed loans per user: account_manager, overdue, and cleared
     const totalLoansQuery = `
       SELECT user_id, COUNT(*) as total_loans
       FROM loan_applications
-      WHERE user_id IN (${userIds.map(() => '?').join(',')}) AND status IN ('account_manager', 'overdue')
+      WHERE user_id IN (${userIds.map(() => '?').join(',')}) AND status IN ('account_manager', 'overdue', 'cleared')
       GROUP BY user_id
     `;
     const totalLoansRows = await executeQuery(totalLoansQuery, userIds);
@@ -1431,20 +1435,40 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
       }
       const dpd = Math.max(0, exhaustedDays - (loanDays || 30));
 
-      const loanForOutstanding = {
-        processed_amount: row.processed_amount,
-        sanctioned_amount: row.disbursal_amount || row.loan_amount,
-        loan_amount: row.loan_amount,
-        principal_amount: row.processed_amount,
-        plan_snapshot: row.plan_snapshot,
-        processed_post_service_fee: row.processed_post_service_fee,
-        fees_breakdown: row.fees_breakdown
-      };
+      // Use total from emi_schedule when available so it matches EMI Details modal (e.g. ₹13.09). Fallback to principal+fee+GST only when no schedule.
       let outstandingAmount = 0;
-      try {
-        outstandingAmount = calculateOutstandingBalance(loanForOutstanding);
-      } catch (e) {
-        console.error('Outstanding balance calc error for loan', row.loan_application_id, e.message);
+      let emiSchedule = row.emi_schedule;
+      if (emiSchedule) {
+        try {
+          const schedule = typeof emiSchedule === 'string' ? JSON.parse(emiSchedule) : emiSchedule;
+          if (Array.isArray(schedule) && schedule.length > 0) {
+            const sum = schedule.reduce((acc, emi) => {
+              const amt = parseFloat(emi.instalment_amount || emi.emi_amount || emi.total || emi.amount || 0) || 0;
+              return acc + amt;
+            }, 0);
+            if (sum > 0) {
+              outstandingAmount = Math.round(sum * 100) / 100;
+            }
+          }
+        } catch (e) {
+          // fall through to calculateOutstandingBalance
+        }
+      }
+      if (outstandingAmount <= 0) {
+        const loanForOutstanding = {
+          processed_amount: row.processed_amount,
+          sanctioned_amount: row.disbursal_amount || row.loan_amount,
+          loan_amount: row.loan_amount,
+          principal_amount: row.processed_amount,
+          plan_snapshot: row.plan_snapshot,
+          processed_post_service_fee: row.processed_post_service_fee,
+          fees_breakdown: row.fees_breakdown
+        };
+        try {
+          outstandingAmount = calculateOutstandingBalance(loanForOutstanding);
+        } catch (e) {
+          console.error('Outstanding balance calc error for loan', row.loan_application_id, e.message);
+        }
       }
 
       const entries = followUpsByLoan[row.loan_application_id] || [];
@@ -1458,6 +1482,30 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
         return (d ? `${d}: ` : '') + (e.response || '');
       }).join(' | ');
 
+      const limitAmount = row.loan_limit != null ? parseFloat(row.loan_limit) : null;
+      const salaryAmount = row.monthly_net_income != null ? parseFloat(row.monthly_net_income) : null;
+
+      // EMI breakdown for display (just amounts: total per EMI)
+      let emiBreakdown = [];
+      if (emiSchedule) {
+        try {
+          const schedule = typeof emiSchedule === 'string' ? JSON.parse(emiSchedule) : emiSchedule;
+          if (Array.isArray(schedule) && schedule.length > 0) {
+            emiBreakdown = schedule.map((emi, i) => {
+              const amt = parseFloat(emi.instalment_amount || emi.emi_amount || emi.total || emi.amount || 0) || 0;
+              return {
+                emi_number: emi.emi_number || emi.instalment_no || i + 1,
+                due_date: emi.due_date || null,
+                amount: Math.round(amt * 100) / 100,
+                status: emi.status || 'pending'
+              };
+            });
+          }
+        } catch (e) {
+          // leave emiBreakdown []
+        }
+      }
+
       return {
         slno: offset + index + 1,
         user_id: row.user_id,
@@ -1470,9 +1518,12 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
         exhausted_days: exhaustedDays,
         dpd,
         outstanding_amount: outstandingAmount,
+        emi_breakdown: emiBreakdown,
         loan_application_id: row.loan_application_id,
         application_number: row.application_number,
         salary_date: row.salary_date,
+        loan_limit: limitAmount,
+        monthly_net_income: salaryAmount,
         cst_response: cstResponse,
         commitment_date: commitmentDate,
         updates,

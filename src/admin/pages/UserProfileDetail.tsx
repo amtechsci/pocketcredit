@@ -11969,29 +11969,18 @@ export function UserProfileDetail() {
                     })}
                   </tbody>
                   {selectedLoanEmiSchedule.length > 0 && (
-                    <tfoot className="bg-gray-50">
-                      <tr>
+                    <tfoot>
+                      <tr className="bg-blue-50 border-t-2 border-gray-200">
                         <td colSpan={2} className="px-4 py-3 text-right text-sm font-semibold text-gray-900">
                           Total:
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-900">
                           {formatCurrencyWithDecimals(
                             selectedLoanEmiSchedule.reduce((sum: number, emi: any) => {
-                              // instalment_amount already includes penalty (calculated in loanCalculations.js)
-                              // So we should just use instalment_amount if available, otherwise emi_amount
                               const instalmentAmount = parseFloat(emi.instalment_amount || 0);
                               const emiAmount = parseFloat(emi.emi_amount || 0);
-                              
-                              // Always use instalment_amount if available (it includes penalty)
-                              // Only fallback to emi_amount if instalment_amount is not available
-                              if (instalmentAmount > 0) {
-                                return sum + instalmentAmount;
-                              } else {
-                                // If instalment_amount is not available, use emi_amount
-                                // Note: emi_amount might not include penalty, but we can't add it here
-                                // because we don't know if it's already included or not
-                                return sum + emiAmount;
-                              }
+                              if (instalmentAmount > 0) return sum + instalmentAmount;
+                              return sum + emiAmount;
                             }, 0)
                           )}
                         </td>

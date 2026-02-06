@@ -16,9 +16,12 @@ interface AccountManagerUser {
   exhausted_days: number;
   dpd: number;
   outstanding_amount: number;
+  emi_breakdown?: { emi_number: number; due_date: string | null; amount: number; status: string }[];
   loan_application_id: number;
   application_number: string;
   salary_date?: number | null;
+  loan_limit?: number | null;
+  monthly_net_income?: number | null;
   cst_response: string;
   commitment_date: string;
   updates: string;
@@ -82,12 +85,13 @@ export function AccountManagerPage() {
     }
   };
 
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amount: number, decimals = 2) => {
     if (amount == null) return '—';
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: 'INR',
-      maximumFractionDigits: 0
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
     }).format(amount);
   };
 
@@ -170,6 +174,7 @@ export function AccountManagerPage() {
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Exhausted Days</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">DPD</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Outstanding</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Limit vs Salary</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Loan ID</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Salary Date</th>
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">CST Response</th>
@@ -200,8 +205,24 @@ export function AccountManagerPage() {
                       <td className="px-3 py-2 whitespace-nowrap text-sm">
                         <span className={row.dpd > 0 ? 'text-orange-600 font-medium' : ''}>{row.dpd}</span>
                       </td>
-                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{formatCurrency(row.outstanding_amount)}</td>
-                      <td className="px-3 py-2 whitespace-nowrap text-sm font-mono">{row.application_number || `#${row.loan_application_id}`}</td>
+                      <td className="px-3 py-2 text-sm text-gray-900">
+                        {row.emi_breakdown && row.emi_breakdown.length > 0 ? (
+                          <div className="flex flex-col gap-0.5">
+                            {row.emi_breakdown.map((emi) => (
+                              <div key={emi.emi_number}>Total: {formatCurrency(emi.amount)}</div>
+                            ))}
+                            <div className="font-semibold border-t border-gray-200 pt-1 mt-1">Total: {formatCurrency(row.outstanding_amount)}</div>
+                          </div>
+                        ) : (
+                          formatCurrency(row.outstanding_amount)
+                        )}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                        {row.loan_limit != null && row.monthly_net_income != null && Number(row.monthly_net_income) > 0
+                          ? `${((Number(row.loan_limit) / Number(row.monthly_net_income)) * 100).toFixed(1)}%`
+                          : '—'}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-mono">PLL{row.loan_application_id}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                         {row.salary_date != null ? String(row.salary_date) : '—'}
                       </td>
