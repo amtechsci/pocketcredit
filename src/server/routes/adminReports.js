@@ -62,6 +62,20 @@ const CIBIL_ADDRESS_LINE1_SUBQUERY = `(SELECT a.address_line1 FROM addresses a W
 const CIBIL_ADDRESS_LINE2_SUBQUERY = `(SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1)`;
 const CIBIL_STATE_NAME_SUBQUERY = `(SELECT COALESCE(sc.state_name, a.state) FROM addresses a LEFT JOIN state_codes sc ON sc.id = a.state WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1)`;
 const CIBIL_PINCODE_SUBQUERY = `(SELECT a.pincode FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1)`;
+const CIBIL_COUNTRY_SUBQUERY = `(SELECT COALESCE(a.country, 'India') FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1)`;
+
+/** Build complete address for Address Line 1: address_line1, address_line2, city, state, pincode, country */
+const formatFullAddress = (loan) => {
+    const parts = [
+        loan.address_line1,
+        loan.address_line2,
+        loan.city,
+        loan.state,
+        loan.pincode,
+        loan.country || 'India'
+    ].filter(p => p != null && String(p).trim() !== '');
+    return parts.join(', ');
+};
 
 const formatDateDDMMYYYY = (dateStr) => {
     if (!dateStr) return '';
@@ -197,8 +211,9 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
                 (SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line1,
                 (SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line2,
                 (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as city,
-                (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state,
-                (SELECT a.pincode FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as pincode
+                (SELECT COALESCE(sc.state_name, a.state) FROM addresses a LEFT JOIN state_codes sc ON sc.id = a.state WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state,
+                (SELECT a.pincode FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as pincode,
+                (SELECT COALESCE(a.country, 'India') FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as country
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
             WHERE la.status = 'account_manager'
@@ -230,7 +245,7 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
                 consumerName, dob, gender, loan.pan_number || '',
                 '', '', '', '', '', '', '', '', '', '', '',
                 '', '', '', '', '', '', '', '',
-                loan.address_line1 || '', stateCode, loan.pincode || '', '02', '',
+                formatFullAddress(loan), stateCode, loan.pincode || '', '02', '',
                 '', '', '', '', '',
                 'NB36250001', 'POCKETCR', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, '', '', dateReported,
@@ -280,7 +295,8 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1) as city,
                 ${CIBIL_STATE_NAME_SUBQUERY} as state,
-                ${CIBIL_PINCODE_SUBQUERY} as pincode
+                ${CIBIL_PINCODE_SUBQUERY} as pincode,
+                ${CIBIL_COUNTRY_SUBQUERY} as country
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
             WHERE la.status = 'cleared'
@@ -329,7 +345,7 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 consumerName, dob, gender, loan.pan_number || '',
                 '', '', '', '', '', '', '', '', '', '', '',
                 '', '', '', '', '', '', '', '',
-                loan.address_line1 || '', stateCode, loan.pincode || '', '02', '',
+                formatFullAddress(loan), stateCode, loan.pincode || '', '02', '',
                 '', '', '', '', '',
                 'NB36250001', 'POCKETCR', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, dateCleared, dateCleared, dateReported,
@@ -380,7 +396,8 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1) as city,
                 ${CIBIL_STATE_NAME_SUBQUERY} as state,
-                ${CIBIL_PINCODE_SUBQUERY} as pincode
+                ${CIBIL_PINCODE_SUBQUERY} as pincode,
+                ${CIBIL_COUNTRY_SUBQUERY} as country
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
             INNER JOIN payment_orders po ON po.loan_id = la.id AND po.payment_type = 'settlement' AND po.status = 'PAID'
@@ -440,7 +457,7 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
                 consumerName, dob, gender, loan.pan_number || '',
                 '', '', '', '', '', '', '', '', '', '', '',
                 '', '', '', '', '', '', '', '',
-                loan.address_line1 || '', stateCode, loan.pincode || '', '02', '',
+                formatFullAddress(loan), stateCode, loan.pincode || '', '02', '',
                 '', '', '', '', '',
                 'NB36250001', 'POCKETCR', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, dateCleared, dateCleared, dateReported,
@@ -489,7 +506,8 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1) as city,
                 ${CIBIL_STATE_NAME_SUBQUERY} as state,
-                ${CIBIL_PINCODE_SUBQUERY} as pincode
+                ${CIBIL_PINCODE_SUBQUERY} as pincode,
+                ${CIBIL_COUNTRY_SUBQUERY} as country
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
             WHERE la.status = 'account_manager'
@@ -539,7 +557,7 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
                 consumerName, dob, gender, loan.pan_number || '',
                 '', '', '', '', '', '', '', '', '', '', '',
                 '', '', '', '', '', '', '', '',
-                loan.address_line1 || '', stateCode, loan.pincode || '', '02', '',
+                formatFullAddress(loan), stateCode, loan.pincode || '', '02', '',
                 '', '', '', '', '',
                 'NB36250001', 'POCKETCR', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, '', '', dateReported,
