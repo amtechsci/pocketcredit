@@ -54,15 +54,18 @@ const getStateCode = (stateName) => {
 };
 
 /**
- * CIBIL address/state: from addresses with source priority (digilocker > pan_api > bank_api > input).
- * State from state_codes (addresses.state = state_codes.id). Requires addresses.source column.
+ * CIBIL address: one row per user by source priority (digilocker > pan_api > bank_api > input), then is_primary, created_at.
+ * Pick the same address id for all columns so we don't mix fields from different rows.
  */
 const _CIBIL_ADDR_ORDER = `CASE WHEN a.source = 'digilocker' THEN 1 WHEN a.source = 'pan_api' THEN 2 WHEN a.source = 'bank_api' THEN 3 WHEN a.source = 'input' THEN 4 ELSE 5 END, a.is_primary DESC, a.created_at DESC`;
-const CIBIL_ADDRESS_LINE1_SUBQUERY = `(SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1)`;
-const CIBIL_ADDRESS_LINE2_SUBQUERY = `(SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1)`;
-const CIBIL_STATE_NAME_SUBQUERY = `(SELECT COALESCE(sc.state_name, a.state) FROM addresses a LEFT JOIN state_codes sc ON sc.id = a.state WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1)`;
-const CIBIL_PINCODE_SUBQUERY = `(SELECT a.pincode FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1)`;
-const CIBIL_COUNTRY_SUBQUERY = `(SELECT COALESCE(a.country, 'India') FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1)`;
+const _CIBIL_ADDR_ORDER_A2 = `CASE WHEN a2.source = 'digilocker' THEN 1 WHEN a2.source = 'pan_api' THEN 2 WHEN a2.source = 'bank_api' THEN 3 WHEN a2.source = 'input' THEN 4 ELSE 5 END, a2.is_primary DESC, a2.created_at DESC`;
+const _CIBIL_CHOSEN_ADDRESS_ID = `(SELECT a2.id FROM addresses a2 WHERE a2.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER_A2} LIMIT 1)`;
+const CIBIL_ADDRESS_LINE1_SUBQUERY = `(SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
+const CIBIL_ADDRESS_LINE2_SUBQUERY = `(SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
+const CIBIL_STATE_NAME_SUBQUERY = `(SELECT COALESCE(sc.state_name, a.state) FROM addresses a LEFT JOIN state_codes sc ON sc.id = a.state WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
+const CIBIL_PINCODE_SUBQUERY = `(SELECT a.pincode FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
+const CIBIL_COUNTRY_SUBQUERY = `(SELECT COALESCE(a.country, 'India') FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
+const CIBIL_CITY_SUBQUERY = `(SELECT a.city FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
 
 /** Build complete address for Address Line 1: address_line1, address_line2, city, state, pincode, country */
 const formatFullAddress = (loan) => {
@@ -293,7 +296,7 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 la.processed_penalty, la.status, la.plan_snapshot,
                 ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
-                (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1) as city,
+                ${CIBIL_CITY_SUBQUERY} as city,
                 ${CIBIL_STATE_NAME_SUBQUERY} as state,
                 ${CIBIL_PINCODE_SUBQUERY} as pincode,
                 ${CIBIL_COUNTRY_SUBQUERY} as country
@@ -394,7 +397,7 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
                 po.amount as settlement_amount, po.updated_at as settlement_date,
                 ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
-                (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1) as city,
+                ${CIBIL_CITY_SUBQUERY} as city,
                 ${CIBIL_STATE_NAME_SUBQUERY} as state,
                 ${CIBIL_PINCODE_SUBQUERY} as pincode,
                 ${CIBIL_COUNTRY_SUBQUERY} as country
@@ -504,7 +507,7 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
                 la.processed_penalty, la.status, la.plan_snapshot,
                 ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
-                (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1) as city,
+                ${CIBIL_CITY_SUBQUERY} as city,
                 ${CIBIL_STATE_NAME_SUBQUERY} as state,
                 ${CIBIL_PINCODE_SUBQUERY} as pincode,
                 ${CIBIL_COUNTRY_SUBQUERY} as country
