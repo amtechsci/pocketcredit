@@ -1385,7 +1385,8 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
     const loanIds = rows.map((r) => r.loan_application_id);
     const placeholders = loanIds.map(() => '?').join(',');
     const followUpsQuery = `
-      SELECT loan_application_id, response, scheduled_date, created_at, follow_up_id
+      SELECT loan_application_id, response, scheduled_date, created_at, follow_up_id,
+        DATE_FORMAT(created_at, '%Y-%m-%d') as created_date
       FROM user_follow_ups
       WHERE type = 'account_manager' AND loan_application_id IN (${placeholders})
       ORDER BY loan_application_id, created_at DESC
@@ -1473,17 +1474,13 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
 
       const entries = followUpsByLoan[row.loan_application_id] || [];
       const latestEntry = entries[0] || null;
-      // Latest 3 responses for CST Response column
-      const cstResponses = entries.slice(0, 3).map((e) => e.response || '').filter(Boolean);
+      // Latest 3 responses for CST Response column (keep all 3 slots even if empty)
+      const cstResponses = entries.slice(0, 3).map((e) => (e.response != null && e.response !== '') ? String(e.response) : '');
       const commitmentDate = latestEntry && latestEntry.scheduled_date
         ? (typeof latestEntry.scheduled_date === 'string' ? latestEntry.scheduled_date : latestEntry.scheduled_date.toISOString ? latestEntry.scheduled_date.toISOString().slice(0, 10) : '')
         : '';
-      // Updates: only entry created dates (no response text)
-      const updates = entries.map((e) => {
-        if (!e.created_at) return '';
-        const d = typeof e.created_at === 'string' ? e.created_at : (e.created_at.toISOString ? e.created_at.toISOString() : String(e.created_at));
-        return d.slice(0, 10);
-      }).filter(Boolean).join(', ');
+      // Updates: only entry created dates (use created_date from SQL or fallback to created_at)
+      const updates = entries.map((e) => e.created_date || (e.created_at ? (typeof e.created_at === 'string' ? e.created_at.slice(0, 10) : (e.created_at.toISOString ? e.created_at.toISOString().slice(0, 10) : '')) : '')).filter(Boolean).join(', ');
 
       const limitAmount = row.loan_limit != null ? parseFloat(row.loan_limit) : null;
       const salaryAmount = row.monthly_net_income != null ? parseFloat(row.monthly_net_income) : null;

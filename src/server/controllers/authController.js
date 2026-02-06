@@ -61,10 +61,10 @@ async function linkOrCreatePartnerLead(userId, mobile, utmSource) {
 
   await executeQuery(
     `INSERT INTO partner_leads (
-      partner_id, partner_uuid, user_id, mobile_number,
+      partner_id, partner_uuid, user_id, first_name, last_name, mobile_number, pan_number,
       dedupe_status, dedupe_code, utm_source, utm_medium,
       lead_shared_at, user_registered_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, 'registered_user', 2004, ?, 'partner_api', NOW(), NOW(), NOW(), NOW())`,
+    ) VALUES (?, ?, ?, '', '', ?, '', 'registered_user', 2004, ?, 'partner_api', NOW(), NOW(), NOW(), NOW())`,
     [partner.id, partner.partner_uuid, userId, mobile, utmSource]
   );
   console.log(`✅ Created partner lead for user ${userId} via UTM link (utm_source: ${utmSource}, partner: ${partner.client_id})`);

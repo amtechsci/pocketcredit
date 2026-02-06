@@ -53,6 +53,16 @@ const getStateCode = (stateName) => {
     return STATE_CODES[normalized] || '';
 };
 
+/**
+ * CIBIL address/state: from addresses with source priority (digilocker > pan_api > bank_api > input).
+ * State from state_codes (addresses.state = state_codes.id). Requires addresses.source column.
+ */
+const _CIBIL_ADDR_ORDER = `CASE WHEN a.source = 'digilocker' THEN 1 WHEN a.source = 'pan_api' THEN 2 WHEN a.source = 'bank_api' THEN 3 WHEN a.source = 'input' THEN 4 ELSE 5 END, a.is_primary DESC, a.created_at DESC`;
+const CIBIL_ADDRESS_LINE1_SUBQUERY = `(SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1)`;
+const CIBIL_ADDRESS_LINE2_SUBQUERY = `(SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1)`;
+const CIBIL_STATE_NAME_SUBQUERY = `(SELECT COALESCE(sc.state_name, a.state) FROM addresses a LEFT JOIN state_codes sc ON sc.id = a.state WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1)`;
+const CIBIL_PINCODE_SUBQUERY = `(SELECT a.pincode FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1)`;
+
 const formatDateDDMMYYYY = (dateStr) => {
     if (!dateStr) return '';
     const date = new Date(dateStr);
@@ -81,6 +91,44 @@ const calculateDPD = (processedDate, loanDays) => {
     return dpd > 0 ? dpd : 0;
 };
 
+/**
+ * Calculate DPD using actual due date when available (processed_due_date), so extended loans
+ * are not wrongly included in the default report. Falls back to processed_at + loanDays if no due date.
+ */
+const calculateDPDForDefault = (loan) => {
+    let dueDate = null;
+    if (loan.processed_due_date) {
+        try {
+            const parsed = typeof loan.processed_due_date === 'string' ? JSON.parse(loan.processed_due_date) : loan.processed_due_date;
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                const dates = parsed.map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
+                dueDate = dates.length > 0 ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
+            } else if (parsed && typeof parsed === 'object' && parsed.date) {
+                dueDate = new Date(parsed.date);
+            } else {
+                dueDate = new Date(parsed);
+            }
+        } catch (e) {
+            dueDate = new Date(loan.processed_due_date);
+        }
+    }
+    if (dueDate && !isNaN(dueDate.getTime())) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        dueDate.setHours(0, 0, 0, 0);
+        const diffDays = Math.ceil((today - dueDate) / (1000 * 60 * 60 * 24));
+        return diffDays > 0 ? diffDays : 0;
+    }
+    let loanDays = 30;
+    if (loan.plan_snapshot) {
+        try {
+            const plan = typeof loan.plan_snapshot === 'string' ? JSON.parse(loan.plan_snapshot) : loan.plan_snapshot;
+            loanDays = plan.repayment_days || plan.total_duration_days || 30;
+        } catch (e) { }
+    }
+    return calculateDPD(loan.processed_at, loanDays);
+};
+
 const getAssetClassification = (dpd) => {
     if (dpd < 90) return '01';
     if (dpd >= 90 && dpd < 180) return '02';
@@ -105,14 +153,25 @@ const CIBIL_HEADERS = [
     'Income', 'Net/Gross Income Indicator', 'Monthly/Annual Income Indicator', 'CKYC', 'NREGA Card Number'
 ];
 
-const escapeCSV = (value) => {
+/**
+ * Escape a value for CSV. For preserveLeadingZero columns (dates, state code, PIN, address category, etc.),
+ * prefix with tab so Excel treats the cell as text and does not strip leading zeros (same as PHP fputcsv approach).
+ */
+const escapeCSV = (value, preserveLeadingZero = false) => {
     if (value === null || value === undefined) return '';
-    const str = String(value);
-    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    let str = String(value);
+    if (preserveLeadingZero && str.length > 0) {
+        str = '\t' + str;
+    }
+    const needsQuoting = str.includes(',') || str.includes('"') || str.includes('\n');
+    if (needsQuoting) {
         return `"${str.replace(/"/g, '""')}"`;
     }
     return str;
 };
+
+/** CIBIL CSV column indices (0-based) to prefix with tab so Excel keeps leading zeros: DOB, State, PIN, Address Category, dates, Account Type, Ownership */
+const CIBIL_FORCE_QUOTE_INDICES = [1, 24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35, 36, 37];
 
 /**
  * GET /api/admin/reports/cibil/disbursal
@@ -173,7 +232,7 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
                 '', '', '', '', '', '', '', '',
                 loan.address_line1 || '', stateCode, loan.pincode || '', '02', '',
                 '', '', '', '', '',
-                'NB36250001', 'POCKETCR', loan.application_number || `PC${loan.loan_id}`,
+                'NB36250001', 'POCKETCR', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, '', '', dateReported,
                 Math.round(totalAmount), Math.round(currentBalance), '', '',
                 '', '', '', '', '', '',
@@ -184,7 +243,7 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
             ];
         });
 
-        const csvContent = [CIBIL_HEADERS.map(escapeCSV).join(','), ...rows.map(row => row.map(escapeCSV).join(','))].join('\n');
+        const csvContent = [CIBIL_HEADERS.map(escapeCSV).join(','), ...rows.map(row => row.map((val, i) => escapeCSV(val, CIBIL_FORCE_QUOTE_INDICES.includes(i))).join(','))].join('\n');
 
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename=loan_disbursal_cibil_${new Date().toISOString().split('T')[0]}.csv`);
@@ -217,18 +276,18 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 la.total_repayable, la.disbursed_at, la.processed_at,
                 la.updated_at as cleared_at, la.exhausted_period_days,
                 la.processed_penalty, la.status, la.plan_snapshot,
-                (SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line1,
-                (SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line2,
-                (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as city,
-                (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state,
-                (SELECT a.pincode FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as pincode
+                ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
+                ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
+                (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1) as city,
+                ${CIBIL_STATE_NAME_SUBQUERY} as state,
+                ${CIBIL_PINCODE_SUBQUERY} as pincode
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
             WHERE la.status = 'cleared'
             AND NOT EXISTS (
-                SELECT 1 FROM loan_payments lp 
-                WHERE lp.loan_application_id = la.id 
-                AND lp.payment_type = 'settlement'
+                SELECT 1 FROM payment_orders po 
+                WHERE po.loan_id = la.id 
+                AND po.payment_type = 'settlement' AND po.status = 'PAID'
             )
         `;
 
@@ -272,7 +331,7 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 '', '', '', '', '', '', '', '',
                 loan.address_line1 || '', stateCode, loan.pincode || '', '02', '',
                 '', '', '', '', '',
-                'NB36250001', 'POCKETCR', loan.application_number || `PC${loan.loan_id}`,
+                'NB36250001', 'POCKETCR', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, dateCleared, dateCleared, dateReported,
                 Math.round(totalAmount), 0, '', '',
                 '', '', '', '', '', '',
@@ -283,7 +342,7 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
             ];
         }));
 
-        const csvContent = [CIBIL_HEADERS.map(escapeCSV).join(','), ...rows.map(row => row.map(escapeCSV).join(','))].join('\n');
+        const csvContent = [CIBIL_HEADERS.map(escapeCSV).join(','), ...rows.map(row => row.map((val, i) => escapeCSV(val, CIBIL_FORCE_QUOTE_INDICES.includes(i))).join(','))].join('\n');
 
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename=loan_cleared_cibil_${new Date().toISOString().split('T')[0]}.csv`);
@@ -316,24 +375,24 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
                 la.total_repayable, la.disbursed_at, la.processed_at,
                 la.updated_at as cleared_at, la.exhausted_period_days,
                 la.processed_penalty, la.status, la.plan_snapshot,
-                lp.amount as settlement_amount, lp.payment_date as settlement_date,
-                (SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line1,
-                (SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line2,
-                (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as city,
-                (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state,
-                (SELECT a.pincode FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as pincode
+                po.amount as settlement_amount, po.updated_at as settlement_date,
+                ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
+                ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
+                (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1) as city,
+                ${CIBIL_STATE_NAME_SUBQUERY} as state,
+                ${CIBIL_PINCODE_SUBQUERY} as pincode
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
-            INNER JOIN loan_payments lp ON lp.loan_application_id = la.id AND lp.payment_type = 'settlement'
+            INNER JOIN payment_orders po ON po.loan_id = la.id AND po.payment_type = 'settlement' AND po.status = 'PAID'
             WHERE la.status IN ('cleared', 'settled')
         `;
 
         const params = [];
         if (from_date && to_date) {
-            sql += ` AND DATE(lp.payment_date) BETWEEN ? AND ?`;
+            sql += ` AND DATE(po.updated_at) BETWEEN ? AND ?`;
             params.push(from_date, to_date);
         }
-        sql += ` ORDER BY lp.payment_date DESC`;
+        sql += ` ORDER BY po.updated_at DESC`;
 
         const loans = await executeQuery(sql, params);
 
@@ -358,7 +417,7 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
             let writtenOffTotal = Math.max(0, Math.ceil(totalOutstanding - settlementAmount));
 
             const paidResult = await executeQuery(
-                `SELECT COALESCE(SUM(amount), 0) as total_paid FROM loan_payments WHERE loan_application_id = ?`,
+                `SELECT COALESCE(SUM(amount), 0) as total_paid FROM loan_payments WHERE loan_id = ?`,
                 [loan.loan_id]
             );
             const totalPaid = parseFloat(paidResult[0]?.total_paid) || 0;
@@ -383,7 +442,7 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
                 '', '', '', '', '', '', '', '',
                 loan.address_line1 || '', stateCode, loan.pincode || '', '02', '',
                 '', '', '', '', '',
-                'NB36250001', 'POCKETCR', loan.application_number || `PC${loan.loan_id}`,
+                'NB36250001', 'POCKETCR', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, dateCleared, dateCleared, dateReported,
                 Math.round(totalAmount), 0, '', '',
                 '', '', '', '', '', '',
@@ -394,7 +453,7 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
             ];
         }));
 
-        const csvContent = [CIBIL_HEADERS.map(escapeCSV).join(','), ...rows.map(row => row.map(escapeCSV).join(','))].join('\n');
+        const csvContent = [CIBIL_HEADERS.map(escapeCSV).join(','), ...rows.map(row => row.map((val, i) => escapeCSV(val, CIBIL_FORCE_QUOTE_INDICES.includes(i))).join(','))].join('\n');
 
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename=loan_settlement_cibil_${new Date().toISOString().split('T')[0]}.csv`);
@@ -426,11 +485,11 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
                 la.total_repayable, la.disbursed_at, la.processed_at,
                 la.processed_due_date, la.exhausted_period_days,
                 la.processed_penalty, la.status, la.plan_snapshot,
-                (SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line1,
-                (SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line2,
-                (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as city,
-                (SELECT a.state FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state,
-                (SELECT a.pincode FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as pincode
+                ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
+                ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
+                (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER} LIMIT 1) as city,
+                ${CIBIL_STATE_NAME_SUBQUERY} as state,
+                ${CIBIL_PINCODE_SUBQUERY} as pincode
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
             WHERE la.status = 'account_manager'
@@ -448,8 +507,8 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
                     loanDays = plan.repayment_days || plan.total_duration_days || 30;
                 } catch (e) { }
             }
-
-            const dpd = calculateDPD(loan.processed_at, loanDays);
+            // Use actual due date (processed_due_date) when available so extended loans are not wrongly included
+            const dpd = calculateDPDForDefault(loan);
             if (dpd > 0) {
                 defaultLoans.push({ ...loan, calculated_dpd: dpd, loan_days: loanDays });
             }
@@ -482,7 +541,7 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
                 '', '', '', '', '', '', '', '',
                 loan.address_line1 || '', stateCode, loan.pincode || '', '02', '',
                 '', '', '', '', '',
-                'NB36250001', 'POCKETCR', loan.application_number || `PC${loan.loan_id}`,
+                'NB36250001', 'POCKETCR', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, '', '', dateReported,
                 Math.round(totalAmount), currentBalance, currentBalance, dpd,
                 '', '', '', '', '', suitFiled,
@@ -493,7 +552,7 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
             ];
         });
 
-        const csvContent = [CIBIL_HEADERS.map(escapeCSV).join(','), ...rows.map(row => row.map(escapeCSV).join(','))].join('\n');
+        const csvContent = [CIBIL_HEADERS.map(escapeCSV).join(','), ...rows.map(row => row.map((val, i) => escapeCSV(val, CIBIL_FORCE_QUOTE_INDICES.includes(i))).join(','))].join('\n');
 
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename=loan_default_cibil_${new Date().toISOString().split('T')[0]}.csv`);
@@ -599,6 +658,8 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             'GST Amount on Processing Fees', 'INTEREST (%)', 'LOAN CLOSURE TYPE', 'INTEREST COLLECTED', 'PENALTY', 'GST On PENALTY',
             'REPAYMENT AMOUNT'
         ];
+        /** BS Repayment CSV: preserve leading zeros for Voucher No (PLL+id), Loan Process Date, LoanDate */
+        const BS_REPAYMENT_DATE_INDICES = [5, 6, 14];
         csvRows.push(headers.map(escapeCSV).join(','));
 
         for (const row of rows) {
@@ -650,8 +711,8 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 }
             }
 
-            const loanDate = row.loan_start_date ? new Date(row.loan_start_date).toLocaleDateString('en-GB').replace(/\//g, '-') : '';
-            const transactionDate = row.transaction_date ? new Date(row.transaction_date).toLocaleDateString('en-GB').replace(/\//g, '-') : '';
+            const loanDate = row.loan_start_date ? formatDateDDMMYYYY(row.loan_start_date) : '';
+            const transactionDate = row.transaction_date ? formatDateDDMMYYYY(row.transaction_date) : '';
 
             const data = [
                 row.rcid || '',
@@ -680,7 +741,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 repayment_amt.toFixed(2)
             ];
 
-            csvRows.push(data.map(escapeCSV).join(','));
+            csvRows.push(data.map((val, i) => escapeCSV(val, BS_REPAYMENT_DATE_INDICES.includes(i))).join(','));
         }
 
         const csvContent = csvRows.join('\n');
@@ -766,6 +827,8 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
             'Country', 'State', 'Processing fee(%)', 'Tenure', 'Processing Fees Collected', 'GST Amount on Processing Fees',
             'Check', 'Remarks'
         ];
+        /** BS Disbursal CSV: preserve leading zeros for Voucher No (PLL+id), LoanDate */
+        const BS_DISBURSAL_PRESERVE_INDICES = [5, 11];
         csvRows.push(headers.map(escapeCSV).join(','));
 
         for (const row of rows) {
@@ -791,14 +854,7 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
             const processing_fee = parseFloat(row.p_fee || row.processing_fees || 0);
             const gst_amount = processing_fee * 0.18;
             
-            let loanDate = '';
-            if (row.processed_date) {
-                const date = new Date(row.processed_date);
-                const day = String(date.getDate()).padStart(2, '0');
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const year = date.getFullYear();
-                loanDate = `${day}/${month}/${year}`;
-            }
+            const loanDate = row.processed_date ? formatDateDDMMYYYY(row.processed_date) : '';
 
             const data = [
                 row.rcid || '',
@@ -821,7 +877,7 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
                 ''
             ];
 
-            csvRows.push(data.map(escapeCSV).join(','));
+            csvRows.push(data.map((val, i) => escapeCSV(val, BS_DISBURSAL_PRESERVE_INDICES.includes(i))).join(','));
         }
 
         const csvContent = csvRows.join('\n');

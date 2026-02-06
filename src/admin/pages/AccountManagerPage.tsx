@@ -228,14 +228,14 @@ export function AccountManagerPage() {
                         {row.salary_date != null ? String(row.salary_date) : '—'}
                       </td>
                       <td className="px-3 py-2 text-sm text-gray-900 max-w-[220px]">
-                        {row.cst_responses && row.cst_responses.length > 0 ? (
-                          <div className="flex flex-col gap-0.5" title={row.cst_responses.join('\n')}>
-                            {row.cst_responses.map((r, i) => (
-                              <span key={i} className="line-clamp-1">{r || '—'}</span>
+                        {Array.isArray(row.cst_responses) && row.cst_responses.length > 0 ? (
+                          <div className="flex flex-col gap-0.5" title={row.cst_responses.filter(Boolean).join('\n') || undefined}>
+                            {row.cst_responses.slice(0, 3).map((r, i) => (
+                              <span key={i} className="line-clamp-2">{r ? String(r) : '—'}</span>
                             ))}
                           </div>
                         ) : (
-                          row.cst_response || '—'
+                          <span className={row.cst_response ? '' : 'text-gray-400'}>{row.cst_response || '—'}</span>
                         )}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">

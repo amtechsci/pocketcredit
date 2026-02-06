@@ -195,14 +195,23 @@ const logRequestActivity = async (req, res, data) => {
     
     const { method, path, user, admin } = req;
     
-    // Safely parse response data
+    // Safely parse response data (skip for non-JSON: CSV, binary, etc.)
     let responseData;
-    try {
-      responseData = typeof data === 'string' ? JSON.parse(data) : data;
-    } catch (parseError) {
-      // If parsing fails, treat as non-JSON response
-      console.warn('⚠️ Failed to parse response data as JSON:', parseError.message);
-      responseData = { raw: data };
+    if (typeof data !== 'string') {
+      responseData = data;
+    } else {
+      const trimmed = data.trim();
+      const looksLikeJson = trimmed.startsWith('{') || trimmed.startsWith('[');
+      if (looksLikeJson) {
+        try {
+          responseData = JSON.parse(data);
+        } catch (parseError) {
+          responseData = { _: 'parse_failed' };
+        }
+      } else {
+        // CSV, HTML, plain text - don't try to parse or warn
+        responseData = { _: 'non_json' };
+      }
     }
     
     let activityType = ACTIVITY_TYPES.SYSTEM_EVENT;

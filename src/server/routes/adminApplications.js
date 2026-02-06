@@ -35,6 +35,19 @@ function formatDateLocal(date) {
   return `${year}-${month}-${day}`;
 }
 
+/**
+ * Format date as DDMMYYYY for CSV export so leading zeros are preserved (e.g. 01111998)
+ */
+function formatDateDDMMYYYY(date) {
+  if (!date) return '';
+  const d = typeof date === 'string' || !(date instanceof Date) ? new Date(date) : date;
+  if (isNaN(d.getTime())) return '';
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}${month}${year}`;
+}
+
 // Get all loan applications with filters and pagination
 router.get('/', authenticateAdmin, async (req, res) => {
   try {
@@ -1651,7 +1664,7 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         'Mobile': app.mobile || '',
         'Email': app.email || '',
         'PAN Number': app.pan_number || '',
-        'Date of Birth': app.date_of_birth || '',
+        'Date of Birth': app.date_of_birth ? formatDateDDMMYYYY(app.date_of_birth) : '',
         'Gender': app.gender || '',
         'Marital Status': app.marital_status || '',
         'Loan Amount': parseFloat(app.loanAmount) || 0,
@@ -1660,9 +1673,9 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         'Interest Rate (% per day)': app.interest_percent_per_day ? parseFloat(app.interest_percent_per_day) : 0,
         'EMI Amount': app.emiAmount ? parseFloat(app.emiAmount) : 0,
         'Status': app.status || '',
-        'Application Date': app.applicationDate ? formatDateLocal(app.applicationDate) : '',
-        'Approved Date': app.approvedDate ? formatDateLocal(app.approvedDate) : '',
-        'Disbursed Date': app.disbursedDate ? formatDateLocal(app.disbursedDate) : '',
+        'Application Date': app.applicationDate ? formatDateDDMMYYYY(app.applicationDate) : '',
+        'Approved Date': app.approvedDate ? formatDateDDMMYYYY(app.approvedDate) : '',
+        'Disbursed Date': app.disbursedDate ? formatDateDDMMYYYY(app.disbursedDate) : '',
         'Processing Fee': app.processing_fee ? parseFloat(app.processing_fee) : 0,
         'Processing Fee %': app.processing_fee_percent ? parseFloat(app.processing_fee_percent) : 0,
         'Disbursal Amount': app.disbursal_amount ? parseFloat(app.disbursal_amount) : 0,
@@ -1685,7 +1698,7 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         'Extension Status': app.extension_status || 'none',
         'Extension Count': app.extension_count || 0,
         'Rejection Reason': app.rejectionReason || '',
-        'Updated At': app.updatedAt ? formatDateLocal(app.updatedAt) : ''
+        'Updated At': app.updatedAt ? formatDateDDMMYYYY(app.updatedAt) : ''
       };
     });
 
@@ -1698,13 +1711,17 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
     }
 
     const headers = Object.keys(exportData[0]);
-    const csvRows = exportData.map(row => 
+    const dateHeaders = new Set(['Date of Birth', 'Application Date', 'Approved Date', 'Disbursed Date', 'Updated At']);
+    const csvRows = exportData.map(row =>
       headers.map(header => {
         const value = row[header];
-        // Escape quotes and wrap in quotes if contains comma, newline, or quote
         if (value === null || value === undefined) return '""';
-        const stringValue = String(value);
-        if (stringValue.includes(',') || stringValue.includes('\n') || stringValue.includes('"')) {
+        let stringValue = String(value);
+        const isDateColumn = dateHeaders.has(header);
+        if (isDateColumn && stringValue.length > 0) {
+          stringValue = '\t' + stringValue;
+        }
+        if (isDateColumn || stringValue.includes(',') || stringValue.includes('\n') || stringValue.includes('"')) {
           return `"${stringValue.replace(/"/g, '""')}"`;
         }
         return stringValue;
