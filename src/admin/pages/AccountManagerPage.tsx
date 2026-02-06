@@ -1,35 +1,30 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminApiService } from '../../services/adminApi';
-import {
-  Search,
-  Eye,
-  User,
-  Phone,
-  Mail,
-  Calendar,
-  ArrowLeft,
-  Briefcase,
-  Banknote
-} from 'lucide-react';
+import { Search, Eye, ArrowLeft, Briefcase } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface AccountManagerUser {
-  id: number;
+  slno: number;
+  user_id: number;
   first_name: string;
   last_name: string;
-  email: string;
   phone: string;
-  status: string;
-  loan_status: string;
+  alternate_mobile?: string | null;
+  total_loans: number;
+  principal_amount: number;
+  exhausted_days: number;
+  dpd: number;
+  outstanding_amount: number;
   loan_application_id: number;
   application_number: string;
-  loan_amount: number;
-  disbursal_amount?: number;
+  salary_date?: number | null;
+  cst_response: string;
+  commitment_date: string;
+  updates: string;
+  loan_status: string;
   disbursed_at?: string;
-  created_at: string;
   updated_at: string;
-  loan_limit: number;
 }
 
 export function AccountManagerPage() {
@@ -116,10 +111,10 @@ export function AccountManagerPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-6">
+    <div className="p-3 sm:p-4 lg:p-6 space-y-4 sm:space-y-6">
+      {/* Header */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4 lg:p-6">
+        <div className="mb-4">
           <button
             onClick={() => navigate(-1)}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4"
@@ -140,22 +135,20 @@ export function AccountManagerPage() {
             </div>
           </div>
         </div>
-
-        {/* Search Bar */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => handleSearch(e.target.value)}
-              placeholder="Search by name, email, phone, application number..."
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-            />
-          </div>
+        {/* Search Bar - same card */}
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => handleSearch(e.target.value)}
+            placeholder="Search by name, email, phone, alt number, application number..."
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+          />
         </div>
+      </div>
 
-        {/* Users Table */}
+      {/* Users Table */}
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="text-center">
@@ -164,111 +157,70 @@ export function AccountManagerPage() {
             </div>
           </div>
         ) : users.length > 0 ? (
-          <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      User
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Contact
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Application
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Loan / Disbursed
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Disbursed
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Updated
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Action
-                    </th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">SL No</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name (User ID)</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Total Loans</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Principal</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Exhausted Days</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">DPD</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Outstanding</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Loan ID</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Salary Date</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">CST Response</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Commitment Date</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Updates</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {users.map((user) => (
-                    <tr key={`${user.id}-${user.loan_application_id}`} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 h-10 w-10 rounded-full bg-purple-100 flex items-center justify-center">
-                            <User className="h-5 w-5 text-purple-600" />
-                          </div>
-                          <div className="ml-4">
-                            <div className="text-sm font-medium text-gray-900">
-                              {user.first_name} {user.last_name}
-                            </div>
-                            <div className="text-sm text-gray-500">ID: {user.id}</div>
-                          </div>
+                  {users.map((row) => (
+                    <tr key={`${row.user_id}-${row.loan_application_id}`} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{row.slno}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">
+                          {[row.first_name, row.last_name].filter(Boolean).join(' ') || '—'}
                         </div>
+                        <div className="text-xs text-gray-500">ID: {row.user_id}</div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          <div className="flex items-center gap-2 mb-1">
-                            <Phone className="w-4 h-4 text-gray-400" />
-                            {user.phone || 'N/A'}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Mail className="w-4 h-4 text-gray-400" />
-                            <span className="text-xs">{user.email || 'N/A'}</span>
-                          </div>
-                        </div>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm">
+                        <div>{row.phone || '—'}</div>
+                        {row.alternate_mobile && (
+                          <div className="text-xs text-gray-500">Alt: {row.alternate_mobile}</div>
+                        )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          <div className="font-medium">{user.application_number || `#${user.loan_application_id}`}</div>
-                          <div className="text-xs text-gray-500">Loan ID: {user.loan_application_id}</div>
-                        </div>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{row.total_loans}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{formatCurrency(row.principal_amount)}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{row.exhausted_days}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm">
+                        <span className={row.dpd > 0 ? 'text-orange-600 font-medium' : ''}>{row.dpd}</span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          <div className="font-medium">{formatCurrency(user.loan_amount)}</div>
-                          {(user.disbursal_amount != null || user.disbursed_at) && (
-                            <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
-                              <Banknote className="w-3 h-3" />
-                              {user.disbursal_amount != null && formatCurrency(user.disbursal_amount)}
-                            </div>
-                          )}
-                          {user.loan_limit > 0 && (
-                            <div className="text-xs text-gray-500">Limit: {formatCurrency(user.loan_limit)}</div>
-                          )}
-                        </div>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{formatCurrency(row.outstanding_amount)}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-mono">{row.application_number || `#${row.loan_application_id}`}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                        {row.salary_date != null ? String(row.salary_date) : '—'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {getLoanStatusBadge(user.loan_status)}
+                      <td className="px-3 py-2 text-sm text-gray-900 max-w-[180px] truncate" title={row.cst_response}>
+                        {row.cst_response || '—'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          <div className="flex items-center gap-2">
-                            <Calendar className="w-4 h-4 text-gray-400" />
-                            {user.disbursed_at ? formatDate(user.disbursed_at) : '—'}
-                          </div>
-                        </div>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                        {row.commitment_date ? (row.commitment_date.slice(0, 10)) : '—'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          <div className="flex items-center gap-2">
-                            <Calendar className="w-4 h-4 text-gray-400" />
-                            {formatDate(user.updated_at)}
-                          </div>
-                        </div>
+                      <td className="px-3 py-2 text-sm text-gray-700 max-w-[220px]" title={row.updates}>
+                        <span className="line-clamp-2">{row.updates || '—'}</span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium">
                         <button
-                          onClick={() => window.open(`/stpl/user-profile/${user.id}`, '_blank')}
+                          onClick={() => window.open(`/stpl/user-profile/${row.user_id}`, '_blank')}
                           className="text-purple-600 hover:text-purple-900 flex items-center gap-1"
                         >
                           <Eye className="w-4 h-4" />
-                          View Profile
+                          View
                         </button>
                       </td>
                     </tr>
@@ -351,13 +303,12 @@ export function AccountManagerPage() {
             )}
           </div>
         ) : (
-          <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
             <Briefcase className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-gray-900 mb-2">No loans in Account Manager</h3>
             <p className="text-gray-600">There are currently no disbursed loans in Account Manager or Overdue status.</p>
           </div>
         )}
-      </div>
     </div>
   );
 }

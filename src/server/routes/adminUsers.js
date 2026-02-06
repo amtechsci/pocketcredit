@@ -1316,7 +1316,7 @@ router.get('/qa-verification/list', authenticateAdmin, async (req, res) => {
 });
 
 // GET /api/admin/users/account-manager/list
-// Get users with loan applications in Account Manager status (account_manager or overdue)
+// Get loans in Account Manager status with: SLNO, name (user id), contact, total loans, principal, exhausted days, DPD, outstanding, loan id, salary date, CST response, commitment date, updates (all AM entries)
 router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
@@ -1328,49 +1328,43 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
     let whereConditions = [];
     let queryParams = [];
 
-    // Account Manager: loan_applications.status IN ('account_manager', 'overdue')
     whereConditions.push(`la.status IN ('account_manager', 'overdue')`);
 
-    // Search filter
     if (search) {
       whereConditions.push(`(
-        u.first_name LIKE ? OR 
-        u.last_name LIKE ? OR 
-        u.email LIKE ? OR 
-        u.phone LIKE ? OR
+        u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR u.phone LIKE ? OR u.alternate_mobile LIKE ? OR
         la.application_number LIKE ?
       )`);
       const searchTerm = `%${search}%`;
-      queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+      queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
     }
 
     const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
 
-    // Get total count
     const countQuery = `
-      SELECT COUNT(*) as total 
-      FROM loan_applications la
-      INNER JOIN users u ON la.user_id = u.id
-      ${whereClause}
+      SELECT COUNT(*) as total FROM loan_applications la INNER JOIN users u ON la.user_id = u.id ${whereClause}
     `;
     const countResult = await executeQuery(countQuery, queryParams);
     const total = countResult && countResult.length > 0 ? countResult[0].total : 0;
 
-    // Get users with loan application details (include disbursed_at, disbursal_amount for account manager)
     const usersQuery = `
       SELECT 
-        u.id,
+        u.id as user_id,
         u.first_name,
         u.last_name,
-        u.email,
         u.phone,
-        u.status,
-        u.loan_limit,
+        u.alternate_mobile,
+        u.salary_date,
         la.id as loan_application_id,
         la.application_number,
         la.loan_amount,
+        la.processed_amount,
         la.disbursal_amount,
         la.disbursed_at,
+        la.processed_at,
+        la.plan_snapshot,
+        la.processed_post_service_fee,
+        la.fees_breakdown,
         la.status as loan_status,
         DATE_FORMAT(la.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
         DATE_FORMAT(la.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
@@ -1380,19 +1374,124 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
       ORDER BY la.updated_at DESC
       LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
     `;
-    const users = await executeQuery(usersQuery, queryParams);
+    const rows = await executeQuery(usersQuery, queryParams);
+    if (!rows || rows.length === 0) {
+      return res.json({ status: 'success', data: { users: [], total: 0, page, limit, totalPages: 0 } });
+    }
+
+    const loanIds = rows.map((r) => r.loan_application_id);
+    const placeholders = loanIds.map(() => '?').join(',');
+    const followUpsQuery = `
+      SELECT loan_application_id, response, scheduled_date, created_at, follow_up_id
+      FROM user_follow_ups
+      WHERE type = 'account_manager' AND loan_application_id IN (${placeholders})
+      ORDER BY loan_application_id, created_at DESC
+    `;
+    const followUps = await executeQuery(followUpsQuery, loanIds);
+
+    const followUpsByLoan = {};
+    (followUps || []).forEach((fu) => {
+      if (!followUpsByLoan[fu.loan_application_id]) {
+        followUpsByLoan[fu.loan_application_id] = [];
+      }
+      followUpsByLoan[fu.loan_application_id].push(fu);
+    });
+
+    const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
+
+    const userIds = [...new Set(rows.map((r) => r.user_id))];
+    const totalLoansQuery = `
+      SELECT user_id, COUNT(*) as total_loans
+      FROM loan_applications
+      WHERE user_id IN (${userIds.map(() => '?').join(',')}) AND status IN ('account_manager', 'overdue')
+      GROUP BY user_id
+    `;
+    const totalLoansRows = await executeQuery(totalLoansQuery, userIds);
+    const totalLoansByUser = {};
+    (totalLoansRows || []).forEach((r) => {
+      totalLoansByUser[r.user_id] = r.total_loans || 0;
+    });
+
+    const users = rows.map((row, index) => {
+      const disbursedAt = row.disbursed_at || row.processed_at;
+      const disbursedDate = disbursedAt ? new Date(disbursedAt) : null;
+      const today = new Date();
+      const exhaustedDays = disbursedDate
+        ? Math.max(0, Math.ceil((today - disbursedDate) / (1000 * 60 * 60 * 24)))
+        : 0;
+
+      let loanDays = 30;
+      if (row.plan_snapshot) {
+        try {
+          const plan = typeof row.plan_snapshot === 'string' ? JSON.parse(row.plan_snapshot) : row.plan_snapshot;
+          loanDays = plan.loan_days || plan.tenure_days || plan.tenure || 30;
+        } catch (e) {
+          // keep 30
+        }
+      }
+      const dpd = Math.max(0, exhaustedDays - (loanDays || 30));
+
+      const loanForOutstanding = {
+        processed_amount: row.processed_amount,
+        sanctioned_amount: row.disbursal_amount || row.loan_amount,
+        loan_amount: row.loan_amount,
+        principal_amount: row.processed_amount,
+        plan_snapshot: row.plan_snapshot,
+        processed_post_service_fee: row.processed_post_service_fee,
+        fees_breakdown: row.fees_breakdown
+      };
+      let outstandingAmount = 0;
+      try {
+        outstandingAmount = calculateOutstandingBalance(loanForOutstanding);
+      } catch (e) {
+        console.error('Outstanding balance calc error for loan', row.loan_application_id, e.message);
+      }
+
+      const entries = followUpsByLoan[row.loan_application_id] || [];
+      const latestEntry = entries[0] || null;
+      const cstResponse = latestEntry ? (latestEntry.response || '') : '';
+      const commitmentDate = latestEntry && latestEntry.scheduled_date
+        ? (typeof latestEntry.scheduled_date === 'string' ? latestEntry.scheduled_date : latestEntry.scheduled_date.toISOString ? latestEntry.scheduled_date.toISOString().slice(0, 10) : '')
+        : '';
+      const updates = entries.map((e) => {
+        const d = e.scheduled_date ? (e.scheduled_date.toISOString ? e.scheduled_date.toISOString().slice(0, 10) : String(e.scheduled_date).slice(0, 10)) : '';
+        return (d ? `${d}: ` : '') + (e.response || '');
+      }).join(' | ');
+
+      return {
+        slno: offset + index + 1,
+        user_id: row.user_id,
+        first_name: row.first_name,
+        last_name: row.last_name,
+        phone: row.phone,
+        alternate_mobile: row.alternate_mobile,
+        total_loans: totalLoansByUser[row.user_id] || 1,
+        principal_amount: row.processed_amount != null ? parseFloat(row.processed_amount) : (row.disbursal_amount != null ? parseFloat(row.disbursal_amount) : parseFloat(row.loan_amount)),
+        exhausted_days: exhaustedDays,
+        dpd,
+        outstanding_amount: outstandingAmount,
+        loan_application_id: row.loan_application_id,
+        application_number: row.application_number,
+        salary_date: row.salary_date,
+        cst_response: cstResponse,
+        commitment_date: commitmentDate,
+        updates,
+        loan_status: row.loan_status,
+        disbursed_at: row.disbursed_at,
+        updated_at: row.updated_at
+      };
+    });
 
     res.json({
       status: 'success',
       data: {
-        users: users || [],
-        total: total,
-        page: page,
-        limit: limit,
+        users,
+        total,
+        page,
+        limit,
         totalPages: Math.ceil(total / limit)
       }
     });
-
   } catch (error) {
     console.error('Get Account Manager users error:', error);
     res.status(500).json({
