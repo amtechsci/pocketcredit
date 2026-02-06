@@ -19,6 +19,7 @@ import { ExtensionLetterDocument } from './admin/pages/ExtensionLetterDocument';
 import { NOCDocument } from './admin/pages/NOCDocument';
 import { SearchResultsPage } from './admin/pages/SearchResultsPage';
 import { PoliciesManagement } from './admin/pages/PoliciesManagement';
+import { AdminPartnersPage } from './admin/pages/AdminPartnersPage';
 import { CoolingPeriodPage } from './admin/pages/CoolingPeriodPage';
 import { RegisteredPage } from './admin/pages/RegisteredPage';
 import { ApprovedPage } from './admin/pages/ApprovedPage';
@@ -101,6 +102,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
     { path: `${BASE_PATH}/qa-verification`, label: 'QA Verification', color: 'cyan' },
     { path: `${BASE_PATH}/reports`, label: 'Reports', color: 'blue' },
     ...(currentUser?.role === 'superadmin' ? [
+      { path: `${BASE_PATH}/partners`, label: 'Partners', color: 'blue' },
       { path: `${BASE_PATH}/team-management`, label: 'Team Management', color: 'blue' },
       { path: `${BASE_PATH}/settings`, label: 'Settings', color: 'blue' }
     ] : [])
@@ -376,6 +378,11 @@ export default function AdminApp() {
         <Route path="policies" element={
           <ProtectedRoute>
             <PoliciesManagement />
+          </ProtectedRoute>
+        } />
+        <Route path="partners" element={
+          <ProtectedRoute>
+            <AdminPartnersPage />
           </ProtectedRoute>
         } />
         <Route path="system-settings" element={

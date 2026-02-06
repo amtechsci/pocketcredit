@@ -14,6 +14,62 @@ try {
 }
 
 /**
+ * Link user to existing partner lead (from API) or create a new partner lead when user joined via UTM-only link.
+ * Partner can share a single link (e.g. ?utm_source=PARTNER_UUID&utm_medium=partner_api); no API call needed.
+ * @param {number} userId - User id
+ * @param {string} mobile - Mobile number
+ * @param {string} utmSource - utm_source (partner_uuid or client_id)
+ */
+async function linkOrCreatePartnerLead(userId, mobile, utmSource) {
+  await initializeDatabase();
+
+  // 1) Find existing partner lead (created by API) for this mobile + utm_source not yet linked
+  const existingByMobile = await executeQuery(
+    `SELECT id, partner_id, user_id FROM partner_leads
+     WHERE mobile_number = ? AND utm_source = ? AND user_id IS NULL
+     ORDER BY lead_shared_at DESC LIMIT 1`,
+    [mobile, utmSource]
+  );
+  if (existingByMobile && existingByMobile.length > 0) {
+    await executeQuery(
+      `UPDATE partner_leads SET user_id = ?, user_registered_at = NOW(), updated_at = NOW() WHERE id = ?`,
+      [userId, existingByMobile[0].id]
+    );
+    console.log(`✅ Linked user ${userId} to partner lead ${existingByMobile[0].id} (utm_source: ${utmSource})`);
+    return;
+  }
+
+  // 2) Already attributed to this partner for this user?
+  const existingByUser = await executeQuery(
+    `SELECT id FROM partner_leads WHERE user_id = ? AND utm_source = ? LIMIT 1`,
+    [userId, utmSource]
+  );
+  if (existingByUser && existingByUser.length > 0) {
+    return;
+  }
+
+  // 3) Resolve utm_source to partner (partner_uuid or client_id) and create new lead (UTM-only, no API call)
+  const { findPartnerByUuid, findPartnerByClientId } = require('../models/partner');
+  let partner = await findPartnerByUuid(utmSource);
+  if (!partner) {
+    partner = await findPartnerByClientId(utmSource);
+  }
+  if (!partner) {
+    return;
+  }
+
+  await executeQuery(
+    `INSERT INTO partner_leads (
+      partner_id, partner_uuid, user_id, mobile_number,
+      dedupe_status, dedupe_code, utm_source, utm_medium,
+      lead_shared_at, user_registered_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'registered_user', 2004, ?, 'partner_api', NOW(), NOW(), NOW(), NOW())`,
+    [partner.id, partner.partner_uuid, userId, mobile, utmSource]
+  );
+  console.log(`✅ Created partner lead for user ${userId} via UTM link (utm_source: ${utmSource}, partner: ${partner.client_id})`);
+}
+
+/**
  * Auth Controller
  * Handles authentication business logic including OTP generation and verification
  */
@@ -194,42 +250,28 @@ const verifyOtp = async (req, res) => {
         phone_verified: true
       });
       
-      // Link user to partner lead if UTM parameters are present
+      // Link to existing partner lead or create new lead (UTM-only link, no API call)
       try {
         const { utm_source, utm_medium } = req.body;
         if (utm_source && utm_medium === 'partner_api') {
-          const { executeQuery, initializeDatabase } = require('../config/database');
-          await initializeDatabase();
-          
-          // Find partner lead by mobile number and utm_source
-          const leads = await executeQuery(
-            `SELECT id, partner_id, user_id 
-             FROM partner_leads 
-             WHERE mobile_number = ? AND utm_source = ? AND user_id IS NULL
-             ORDER BY lead_shared_at DESC 
-             LIMIT 1`,
-            [String(mobile), utm_source]
-          );
-          
-          if (leads && leads.length > 0) {
-            // Update partner lead with user_id
-            await executeQuery(
-              `UPDATE partner_leads 
-               SET user_id = ?, user_registered_at = NOW(), updated_at = NOW()
-               WHERE id = ?`,
-              [user.id, leads[0].id]
-            );
-            console.log(`✅ Linked user ${user.id} to partner lead ${leads[0].id} (utm_source: ${utm_source})`);
-          }
+          await linkOrCreatePartnerLead(user.id, String(mobile), utm_source);
         }
       } catch (partnerLinkError) {
         console.error('Error linking user to partner lead (non-critical):', partnerLinkError.message);
         // Don't fail registration if partner linking fails
       }
-      
     } else {
       // Update last login for existing user
       await updateLastLogin(user.id);
+      // If existing user logged in with partner UTM link, ensure they are attributed to that partner (UTM-only link)
+      try {
+        const { utm_source, utm_medium } = req.body;
+        if (utm_source && utm_medium === 'partner_api') {
+          await linkOrCreatePartnerLead(user.id, String(mobile), utm_source);
+        }
+      } catch (partnerLinkError) {
+        console.error('Error linking existing user to partner lead (non-critical):', partnerLinkError.message);
+      }
     }
 
     // Extract and save login data (only if extractLoginData is available and table exists)

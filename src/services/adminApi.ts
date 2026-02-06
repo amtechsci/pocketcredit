@@ -1899,6 +1899,114 @@ class AdminApiService {
     return this.request('GET', `/team/${id}/activity`, undefined, { limit });
   }
 
+  // ==================== Partner Management APIs ====================
+
+  /**
+   * Get all partners (admin)
+   */
+  async getPartners(): Promise<ApiResponse<{
+    partners: Array<{
+      id: number;
+      partner_uuid: string;
+      client_id: string;
+      name: string;
+      email: string | null;
+      public_key_path: string | null;
+      allowed_ips: string | null;
+      is_active: number;
+      created_at: string;
+      updated_at: string;
+    }>;
+  }>> {
+    return this.request('GET', '/partners');
+  }
+
+  /**
+   * Get single partner
+   */
+  async getPartner(id: number): Promise<ApiResponse<{
+    id: number;
+    partner_uuid: string;
+    client_id: string;
+    name: string;
+    email: string | null;
+    public_key_path: string | null;
+    allowed_ips: string | null;
+    is_active: number;
+    created_at: string;
+    updated_at: string;
+  }>> {
+    return this.request('GET', `/partners/${id}`);
+  }
+
+  /**
+   * Create new partner
+   */
+  async createPartner(data: {
+    client_id: string;
+    client_secret: string;
+    name: string;
+    email?: string;
+    public_key_path?: string;
+    public_key_pem?: string;
+    allowed_ips?: string;
+  }): Promise<ApiResponse<{ id: number; partner_uuid: string; client_id: string; name: string; email: string | null; is_active: boolean }>> {
+    return this.request('POST', '/partners', data);
+  }
+
+  /**
+   * Update partner
+   */
+  async updatePartner(id: number, data: {
+    name?: string;
+    email?: string;
+    public_key_path?: string;
+    public_key_pem?: string;
+    allowed_ips?: string;
+    is_active?: boolean;
+    client_secret?: string;
+  }): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/partners/${id}`, data);
+  }
+
+  /**
+   * Get partner leads (admin view)
+   */
+  async getPartnerLeads(partnerId: number, params?: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<ApiResponse<{
+    partner: { id: number; name: string; client_id: string };
+    leads: Array<{
+      id: number;
+      first_name: string;
+      last_name: string;
+      mobile_number: string;
+      pan_number: string | null;
+      dedupe_status: string;
+      dedupe_code: number;
+      lead_shared_at: string;
+      user_registered_at: string | null;
+      loan_application_id: number | null;
+      loan_status: string | null;
+      disbursed_at: string | null;
+      disbursal_amount: number | null;
+      payout_eligible: number | null;
+      payout_amount: number | null;
+      payout_grade: string | null;
+      payout_status: string | null;
+      user_id: number | null;
+      email: string | null;
+      application_number: string | null;
+    }>;
+    pagination: { page: number; limit: number; total: number; total_pages: number };
+  }>> {
+    return this.request('GET', `/partners/${partnerId}/leads`, undefined, params);
+  }
+
   /**
    * Create new team member
    */
