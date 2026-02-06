@@ -1473,14 +1473,17 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
 
       const entries = followUpsByLoan[row.loan_application_id] || [];
       const latestEntry = entries[0] || null;
-      const cstResponse = latestEntry ? (latestEntry.response || '') : '';
+      // Latest 3 responses for CST Response column
+      const cstResponses = entries.slice(0, 3).map((e) => e.response || '').filter(Boolean);
       const commitmentDate = latestEntry && latestEntry.scheduled_date
         ? (typeof latestEntry.scheduled_date === 'string' ? latestEntry.scheduled_date : latestEntry.scheduled_date.toISOString ? latestEntry.scheduled_date.toISOString().slice(0, 10) : '')
         : '';
+      // Updates: only entry created dates (no response text)
       const updates = entries.map((e) => {
-        const d = e.scheduled_date ? (e.scheduled_date.toISOString ? e.scheduled_date.toISOString().slice(0, 10) : String(e.scheduled_date).slice(0, 10)) : '';
-        return (d ? `${d}: ` : '') + (e.response || '');
-      }).join(' | ');
+        if (!e.created_at) return '';
+        const d = typeof e.created_at === 'string' ? e.created_at : (e.created_at.toISOString ? e.created_at.toISOString() : String(e.created_at));
+        return d.slice(0, 10);
+      }).filter(Boolean).join(', ');
 
       const limitAmount = row.loan_limit != null ? parseFloat(row.loan_limit) : null;
       const salaryAmount = row.monthly_net_income != null ? parseFloat(row.monthly_net_income) : null;
@@ -1524,7 +1527,8 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
         salary_date: row.salary_date,
         loan_limit: limitAmount,
         monthly_net_income: salaryAmount,
-        cst_response: cstResponse,
+        cst_response: cstResponses[0] || '',
+        cst_responses: cstResponses,
         commitment_date: commitmentDate,
         updates,
         loan_status: row.loan_status,

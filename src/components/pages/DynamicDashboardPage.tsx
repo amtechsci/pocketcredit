@@ -424,11 +424,12 @@ export function DynamicDashboardPage() {
     });
   };
 
-  // Format application number to short format (PLL + last 4 digits)
-  const formatAppNumber = (appNumber: string) => {
-    if (!appNumber) return 'N/A';
-    const last4 = appNumber.slice(-4);
-    return `PLL${last4}`;
+  // Loan ID: PLL + loan_application.id (unique)
+  const formatLoanId = (loanId: number | string | null | undefined) => {
+    if (loanId == null || loanId === '') return 'N/A';
+    const id = typeof loanId === 'string' ? parseInt(loanId, 10) : loanId;
+    if (isNaN(id)) return 'N/A';
+    return `PLL${id}`;
   };
 
   // Handle NOC PDF download
@@ -697,7 +698,7 @@ export function DynamicDashboardPage() {
                       <div className="flex justify-between items-start mb-3">
                         <div className="flex-1 min-w-0">
                           <h4 className="text-sm font-semibold truncate">{loan.loan_purpose || 'Personal Loan'}</h4>
-                          <p className="text-gray-600 text-xs truncate">App: {formatAppNumber(loan.application_number)}</p>
+                          <p className="text-gray-600 text-xs truncate">App: {formatLoanId(loan.id)}</p>
                         </div>
                         <Badge
                           variant="secondary"
@@ -896,7 +897,7 @@ export function DynamicDashboardPage() {
                   <div className="flex justify-between items-start mb-3">
                     <div className="flex-1 min-w-0">
                       <h4 className="text-sm font-semibold truncate">{loan.loan_purpose || 'Personal Loan'}</h4>
-                      <p className="text-gray-600 text-xs truncate">App: {formatAppNumber(loan.application_number)}</p>
+                      <p className="text-gray-600 text-xs truncate">App: {formatLoanId(loan.id)}</p>
                     </div>
                     <Badge
                       variant="secondary"
@@ -1233,7 +1234,7 @@ export function DynamicDashboardPage() {
                                     {loan.loan_purpose || 'Personal'} Loan
                                   </h4>
                                   <p className="text-xs text-gray-500">
-                                    App: {formatAppNumber(loan.application_number)}
+                                    App: {formatLoanId(loan.id)}
                                   </p>
                                 </div>
                                 <Badge
@@ -1590,7 +1591,7 @@ export function DynamicDashboardPage() {
             <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 flex justify-between items-center">
               <div>
                 <h2 className="text-xl font-bold">Loan Details</h2>
-                <p className="text-blue-100 text-sm">{formatAppNumber(selectedLoanDetails.application_number)}</p>
+                <p className="text-blue-100 text-sm">{formatLoanId(selectedLoanDetails.id)}</p>
               </div>
               <button
                 onClick={() => setShowLoanDetailsModal(false)}
@@ -1633,7 +1634,7 @@ export function DynamicDashboardPage() {
                 <div className="bg-gray-50 rounded-lg p-4">
                   <p className="text-xs text-gray-600 mb-1">Application Number</p>
                   <p className="text-sm font-semibold text-gray-900">
-                    {formatAppNumber(selectedLoanDetails.application_number)}
+                    {formatLoanId(selectedLoanDetails.id)}
                   </p>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-4">

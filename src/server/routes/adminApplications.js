@@ -277,9 +277,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
         }
       }
       
-      // Generate shorter loan ID format: PLL + 4 digits (last 4 digits of application number or ID)
-      const loanIdDigits = app.applicationNumber ? app.applicationNumber.slice(-4) : String(app.id).padStart(4, '0').slice(-4);
-      const shortLoanId = `PLL${loanIdDigits}`;
+      // Loan ID: PLL + loan_application.id (unique)
+      const shortLoanId = `PLL${app.id}`;
 
       return {
         id: app.applicationNumber || app.id,
@@ -1101,9 +1100,7 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
             
             const borrowerName = recipientName;
             const applicationNumber = loanDetail.application_number || applicationId;
-            const shortLoanId = applicationNumber && applicationNumber !== 'N/A' 
-              ? `PLL${String(applicationNumber).slice(-4)}`
-              : `PLL${String(applicationId).padStart(4, '0').slice(-4)}`;
+            const shortLoanId = `PLL${applicationId}`;
             const todayDate = formatDate(new Date().toISOString());
             
             const htmlContent = `

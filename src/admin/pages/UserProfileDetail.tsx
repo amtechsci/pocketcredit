@@ -1803,17 +1803,9 @@ export function UserProfileDetail() {
     return `${year}-${month}-${day}`;
   };
 
-  // Format loan ID to short format (PLL + last 4 digits)
-  const formatLoanId = (applicationNumber: string | null | undefined, loanApplicationId: number | null | undefined) => {
-    if (applicationNumber) {
-      // Extract last 4 digits from application number (e.g., PC06543530515 -> 0515)
-      const last4 = applicationNumber.slice(-4);
-      return `PLL${last4}`;
-    }
-    if (loanApplicationId) {
-      // Use loan_application_id and take last 4 digits
-      return `PLL${String(loanApplicationId).padStart(4, '0').slice(-4)}`;
-    }
+  // Format loan ID as PLL + loan_application.id (unique)
+  const formatLoanId = (_applicationNumber: string | null | undefined, loanApplicationId: number | null | undefined) => {
+    if (loanApplicationId != null) return `PLL${loanApplicationId}`;
     return '-';
   };
 
@@ -5635,7 +5627,7 @@ export function UserProfileDetail() {
                       }
 
                       // Use shortLoanId from backend, or generate fallback
-                      const shortLoanId = loan.shortLoanId || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
+                      const shortLoanId = loan.shortLoanId || (loan.id != null ? `PLL${loan.id}` : (loan.loanId ? `PLL${loan.loanId}` : 'PLL—'));
 
                       // Fetch calculation if not loaded yet
                       if (loanId && !calculation && !isLoading) {
@@ -6341,7 +6333,7 @@ export function UserProfileDetail() {
                         const isLoading = calculationsLoading[loanId];
 
                         // Use shortLoanId from backend, or generate fallback
-                        const shortLoanId = loan.shortLoanId || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
+                        const shortLoanId = loan.shortLoanId || (loan.id != null ? `PLL${loan.id}` : (loan.loanId ? `PLL${loan.loanId}` : 'PLL—'));
 
                         // Fetch calculation if not loaded yet
                         if (loanId && !calculation && !isLoading) {
@@ -10866,7 +10858,7 @@ export function UserProfileDetail() {
                       <>
                         {/* Show ready_for_disbursement loans first */}
                         {getArray('loans')?.filter((l: any) => l.status === 'ready_for_disbursement').map((loan: any) => {
-                          const shortLoanId = loan.shortLoanId || loan.application_number || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
+                          const shortLoanId = loan.shortLoanId || (loan.id != null ? `PLL${loan.id}` : (loan.loanId ? `PLL${loan.loanId}` : loan.application_number || 'PLL—'));
                           return (
                             <option key={loan.id || loan.loanId} value={loan.id || loan.loanId} className="font-bold text-green-600">
                               📦 {shortLoanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} (Ready for Disbursement)
@@ -10879,7 +10871,7 @@ export function UserProfileDetail() {
                           )}
                         {/* Show other loans (exclude account_manager and cleared) */}
                         {getArray('loans')?.filter((l: any) => l.status !== 'ready_for_disbursement' && l.status !== 'account_manager' && l.status !== 'cleared').map((loan: any) => {
-                          const shortLoanId = loan.shortLoanId || loan.application_number || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
+                          const shortLoanId = loan.shortLoanId || (loan.id != null ? `PLL${loan.id}` : (loan.loanId ? `PLL${loan.loanId}` : loan.application_number || 'PLL—'));
                           return (
                             <option key={loan.id || loan.loanId} value={loan.id || loan.loanId}>
                               {shortLoanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} ({loan.status})
@@ -10891,7 +10883,7 @@ export function UserProfileDetail() {
                           <>
                             <option disabled>─── Already Disbursed (Cannot Select) ───</option>
                             {getArray('loans')?.filter((l: any) => l.status === 'account_manager' || l.status === 'overdue' || l.status === 'cleared').map((loan: any) => {
-                              const shortLoanId = loan.shortLoanId || loan.application_number || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
+                              const shortLoanId = loan.shortLoanId || (loan.id != null ? `PLL${loan.id}` : (loan.loanId ? `PLL${loan.loanId}` : loan.application_number || 'PLL—'));
                               return (
                                 <option key={loan.id || loan.loanId} disabled style={{ color: '#999' }}>
                                   🚫 {shortLoanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} ({loan.status})
@@ -10905,7 +10897,7 @@ export function UserProfileDetail() {
                       <>
                         {/* Show ready_for_disbursement loans first */}
                         {getArray('loans')?.filter((l: any) => l.status === 'ready_for_disbursement').map((loan: any) => {
-                          const shortLoanId = loan.shortLoanId || loan.application_number || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
+                          const shortLoanId = loan.shortLoanId || (loan.id != null ? `PLL${loan.id}` : (loan.loanId ? `PLL${loan.loanId}` : loan.application_number || 'PLL—'));
                           return (
                             <option key={loan.id || loan.loanId} value={loan.id || loan.loanId} className="font-bold text-green-600">
                               📦 {shortLoanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} (Ready for Disbursement)
@@ -10915,7 +10907,7 @@ export function UserProfileDetail() {
                         <option disabled>──────────────</option>
                         {/* Show all other loans */}
                         {getArray('loans')?.filter((l: any) => l.status !== 'ready_for_disbursement').map((loan: any) => {
-                          const shortLoanId = loan.shortLoanId || loan.application_number || (loan.loanId ? `PLL${loan.loanId.slice(-4)}` : `PLL${String(loan.id || 'N/A').padStart(4, '0').slice(-4)}`);
+                          const shortLoanId = loan.shortLoanId || (loan.id != null ? `PLL${loan.id}` : (loan.loanId ? `PLL${loan.loanId}` : loan.application_number || 'PLL—'));
                           return (
                             <option key={loan.id || loan.loanId} value={loan.id || loan.loanId}>
                               {shortLoanId} - ₹{loan.amount || loan.loan_amount || loan.principalAmount} ({loan.status})

@@ -197,7 +197,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
           la.application_number LIKE ?
           OR CONCAT('PLL', RIGHT(la.application_number, 4)) LIKE ?
           OR CONCAT('PLL', LPAD(la.id, 4, '0')) LIKE ?
-      `, [searchTerm, exactSearch, exactSearch]);
+          OR CONCAT('PLL', la.id) LIKE ?
+      `, [searchTerm, exactSearch, exactSearch, exactSearch]);
 
       for (const result of loanResults) {
         if (!seenUserIds.has(result.user_id)) {

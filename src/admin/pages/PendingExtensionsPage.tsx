@@ -165,10 +165,9 @@ export function PendingExtensionsPage() {
     }).format(amount);
   };
 
-  const getShortLoanId = (applicationNumber: string) => {
-    if (!applicationNumber) return 'N/A';
-    const last4 = applicationNumber.slice(-4);
-    return `PLL${last4}`;
+  const getShortLoanId = (loanApplicationId: number | null | undefined) => {
+    if (loanApplicationId == null) return 'N/A';
+    return `PLL${loanApplicationId}`;
   };
 
   return (
@@ -233,7 +232,7 @@ export function PendingExtensionsPage() {
                     <div className="flex items-center gap-4 mb-4">
                       <div>
                         <h3 className="text-lg font-semibold text-gray-900">
-                          {getShortLoanId(extension.loan_application_number)}
+                          {getShortLoanId(extension.loan_application_id)}
                         </h3>
                         <p className="text-sm text-gray-500">
                           Extension #{extension.extension_number}
@@ -389,7 +388,7 @@ export function PendingExtensionsPage() {
               <h3 className="text-lg font-semibold mb-4">Approve Extension Request</h3>
               <div className="mb-4">
                 <p className="text-sm text-gray-600 mb-2">
-                  Loan: <span className="font-medium">{getShortLoanId(selectedExtension.loan_application_number)}</span>
+                  Loan: <span className="font-medium">{getShortLoanId(selectedExtension.loan_application_id)}</span>
                 </p>
                 <p className="text-sm text-gray-600 mb-2">
                   Borrower: <span className="font-medium">{selectedExtension.user_name}</span>
@@ -442,7 +441,7 @@ export function PendingExtensionsPage() {
               <h3 className="text-lg font-semibold mb-4">Reject Extension Request</h3>
               <div className="mb-4">
                 <p className="text-sm text-gray-600 mb-2">
-                  Loan: <span className="font-medium">{getShortLoanId(selectedExtension.loan_application_number)}</span>
+                  Loan: <span className="font-medium">{getShortLoanId(selectedExtension.loan_application_id)}</span>
                 </p>
                 <p className="text-sm text-gray-600 mb-4">
                   Borrower: <span className="font-medium">{selectedExtension.user_name}</span>

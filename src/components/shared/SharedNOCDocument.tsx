@@ -55,11 +55,8 @@ export function SharedNOCDocument({ nocData }: SharedNOCDocumentProps) {
         `${nocData.borrower?.first_name || ''} ${nocData.borrower?.last_name || ''}`.trim() || 
         'N/A';
     
-    // Format loan ID as PLL + last 4 digits (e.g., PC42254906732 -> PLL6732)
-    const applicationNumber = nocData.loan?.application_number || nocData.loan?.loan_id || 'N/A';
-    const shortLoanId = applicationNumber && applicationNumber !== 'N/A' 
-        ? `PLL${String(applicationNumber).slice(-4)}`
-        : (nocData.loan?.id ? `PLL${String(nocData.loan.id).padStart(4, '0').slice(-4)}` : 'PLLXXX');
+    // Loan ID: PLL + loan_application.id (unique)
+    const shortLoanId = nocData.loan?.id != null ? `PLL${nocData.loan.id}` : 'PLLXXX';
     
     // Get today's date for the certificate
     const todayDate = formatDate(nocData.generated_at || new Date().toISOString());

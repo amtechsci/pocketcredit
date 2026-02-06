@@ -23,6 +23,7 @@ interface AccountManagerUser {
   loan_limit?: number | null;
   monthly_net_income?: number | null;
   cst_response: string;
+  cst_responses?: string[];
   commitment_date: string;
   updates: string;
   loan_status: string;
@@ -226,14 +227,22 @@ export function AccountManagerPage() {
                       <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                         {row.salary_date != null ? String(row.salary_date) : '—'}
                       </td>
-                      <td className="px-3 py-2 text-sm text-gray-900 max-w-[180px] truncate" title={row.cst_response}>
-                        {row.cst_response || '—'}
+                      <td className="px-3 py-2 text-sm text-gray-900 max-w-[220px]">
+                        {row.cst_responses && row.cst_responses.length > 0 ? (
+                          <div className="flex flex-col gap-0.5" title={row.cst_responses.join('\n')}>
+                            {row.cst_responses.map((r, i) => (
+                              <span key={i} className="line-clamp-1">{r || '—'}</span>
+                            ))}
+                          </div>
+                        ) : (
+                          row.cst_response || '—'
+                        )}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
                         {row.commitment_date ? (row.commitment_date.slice(0, 10)) : '—'}
                       </td>
-                      <td className="px-3 py-2 text-sm text-gray-700 max-w-[220px]" title={row.updates}>
-                        <span className="line-clamp-2">{row.updates || '—'}</span>
+                      <td className="px-3 py-2 text-sm text-gray-700 max-w-[180px] whitespace-nowrap" title={row.updates}>
+                        {row.updates || '—'}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap text-sm font-medium">
                         <button

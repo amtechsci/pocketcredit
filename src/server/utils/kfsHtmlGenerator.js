@@ -271,7 +271,7 @@ function generateKFSHTML(kfsData) {
           <tr>
             <td style="width: 5%;">1</td>
             <td style="width: 40%;">Loan proposal/account No.</td>
-            <td style="width: 20%;">${kfsData.loan?.application_number ? `PLL${kfsData.loan.application_number.slice(-4)}` : kfsData.loan?.application_number || ''}</td>
+            <td style="width: 20%;">${kfsData.loan?.id != null ? `PLL${kfsData.loan.id}` : (kfsData.loan?.application_number || '')}</td>
             <td style="width: 15%;">Type of Loan</td>
             <td style="width: 20%;">${kfsData.loan?.type || 'Personal'}</td>
           </tr>

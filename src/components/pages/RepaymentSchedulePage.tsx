@@ -534,25 +534,12 @@ export const RepaymentSchedulePage = () => {
   // Always show premium limit (₹1,50,000) as the ultimate goal
   const headerLimit = 150000; // Always show ₹1,50,000
 
-  // Generate short loan ID format: PLL + last 4 digits
+  // Loan ID: PLL + loan_application.id (unique)
   const getShortLoanId = () => {
-    // Try multiple sources: loanData, kfsData.loan, or URL parameter
     const sourceLoan = loanData || kfsData?.loan;
     const appId = searchParams.get('applicationId');
-    
-    const appNumber = sourceLoan?.application_number 
-      || sourceLoan?.loan_id 
-      || sourceLoan?.id 
-      || kfsData?.loan?.application_number
-      || kfsData?.loan?.loan_id
-      || kfsData?.loan?.id
-      || appId
-      || '';
-      
-    if (appNumber) {
-      const last4 = String(appNumber).slice(-4);
-      return `PLL${last4}`;
-    }
+    const id = sourceLoan?.id ?? kfsData?.loan?.id ?? (appId ? Number(appId) : null);
+    if (id != null && !isNaN(Number(id))) return `PLL${id}`;
     return 'N/A';
   };
 

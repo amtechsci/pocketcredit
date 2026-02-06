@@ -4017,10 +4017,7 @@ function generateNOCHTML(nocData) {
     `${nocData.borrower?.first_name || ''} ${nocData.borrower?.last_name || ''}`.trim() ||
     'N/A';
 
-  const applicationNumber = nocData.loan?.application_number || nocData.loan?.loan_id || 'N/A';
-  const shortLoanId = applicationNumber && applicationNumber !== 'N/A'
-    ? `PLL${String(applicationNumber).slice(-4)}`
-    : (nocData.loan?.id ? `PLL${String(nocData.loan.id).padStart(4, '0').slice(-4)}` : 'PLLXXX');
+  const shortLoanId = nocData.loan?.id != null ? `PLL${nocData.loan.id}` : 'PLLXXX';
 
   const todayDate = formatDate(nocData.generated_at || new Date().toISOString());
 

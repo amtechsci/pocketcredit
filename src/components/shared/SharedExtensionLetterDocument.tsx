@@ -90,11 +90,8 @@ export function SharedExtensionLetterDocument({ extensionData }: SharedExtension
         `${extensionData.borrower?.first_name || ''} ${extensionData.borrower?.last_name || ''}`.trim() || 
         'N/A';
     const loanAmount = extensionData.loan?.sanctioned_amount || extensionData.loan?.loan_amount || 0;
-    const applicationNumber = extensionData.loan?.application_number || extensionData.loan?.loan_id || 'N/A';
-    // Format loan ID as PLL + last 4 digits (e.g., PC42254906732 -> PLL6732)
-    const shortLoanId = applicationNumber && applicationNumber !== 'N/A' 
-        ? `PLL${String(applicationNumber).slice(-4)}`
-        : (extensionData.loan?.id ? `PLL${String(extensionData.loan.id).padStart(4, '0').slice(-4)}` : 'N/A');
+    // Loan ID: PLL + loan_application.id (unique)
+    const shortLoanId = extensionData.loan?.id != null ? `PLL${extensionData.loan.id}` : 'N/A';
     const disbursementDate = extensionData.loan?.disbursed_at || extensionData.loan?.processed_at;
     
     // Get today's date for interest calculation

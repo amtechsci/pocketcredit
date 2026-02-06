@@ -1149,9 +1149,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         const totalInterest = emi * app.tenure_months - app.loan_amount;
         const totalAmount = app.loan_amount + processingFee + gst + totalInterest;
 
-        // Generate shorter loan ID format: PLL + 4 digits (last 4 digits of application number or ID)
-        const loanIdDigits = app.application_number ? app.application_number.slice(-4) : String(app.id).padStart(4, '0').slice(-4);
-        const shortLoanId = `PLL${loanIdDigits}`;
+        // Loan ID: PLL + loan_application.id (unique)
+        const shortLoanId = `PLL${app.id}`;
 
         return {
           id: app.id,
@@ -3262,9 +3261,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
                 const borrowerName = recipientName;
                 const applicationNumber = loanDetail.application_number || loanIdInt;
-                const shortLoanId = applicationNumber && applicationNumber !== 'N/A'
-                  ? `PLL${String(applicationNumber).slice(-4)}`
-                  : `PLL${String(loanIdInt).padStart(4, '0').slice(-4)}`;
+                const shortLoanId = `PLL${loanIdInt}`;
                 const todayDate = formatDate(new Date().toISOString());
 
                 const htmlContent = `
@@ -3566,9 +3563,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
                       const borrowerName = recipientName;
                       const applicationNumber = loanDetail.application_number || loanIdInt;
-                      const shortLoanId = applicationNumber && applicationNumber !== 'N/A'
-                        ? `PLL${String(applicationNumber).slice(-4)}`
-                        : `PLL${String(loanIdInt).padStart(4, '0').slice(-4)}`;
+                      const shortLoanId = `PLL${loanIdInt}`;
                       const todayDate = formatDate(new Date().toISOString());
 
                       const htmlContent = `
@@ -4643,13 +4638,8 @@ router.get('/:userId/enach-subscriptions', authenticateAdmin, async (req, res) =
         ? applicationNumbersMap[sub.loan_application_id] 
         : null;
 
-      // Compute short_loan_id from application_number (format: PLL + last 4 digits)
-      let shortLoanId = null;
-      if (applicationNumber) {
-        const appNumber = String(applicationNumber);
-        const last4Digits = appNumber.slice(-4);
-        shortLoanId = `PLL${last4Digits}`;
-      }
+      // Loan ID: PLL + loan_application.id (unique)
+      const shortLoanId = sub.loan_application_id != null ? `PLL${sub.loan_application_id}` : null;
 
       return {
         ...sub,

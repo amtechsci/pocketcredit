@@ -602,9 +602,8 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
         csvRows.push(headers.map(escapeCSV).join(','));
 
         for (const row of rows) {
-            // Voucher No: PLL + last 4 digits of loan id (padded with zeros)
-            const loanIdStr = String(row.lid).padStart(4, '0');
-            const voucher_no = 'PLL' + loanIdStr.slice(-4);
+            // Voucher No: PLL + loan_application.id (unique)
+            const voucher_no = 'PLL' + row.lid;
             const loan_closure_type = row.transaction_flow;
 
             const processing_fee_collected = row.transaction_flow === 'part' ? 'P.P' : (row.processing_fees || row.p_fee || 0);
@@ -770,9 +769,8 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
         csvRows.push(headers.map(escapeCSV).join(','));
 
         for (const row of rows) {
-            // Voucher No: PLL + last 4 digits of loan id (padded with zeros)
-            const loanIdStr = String(row.lid).padStart(4, '0');
-            const voucher_no = 'PLL' + loanIdStr.slice(-4);
+            // Voucher No: PLL + loan_application.id (unique)
+            const voucher_no = 'PLL' + row.lid;
 
             // Try to get transaction number from transactions table (loan_disbursement)
             let tno = 0;

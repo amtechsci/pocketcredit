@@ -117,9 +117,7 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                             <td className="border border-black p-2" style={{ width: '5%' }}>1</td>
                             <td className="border border-black p-2" style={{ width: '40%' }}>Loan proposal/account No.</td>
                             <td className="border border-black p-2" style={{ width: '20%' }}>
-                                {kfsData.loan.application_number
-                                    ? `PLL${kfsData.loan.application_number.slice(-4)}`
-                                    : kfsData.loan.application_number}
+                                {kfsData.loan.id != null ? `PLL${kfsData.loan.id}` : (kfsData.loan.application_number || '')}
                             </td>
                             <td className="border border-black p-2" style={{ width: '15%' }}>Type of Loan</td>
                             <td className="border border-black p-2" style={{ width: '20%' }}>{kfsData.loan.type}</td>

@@ -1132,18 +1132,11 @@ export function LoanApplicationsQueue() {
                       className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
                     >
                       {(() => {
-                        // Use shortLoanId if available, otherwise generate it from id or loanId
-                        if (application.shortLoanId) {
-                          return application.shortLoanId;
-                        }
-                        // Generate short format: PLL + last 4 digits
-                        const sourceId = application.loanId || application.id;
-                        if (sourceId) {
-                          const last4 = sourceId.slice(-4);
-                          return `PLL${last4}`;
-                        }
-                        // Fallback: use id padded to 4 digits
-                        return `PLL${String(application.id).padStart(4, '0').slice(-4)}`;
+                        // PLL + loan_application.id (unique)
+                        if (application.shortLoanId) return application.shortLoanId;
+                        if (application.id != null) return `PLL${application.id}`;
+                        if (application.loanId) return `PLL${application.loanId}`;
+                        return 'PLL—';
                       })()}
                     </button>
                   </td>
