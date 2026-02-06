@@ -1315,4 +1315,91 @@ router.get('/qa-verification/list', authenticateAdmin, async (req, res) => {
   }
 });
 
+// GET /api/admin/users/account-manager/list
+// Get users with loan applications in Account Manager status (account_manager or overdue)
+router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const search = req.query.search || '';
+    const offset = (page - 1) * limit;
+
+    let whereConditions = [];
+    let queryParams = [];
+
+    // Account Manager: loan_applications.status IN ('account_manager', 'overdue')
+    whereConditions.push(`la.status IN ('account_manager', 'overdue')`);
+
+    // Search filter
+    if (search) {
+      whereConditions.push(`(
+        u.first_name LIKE ? OR 
+        u.last_name LIKE ? OR 
+        u.email LIKE ? OR 
+        u.phone LIKE ? OR
+        la.application_number LIKE ?
+      )`);
+      const searchTerm = `%${search}%`;
+      queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+    }
+
+    const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+
+    // Get total count
+    const countQuery = `
+      SELECT COUNT(*) as total 
+      FROM loan_applications la
+      INNER JOIN users u ON la.user_id = u.id
+      ${whereClause}
+    `;
+    const countResult = await executeQuery(countQuery, queryParams);
+    const total = countResult && countResult.length > 0 ? countResult[0].total : 0;
+
+    // Get users with loan application details (include disbursed_at, disbursal_amount for account manager)
+    const usersQuery = `
+      SELECT 
+        u.id,
+        u.first_name,
+        u.last_name,
+        u.email,
+        u.phone,
+        u.status,
+        u.loan_limit,
+        la.id as loan_application_id,
+        la.application_number,
+        la.loan_amount,
+        la.disbursal_amount,
+        la.disbursed_at,
+        la.status as loan_status,
+        DATE_FORMAT(la.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+        DATE_FORMAT(la.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
+      FROM loan_applications la
+      INNER JOIN users u ON la.user_id = u.id
+      ${whereClause}
+      ORDER BY la.updated_at DESC
+      LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
+    `;
+    const users = await executeQuery(usersQuery, queryParams);
+
+    res.json({
+      status: 'success',
+      data: {
+        users: users || [],
+        total: total,
+        page: page,
+        limit: limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get Account Manager users error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch Account Manager users'
+    });
+  }
+});
+
 module.exports = router;

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { Search, Menu, X } from 'lucide-react';
+import { Search, Menu, Settings, LogOut, ChevronDown } from 'lucide-react';
 import { AdminLogin } from './admin/AdminLogin';
 import { AdminDashboard } from './admin/pages/AdminDashboard';
 import { LoanApplicationsQueue } from './admin/pages/LoanApplicationsQueue';
@@ -24,10 +24,20 @@ import { CoolingPeriodPage } from './admin/pages/CoolingPeriodPage';
 import { RegisteredPage } from './admin/pages/RegisteredPage';
 import { ApprovedPage } from './admin/pages/ApprovedPage';
 import { QAVerificationPage } from './admin/pages/QAVerificationPage';
+import { AccountManagerPage } from './admin/pages/AccountManagerPage';
 import { AdminProvider } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
 import { useAdminAutoLogout } from './admin/hooks/useAdminAutoLogout';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './components/ui/sheet';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from './components/ui/dropdown-menu';
+import { Avatar, AvatarFallback } from './components/ui/avatar';
 
 export interface AdminUser {
   id: string;
@@ -95,6 +105,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
   const navigationItems = [
     { path: `${BASE_PATH}/dashboard`, label: 'Dashboard', color: 'blue' },
     { path: `${BASE_PATH}/applications`, label: 'Applications', color: 'blue' },
+    { path: `${BASE_PATH}/account-manager`, label: 'Account Manager', color: 'purple' },
     { path: `${BASE_PATH}/users`, label: 'Users', color: 'blue' },
     { path: `${BASE_PATH}/registered`, label: 'Registered', color: 'blue' },
     { path: `${BASE_PATH}/approved`, label: 'Approved', color: 'green' },
@@ -103,8 +114,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
     { path: `${BASE_PATH}/reports`, label: 'Reports', color: 'blue' },
     ...(currentUser?.role === 'superadmin' ? [
       { path: `${BASE_PATH}/partners`, label: 'Partners', color: 'blue' },
-      { path: `${BASE_PATH}/team-management`, label: 'Team Management', color: 'blue' },
-      { path: `${BASE_PATH}/settings`, label: 'Settings', color: 'blue' }
+      { path: `${BASE_PATH}/team-management`, label: 'Team Management', color: 'blue' }
     ] : [])
   ];
 
@@ -113,7 +123,8 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
       blue: 'bg-blue-100 text-blue-700',
       green: 'bg-green-100 text-green-700',
       orange: 'bg-orange-100 text-orange-700',
-      cyan: 'bg-cyan-100 text-cyan-700'
+      cyan: 'bg-cyan-100 text-cyan-700',
+      purple: 'bg-purple-100 text-purple-700'
     };
     return isActive(path) 
       ? colorClasses[color as keyof typeof colorClasses] || 'bg-blue-100 text-blue-700'
@@ -185,22 +196,57 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
               >
                 <Search className="w-5 h-5" />
               </button>
-              {/* User Info - Desktop */}
-              <div className="hidden sm:block text-right">
-                <div className="text-sm font-medium text-gray-900">{currentUser?.name}</div>
-                <div className="text-xs text-gray-500 capitalize">{currentUser?.role}</div>
-              </div>
-              {/* User Info - Mobile (just name) */}
-              <div className="sm:hidden text-right">
-                <div className="text-xs font-medium text-gray-900 truncate max-w-[80px]">{currentUser?.name}</div>
-              </div>
-              <button
-                onClick={handleLogout}
-                className="px-2 sm:px-4 py-2 text-xs sm:text-sm font-medium text-gray-700 hover:text-gray-900 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors whitespace-nowrap"
-              >
-                <span className="hidden sm:inline">Sign Out</span>
-                <span className="sm:hidden">Out</span>
-              </button>
+              {/* Admin user dropdown: name click opens Settings & Logout */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-gray-100 transition-colors outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-1"
+                    aria-label="Open admin menu"
+                  >
+                    <Avatar className="h-8 w-8 border border-gray-200">
+                      <AvatarFallback className="bg-gray-200 text-gray-700 text-xs font-medium">
+                        {currentUser?.name?.split(/\s+/).map((n) => n[0]).join('').slice(0, 2).toUpperCase() || 'A'}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="hidden sm:block text-left">
+                      <div className="text-sm font-medium text-gray-900">{currentUser?.name}</div>
+                      <div className="text-xs text-gray-500 capitalize">{currentUser?.role}</div>
+                    </div>
+                    <div className="sm:hidden text-left">
+                      <div className="text-xs font-medium text-gray-900 truncate max-w-[80px]">{currentUser?.name}</div>
+                    </div>
+                    <ChevronDown className="h-4 w-4 text-gray-500 flex-shrink-0" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel className="font-normal">
+                    <div className="flex flex-col space-y-1">
+                      <p className="text-sm font-medium">{currentUser?.name}</p>
+                      {currentUser?.email && (
+                        <p className="text-xs text-gray-500">{currentUser.email}</p>
+                      )}
+                      <p className="text-xs text-gray-500 capitalize">{currentUser?.role}</p>
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {currentUser?.role === 'superadmin' && (
+                    <DropdownMenuItem
+                      onClick={() => navigate(`${BASE_PATH}/settings`)}
+                      className="cursor-pointer"
+                    >
+                      <Settings className="mr-2 h-4 w-4" />
+                      Settings
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem
+                    onClick={handleLogout}
+                    className="cursor-pointer text-red-600 focus:text-red-700 focus:bg-red-50"
+                  >
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Logout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </div>
@@ -353,6 +399,11 @@ export default function AdminApp() {
         <Route path="qa-verification" element={
           <ProtectedRoute>
             <QAVerificationPage />
+          </ProtectedRoute>
+        } />
+        <Route path="account-manager" element={
+          <ProtectedRoute>
+            <AccountManagerPage />
           </ProtectedRoute>
         } />
         <Route path="activity-logs" element={

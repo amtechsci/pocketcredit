@@ -2294,6 +2294,25 @@ class AdminApiService {
   }
 
   /**
+   * Get users with loans in Account Manager status (account_manager or overdue)
+   */
+  async getAccountManagerUsers(page: number = 1, limit: number = 20, search: string = ''): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.get('/api/admin/users/account-manager/list', {
+        params: { page, limit, search },
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
+
+  /**
    * UAN Basic V3 API Method (Admin version - synchronous API)
    */
   async getUANBasic(userId: string, data: { mobile: string }): Promise<ApiResponse<any>> {
