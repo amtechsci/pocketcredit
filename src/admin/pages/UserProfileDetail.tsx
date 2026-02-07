@@ -218,6 +218,39 @@ export function UserProfileDetail() {
 
   const { canEditUsers, currentUser, shouldHideTransactionTab, isDebtAgency, isNbfcAdmin, shouldMaskMobile } = useAdmin();
 
+  // Tab list and effective active tab (must be defined before any hook that uses effectiveActiveTab)
+  const allTabsList = [
+    { id: 'personal', label: 'Personal', icon: User },
+    { id: 'kyc', label: 'KYC Details', icon: CheckCircle },
+    { id: 'documents', label: 'Documents', icon: FileText },
+    { id: 'bank', label: 'Bank Information', icon: CreditCard },
+    { id: 'statement-verification', label: 'Statement Verification', icon: FileText },
+    { id: 'reference', label: 'Reference', icon: Phone },
+    { id: 'applied-loans', label: 'Applied Loans', icon: Clock },
+    { id: 'loans', label: 'Loans', icon: Building },
+    { id: 'transactions', label: 'Transaction Details', icon: IndianRupee },
+    { id: 'validation', label: 'Validation', icon: Shield },
+    { id: 'credit-analytics', label: 'Credit Analytics', icon: TrendingUp },
+    { id: 'follow-up', label: 'Follow Up', icon: MessageSquare },
+    { id: 'notes', label: 'Note', icon: FileText },
+    { id: 'profile-comments', label: 'Profile Comments', icon: MessageSquare },
+    { id: 'sms', label: 'SMS', icon: MessageSquare },
+    { id: 'account-manager', label: 'Account Manager', icon: Briefcase },
+    { id: 'login-data', label: 'Login Data', icon: Clock },
+    { id: 'accounts', label: 'Accounts', icon: Wallet },
+    { id: 'enach', label: 'E-NACH', icon: CreditCard },
+  ];
+  const debtAgencyHiddenTabIdsList = ['kyc', 'documents', 'bank', 'applied-loans', 'transactions', 'validation', 'credit-analytics', 'profile-comments', 'enach'];
+  const tabsFiltered = allTabsList.filter((tab) => {
+    if (shouldHideTransactionTab && tab.id === 'transactions') return false;
+    if (isDebtAgency && debtAgencyHiddenTabIdsList.includes(tab.id)) return false;
+    return true;
+  });
+  const visibleTabIdsList = tabsFiltered.map((t) => t.id);
+  const effectiveActiveTab = visibleTabIdsList.length && visibleTabIdsList.includes(activeTab)
+    ? activeTab
+    : (visibleTabIdsList[0] || 'personal');
+
   // Debug admin context (commented out to reduce console noise)
 
   // Real data state
@@ -1932,39 +1965,6 @@ export function UserProfileDetail() {
       </div>
     );
   }
-
-  const allTabs = [
-    { id: 'personal', label: 'Personal', icon: User },
-    { id: 'kyc', label: 'KYC Details', icon: CheckCircle },
-    { id: 'documents', label: 'Documents', icon: FileText },
-    { id: 'bank', label: 'Bank Information', icon: CreditCard },
-    { id: 'statement-verification', label: 'Statement Verification', icon: FileText },
-    { id: 'reference', label: 'Reference', icon: Phone },
-    { id: 'applied-loans', label: 'Applied Loans', icon: Clock },
-    { id: 'loans', label: 'Loans', icon: Building },
-    { id: 'transactions', label: 'Transaction Details', icon: IndianRupee },
-    { id: 'validation', label: 'Validation', icon: Shield },
-    { id: 'credit-analytics', label: 'Credit Analytics', icon: TrendingUp },
-    { id: 'follow-up', label: 'Follow Up', icon: MessageSquare },
-    { id: 'notes', label: 'Note', icon: FileText },
-    { id: 'profile-comments', label: 'Profile Comments', icon: MessageSquare },
-    { id: 'sms', label: 'SMS', icon: MessageSquare },
-    { id: 'account-manager', label: 'Account Manager', icon: Briefcase },
-    { id: 'login-data', label: 'Login Data', icon: Clock },
-    { id: 'accounts', label: 'Accounts', icon: Wallet },
-    { id: 'enach', label: 'E-NACH', icon: CreditCard },
-  ];
-  const debtAgencyHiddenTabIds = ['kyc', 'documents', 'bank', 'applied-loans', 'transactions', 'validation', 'credit-analytics', 'profile-comments', 'enach'];
-  const tabs = allTabs.filter((tab) => {
-    if (shouldHideTransactionTab && tab.id === 'transactions') return false;
-    if (isDebtAgency && debtAgencyHiddenTabIds.includes(tab.id)) return false;
-    return true;
-  });
-  const visibleTabIds = tabs.map((t) => t.id);
-  // Derive effective tab without setState to avoid re-render loop (React #310)
-  const effectiveActiveTab = visibleTabIds.length && visibleTabIds.includes(activeTab)
-    ? activeTab
-    : (visibleTabIds[0] || 'personal');
 
   const handleRefetchKYC = async () => {
     if (!params.userId) return;
@@ -12289,7 +12289,7 @@ export function UserProfileDetail() {
         <div className="px-3 sm:px-4 lg:px-6">
           <div className="flex overflow-x-auto scrollbar-hide mobile-scroll">
             <div className="flex space-x-0 min-w-max">
-              {tabs.map((tab) => {
+              {tabsFiltered.map((tab) => {
                 const Icon = tab.icon;
                 return (
                   <button
