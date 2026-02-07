@@ -60,7 +60,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
     // Build query
     let query = `
       SELECT 
-        id, name, email, phone, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at
+        id, name, email, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at
       FROM admins
       WHERE 1=1
     `;
@@ -194,7 +194,7 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
     const { id } = req.params;
 
     const admins = await executeQuery(
-      'SELECT id, name, email, phone, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
+      'SELECT id, name, email, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
       [id]
     );
 
@@ -381,21 +381,19 @@ router.post('/', authenticateAdmin, async (req, res) => {
     const subCategory = role === 'sub_admin' ? sub_admin_category : null;
     const allowedIp = role === 'sub_admin' && sub_admin_category === 'debt_agency' ? (whitelisted_ip || null) : null;
 
-    // Create admin
+    // Create admin (omit phone/department if your admins table does not have these columns)
     const adminId = uuidv4();
     await executeQuery(`
-      INSERT INTO admins (id, name, email, phone, password, role, sub_admin_category, whitelisted_ip, department, permissions, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
+      INSERT INTO admins (id, name, email, password, role, sub_admin_category, whitelisted_ip, permissions, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
     `, [
       adminId,
       name,
       email.toLowerCase(),
-      phone || null,
       hashedPassword,
       role,
       subCategory,
       allowedIp,
-      department || null,
       JSON.stringify(finalPermissions)
     ]);
 
@@ -410,7 +408,7 @@ router.post('/', authenticateAdmin, async (req, res) => {
 
     // Get created admin
     const newAdmins = await executeQuery(
-      'SELECT id, name, email, phone, role, sub_admin_category, whitelisted_ip, department, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
+      'SELECT id, name, email, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
       [adminId]
     );
 
@@ -497,15 +495,9 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       params.push(email.toLowerCase());
     }
 
-    if (phone !== undefined) {
-      updates.push('phone = ?');
-      params.push(phone);
-    }
-
-    if (department !== undefined) {
-      updates.push('department = ?');
-      params.push(department);
-    }
+    // Omit phone/department - not all schemas have these columns on admins
+    // if (phone !== undefined) { updates.push('phone = ?'); params.push(phone); }
+    // if (department !== undefined) { updates.push('department = ?'); params.push(department); }
 
     if (role !== undefined) {
       if (!isSuperAdmin) {
@@ -599,7 +591,7 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
 
     // Get updated admin
     const updatedAdmins = await executeQuery(
-      'SELECT id, name, email, phone, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
+      'SELECT id, name, email, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
       [id]
     );
 
