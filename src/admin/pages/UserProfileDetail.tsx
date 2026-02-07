@@ -716,7 +716,7 @@ export function UserProfileDetail() {
   // Fetch E-NACH subscriptions when tab is active
   useEffect(() => {
     const fetchEnachSubscriptions = async () => {
-      if (activeTab === 'enach' && params.userId && !loadingEnach) {
+      if (effectiveActiveTab === 'enach' && params.userId && !loadingEnach) {
         try {
           setLoadingEnach(true);
           const response = await adminApiService.getEnachSubscriptions(params.userId);
@@ -740,7 +740,7 @@ export function UserProfileDetail() {
   // Fetch E-NACH charge history when tab is active
   useEffect(() => {
     const fetchChargeHistory = async () => {
-      if (activeTab === 'enach' && params.userId && !loadingChargeHistory) {
+      if (effectiveActiveTab === 'enach' && params.userId && !loadingChargeHistory) {
         try {
           setLoadingChargeHistory(true);
           const response = await adminApiService.getEnachChargeHistory(params.userId);
@@ -1038,12 +1038,12 @@ export function UserProfileDetail() {
 
   // Fetch loan calculations when loans are available (backend-only)
   useEffect(() => {
-    if (userData && (activeTab === 'applied-loans' || activeTab === 'loans')) {
+    if (userData && (effectiveActiveTab === 'applied-loans' || effectiveActiveTab === 'loans')) {
       let loansToFetch: any[] = [];
 
-      if (activeTab === 'applied-loans') {
+      if (effectiveActiveTab === 'applied-loans') {
         loansToFetch = getArray('loans'); // Fetch all loans, no status filter
-      } else if (activeTab === 'loans') {
+      } else if (effectiveActiveTab === 'loans') {
         loansToFetch = getArray('loans').filter((loan: any) =>
           ['account_manager', 'overdue', 'cleared'].includes(loan.status)
         );
@@ -1061,7 +1061,7 @@ export function UserProfileDetail() {
 
   // Fetch validation history when validation tab is active
   useEffect(() => {
-    if (activeTab === 'validation' && userData?.id) {
+    if (effectiveActiveTab === 'validation' && userData?.id) {
       fetchValidationHistory();
     }
   }, [activeTab, userData?.id]);
@@ -1075,21 +1075,21 @@ export function UserProfileDetail() {
 
   // Fetch credit analytics when credit analytics tab is active (refresh if needed)
   useEffect(() => {
-    if (activeTab === 'credit-analytics' && userData?.id) {
+    if (effectiveActiveTab === 'credit-analytics' && userData?.id) {
       fetchCreditAnalytics();
     }
   }, [activeTab, userData?.id]);
 
   // Fetch transactions when transactions tab is active
   useEffect(() => {
-    if (activeTab === 'transactions' && userData?.id) {
+    if (effectiveActiveTab === 'transactions' && userData?.id) {
       fetchUserTransactions();
     }
   }, [activeTab, userData?.id]);
 
   // Load profile comments when tab is active
   useEffect(() => {
-    if (activeTab === 'profile-comments' && params.userId) {
+    if (effectiveActiveTab === 'profile-comments' && params.userId) {
       fetchProfileComments();
     }
   }, [activeTab, params.userId, fetchProfileComments]);
@@ -1183,7 +1183,7 @@ export function UserProfileDetail() {
 
   // Fetch bank statements when tab becomes active
   useEffect(() => {
-    if (activeTab === 'statement-verification' && params.userId) {
+    if (effectiveActiveTab === 'statement-verification' && params.userId) {
       fetchBankStatement();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1960,15 +1960,11 @@ export function UserProfileDetail() {
     if (isDebtAgency && debtAgencyHiddenTabIds.includes(tab.id)) return false;
     return true;
   });
-
-  // When visible tabs change (e.g. role hides Transaction), switch to first visible if current is hidden
-  useEffect(() => {
-    const visibleIds = tabs.map((t) => t.id);
-    if (visibleIds.length && !visibleIds.includes(activeTab)) {
-      setActiveTab(visibleIds[0]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run when visibility rules change, not on every activeTab change (avoids re-render loop)
-  }, [shouldHideTransactionTab, isDebtAgency]);
+  const visibleTabIds = tabs.map((t) => t.id);
+  // Derive effective tab without setState to avoid re-render loop (React #310)
+  const effectiveActiveTab = visibleTabIds.length && visibleTabIds.includes(activeTab)
+    ? activeTab
+    : (visibleTabIds[0] || 'personal');
 
   const handleRefetchKYC = async () => {
     if (!params.userId) return;
@@ -12299,7 +12295,7 @@ export function UserProfileDetail() {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium whitespace-nowrap border-b-2 transition-colors flex-shrink-0 ${activeTab === tab.id
+                    className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium whitespace-nowrap border-b-2 transition-colors flex-shrink-0 ${effectiveActiveTab === tab.id
                       ? 'border-blue-600 text-blue-600 bg-blue-50'
                       : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300 hover:bg-gray-50'
                       }`}
@@ -12326,25 +12322,25 @@ export function UserProfileDetail() {
 
       {/* Content Area */}
       <div className="p-3 sm:p-4 lg:p-6">
-        {activeTab === 'personal' && renderPersonalTab()}
-        {activeTab === 'kyc' && renderKYCTab()}
-        {activeTab === 'documents' && renderDocumentsTab()}
-        {activeTab === 'bank' && renderBankTab()}
-        {activeTab === 'statement-verification' && renderStatementVerificationTab()}
-        {activeTab === 'reference' && renderReferenceTab()}
-        {activeTab === 'login-data' && renderLoginDataTab()}
-        {activeTab === 'accounts' && renderAccountsTab()}
-        {activeTab === 'enach' && renderEnachTab()}
-        {activeTab === 'applied-loans' && renderAppliedLoansTab()}
-        {activeTab === 'loans' && renderLoansTab()}
-        {activeTab === 'transactions' && renderTransactionsTab()}
-        {activeTab === 'validation' && renderValidationTab()}
-        {activeTab === 'credit-analytics' && renderCreditAnalyticsTab()}
-        {activeTab === 'follow-up' && renderFollowUpTab()}
-        {activeTab === 'notes' && renderNotesTab()}
-        {activeTab === 'profile-comments' && renderProfileCommentsTab()}
-        {activeTab === 'sms' && renderSmsTab()}
-        {activeTab === 'account-manager' && renderAccountManagerTab()}
+        {effectiveActiveTab === 'personal' && renderPersonalTab()}
+        {effectiveActiveTab === 'kyc' && renderKYCTab()}
+        {effectiveActiveTab === 'documents' && renderDocumentsTab()}
+        {effectiveActiveTab === 'bank' && renderBankTab()}
+        {effectiveActiveTab === 'statement-verification' && renderStatementVerificationTab()}
+        {effectiveActiveTab === 'reference' && renderReferenceTab()}
+        {effectiveActiveTab === 'login-data' && renderLoginDataTab()}
+        {effectiveActiveTab === 'accounts' && renderAccountsTab()}
+        {effectiveActiveTab === 'enach' && renderEnachTab()}
+        {effectiveActiveTab === 'applied-loans' && renderAppliedLoansTab()}
+        {effectiveActiveTab === 'loans' && renderLoansTab()}
+        {effectiveActiveTab === 'transactions' && renderTransactionsTab()}
+        {effectiveActiveTab === 'validation' && renderValidationTab()}
+        {effectiveActiveTab === 'credit-analytics' && renderCreditAnalyticsTab()}
+        {effectiveActiveTab === 'follow-up' && renderFollowUpTab()}
+        {effectiveActiveTab === 'notes' && renderNotesTab()}
+        {effectiveActiveTab === 'profile-comments' && renderProfileCommentsTab()}
+        {effectiveActiveTab === 'sms' && renderSmsTab()}
+        {effectiveActiveTab === 'account-manager' && renderAccountManagerTab()}
       </div>
 
       {/* Modals */}
