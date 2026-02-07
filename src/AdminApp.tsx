@@ -25,6 +25,7 @@ import { RegisteredPage } from './admin/pages/RegisteredPage';
 import { ApprovedPage } from './admin/pages/ApprovedPage';
 import { QAVerificationPage } from './admin/pages/QAVerificationPage';
 import { AccountManagerPage } from './admin/pages/AccountManagerPage';
+import { OverduePage } from './admin/pages/OverduePage';
 import { AdminProvider } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
 import { useAdminAutoLogout } from './admin/hooks/useAdminAutoLogout';
@@ -39,13 +40,17 @@ import {
 } from './components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from './components/ui/avatar';
 
+export type AdminRole = 'superadmin' | 'manager' | 'officer' | 'super_admin' | 'master_admin' | 'nbfc_admin' | 'sub_admin';
+export type SubAdminCategory = 'verify_user' | 'qa_user' | 'account_manager' | 'recovery_officer' | 'debt_agency';
+
 export interface AdminUser {
   id: string;
   name: string;
   email: string;
   phone?: string;
-  role: 'superadmin' | 'manager' | 'officer';
+  role: AdminRole;
   department?: string;
+  sub_admin_category?: SubAdminCategory | null;
   permissions: string[];
 }
 
@@ -102,32 +107,60 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
     return location.pathname === path || location.pathname.startsWith(path + '/');
   };
 
-  const navigationItems = [
-    { path: `${BASE_PATH}/dashboard`, label: 'Dashboard', color: 'blue' },
-    { path: `${BASE_PATH}/applications`, label: 'Applications', color: 'blue' },
-    { path: `${BASE_PATH}/account-manager`, label: 'Account Manager', color: 'purple' },
-    { path: `${BASE_PATH}/users`, label: 'Users', color: 'blue' },
-    { path: `${BASE_PATH}/registered`, label: 'Registered', color: 'blue' },
-    { path: `${BASE_PATH}/approved`, label: 'Approved', color: 'green' },
-    { path: `${BASE_PATH}/cooling-period`, label: 'Cooling Period', color: 'orange' },
-    { path: `${BASE_PATH}/qa-verification`, label: 'QA Verification', color: 'cyan' },
-    { path: `${BASE_PATH}/reports`, label: 'Reports', color: 'blue' },
-    ...(currentUser?.role === 'superadmin' ? [
-      { path: `${BASE_PATH}/partners`, label: 'Partners', color: 'blue' },
-      { path: `${BASE_PATH}/team-management`, label: 'Team Management', color: 'blue' }
-    ] : [])
-  ];
+  const isSuperAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'super_admin';
+  const subCat = currentUser?.sub_admin_category;
+  const navByRole: { path: string; label: string; color: string }[] = [];
+  if (currentUser?.role === 'sub_admin') {
+    if (subCat === 'verify_user') {
+      navByRole.push({ path: `${BASE_PATH}/applications`, label: 'Applications', color: 'blue' });
+    } else if (subCat === 'qa_user') {
+      navByRole.push({ path: `${BASE_PATH}/qa-verification`, label: 'QA Verification', color: 'cyan' });
+    } else if (subCat === 'account_manager') {
+      navByRole.push({ path: `${BASE_PATH}/account-manager`, label: 'Account Manager', color: 'purple' });
+      navByRole.push({ path: `${BASE_PATH}/applications`, label: 'Applications', color: 'blue' });
+    } else if (subCat === 'recovery_officer' || subCat === 'debt_agency') {
+      navByRole.push({ path: `${BASE_PATH}/overdue`, label: 'Over Due', color: 'red' });
+    }
+  } else if (currentUser?.role === 'nbfc_admin') {
+    navByRole.push(
+      { path: `${BASE_PATH}/overdue`, label: 'Over Due', color: 'red' },
+      { path: `${BASE_PATH}/applications`, label: 'Applications', color: 'blue' }
+    );
+  } else {
+    navByRole.push(
+      { path: `${BASE_PATH}/dashboard`, label: 'Dashboard', color: 'blue' },
+      { path: `${BASE_PATH}/applications`, label: 'Applications', color: 'blue' },
+      { path: `${BASE_PATH}/account-manager`, label: 'Account Manager', color: 'purple' },
+      { path: `${BASE_PATH}/users`, label: 'Users', color: 'blue' },
+      { path: `${BASE_PATH}/registered`, label: 'Registered', color: 'blue' },
+      { path: `${BASE_PATH}/approved`, label: 'Approved', color: 'green' },
+      { path: `${BASE_PATH}/cooling-period`, label: 'Cooling Period', color: 'orange' },
+      { path: `${BASE_PATH}/qa-verification`, label: 'QA Verification', color: 'cyan' },
+      { path: `${BASE_PATH}/reports`, label: 'Reports', color: 'blue' }
+    );
+    if (isSuperAdmin) {
+      navByRole.push(
+        { path: `${BASE_PATH}/partners`, label: 'Partners', color: 'blue' },
+        { path: `${BASE_PATH}/team-management`, label: 'Team Management', color: 'blue' }
+      );
+    }
+  }
+  const navigationItems = navByRole;
+  const showSearch = isSuperAdmin || currentUser?.role === 'manager' || currentUser?.role === 'officer' || currentUser?.role === 'master_admin'
+    || (currentUser?.role === 'sub_admin' && ['verify_user', 'qa_user', 'account_manager', 'recovery_officer'].includes(subCat || ''))
+    || currentUser?.role === 'nbfc_admin';
 
   const getActiveClasses = (path: string, color: string) => {
-    const colorClasses = {
+    const colorClasses: Record<string, string> = {
       blue: 'bg-blue-100 text-blue-700',
       green: 'bg-green-100 text-green-700',
       orange: 'bg-orange-100 text-orange-700',
       cyan: 'bg-cyan-100 text-cyan-700',
-      purple: 'bg-purple-100 text-purple-700'
+      purple: 'bg-purple-100 text-purple-700',
+      red: 'bg-red-100 text-red-700'
     };
-    return isActive(path) 
-      ? colorClasses[color as keyof typeof colorClasses] || 'bg-blue-100 text-blue-700'
+    return isActive(path)
+      ? (colorClasses[color] || 'bg-blue-100 text-blue-700')
       : 'text-gray-600 hover:text-gray-900';
   };
 
@@ -176,26 +209,28 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
               </button>
             </div>
             <div className="flex items-center gap-2 sm:gap-4">
-              {/* Search Button - Desktop */}
-              <button
-                onClick={() => {
-                  window.open(`${BASE_PATH}/search`, '_blank');
-                }}
-                className="hidden md:flex items-center gap-2 px-3 lg:px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 hover:text-gray-900"
-              >
-                <Search className="w-4 h-4" />
-                <span className="hidden lg:inline">Search</span>
-              </button>
-              {/* Search Button - Mobile */}
-              <button
-                onClick={() => {
-                  window.open(`${BASE_PATH}/search`, '_blank');
-                }}
-                className="md:hidden p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
-                aria-label="Search"
-              >
-                <Search className="w-5 h-5" />
-              </button>
+              {showSearch && (
+                <>
+                  <button
+                    onClick={() => {
+                      window.open(`${BASE_PATH}/search`, '_blank');
+                    }}
+                    className="hidden md:flex items-center gap-2 px-3 lg:px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 hover:text-gray-900"
+                  >
+                    <Search className="w-4 h-4" />
+                    <span className="hidden lg:inline">Search</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      window.open(`${BASE_PATH}/search`, '_blank');
+                    }}
+                    className="md:hidden p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+                    aria-label="Search"
+                  >
+                    <Search className="w-5 h-5" />
+                  </button>
+                </>
+              )}
               {/* Admin user dropdown: name click opens Settings & Logout */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -404,6 +439,11 @@ export default function AdminApp() {
         <Route path="account-manager" element={
           <ProtectedRoute>
             <AccountManagerPage />
+          </ProtectedRoute>
+        } />
+        <Route path="overdue" element={
+          <ProtectedRoute>
+            <OverduePage />
           </ProtectedRoute>
         } />
         <Route path="activity-logs" element={

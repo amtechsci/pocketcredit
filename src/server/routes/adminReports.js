@@ -54,12 +54,11 @@ const getStateCode = (stateName) => {
 };
 
 /**
- * CIBIL address: one row per user by source priority (digilocker > pan_api > bank_api > input), then is_primary, created_at.
+ * CIBIL address: Aadhar (Digilocker) only for Address Line 1, State Code, PIN Code.
  * Pick the same address id for all columns so we don't mix fields from different rows.
  */
-const _CIBIL_ADDR_ORDER = `CASE WHEN a.source = 'digilocker' THEN 1 WHEN a.source = 'pan_api' THEN 2 WHEN a.source = 'bank_api' THEN 3 WHEN a.source = 'input' THEN 4 ELSE 5 END, a.is_primary DESC, a.created_at DESC`;
-const _CIBIL_ADDR_ORDER_A2 = `CASE WHEN a2.source = 'digilocker' THEN 1 WHEN a2.source = 'pan_api' THEN 2 WHEN a2.source = 'bank_api' THEN 3 WHEN a2.source = 'input' THEN 4 ELSE 5 END, a2.is_primary DESC, a2.created_at DESC`;
-const _CIBIL_CHOSEN_ADDRESS_ID = `(SELECT a2.id FROM addresses a2 WHERE a2.user_id = u.id ORDER BY ${_CIBIL_ADDR_ORDER_A2} LIMIT 1)`;
+const _CIBIL_ADDR_ORDER_A2 = `a2.is_primary DESC, a2.created_at DESC`;
+const _CIBIL_CHOSEN_ADDRESS_ID = `(SELECT a2.id FROM addresses a2 WHERE a2.user_id = u.id AND a2.source = 'digilocker' ORDER BY ${_CIBIL_ADDR_ORDER_A2} LIMIT 1)`;
 const CIBIL_ADDRESS_LINE1_SUBQUERY = `(SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
 const CIBIL_ADDRESS_LINE2_SUBQUERY = `(SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
 const CIBIL_STATE_NAME_SUBQUERY = `(SELECT COALESCE(sc.state_name, a.state) FROM addresses a LEFT JOIN state_codes sc ON sc.id = a.state WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
@@ -180,7 +179,7 @@ const escapeCSV = (value, preserveLeadingZero = false) => {
     if (preserveLeadingZero && str.length > 0) {
         str = '\t' + str;
     }
-    const needsQuoting = str.includes(',') || str.includes('"') || str.includes('\n');
+    const needsQuoting = preserveLeadingZero || str.includes(',') || str.includes('"') || str.includes('\n');
     if (needsQuoting) {
         return `"${str.replace(/"/g, '""')}"`;
     }
@@ -210,13 +209,13 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
                 la.id as loan_id, la.application_number, la.loan_amount,
                 la.disbursal_amount, la.processing_fee, la.total_interest,
                 la.total_repayable, la.disbursed_at, la.processed_at,
-                la.processed_due_date, la.processed_penalty, la.status, la.plan_snapshot,
-                (SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line1,
-                (SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as address_line2,
-                (SELECT a.city FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as city,
-                (SELECT COALESCE(sc.state_name, a.state) FROM addresses a LEFT JOIN state_codes sc ON sc.id = a.state WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state,
-                (SELECT a.pincode FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as pincode,
-                (SELECT COALESCE(a.country, 'India') FROM addresses a WHERE a.user_id = u.id ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as country
+                la.processed_due_date, la.processed_penalty, la.status, la.plan_snapshot, la.emi_schedule,
+                ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
+                ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
+                ${CIBIL_CITY_SUBQUERY} as city,
+                ${CIBIL_STATE_NAME_SUBQUERY} as state,
+                ${CIBIL_PINCODE_SUBQUERY} as pincode,
+                ${CIBIL_COUNTRY_SUBQUERY} as country
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
             WHERE la.status = 'account_manager'
@@ -239,10 +238,20 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
             const dateOpened = formatDateDDMMYYYY(loan.disbursed_at || loan.processed_at);
             const dateReported = formatDateDDMMYYYY(new Date());
 
+            const loanAmount = parseFloat(loan.loan_amount) || 0;
             let processingFee = parseFloat(loan.processing_fee) || 0;
             let gst = processingFee * 0.18;
-            let totalAmount = (parseFloat(loan.loan_amount) || 0) + processingFee + gst;
-            let currentBalance = parseFloat(loan.total_repayable) || totalAmount;
+            let currentBalance = parseFloat(loan.total_repayable) || 0;
+            if (loan.emi_schedule) {
+                try {
+                    const schedule = typeof loan.emi_schedule === 'string' ? JSON.parse(loan.emi_schedule) : loan.emi_schedule;
+                    const arr = Array.isArray(schedule) ? schedule : [];
+                    const emi1 = arr[0] && (arr[0].emi_amount != null ? arr[0].emi_amount : arr[0].amount);
+                    const emi2 = arr[1] && (arr[1].emi_amount != null ? arr[1].emi_amount : arr[1].amount);
+                    const sum = (parseFloat(emi1) || 0) + (parseFloat(emi2) || 0);
+                    if (sum > 0) currentBalance = Math.round(sum);
+                } catch (e) { }
+            }
 
             return [
                 consumerName, dob, gender, loan.pan_number || '',
@@ -250,9 +259,9 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
                 '', '', '', '', '', '', '', '',
                 formatFullAddress(loan), stateCode, loan.pincode || '', '02', '',
                 '', '', '', '', '',
-                'NB36250001', 'POCKETCR', 'PLL' + loan.loan_id,
+                'NB86590001', 'SPHEETIFINTECH', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, '', '', dateReported,
-                Math.round(totalAmount), Math.round(currentBalance), '', '',
+                Math.round(loanAmount), Math.round(currentBalance), '', '',
                 '', '', '', '', '', '',
                 '', '01', '', '', '', '',
                 '', '', '', '', '',
@@ -328,9 +337,9 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
             const dateCleared = formatDateDDMMYYYY(loan.cleared_at);
             const dateReported = formatDateDDMMYYYY(new Date());
 
+            const loanAmount = parseFloat(loan.loan_amount) || 0;
             let processingFee = parseFloat(loan.processing_fee) || 0;
             let gst = processingFee * 0.18;
-            let totalAmount = (parseFloat(loan.loan_amount) || 0) + processingFee + gst;
 
             let loanDays = 30;
             if (loan.plan_snapshot) {
@@ -350,9 +359,9 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 '', '', '', '', '', '', '', '',
                 formatFullAddress(loan), stateCode, loan.pincode || '', '02', '',
                 '', '', '', '', '',
-                'NB36250001', 'POCKETCR', 'PLL' + loan.loan_id,
+                'NB86590001', 'SPHEETIFINTECH', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, dateCleared, dateCleared, dateReported,
-                Math.round(totalAmount), 0, '', '',
+                Math.round(loanAmount), 0, '', '',
                 '', '', '', '', '', '',
                 '', assetClass, '', '', '', '',
                 '', '', '', '', '',
@@ -462,9 +471,9 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
                 '', '', '', '', '', '', '', '',
                 formatFullAddress(loan), stateCode, loan.pincode || '', '02', '',
                 '', '', '', '', '',
-                'NB36250001', 'POCKETCR', 'PLL' + loan.loan_id,
+                'NB86590001', 'SPHEETIFINTECH', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, dateCleared, dateCleared, dateReported,
-                Math.round(totalAmount), 0, '', '',
+                Math.round(loanAmount), 0, '', '',
                 '', '', '', '', '', '',
                 '03', assetClass, '', '', '', '',
                 '', '', '', writtenOffTotal, writtenOffPrincipal,
@@ -562,9 +571,9 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
                 '', '', '', '', '', '', '', '',
                 formatFullAddress(loan), stateCode, loan.pincode || '', '02', '',
                 '', '', '', '', '',
-                'NB36250001', 'POCKETCR', 'PLL' + loan.loan_id,
+                'NB86590001', 'SPHEETIFINTECH', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, '', '', dateReported,
-                Math.round(totalAmount), currentBalance, currentBalance, dpd,
+                Math.round(loanAmount), currentBalance, currentBalance, dpd,
                 '', '', '', '', '', suitFiled,
                 '', '', '', '', '', '',
                 '', '', '', '', '',
@@ -604,10 +613,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             SELECT 
                 CONCAT('PC', LPAD(u.id, 5, '0')) as rcid, 
                 CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as pan_name,
-                (SELECT sc.state_name FROM addresses a 
-                 LEFT JOIN state_codes sc ON sc.id = a.state 
-                 WHERE a.user_id = u.id 
-                 ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state_name,
+                ${CIBIL_STATE_NAME_SUBQUERY} as state_name,
                 la.id as lid, la.disbursal_amount as processed_amount, 
                 la.processing_fee as p_fee, la.total_interest as service_charge, 
                 la.processed_penalty as penality_charge,
@@ -752,8 +758,8 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 'India',
                 row.state_name || '',
                 row.pro_fee_per || '',
-                processing_fee_collected === 'P.P' ? 'P.P' : processing_fee_collected.toFixed(2),
-                gst_on_processing_fees === 'P.P' ? 'P.P' : gst_on_processing_fees.toFixed(2),
+                processing_fee_collected === 'P.P' ? 'P.P' : (Number(processing_fee_collected) || 0).toFixed(2),
+                gst_on_processing_fees === 'P.P' ? 'P.P' : (Number(gst_on_processing_fees) || 0).toFixed(2),
                 row.interest_percentage || '',
                 loan_closure_type,
                 interest_collected.toFixed(2),
@@ -794,10 +800,7 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
             SELECT 
                 CONCAT('PC', LPAD(u.id, 5, '0')) as rcid,
                 CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as pan_name,
-                (SELECT sc.state_name FROM addresses a 
-                 LEFT JOIN state_codes sc ON sc.id = a.state 
-                 WHERE a.user_id = u.id 
-                 ORDER BY a.is_primary DESC, a.created_at DESC LIMIT 1) as state_name,
+                ${CIBIL_STATE_NAME_SUBQUERY} as state_name,
                 la.id as lid, la.loan_amount as amount, la.processing_fee as processing_fees,
                 la.disbursal_amount as processed_amount, la.processing_fee as p_fee,
                 la.exhausted_period_days as exhausted_period, la.processed_at as processed_date,

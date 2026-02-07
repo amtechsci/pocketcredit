@@ -59,6 +59,13 @@ async function updateOverdueLoans() {
 
         await executeQuery(updateQuery, [loan.id]);
 
+        try {
+          const { assignRecoveryOfficerForLoan } = require('../services/adminAssignmentService');
+          await assignRecoveryOfficerForLoan(loan.id);
+        } catch (assignErr) {
+          console.error('Assign recovery officer for overdue loan failed:', assignErr);
+        }
+
         updatedCount++;
         cronLogger.info(`Updated loan #${loan.id} (${loan.application_number}) to overdue status (DPD: ${loan.dpd})`).catch(() => {});
 

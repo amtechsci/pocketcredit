@@ -201,6 +201,31 @@ router.get('/', authenticateAdmin, async (req, res) => {
       queryParams.push(dateTo);
     }
 
+    // Sub-admin: restrict to assigned applications and allowed statuses
+    const subCategory = req.admin?.sub_admin_category;
+    if (req.admin?.role === 'sub_admin' && subCategory) {
+      const adminId = req.admin.id;
+      if (subCategory === 'verify_user') {
+        whereConditions.push('la.assigned_verify_admin_id = ?');
+        queryParams.push(adminId);
+        if (!status || status === 'all') {
+          whereConditions.push("la.status IN ('submitted','under_review','follow_up','disbursal','ready_for_disbursement')");
+        }
+      } else if (subCategory === 'qa_user') {
+        whereConditions.push('la.assigned_qa_admin_id = ?');
+        queryParams.push(adminId);
+        whereConditions.push("la.status IN ('disbursal','ready_for_disbursement')");
+      } else if (subCategory === 'account_manager') {
+        whereConditions.push('la.assigned_account_manager_id = ?');
+        queryParams.push(adminId);
+        whereConditions.push("la.status IN ('account_manager')");
+      } else if (subCategory === 'recovery_officer') {
+        whereConditions.push('la.assigned_recovery_officer_id = ?');
+        queryParams.push(adminId);
+        whereConditions.push("la.status = 'overdue'");
+      }
+    }
+
     // Add WHERE clause if conditions exist
     if (whereConditions.length > 0) {
       baseQuery += ' WHERE ' + whereConditions.join(' AND ');
@@ -1009,6 +1034,16 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
     updateParams.push(applicationId);
 
     await executeQuery(updateQuery, updateParams);
+
+    // Assign account manager when status changes to account_manager (by PCID)
+    if (status === 'account_manager') {
+      try {
+        const { assignAccountManagerForLoan } = require('../services/adminAssignmentService');
+        await assignAccountManagerForLoan(applicationId, loan.user_id);
+      } catch (err) {
+        console.error('Assign account manager for loan failed:', err);
+      }
+    }
 
     // Update partner leads if status changed to account_manager and loan is disbursed
     if (status === 'account_manager') {

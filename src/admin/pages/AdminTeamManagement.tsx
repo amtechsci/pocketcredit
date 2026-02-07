@@ -33,7 +33,7 @@ interface AdminUser {
   id: string;
   name: string;
   email: string;
-  role: 'superadmin' | 'manager' | 'officer';
+  role: string;
   permissions: string[];
   status?: 'active' | 'inactive';
   is_active?: boolean;
@@ -43,6 +43,8 @@ interface AdminUser {
   created_at?: string;
   phone?: string;
   department?: string;
+  sub_admin_category?: string | null;
+  whitelisted_ip?: string | null;
 }
 
 interface ActivityLog {
@@ -121,20 +123,24 @@ export function AdminTeamManagement() {
     name: '',
     email: '',
     password: '',
-    role: 'officer' as 'superadmin' | 'manager' | 'officer',
+    role: 'officer',
     permissions: [] as string[],
     phone: '',
-    department: ''
+    department: '',
+    sub_admin_category: '' as string,
+    whitelisted_ip: ''
   });
 
   const [editFormData, setEditFormData] = useState({
     name: '',
     email: '',
-    role: 'officer' as 'superadmin' | 'manager' | 'officer',
+    role: 'officer',
     permissions: [] as string[],
     phone: '',
     department: '',
-    is_active: true
+    is_active: true,
+    sub_admin_category: '' as string,
+    whitelisted_ip: ''
   });
 
   const [permissionsFormData, setPermissionsFormData] = useState<string[]>([]);
@@ -175,7 +181,9 @@ export function AdminTeamManagement() {
           lastLogin: admin.last_login,
           createdAt: admin.created_at,
           phone: admin.phone,
-          department: admin.department
+          department: admin.department,
+          sub_admin_category: admin.sub_admin_category ?? null,
+          whitelisted_ip: admin.whitelisted_ip ?? null
         }));
         setTeamMembers(transformedMembers);
       }
@@ -244,15 +252,28 @@ export function AdminTeamManagement() {
   const getRolePermissions = (role: string) => {
     switch (role) {
       case 'superadmin':
+      case 'super_admin':
         return ['*'];
       case 'manager':
+      case 'master_admin':
         return ['approve_loans', 'reject_loans', 'view_users', 'edit_loans', 'manage_officers', 'view_analytics'];
       case 'officer':
         return ['view_loans', 'view_users', 'add_notes', 'follow_up'];
+      case 'nbfc_admin':
+      case 'sub_admin':
+        return ['view_loans', 'view_users'];
       default:
         return [];
     }
   };
+
+  const SUB_ADMIN_CATEGORIES = [
+    { value: 'verify_user', label: 'Verify User' },
+    { value: 'qa_user', label: 'QA User' },
+    { value: 'account_manager', label: 'Account Manager' },
+    { value: 'recovery_officer', label: 'Recovery Officer' },
+    { value: 'debt_agency', label: 'Debt Agency' }
+  ];
 
   const filteredMembers = teamMembers.filter(member => {
     const matchesSearch = member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -266,11 +287,15 @@ export function AdminTeamManagement() {
       setError('Name, email, and password are required');
       return;
     }
+    if (newUser.role === 'sub_admin' && !newUser.sub_admin_category) {
+      setError('Sub-admin category is required for Sub-admin role');
+      return;
+    }
 
     try {
       setSaving(true);
       setError(null);
-      const response = await adminApiService.createTeamMember({
+      const payload: any = {
         name: newUser.name,
         email: newUser.email,
         password: newUser.password,
@@ -278,11 +303,16 @@ export function AdminTeamManagement() {
         permissions: newUser.permissions.length > 0 ? newUser.permissions : getRolePermissions(newUser.role),
         phone: newUser.phone || undefined,
         department: newUser.department || undefined
-      });
+      };
+      if (newUser.role === 'sub_admin') {
+        payload.sub_admin_category = newUser.sub_admin_category || null;
+        payload.whitelisted_ip = newUser.sub_admin_category === 'debt_agency' ? (newUser.whitelisted_ip || null) : null;
+      }
+      const response = await adminApiService.createTeamMember(payload);
 
       if (response.status === 'success') {
         setShowAddModal(false);
-        setNewUser({ name: '', email: '', password: '', role: 'officer', permissions: [], phone: '', department: '' });
+        setNewUser({ name: '', email: '', password: '', role: 'officer', permissions: [], phone: '', department: '', sub_admin_category: '', whitelisted_ip: '' });
         await fetchTeamMembers();
         await fetchStats();
       } else {
@@ -305,7 +335,9 @@ export function AdminTeamManagement() {
       permissions: user.permissions || [],
       phone: user.phone || '',
       department: user.department || '',
-      is_active: user.is_active !== false
+      is_active: user.is_active !== false,
+      sub_admin_category: user.sub_admin_category || '',
+      whitelisted_ip: user.whitelisted_ip || ''
     });
     setShowEditModal(true);
   };
@@ -316,7 +348,15 @@ export function AdminTeamManagement() {
     try {
       setSaving(true);
       setError(null);
-      const response = await adminApiService.updateTeamMember(editingUser.id, editFormData);
+      const payload: any = { ...editFormData };
+      if (payload.role === 'sub_admin') {
+        payload.sub_admin_category = payload.sub_admin_category || null;
+        payload.whitelisted_ip = payload.sub_admin_category === 'debt_agency' ? (payload.whitelisted_ip || null) : null;
+      } else {
+        payload.sub_admin_category = null;
+        payload.whitelisted_ip = null;
+      }
+      const response = await adminApiService.updateTeamMember(editingUser.id, payload);
 
       if (response.status === 'success') {
         setShowEditModal(false);
@@ -512,6 +552,10 @@ export function AdminTeamManagement() {
           >
             <option value="all">All Roles</option>
             <option value="superadmin">Super Admin</option>
+            <option value="super_admin">Super Admin (new)</option>
+            <option value="master_admin">Master Admin</option>
+            <option value="nbfc_admin">NBFC Admin</option>
+            <option value="sub_admin">Sub-admin</option>
             <option value="manager">Manager</option>
             <option value="officer">Officer</option>
           </select>
@@ -550,7 +594,9 @@ export function AdminTeamManagement() {
                 <div className="flex items-center justify-between">
                   <span className="text-gray-600">Role:</span>
                   <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getRoleColor(member.role)}`}>
-                    {member.role.replace('_', ' ').toUpperCase()}
+                    {member.role === 'sub_admin' && member.sub_admin_category
+                      ? SUB_ADMIN_CATEGORIES.find(c => c.value === member.sub_admin_category)?.label || member.sub_admin_category
+                      : member.role.replace(/_/g, ' ')}
                   </span>
                 </div>
 
@@ -728,16 +774,51 @@ export function AdminTeamManagement() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">Role *</label>
                   <select
                     value={newUser.role}
-                    onChange={(e) => setNewUser({ ...newUser, role: e.target.value as 'superadmin' | 'manager' | 'officer' })}
+                    onChange={(e) => setNewUser({ ...newUser, role: e.target.value, sub_admin_category: e.target.value === 'sub_admin' ? newUser.sub_admin_category : '' })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   >
                     <option value="officer">Officer</option>
                     <option value="manager">Manager</option>
                     <option value="superadmin">Super Admin</option>
+                    <option value="super_admin">Super Admin (new)</option>
+                    <option value="master_admin">Master Admin</option>
+                    <option value="nbfc_admin">NBFC Admin</option>
+                    <option value="sub_admin">Sub-admin</option>
                   </select>
                 </div>
               </div>
+
+              {newUser.role === 'sub_admin' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Sub-admin category *</label>
+                    <select
+                      value={newUser.sub_admin_category}
+                      onChange={(e) => setNewUser({ ...newUser, sub_admin_category: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    >
+                      <option value="">Select category</option>
+                      {SUB_ADMIN_CATEGORIES.map((c) => (
+                        <option key={c.value} value={c.value}>{c.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {newUser.sub_admin_category === 'debt_agency' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Whitelisted IP (comma-separated)</label>
+                      <input
+                        type="text"
+                        value={newUser.whitelisted_ip}
+                        onChange={(e) => setNewUser({ ...newUser, whitelisted_ip: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="e.g. 192.168.1.1"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Permissions Preview</label>
@@ -862,13 +943,17 @@ export function AdminTeamManagement() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">Role *</label>
                   <select
                     value={editFormData.role}
-                    onChange={(e) => setEditFormData({ ...editFormData, role: e.target.value as 'superadmin' | 'manager' | 'officer' })}
+                    onChange={(e) => setEditFormData({ ...editFormData, role: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   >
                     <option value="officer">Officer</option>
                     <option value="manager">Manager</option>
                     <option value="superadmin">Super Admin</option>
+                    <option value="super_admin">Super Admin (new)</option>
+                    <option value="master_admin">Master Admin</option>
+                    <option value="nbfc_admin">NBFC Admin</option>
+                    <option value="sub_admin">Sub-admin</option>
                   </select>
                 </div>
                 <div>
@@ -883,6 +968,36 @@ export function AdminTeamManagement() {
                   </select>
                 </div>
               </div>
+
+              {editFormData.role === 'sub_admin' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Sub-admin category *</label>
+                    <select
+                      value={editFormData.sub_admin_category}
+                      onChange={(e) => setEditFormData({ ...editFormData, sub_admin_category: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Select category</option>
+                      {SUB_ADMIN_CATEGORIES.map((c) => (
+                        <option key={c.value} value={c.value}>{c.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {editFormData.sub_admin_category === 'debt_agency' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Whitelisted IP (comma-separated)</label>
+                      <input
+                        type="text"
+                        value={editFormData.whitelisted_ip}
+                        onChange={(e) => setEditFormData({ ...editFormData, whitelisted_ip: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="e.g. 192.168.1.1"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="flex gap-3 pt-4">
                 <button

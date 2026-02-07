@@ -307,6 +307,14 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
             const oldStatus = loanToUpdate?.status || 'unknown';
             loanUpdateMessage = `Loan ${targetLoanId} status updated from ${oldStatus} to ${newStatus}`;
             console.log(`✅ Successfully updated loan ${targetLoanId} status from ${oldStatus} to ${newStatus} (${affectedRows} row(s) affected)`);
+            if (newStatus === 'qa_verification') {
+              try {
+                const { assignQAUserForLoan } = require('../services/adminAssignmentService');
+                await assignQAUserForLoan(targetLoanId);
+              } catch (err) {
+                console.error('Assign QA user for loan failed:', err);
+              }
+            }
           } else {
             loanUpdateMessage = `Failed to update loan ${targetLoanId} status. No rows were affected.`;
             console.error(`❌ ${loanUpdateMessage}`);

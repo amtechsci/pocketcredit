@@ -51,7 +51,7 @@ const authenticateAdmin = async (req, res, next) => {
     await initializeDatabase();
     
     const admins = await executeQuery(
-      'SELECT id, name, email, role, permissions, is_active FROM admins WHERE id = ?',
+      'SELECT id, name, email, role, sub_admin_category, permissions, is_active FROM admins WHERE id = ?',
       [decoded.id]
     );
     
@@ -102,6 +102,7 @@ const authenticateAdmin = async (req, res, next) => {
       name: admin.name,
       email: admin.email,
       role: admin.role,
+      sub_admin_category: admin.sub_admin_category || null,
       permissions: Array.isArray(admin.permissions) ? admin.permissions : JSON.parse(admin.permissions || '[]')
     };
 

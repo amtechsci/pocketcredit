@@ -2014,10 +2014,12 @@ class AdminApiService {
     name: string;
     email: string;
     password: string;
-    role: 'superadmin' | 'manager' | 'officer';
+    role: string;
     permissions?: string[];
     phone?: string;
     department?: string;
+    sub_admin_category?: string | null;
+    whitelisted_ip?: string | null;
   }): Promise<ApiResponse<{
     admin: {
       id: string;
@@ -2040,11 +2042,13 @@ class AdminApiService {
   async updateTeamMember(id: string, data: {
     name?: string;
     email?: string;
-    role?: 'superadmin' | 'manager' | 'officer';
+    role?: string;
     permissions?: string[];
     phone?: string;
     department?: string;
     is_active?: boolean;
+    sub_admin_category?: string | null;
+    whitelisted_ip?: string | null;
   }): Promise<ApiResponse<{
     admin: {
       id: string;

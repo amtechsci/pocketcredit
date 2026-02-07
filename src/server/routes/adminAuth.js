@@ -31,7 +31,7 @@ router.post('/login', validate(schemas.adminLogin), async (req, res) => {
     // Find admin in MySQL
     console.log('Querying MySQL for admin...');
     const admins = await executeQuery(
-      'SELECT id, name, email, phone, password, role, permissions, is_active FROM admins WHERE email = ?',
+      'SELECT id, name, email, phone, password, role, sub_admin_category, whitelisted_ip, permissions, is_active FROM admins WHERE email = ?',
       [email]
     );
     console.log('MySQL query result:', admins.length, 'admins found');
@@ -54,6 +54,19 @@ router.post('/login', validate(schemas.adminLogin), async (req, res) => {
         status: 'error',
         message: 'Admin account is deactivated'
       });
+    }
+
+    // Debt agency: allow login only from whitelisted IP
+    if (admin.role === 'sub_admin' && admin.sub_admin_category === 'debt_agency' && admin.whitelisted_ip) {
+      const clientIp = (req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || '').trim();
+      const allowedIps = admin.whitelisted_ip.split(',').map(s => s.trim()).filter(Boolean);
+      const allowed = allowedIps.some(ip => clientIp === ip || clientIp === `::ffff:${ip}`);
+      if (!allowed) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Login allowed only from whitelisted IP address'
+        });
+      }
     }
 
     // Verify password
@@ -105,6 +118,7 @@ router.post('/login', validate(schemas.adminLogin), async (req, res) => {
           email: admin.email,
           phone: admin.phone,
           role: admin.role,
+          sub_admin_category: admin.sub_admin_category || null,
           permissions: Array.isArray(admin.permissions) ? admin.permissions : JSON.parse(admin.permissions || '[]')
         },
         token
@@ -419,6 +433,7 @@ router.post('/verify-otp', async (req, res) => {
           email: admin.email,
           phone: admin.phone,
           role: admin.role,
+          sub_admin_category: admin.sub_admin_category || null,
           permissions: Array.isArray(admin.permissions) ? admin.permissions : JSON.parse(admin.permissions || '[]')
         },
         token

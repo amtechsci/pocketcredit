@@ -3,7 +3,11 @@ const bcrypt = require('bcryptjs');
 const { authenticateAdmin } = require('../middleware/auth');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
+const { redistributeOnDeactivate } = require('../services/adminAssignmentService');
 const router = express.Router();
+
+const VALID_ADMIN_ROLES = ['superadmin', 'manager', 'officer', 'super_admin', 'master_admin', 'nbfc_admin', 'sub_admin'];
+const SUB_ADMIN_CATEGORIES = ['verify_user', 'qa_user', 'account_manager', 'recovery_officer', 'debt_agency'];
 
 // Ensure database is initialized
 let dbInitialized = false;
@@ -56,7 +60,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
     // Build query
     let query = `
       SELECT 
-        id, name, email, role, permissions, is_active, last_login, created_at, updated_at
+        id, name, email, phone, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at
       FROM admins
       WHERE 1=1
     `;
@@ -190,7 +194,7 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
     const { id } = req.params;
 
     const admins = await executeQuery(
-      'SELECT id, name, email, role, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
+      'SELECT id, name, email, phone, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
       [id]
     );
 
@@ -317,7 +321,7 @@ router.post('/', authenticateAdmin, async (req, res) => {
       });
     }
 
-    const { name, email, password, role, permissions, phone, department } = req.body;
+    const { name, email, password, role, permissions, phone, department, sub_admin_category, whitelisted_ip } = req.body;
 
     // Validate required fields
     if (!name || !email || !password || !role) {
@@ -328,11 +332,20 @@ router.post('/', authenticateAdmin, async (req, res) => {
     }
 
     // Validate role
-    if (!['superadmin', 'manager', 'officer'].includes(role)) {
+    if (!VALID_ADMIN_ROLES.includes(role)) {
       return res.status(400).json({
         status: 'error',
-        message: 'Invalid role. Must be superadmin, manager, or officer'
+        message: 'Invalid role. Must be one of: ' + VALID_ADMIN_ROLES.join(', ')
       });
+    }
+
+    if (role === 'sub_admin') {
+      if (!sub_admin_category || !SUB_ADMIN_CATEGORIES.includes(sub_admin_category)) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Sub-admin requires sub_admin_category: ' + SUB_ADMIN_CATEGORIES.join(', ')
+        });
+      }
     }
 
     // Check if email already exists
@@ -354,20 +367,25 @@ router.post('/', authenticateAdmin, async (req, res) => {
     // Determine permissions based on role if not provided
     let finalPermissions = permissions;
     if (!finalPermissions || finalPermissions.length === 0) {
-      if (role === 'superadmin') {
+      if (role === 'superadmin' || role === 'super_admin') {
         finalPermissions = ['*'];
-      } else if (role === 'manager') {
+      } else if (role === 'manager' || role === 'master_admin') {
         finalPermissions = ['approve_loans', 'reject_loans', 'view_users', 'edit_loans', 'manage_officers', 'view_analytics'];
+      } else if (role === 'sub_admin') {
+        finalPermissions = ['view_loans', 'view_users'];
       } else {
         finalPermissions = ['view_loans', 'view_users', 'add_notes', 'follow_up'];
       }
     }
 
+    const subCategory = role === 'sub_admin' ? sub_admin_category : null;
+    const allowedIp = role === 'sub_admin' && sub_admin_category === 'debt_agency' ? (whitelisted_ip || null) : null;
+
     // Create admin
     const adminId = uuidv4();
     await executeQuery(`
-      INSERT INTO admins (id, name, email, phone, password, role, department, permissions, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
+      INSERT INTO admins (id, name, email, phone, password, role, sub_admin_category, whitelisted_ip, department, permissions, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
     `, [
       adminId,
       name,
@@ -375,6 +393,8 @@ router.post('/', authenticateAdmin, async (req, res) => {
       phone || null,
       hashedPassword,
       role,
+      subCategory,
+      allowedIp,
       department || null,
       JSON.stringify(finalPermissions)
     ]);
@@ -390,7 +410,7 @@ router.post('/', authenticateAdmin, async (req, res) => {
 
     // Get created admin
     const newAdmins = await executeQuery(
-      'SELECT id, name, email, phone, role, department, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
+      'SELECT id, name, email, phone, role, sub_admin_category, whitelisted_ip, department, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
       [adminId]
     );
 
@@ -429,8 +449,8 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
     await ensureDbInitialized();
     const { id } = req.params;
 
-    // Only superadmin can edit other superadmins or managers
-    const targetAdmins = await executeQuery('SELECT role FROM admins WHERE id = ?', [id]);
+    // Only superadmin/super_admin can edit other superadmins or managers
+    const targetAdmins = await executeQuery('SELECT role, sub_admin_category, is_active FROM admins WHERE id = ?', [id]);
     if (targetAdmins.length === 0) {
       return res.status(404).json({
         status: 'error',
@@ -439,14 +459,16 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
     }
 
     const targetRole = targetAdmins[0].role;
-    if ((targetRole === 'superadmin' || targetRole === 'manager') && req.admin.role !== 'superadmin') {
+    const targetCategory = targetAdmins[0].sub_admin_category;
+    const isSuperAdmin = req.admin.role === 'superadmin' || req.admin.role === 'super_admin';
+    if ((['superadmin', 'super_admin', 'manager', 'master_admin'].includes(targetRole)) && !isSuperAdmin) {
       return res.status(403).json({
         status: 'error',
-        message: 'Only superadmin can edit managers and superadmins'
+        message: 'Only super admin can edit other admins and managers'
       });
     }
 
-    const { name, email, role, permissions, phone, department, is_active } = req.body;
+    const { name, email, role, permissions, phone, department, is_active, sub_admin_category, whitelisted_ip } = req.body;
 
     // Build update query dynamically
     const updates = [];
@@ -486,23 +508,46 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
     }
 
     if (role !== undefined) {
-      // Only superadmin can change roles
-      if (req.admin.role !== 'superadmin') {
+      if (!isSuperAdmin) {
         return res.status(403).json({
           status: 'error',
-          message: 'Only superadmin can change roles'
+          message: 'Only super admin can change roles'
         });
       }
-
-      if (!['superadmin', 'manager', 'officer'].includes(role)) {
+      if (!VALID_ADMIN_ROLES.includes(role)) {
         return res.status(400).json({
           status: 'error',
-          message: 'Invalid role'
+          message: 'Invalid role. Must be one of: ' + VALID_ADMIN_ROLES.join(', ')
         });
       }
-
+      if (role === 'sub_admin' && (!sub_admin_category || !SUB_ADMIN_CATEGORIES.includes(sub_admin_category))) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Sub-admin requires sub_admin_category: ' + SUB_ADMIN_CATEGORIES.join(', ')
+        });
+      }
       updates.push('role = ?');
       params.push(role);
+      if (role === 'sub_admin') {
+        updates.push('sub_admin_category = ?');
+        params.push(sub_admin_category);
+      } else {
+        updates.push('sub_admin_category = NULL');
+        updates.push('whitelisted_ip = NULL');
+      }
+    }
+
+    if (sub_admin_category !== undefined && (req.body.role === 'sub_admin' || targetRole === 'sub_admin')) {
+      if (!updates.some(u => u.includes('sub_admin_category'))) {
+        updates.push('sub_admin_category = ?');
+        params.push(SUB_ADMIN_CATEGORIES.includes(sub_admin_category) ? sub_admin_category : null);
+      }
+    }
+    if (whitelisted_ip !== undefined) {
+      if (!updates.some(u => u.includes('whitelisted_ip'))) {
+        updates.push('whitelisted_ip = ?');
+        params.push(whitelisted_ip || null);
+      }
     }
 
     if (permissions !== undefined) {
@@ -510,12 +555,12 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       params.push(JSON.stringify(permissions));
     }
 
+    const wasActive = !!targetAdmins[0].is_active;
     if (is_active !== undefined) {
-      // Only superadmin can activate/deactivate
-      if (req.admin.role !== 'superadmin') {
+      if (!isSuperAdmin) {
         return res.status(403).json({
           status: 'error',
-          message: 'Only superadmin can change account status'
+          message: 'Only super admin can activate/deactivate accounts'
         });
       }
       updates.push('is_active = ?');
@@ -537,6 +582,15 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       params
     );
 
+    // When deactivating a sub-admin, redistribute their assigned IDs to other active sub-admins
+    if (is_active === false && wasActive && targetRole === 'sub_admin' && targetCategory) {
+      try {
+        await redistributeOnDeactivate(id, targetCategory);
+      } catch (redistErr) {
+        console.error('Redistribution on deactivate failed:', redistErr);
+      }
+    }
+
     // Log activity
     await logAdminActivity(req.admin.id, 'updated_admin', {
       admin_id: id,
@@ -545,7 +599,7 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
 
     // Get updated admin
     const updatedAdmins = await executeQuery(
-      'SELECT id, name, email, role, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
+      'SELECT id, name, email, phone, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
       [id]
     );
 
@@ -577,15 +631,13 @@ router.patch('/:id/status', authenticateAdmin, async (req, res) => {
     await ensureDbInitialized();
     const { id } = req.params;
 
-    // Only superadmin can change status
-    if (req.admin.role !== 'superadmin') {
+    if (req.admin.role !== 'superadmin' && req.admin.role !== 'super_admin') {
       return res.status(403).json({
         status: 'error',
-        message: 'Only superadmin can change account status'
+        message: 'Only super admin can change account status'
       });
     }
 
-    // Can't deactivate yourself
     if (id === req.admin.id) {
       return res.status(400).json({
         status: 'error',
@@ -593,7 +645,7 @@ router.patch('/:id/status', authenticateAdmin, async (req, res) => {
       });
     }
 
-    const admins = await executeQuery('SELECT is_active FROM admins WHERE id = ?', [id]);
+    const admins = await executeQuery('SELECT is_active, role, sub_admin_category FROM admins WHERE id = ?', [id]);
     if (admins.length === 0) {
       return res.status(404).json({
         status: 'error',
@@ -601,12 +653,23 @@ router.patch('/:id/status', authenticateAdmin, async (req, res) => {
       });
     }
 
-    const newStatus = !admins[0].is_active;
+    const wasActive = !!admins[0].is_active;
+    const targetRole = admins[0].role;
+    const targetCategory = admins[0].sub_admin_category;
+    const newStatus = !wasActive;
 
     await executeQuery(
       'UPDATE admins SET is_active = ?, updated_at = NOW() WHERE id = ?',
       [newStatus ? 1 : 0, id]
     );
+
+    if (!newStatus && targetRole === 'sub_admin' && targetCategory) {
+      try {
+        await redistributeOnDeactivate(id, targetCategory);
+      } catch (redistErr) {
+        console.error('Redistribution on deactivate failed:', redistErr);
+      }
+    }
 
     // Log activity
     await logAdminActivity(req.admin.id, newStatus ? 'activated_admin' : 'deactivated_admin', {

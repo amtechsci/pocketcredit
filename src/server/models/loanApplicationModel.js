@@ -248,11 +248,22 @@ const createApplication = async (userId, applicationData) => {
     ];
 
     const [result] = await pool.execute(query, values);
+    const insertedId = result.insertId;
 
     console.log(`✅ Loan application created with status: ${initialStatus}${hasCompletedLoan ? ' (Repeat customer - Expedited)' : ''}`);
 
+    // Assign to verify user when status is submitted (round-robin)
+    if (initialStatus === 'submitted') {
+      try {
+        const { assignVerifyUserForLoan } = require('../services/adminAssignmentService');
+        await assignVerifyUserForLoan(insertedId);
+      } catch (err) {
+        console.error('Assign verify user for new loan failed:', err);
+      }
+    }
+
     // Return the created application
-    return await findApplicationById(result.insertId);
+    return await findApplicationById(insertedId);
   } catch (error) {
     console.error('Error creating loan application:', error.message);
     throw error;

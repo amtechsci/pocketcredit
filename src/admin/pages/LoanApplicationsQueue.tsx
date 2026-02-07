@@ -70,12 +70,17 @@ interface ProfileComment {
 
 
 
-export function LoanApplicationsQueue() {
+interface LoanApplicationsQueueProps {
+  /** When provided (e.g. from Overdue page), force this status and do not read from URL */
+  initialStatus?: string;
+}
+
+export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueueProps = {}) {
   const navigate = useNavigate();
   const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState(initialStatus || 'all');
   const [sortBy, setSortBy] = useState('applicationDate');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const { canApproveLoans, canRejectLoans } = useAdmin();
@@ -100,13 +105,14 @@ export function LoanApplicationsQueue() {
   const [loadingComments, setLoadingComments] = useState<{ [userId: string]: boolean }>({});
   const [expandedComments, setExpandedComments] = useState<{ [userId: string]: boolean }>({});
 
-  // Initialize status filter from URL parameters
+  // Initialize status filter from URL parameters (ignore when initialStatus is set, e.g. Over Due page)
   useEffect(() => {
+    if (initialStatus) return;
     const statusFromUrl = searchParams.get('status');
     if (statusFromUrl && ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'overdue', 'cleared', 'rejected', 'ready_for_disbursement', 'repeat_disbursal', 'ready_to_repeat_disbursal'].includes(statusFromUrl)) {
       setStatusFilter(statusFromUrl);
     }
-  }, [searchParams]);
+  }, [searchParams, initialStatus]);
 
   // Memoized callbacks to prevent re-renders
   const handleSort = useCallback((field: string) => {

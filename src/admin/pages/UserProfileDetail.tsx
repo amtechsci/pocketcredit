@@ -216,7 +216,7 @@ export function UserProfileDetail() {
   const [loadingChargeHistory, setLoadingChargeHistory] = useState(false);
   const [recheckingChargeStatus, setRecheckingChargeStatus] = useState<{ [key: string]: boolean }>({});
 
-  const { canEditUsers, currentUser } = useAdmin();
+  const { canEditUsers, currentUser, shouldHideTransactionTab, isDebtAgency, isNbfcAdmin, shouldMaskMobile } = useAdmin();
 
   // Debug admin context (commented out to reduce console noise)
 
@@ -1933,7 +1933,7 @@ export function UserProfileDetail() {
     );
   }
 
-  const tabs = [
+  const allTabs = [
     { id: 'personal', label: 'Personal', icon: User },
     { id: 'kyc', label: 'KYC Details', icon: CheckCircle },
     { id: 'documents', label: 'Documents', icon: FileText },
@@ -1954,6 +1954,19 @@ export function UserProfileDetail() {
     { id: 'accounts', label: 'Accounts', icon: Wallet },
     { id: 'enach', label: 'E-NACH', icon: CreditCard },
   ];
+  const debtAgencyHiddenTabIds = ['kyc', 'documents', 'bank', 'applied-loans', 'transactions', 'validation', 'credit-analytics', 'profile-comments', 'enach'];
+  const tabs = allTabs.filter((tab) => {
+    if (shouldHideTransactionTab && tab.id === 'transactions') return false;
+    if (isDebtAgency && debtAgencyHiddenTabIds.includes(tab.id)) return false;
+    return true;
+  });
+
+  useEffect(() => {
+    const visibleIds = tabs.map((t) => t.id);
+    if (visibleIds.length && !visibleIds.includes(activeTab)) {
+      setActiveTab(visibleIds[0]);
+    }
+  }, [shouldHideTransactionTab, isDebtAgency, activeTab]);
 
   const handleRefetchKYC = async () => {
     if (!params.userId) return;
