@@ -1961,12 +1961,14 @@ export function UserProfileDetail() {
     return true;
   });
 
+  // When visible tabs change (e.g. role hides Transaction), switch to first visible if current is hidden
   useEffect(() => {
     const visibleIds = tabs.map((t) => t.id);
     if (visibleIds.length && !visibleIds.includes(activeTab)) {
       setActiveTab(visibleIds[0]);
     }
-  }, [shouldHideTransactionTab, isDebtAgency, activeTab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run when visibility rules change, not on every activeTab change (avoids re-render loop)
+  }, [shouldHideTransactionTab, isDebtAgency]);
 
   const handleRefetchKYC = async () => {
     if (!params.userId) return;
