@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const { authenticateAdmin } = require('../middleware/auth');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
-const { redistributeOnDeactivate } = require('../services/adminAssignmentService');
+const { redistributeOnDeactivate, redistributeOnNewSubAdmin, syncTempAssignmentsForCategory } = require('../services/adminAssignmentService');
 const router = express.Router();
 
 const VALID_ADMIN_ROLES = ['superadmin', 'manager', 'officer', 'super_admin', 'master_admin', 'nbfc_admin', 'sub_admin'];
@@ -17,6 +17,34 @@ const ensureDbInitialized = async () => {
     dbInitialized = true;
   }
 };
+
+const ADMIN_SELECT_WITH_LEAVE = 'id, name, email, role, sub_admin_category, whitelisted_ip, weekly_off_days, temp_inactive_from, temp_inactive_to, permissions, is_active, last_login, created_at, updated_at';
+const ADMIN_SELECT_WITHOUT_LEAVE = 'id, name, email, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at';
+
+async function getAdminById(id) {
+  try {
+    const rows = await executeQuery(
+      `SELECT ${ADMIN_SELECT_WITH_LEAVE} FROM admins WHERE id = ?`,
+      [id]
+    );
+    return rows[0] || null;
+  } catch (err) {
+    if (err.errno === 1054 && err.sqlMessage && err.sqlMessage.includes('weekly_off_days')) {
+      const rows = await executeQuery(
+        `SELECT ${ADMIN_SELECT_WITHOUT_LEAVE} FROM admins WHERE id = ?`,
+        [id]
+      );
+      const row = rows[0] || null;
+      if (row) {
+        row.weekly_off_days = null;
+        row.temp_inactive_from = null;
+        row.temp_inactive_to = null;
+      }
+      return row;
+    }
+    throw err;
+  }
+}
 
 // Helper function to log admin activity
 const logAdminActivity = async (adminId, action, metadata = {}) => {
@@ -57,31 +85,20 @@ router.get('/', authenticateAdmin, async (req, res) => {
     const { page = 1, limit = 50, role, search } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    // Build query
-    let query = `
-      SELECT 
-        id, name, email, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at
-      FROM admins
-      WHERE 1=1
-    `;
+    const selectWithLeave = 'id, name, email, role, sub_admin_category, whitelisted_ip, weekly_off_days, temp_inactive_from, temp_inactive_to, permissions, is_active, last_login, created_at, updated_at';
+    const selectWithoutLeave = 'id, name, email, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at';
+
+    let whereClause = ' WHERE 1=1';
+    if (role && role !== 'all') whereClause += ' AND role = ?';
+    if (search) whereClause += ' AND (name LIKE ? OR email LIKE ?)';
+    const orderLimit = ` ORDER BY created_at DESC LIMIT ${parseInt(limit)} OFFSET ${offset}`;
     const params = [];
-
-    // Filter by role
-    if (role && role !== 'all') {
-      query += ' AND role = ?';
-      params.push(role);
-    }
-
-    // Search by name or email
+    if (role && role !== 'all') params.push(role);
     if (search) {
-      query += ' AND (name LIKE ? OR email LIKE ?)';
       const searchTerm = `%${search}%`;
       params.push(searchTerm, searchTerm);
     }
-
-    // Order by created_at desc
-    // Note: LIMIT and OFFSET must be integers in the query string, not placeholders
-    query += ` ORDER BY created_at DESC LIMIT ${parseInt(limit)} OFFSET ${offset}`;
+    const query = `SELECT ${selectWithLeave} FROM admins${whereClause}${orderLimit}`;
 
     // Get total count
     let countQuery = 'SELECT COUNT(*) as total FROM admins WHERE 1=1';
@@ -98,10 +115,25 @@ router.get('/', authenticateAdmin, async (req, res) => {
       countParams.push(searchTerm, searchTerm);
     }
 
-    const [admins, countResult] = await Promise.all([
-      executeQuery(query, params),
-      executeQuery(countQuery, countParams)
-    ]);
+    let admins;
+    let countResult;
+    try {
+      [admins, countResult] = await Promise.all([
+        executeQuery(query, params),
+        executeQuery(countQuery, countParams)
+      ]);
+    } catch (err) {
+      if (err.errno === 1054 && err.sqlMessage && err.sqlMessage.includes('weekly_off_days')) {
+        const queryFallback = `SELECT ${selectWithoutLeave} FROM admins${whereClause}${orderLimit}`;
+        [admins, countResult] = await Promise.all([
+          executeQuery(queryFallback, params),
+          executeQuery(countQuery, countParams)
+        ]);
+        admins = (admins || []).map(a => ({ ...a, weekly_off_days: null, temp_inactive_from: null, temp_inactive_to: null }));
+      } else {
+        throw err;
+      }
+    }
 
     const total = countResult[0].total;
 
@@ -131,6 +163,118 @@ router.get('/', authenticateAdmin, async (req, res) => {
       status: 'error',
       message: 'Failed to fetch team members'
     });
+  }
+});
+
+/**
+ * POST /api/admin/team/redistribute
+ * Manually trigger redistribution of assignments for a sub-admin category.
+ * Body: { category: 'verify_user' | 'qa_user' | 'account_manager' | 'recovery_officer' }
+ */
+router.post('/redistribute', authenticateAdmin, async (req, res) => {
+  if (req.admin.role !== 'superadmin' && req.admin.role !== 'super_admin' && !req.admin.permissions?.includes('manage_officers')) {
+    return res.status(403).json({
+      status: 'error',
+      message: 'Permission denied'
+    });
+  }
+  const category = req.body?.category;
+  const allowed = ['verify_user', 'qa_user', 'account_manager', 'recovery_officer'];
+  if (!category || !allowed.includes(category)) {
+    return res.status(400).json({
+      status: 'error',
+      message: 'Invalid or missing category. Use one of: ' + allowed.join(', ')
+    });
+  }
+  try {
+    await ensureDbInitialized();
+    await redistributeOnNewSubAdmin(category);
+    res.json({
+      status: 'success',
+      message: `Assignments redistributed for ${category}. All active ${category.replace('_', ' ')}s now have a fair share.`
+    });
+  } catch (err) {
+    console.error('Redistribute error:', err);
+    res.status(500).json({
+      status: 'error',
+      message: err.message || 'Failed to redistribute assignments'
+    });
+  }
+});
+
+/**
+ * GET /api/admin/team/me
+ * Get current admin's profile (for leave settings). Any authenticated admin.
+ */
+router.get('/me', authenticateAdmin, async (req, res) => {
+  try {
+    const admin = await getAdminById(req.admin.id);
+    if (!admin) {
+      return res.status(404).json({ status: 'error', message: 'Admin not found' });
+    }
+    admin.permissions = Array.isArray(admin.permissions) ? admin.permissions : (admin.permissions ? JSON.parse(admin.permissions) : []);
+    res.json({ status: 'success', data: { admin } });
+  } catch (err) {
+    console.error('Get me error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch profile' });
+  }
+});
+
+/**
+ * PUT /api/admin/team/me/leave
+ * Update current admin's own weekly off and leave date range. Any authenticated sub-admin (except debt_agency).
+ */
+router.put('/me/leave', authenticateAdmin, async (req, res) => {
+  if (req.admin.role !== 'sub_admin' || req.admin.sub_admin_category === 'debt_agency') {
+    return res.status(403).json({
+      status: 'error',
+      message: 'Only sub-admins (except Debt Agency) can set leave'
+    });
+  }
+  const { weekly_off_days: weeklyOffDays, temp_inactive_from: tempInactiveFrom, temp_inactive_to: tempInactiveTo } = req.body;
+  try {
+    await ensureDbInitialized();
+    const updates = [];
+    const params = [];
+    if (weeklyOffDays !== undefined) {
+      const val = Array.isArray(weeklyOffDays) ? weeklyOffDays.filter(d => d !== '' && d != null).join(',') : (weeklyOffDays === '' || weeklyOffDays == null ? null : String(weeklyOffDays));
+      updates.push('weekly_off_days = ?');
+      params.push(val || null);
+    }
+    if (tempInactiveFrom !== undefined) {
+      updates.push('temp_inactive_from = ?');
+      params.push(tempInactiveFrom === '' || tempInactiveFrom == null ? null : tempInactiveFrom);
+    }
+    if (tempInactiveTo !== undefined) {
+      updates.push('temp_inactive_to = ?');
+      params.push(tempInactiveTo === '' || tempInactiveTo == null ? null : tempInactiveTo);
+    }
+    if (updates.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'No leave fields to update' });
+    }
+    params.push(req.admin.id);
+    await executeQuery(
+      `UPDATE admins SET ${updates.join(', ')}, updated_at = NOW() WHERE id = ?`,
+      params
+    );
+    const category = req.admin.sub_admin_category;
+    if (category) {
+      try {
+        await syncTempAssignmentsForCategory(category);
+      } catch (e) {
+        console.error('Sync temp assignments on self leave update failed:', e);
+      }
+    }
+    const admin = await getAdminById(req.admin.id);
+    admin.permissions = Array.isArray(admin.permissions) ? admin.permissions : (admin.permissions ? JSON.parse(admin.permissions) : []);
+    res.json({
+      status: 'success',
+      message: 'Leave settings updated',
+      data: { admin }
+    });
+  } catch (err) {
+    console.error('Update my leave error:', err);
+    res.status(500).json({ status: 'error', message: err.message || 'Failed to update leave' });
   }
 });
 
@@ -193,19 +337,13 @@ router.get('/:id', authenticateAdmin, async (req, res) => {
     await ensureDbInitialized();
     const { id } = req.params;
 
-    const admins = await executeQuery(
-      'SELECT id, name, email, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
-      [id]
-    );
-
-    if (admins.length === 0) {
+    const admin = await getAdminById(id);
+    if (!admin) {
       return res.status(404).json({
         status: 'error',
         message: 'Admin not found'
       });
     }
-
-    const admin = admins[0];
     admin.permissions = Array.isArray(admin.permissions)
       ? admin.permissions
       : (admin.permissions ? JSON.parse(admin.permissions) : []);
@@ -397,6 +535,15 @@ router.post('/', authenticateAdmin, async (req, res) => {
       JSON.stringify(finalPermissions)
     ]);
 
+    // When a new sub-admin joins, redistribute existing assignments so the new person gets a share
+    if (role === 'sub_admin' && subCategory && subCategory !== 'debt_agency') {
+      try {
+        await redistributeOnNewSubAdmin(subCategory);
+      } catch (redistErr) {
+        console.error('Redistribution on new sub-admin failed:', redistErr);
+      }
+    }
+
     // Log activity
     await logAdminActivity(req.admin.id, 'created_admin', {
       admin_id: adminId,
@@ -407,12 +554,7 @@ router.post('/', authenticateAdmin, async (req, res) => {
     });
 
     // Get created admin
-    const newAdmins = await executeQuery(
-      'SELECT id, name, email, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
-      [adminId]
-    );
-
-    const newAdmin = newAdmins[0];
+    const newAdmin = await getAdminById(adminId);
     newAdmin.permissions = Array.isArray(newAdmin.permissions)
       ? newAdmin.permissions
       : JSON.parse(newAdmin.permissions || '[]');
@@ -466,7 +608,7 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       });
     }
 
-    const { name, email, role, permissions, phone, department, is_active, sub_admin_category, whitelisted_ip } = req.body;
+    const { name, email, role, permissions, phone, department, is_active, sub_admin_category, whitelisted_ip, weekly_off_days: weeklyOffDays, temp_inactive_from: tempInactiveFrom, temp_inactive_to: tempInactiveTo } = req.body;
 
     // Build update query dynamically
     const updates = [];
@@ -559,6 +701,21 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       params.push(is_active ? 1 : 0);
     }
 
+    // Temporary inactive (leave): weekly off and/or date range
+    if (weeklyOffDays !== undefined) {
+      const val = Array.isArray(weeklyOffDays) ? weeklyOffDays.filter(d => d !== '' && d != null).join(',') : (weeklyOffDays === '' || weeklyOffDays == null ? null : String(weeklyOffDays));
+      updates.push('weekly_off_days = ?');
+      params.push(val || null);
+    }
+    if (tempInactiveFrom !== undefined) {
+      updates.push('temp_inactive_from = ?');
+      params.push(tempInactiveFrom === '' || tempInactiveFrom == null ? null : tempInactiveFrom);
+    }
+    if (tempInactiveTo !== undefined) {
+      updates.push('temp_inactive_to = ?');
+      params.push(tempInactiveTo === '' || tempInactiveTo == null ? null : tempInactiveTo);
+    }
+
     if (updates.length === 0) {
       return res.status(400).json({
         status: 'error',
@@ -569,10 +726,26 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
     updates.push('updated_at = NOW()');
     params.push(id);
 
-    await executeQuery(
-      `UPDATE admins SET ${updates.join(', ')} WHERE id = ?`,
-      params
-    );
+    try {
+      await executeQuery(
+        `UPDATE admins SET ${updates.join(', ')} WHERE id = ?`,
+        params
+      );
+    } catch (updateErr) {
+      if (updateErr.errno === 1054 && updateErr.sqlMessage && updateErr.sqlMessage.includes('weekly_off_days')) {
+        const leaveKeys = ['weekly_off_days', 'temp_inactive_from', 'temp_inactive_to'];
+        const updatesNoLeave = updates.filter(u => !leaveKeys.some(k => u.startsWith(k + ' =')));
+        const paramIndicesToDrop = [];
+        updates.forEach((u, i) => { if (leaveKeys.some(k => u.startsWith(k + ' ='))) paramIndicesToDrop.push(i); });
+        const paramsNoLeave = params.filter((_, i) => !paramIndicesToDrop.includes(i));
+        await executeQuery(
+          `UPDATE admins SET ${updatesNoLeave.join(', ')} WHERE id = ?`,
+          paramsNoLeave
+        );
+      } else {
+        throw updateErr;
+      }
+    }
 
     // When deactivating a sub-admin, redistribute their assigned IDs to other active sub-admins
     if (is_active === false && wasActive && targetRole === 'sub_admin' && targetCategory) {
@@ -583,6 +756,17 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       }
     }
 
+    // When leave (temp inactive) settings change: sync temp assignments only (no permanent reassign).
+    // Admins on leave get temp_assigned_* set on their loans; when back, temp_assigned is cleared.
+    const leaveFieldsUpdated = weeklyOffDays !== undefined || tempInactiveFrom !== undefined || tempInactiveTo !== undefined;
+    if (leaveFieldsUpdated && targetRole === 'sub_admin' && targetCategory && targetCategory !== 'debt_agency') {
+      try {
+        await syncTempAssignmentsForCategory(targetCategory);
+      } catch (err) {
+        console.error('Sync temp assignments on leave update failed:', err);
+      }
+    }
+
     // Log activity
     await logAdminActivity(req.admin.id, 'updated_admin', {
       admin_id: id,
@@ -590,12 +774,7 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
     });
 
     // Get updated admin
-    const updatedAdmins = await executeQuery(
-      'SELECT id, name, email, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at FROM admins WHERE id = ?',
-      [id]
-    );
-
-    const updatedAdmin = updatedAdmins[0];
+    const updatedAdmin = await getAdminById(id);
     updatedAdmin.permissions = Array.isArray(updatedAdmin.permissions)
       ? updatedAdmin.permissions
       : JSON.parse(updatedAdmin.permissions || '[]');

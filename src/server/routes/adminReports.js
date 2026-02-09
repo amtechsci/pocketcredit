@@ -186,8 +186,8 @@ const escapeCSV = (value, preserveLeadingZero = false) => {
     return str;
 };
 
-/** CIBIL CSV column indices (0-based) to prefix with tab so Excel keeps leading zeros: DOB, State, PIN, Address Category, dates, Account Type, Ownership */
-const CIBIL_FORCE_QUOTE_INDICES = [1, 24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35, 36, 37];
+/** CIBIL CSV column indices (0-based) to prefix with tab + quote so Excel keeps leading zeros: DOB, State, PIN, Address Category, dates (opened, last payment, closed, reported), Account Type, Ownership */
+const CIBIL_FORCE_QUOTE_INDICES = [1, 24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40];
 
 /**
  * GET /api/admin/reports/cibil/disbursal

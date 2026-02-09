@@ -118,7 +118,15 @@ router.get('/', authenticateAdmin, async (req, res) => {
         COALESCE(lp.plan_code, '') as plan_code,
         COALESCE(lp.plan_name, '') as plan_name,
         la.extension_status,
-        la.extension_count
+        la.extension_count,
+        la.assigned_verify_admin_id,
+        la.temp_assigned_verify_admin_id,
+        la.assigned_qa_admin_id,
+        la.temp_assigned_qa_admin_id,
+        la.assigned_account_manager_id,
+        la.temp_assigned_account_manager_id,
+        la.assigned_recovery_officer_id,
+        la.temp_assigned_recovery_officer_id
       FROM loan_applications la
       LEFT JOIN users u ON la.user_id = u.id
       LEFT JOIN (
@@ -206,22 +214,22 @@ router.get('/', authenticateAdmin, async (req, res) => {
     if (req.admin?.role === 'sub_admin' && subCategory) {
       const adminId = req.admin.id;
       if (subCategory === 'verify_user') {
-        whereConditions.push('la.assigned_verify_admin_id = ?');
-        queryParams.push(adminId);
+        whereConditions.push('(la.assigned_verify_admin_id = ? OR la.temp_assigned_verify_admin_id = ?)');
+        queryParams.push(adminId, adminId);
         if (!status || status === 'all') {
           whereConditions.push("la.status IN ('submitted','under_review','follow_up','disbursal','ready_for_disbursement')");
         }
       } else if (subCategory === 'qa_user') {
-        whereConditions.push('la.assigned_qa_admin_id = ?');
-        queryParams.push(adminId);
+        whereConditions.push('(la.assigned_qa_admin_id = ? OR la.temp_assigned_qa_admin_id = ?)');
+        queryParams.push(adminId, adminId);
         whereConditions.push("la.status IN ('disbursal','ready_for_disbursement')");
       } else if (subCategory === 'account_manager') {
-        whereConditions.push('la.assigned_account_manager_id = ?');
-        queryParams.push(adminId);
+        whereConditions.push('(la.assigned_account_manager_id = ? OR la.temp_assigned_account_manager_id = ?)');
+        queryParams.push(adminId, adminId);
         whereConditions.push("la.status IN ('account_manager')");
       } else if (subCategory === 'recovery_officer') {
-        whereConditions.push('la.assigned_recovery_officer_id = ?');
-        queryParams.push(adminId);
+        whereConditions.push('(la.assigned_recovery_officer_id = ? OR la.temp_assigned_recovery_officer_id = ?)');
+        queryParams.push(adminId, adminId);
         whereConditions.push("la.status = 'overdue'");
       }
     }
@@ -301,6 +309,12 @@ router.get('/', authenticateAdmin, async (req, res) => {
       throw queryError;
     }
 
+    // For sub-admin: determine assignment type (primary = my assign, temp = temp assign)
+    const adminId = req.admin?.id;
+    const subCat = req.admin?.sub_admin_category;
+    const assignedCol = subCat === 'verify_user' ? 'assigned_verify_admin_id' : subCat === 'qa_user' ? 'assigned_qa_admin_id' : subCat === 'account_manager' ? 'assigned_account_manager_id' : subCat === 'recovery_officer' ? 'assigned_recovery_officer_id' : null;
+    const tempCol = subCat === 'verify_user' ? 'temp_assigned_verify_admin_id' : subCat === 'qa_user' ? 'temp_assigned_qa_admin_id' : subCat === 'account_manager' ? 'temp_assigned_account_manager_id' : subCat === 'recovery_officer' ? 'temp_assigned_recovery_officer_id' : null;
+
     // Transform the data to match the expected format
     const applicationsWithUserData = applications.map(app => {
       // Parse fees_breakdown JSON if available
@@ -317,6 +331,12 @@ router.get('/', authenticateAdmin, async (req, res) => {
       
       // Loan ID: PLL + loan_application.id (unique)
       const shortLoanId = `PLL${app.id}`;
+
+      let assignmentType = null;
+      if (req.admin?.role === 'sub_admin' && adminId && assignedCol && tempCol) {
+        if (app[assignedCol] === adminId) assignmentType = 'primary';
+        else if (app[tempCol] === adminId) assignmentType = 'temp';
+      }
 
       return {
         id: app.applicationNumber || app.id,
@@ -349,6 +369,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
         pincode: app.pincode || '000000', // Use actual pincode
         assignedManager: 'Unassigned', // This would need to be added to the database
         recoveryOfficer: 'Unassigned', // This would need to be added to the database
+        assignmentType: assignmentType,
         // Additional real data fields
         dateOfBirth: app.date_of_birth,
         gender: app.gender,
@@ -1447,53 +1468,74 @@ router.put('/:applicationId/loan-plan', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Get application statistics
+// Get application statistics (for sub_admins: only assigned-to-me counts)
 router.get('/stats/overview', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
-    
-    // Get total applications
-    const totalResult = await executeQuery('SELECT COUNT(*) as total FROM loan_applications');
-    const total = totalResult[0].total;
-    
-    // Get status breakdown
-    const statusResult = await executeQuery(`
-      SELECT 
-        status,
-        COUNT(*) as count
-      FROM loan_applications 
-      GROUP BY status
-    `);
-    
-    const statusCounts = {};
-    statusResult.forEach(row => {
-      statusCounts[row.status] = row.count;
-    });
-    
-    // Get loan type breakdown
-    const typeResult = await executeQuery(`
-      SELECT 
-        loan_purpose,
-        COUNT(*) as count
-      FROM loan_applications 
-      GROUP BY loan_purpose
-    `);
-    
-    const typeCounts = {};
-    typeResult.forEach(row => {
-      typeCounts[row.loan_purpose] = row.count;
-    });
-    
-    // Get total and average amounts
-    const amountResult = await executeQuery(`
-      SELECT 
-        SUM(loan_amount) as totalAmount,
-        AVG(loan_amount) as averageAmount
-      FROM loan_applications
-    `);
-    
+
+    const isSubAdmin = req.admin?.role === 'sub_admin';
+    const subCat = req.admin?.sub_admin_category;
+    const adminId = req.admin?.id;
+
+    let total = 0;
+    let statusCounts = {};
+    let typeCounts = {};
+    let amountResult = [{ totalAmount: 0, averageAmount: 0 }];
+
+    if (isSubAdmin && subCat && adminId) {
+      // Sub-admin: return only assigned counts (or for debt_agency, total overdue)
+      if (subCat === 'debt_agency') {
+        const overdueResult = await executeQuery(
+          "SELECT COUNT(*) as total FROM loan_applications WHERE status = 'overdue'"
+        );
+        total = overdueResult[0]?.total || 0;
+        statusCounts = { overdue: total };
+      } else {
+        const assignedCol = subCat === 'verify_user' ? 'assigned_verify_admin_id' : subCat === 'qa_user' ? 'assigned_qa_admin_id' : subCat === 'account_manager' ? 'assigned_account_manager_id' : subCat === 'recovery_officer' ? 'assigned_recovery_officer_id' : null;
+        const tempCol = subCat === 'verify_user' ? 'temp_assigned_verify_admin_id' : subCat === 'qa_user' ? 'temp_assigned_qa_admin_id' : subCat === 'account_manager' ? 'temp_assigned_account_manager_id' : subCat === 'recovery_officer' ? 'temp_assigned_recovery_officer_id' : null;
+        if (assignedCol && tempCol) {
+          const statusResult = await executeQuery(
+            `SELECT status, COUNT(*) as count FROM loan_applications la
+             WHERE (la.${assignedCol} = ? OR la.${tempCol} = ?)
+             GROUP BY status`,
+            [adminId, adminId]
+          );
+          statusResult.forEach(row => {
+            statusCounts[row.status] = row.count;
+            total += Number(row.count);
+          });
+        }
+      }
+    } else {
+      // Full admin: global counts
+      const totalResult = await executeQuery('SELECT COUNT(*) as total FROM loan_applications');
+      total = totalResult[0].total;
+
+      const statusResult = await executeQuery(`
+        SELECT status, COUNT(*) as count
+        FROM loan_applications
+        GROUP BY status
+      `);
+      statusResult.forEach(row => {
+        statusCounts[row.status] = row.count;
+      });
+
+      const typeResult = await executeQuery(`
+        SELECT loan_purpose, COUNT(*) as count
+        FROM loan_applications
+        GROUP BY loan_purpose
+      `);
+      typeResult.forEach(row => {
+        typeCounts[row.loan_purpose] = row.count;
+      });
+
+      amountResult = await executeQuery(`
+        SELECT SUM(loan_amount) as totalAmount, AVG(loan_amount) as averageAmount
+        FROM loan_applications
+      `);
+    }
+
     const stats = {
-      // Frontend expected field names
       totalApplications: total,
       submittedApplications: statusCounts['submitted'] || 0,
       pendingApplications: statusCounts['under_review'] || 0,
@@ -1506,9 +1548,7 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       accountManagerApplications: statusCounts['account_manager'] || 0,
       overdueApplications: statusCounts['overdue'] || 0,
       clearedApplications: statusCounts['cleared'] || 0,
-      newApplications: statusCounts['submitted'] || 0, // New applications are typically submitted
-      
-      // Legacy field names for backward compatibility
+      newApplications: statusCounts['submitted'] || 0,
       total: total,
       applied: statusCounts['applied'] || 0,
       underReview: statusCounts['under_review'] || 0,
@@ -1517,8 +1557,8 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       pendingDocuments: statusCounts['pending_documents'] || 0,
       personalLoans: typeCounts['Personal'] || 0,
       businessLoans: typeCounts['Business'] || 0,
-      totalAmount: parseFloat(amountResult[0].totalAmount) || 0,
-      averageAmount: parseFloat(amountResult[0].averageAmount) || 0
+      totalAmount: parseFloat(amountResult[0]?.totalAmount) || 0,
+      averageAmount: parseFloat(amountResult[0]?.averageAmount) || 0
     };
 
     res.json({

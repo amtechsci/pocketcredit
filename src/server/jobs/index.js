@@ -10,6 +10,7 @@ const cronLogger = require('../services/cronLogger');
 const { calculateLoanInterestAndPenalty } = require('./loanCalculationJob');
 const { updateOverdueLoans } = require('./updateOverdueLoans');
 const { runSMSNotificationJob } = require('./smsNotificationJob');
+const { runSyncTempAssignments } = require('./syncTempAssignmentsJob');
 
 /**
  * Register all scheduled jobs
@@ -35,6 +36,15 @@ async function registerJobs() {
   }, {
     timezone: 'Asia/Kolkata', // IST
     runOnInit: false // Don't run on server start
+  });
+
+  // Sync temp assignments (leave cover) - daily at 00:05 IST
+  // Clears temp_assigned when leave date range ends; applies temp cover when on leave
+  cronManager.daily('00:05', 'sync-temp-assignments', async () => {
+    await runSyncTempAssignments();
+  }, {
+    timezone: 'Asia/Kolkata', // IST
+    runOnInit: false
   });
 
   // SMS Notification Job - DISABLED (OneXtel API authentication needs configuration)

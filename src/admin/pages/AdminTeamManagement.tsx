@@ -45,6 +45,9 @@ interface AdminUser {
   department?: string;
   sub_admin_category?: string | null;
   whitelisted_ip?: string | null;
+  weekly_off_days?: string | number[] | null;
+  temp_inactive_from?: string | null;
+  temp_inactive_to?: string | null;
 }
 
 interface ActivityLog {
@@ -97,6 +100,9 @@ export function AdminTeamManagement() {
   const [showViewModal, setShowViewModal] = useState(false);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
   const [showBulkActionsModal, setShowBulkActionsModal] = useState(false);
+  const [showReassignModal, setShowReassignModal] = useState(false);
+  const [reassignCategory, setReassignCategory] = useState('');
+  const [reassigning, setReassigning] = useState(false);
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
   const [viewingUser, setViewingUser] = useState<AdminUser | null>(null);
@@ -140,7 +146,10 @@ export function AdminTeamManagement() {
     department: '',
     is_active: true,
     sub_admin_category: '' as string,
-    whitelisted_ip: ''
+    whitelisted_ip: '',
+    weekly_off_days: [] as number[],
+    temp_inactive_from: '',
+    temp_inactive_to: ''
   });
 
   const [permissionsFormData, setPermissionsFormData] = useState<string[]>([]);
@@ -183,7 +192,10 @@ export function AdminTeamManagement() {
           phone: admin.phone,
           department: admin.department,
           sub_admin_category: admin.sub_admin_category ?? null,
-          whitelisted_ip: admin.whitelisted_ip ?? null
+          whitelisted_ip: admin.whitelisted_ip ?? null,
+          weekly_off_days: admin.weekly_off_days ?? null,
+          temp_inactive_from: admin.temp_inactive_from ?? null,
+          temp_inactive_to: admin.temp_inactive_to ?? null
         }));
         setTeamMembers(transformedMembers);
       }
@@ -249,6 +261,25 @@ export function AdminTeamManagement() {
     }
   };
 
+  // 0=Sun, 1=Mon, ... 6=Sat. Same logic as backend.
+  const isOnLeaveToday = (member: AdminUser): boolean => {
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const todayStr = today.toISOString().slice(0, 10);
+    if (member.weekly_off_days) {
+      const days = Array.isArray(member.weekly_off_days)
+        ? member.weekly_off_days
+        : String(member.weekly_off_days).split(',').map(d => parseInt(String(d).trim(), 10)).filter(n => !Number.isNaN(n));
+      if (days.includes(dayOfWeek)) return true;
+    }
+    if (member.temp_inactive_from && member.temp_inactive_to) {
+      const from = String(member.temp_inactive_from).slice(0, 10);
+      const to = String(member.temp_inactive_to).slice(0, 10);
+      if (todayStr >= from && todayStr <= to) return true;
+    }
+    return false;
+  };
+
   const getRolePermissions = (role: string) => {
     switch (role) {
       case 'superadmin':
@@ -274,6 +305,33 @@ export function AdminTeamManagement() {
     { value: 'recovery_officer', label: 'Recovery Officer' },
     { value: 'debt_agency', label: 'Debt Agency' }
   ];
+
+  const REDISTRIBUTE_CATEGORIES = SUB_ADMIN_CATEGORIES.filter(c => c.value !== 'debt_agency');
+
+  const handleRedistribute = async () => {
+    if (!reassignCategory) return;
+    try {
+      setReassigning(true);
+      setError(null);
+      const response = await adminApiService.redistributeSubAdminAssignments(reassignCategory);
+      if (response.status === 'success') {
+        setShowReassignModal(false);
+        setReassignCategory('');
+        await fetchTeamMembers();
+        if (typeof (window as any).toast?.success === 'function') {
+          (window as any).toast.success(response.message || 'Assignments redistributed.');
+        } else {
+          alert(response.message || 'Assignments redistributed.');
+        }
+      } else {
+        setError((response as any).message || 'Redistribution failed');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to redistribute');
+    } finally {
+      setReassigning(false);
+    }
+  };
 
   const filteredMembers = teamMembers.filter(member => {
     const matchesSearch = member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -328,6 +386,12 @@ export function AdminTeamManagement() {
 
   const handleEditUser = (user: AdminUser) => {
     setEditingUser(user);
+    const weeklyOff = user.weekly_off_days;
+    const weeklyArr = weeklyOff == null || weeklyOff === ''
+      ? []
+      : Array.isArray(weeklyOff)
+        ? weeklyOff
+        : String(weeklyOff).split(',').map(d => parseInt(d.trim(), 10)).filter(n => !Number.isNaN(n));
     setEditFormData({
       name: user.name,
       email: user.email,
@@ -337,7 +401,10 @@ export function AdminTeamManagement() {
       department: user.department || '',
       is_active: user.is_active !== false,
       sub_admin_category: user.sub_admin_category || '',
-      whitelisted_ip: user.whitelisted_ip || ''
+      whitelisted_ip: user.whitelisted_ip || '',
+      weekly_off_days: weeklyArr,
+      temp_inactive_from: user.temp_inactive_from ? String(user.temp_inactive_from).slice(0, 10) : '',
+      temp_inactive_to: user.temp_inactive_to ? String(user.temp_inactive_to).slice(0, 10) : ''
     });
     setShowEditModal(true);
   };
@@ -356,6 +423,9 @@ export function AdminTeamManagement() {
         payload.sub_admin_category = null;
         payload.whitelisted_ip = null;
       }
+      payload.weekly_off_days = editFormData.weekly_off_days.length ? editFormData.weekly_off_days : null;
+      payload.temp_inactive_from = editFormData.temp_inactive_from || null;
+      payload.temp_inactive_to = editFormData.temp_inactive_to || null;
       const response = await adminApiService.updateTeamMember(editingUser.id, payload);
 
       if (response.status === 'success') {
@@ -510,6 +580,14 @@ export function AdminTeamManagement() {
             Bulk Actions
           </button>
           <button
+            onClick={() => setShowReassignModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-amber-100 text-amber-800 rounded-md hover:bg-amber-200 transition-colors"
+            title="Redistribute assignments by sub-admin type"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Reassign
+          </button>
+          <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
           >
@@ -599,6 +677,12 @@ export function AdminTeamManagement() {
                       : member.role.replace(/_/g, ' ')}
                   </span>
                 </div>
+                {member.role === 'sub_admin' && member.sub_admin_category !== 'debt_agency' && isOnLeaveToday(member) && (
+                  <div className="flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                    <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-800">On leave</span>
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <span className="text-gray-600 text-sm">Permissions:</span>
@@ -686,6 +770,63 @@ export function AdminTeamManagement() {
       )}
 
       {/* Add User Modal */}
+      {/* Reassign by sub-admin category modal */}
+      {showReassignModal && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4 border border-gray-200 ring-1 ring-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-lg font-semibold text-gray-900">Reassign by sub-admin</h4>
+              <button
+                onClick={() => { setShowReassignModal(false); setReassignCategory(''); }}
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              Redistribute all applications/users for the selected type across all active sub-admins (including newly added). Choose the sub-admin category to reassign.
+            </p>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Sub-admin type</label>
+              <select
+                value={reassignCategory}
+                onChange={(e) => setReassignCategory(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="">Select type</option>
+                {REDISTRIBUTE_CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={handleRedistribute}
+                disabled={!reassignCategory || reassigning}
+                className="flex-1 px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+              >
+                {reassigning ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Reassigning...
+                  </>
+                ) : (
+                  'Reassign'
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowReassignModal(false); setReassignCategory(''); }}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showAddModal && (
         <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
@@ -999,6 +1140,66 @@ export function AdminTeamManagement() {
                 </div>
               )}
 
+              {editFormData.role === 'sub_admin' && editFormData.sub_admin_category && editFormData.sub_admin_category !== 'debt_agency' && (
+                <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-4">
+                  <h5 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                    <Calendar className="w-4 h-4" />
+                    Temporary inactive (leave)
+                  </h5>
+                  <p className="text-xs text-gray-600">Set weekly off or leave dates for this sub-admin. When set, they are excluded from assignments and their work is temporarily covered by others. Sub-admins can also update their own leave from the account menu (top right) → Leave settings.</p>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Weekly off (select days)</label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { v: 0, label: 'Sun' },
+                        { v: 1, label: 'Mon' },
+                        { v: 2, label: 'Tue' },
+                        { v: 3, label: 'Wed' },
+                        { v: 4, label: 'Thu' },
+                        { v: 5, label: 'Fri' },
+                        { v: 6, label: 'Sat' }
+                      ].map(({ v, label }) => (
+                        <label key={v} className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md bg-white hover:bg-gray-50">
+                          <input
+                            type="checkbox"
+                            checked={editFormData.weekly_off_days.includes(v)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setEditFormData({ ...editFormData, weekly_off_days: [...editFormData.weekly_off_days, v].sort((a, b) => a - b) });
+                              } else {
+                                setEditFormData({ ...editFormData, weekly_off_days: editFormData.weekly_off_days.filter(d => d !== v) });
+                              }
+                            }}
+                            className="rounded border-gray-300"
+                          />
+                          <span className="text-sm">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Leave from (date)</label>
+                      <input
+                        type="date"
+                        value={editFormData.temp_inactive_from}
+                        onChange={(e) => setEditFormData({ ...editFormData, temp_inactive_from: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Leave to (date)</label>
+                      <input
+                        type="date"
+                        value={editFormData.temp_inactive_to}
+                        onChange={(e) => setEditFormData({ ...editFormData, temp_inactive_to: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-3 pt-4">
                 <button
                   type="submit"
@@ -1089,6 +1290,29 @@ export function AdminTeamManagement() {
                   <label className="text-sm font-medium text-gray-500">User ID</label>
                   <p className="text-gray-900 font-mono text-sm">{viewingUser.id}</p>
                 </div>
+                {viewingUser.role === 'sub_admin' && viewingUser.sub_admin_category !== 'debt_agency' && (viewingUser.weekly_off_days || viewingUser.temp_inactive_from) && (
+                  <div className="col-span-2">
+                    <label className="text-sm font-medium text-gray-500">Leave</label>
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                      {isOnLeaveToday(viewingUser) && (
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-amber-100 text-amber-800">On leave today</span>
+                      )}
+                      {viewingUser.weekly_off_days && (
+                        <span className="text-sm text-gray-700">
+                          Weekly off: {[0,1,2,3,4,5,6].filter(d => {
+                            const arr = Array.isArray(viewingUser.weekly_off_days) ? viewingUser.weekly_off_days : String(viewingUser.weekly_off_days).split(',').map(x => parseInt(x, 10));
+                            return arr.includes(d);
+                          }).map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join(', ')}
+                        </span>
+                      )}
+                      {viewingUser.temp_inactive_from && viewingUser.temp_inactive_to && (
+                        <span className="text-sm text-gray-700">
+                          Date range: {String(viewingUser.temp_inactive_from).slice(0, 10)} – {String(viewingUser.temp_inactive_to).slice(0, 10)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Permissions */}

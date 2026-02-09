@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { Search, Menu, Settings, LogOut, ChevronDown } from 'lucide-react';
+import { Search, Menu, Settings, LogOut, ChevronDown, Calendar } from 'lucide-react';
 import { AdminLogin } from './admin/AdminLogin';
 import { AdminDashboard } from './admin/pages/AdminDashboard';
 import { LoanApplicationsQueue } from './admin/pages/LoanApplicationsQueue';
@@ -9,6 +9,7 @@ import { AdminUsersPage } from './admin/pages/AdminUsersPage';
 import { PendingExtensionsPage } from './admin/pages/PendingExtensionsPage';
 import { ActivityLogsPage } from './admin/pages/ActivityLogsPage';
 import { AdminTeamManagement } from './admin/pages/AdminTeamManagement';
+import { MyLeavePage } from './admin/pages/MyLeavePage';
 import { AdminReports } from './admin/pages/AdminReports';
 import { AdminSettings } from './admin/pages/AdminSettings';
 import { SystemSettings } from './admin/pages/SystemSettings';
@@ -273,6 +274,15 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                       Settings
                     </DropdownMenuItem>
                   )}
+                  {currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category && currentUser.sub_admin_category !== 'debt_agency' && (
+                    <DropdownMenuItem
+                      onClick={() => navigate(`${BASE_PATH}/my-leave`)}
+                      className="cursor-pointer"
+                    >
+                      <Calendar className="mr-2 h-4 w-4" />
+                      Leave settings
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem
                     onClick={handleLogout}
                     className="cursor-pointer text-red-600 focus:text-red-700 focus:bg-red-50"
@@ -454,6 +464,11 @@ export default function AdminApp() {
         <Route path="team-management" element={
           <ProtectedRoute>
             <AdminTeamManagement />
+          </ProtectedRoute>
+        } />
+        <Route path="my-leave" element={
+          <ProtectedRoute>
+            <MyLeavePage />
           </ProtectedRoute>
         } />
         <Route path="reports" element={

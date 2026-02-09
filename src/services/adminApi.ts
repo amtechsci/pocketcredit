@@ -2049,6 +2049,9 @@ class AdminApiService {
     is_active?: boolean;
     sub_admin_category?: string | null;
     whitelisted_ip?: string | null;
+    weekly_off_days?: number[] | string | null;
+    temp_inactive_from?: string | null;
+    temp_inactive_to?: string | null;
   }): Promise<ApiResponse<{
     admin: {
       id: string;
@@ -2086,6 +2089,32 @@ class AdminApiService {
    */
   async deleteTeamMember(id: string): Promise<ApiResponse<any>> {
     return this.request('DELETE', `/team/${id}`);
+  }
+
+  /**
+   * Redistribute assignments for a sub-admin category (verify_user, qa_user, account_manager, recovery_officer).
+   * Splits all relevant loans across all active sub-admins of that category.
+   */
+  async redistributeSubAdminAssignments(category: string): Promise<ApiResponse<{ message: string }>> {
+    return this.request('POST', '/team/redistribute', { category });
+  }
+
+  /**
+   * Get current admin's profile (for leave settings).
+   */
+  async getMyAdminProfile(): Promise<ApiResponse<{ admin: any }>> {
+    return this.request('GET', '/team/me');
+  }
+
+  /**
+   * Update current admin's own weekly off and leave. Sub-admins only (except debt_agency).
+   */
+  async updateMyLeave(data: {
+    weekly_off_days?: number[] | string | null;
+    temp_inactive_from?: string | null;
+    temp_inactive_to?: string | null;
+  }): Promise<ApiResponse<{ admin: any; message: string }>> {
+    return this.request('PUT', '/team/me/leave', data);
   }
 
   // Policies Management

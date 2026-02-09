@@ -56,6 +56,8 @@ interface LoanApplication {
   city: string;
   state: string;
   pincode: string;
+  /** For sub-admin: 'primary' = my assign, 'temp' = temp assign (covering for someone on leave) */
+  assignmentType?: 'primary' | 'temp' | null;
 }
 
 interface ProfileComment {
@@ -75,6 +77,15 @@ interface LoanApplicationsQueueProps {
   initialStatus?: string;
 }
 
+// Per spec: which status tabs each sub-admin can see on Applications
+const SUB_ADMIN_ALLOWED_STATUSES: Record<string, string[]> = {
+  verify_user: ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'ready_for_disbursement'],
+  qa_user: ['all', 'disbursal', 'ready_for_disbursement'],
+  account_manager: ['all', 'repeat_disbursal', 'ready_to_repeat_disbursal'],
+  recovery_officer: ['all', 'overdue'],
+  debt_agency: ['all', 'overdue']
+};
+
 export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueueProps = {}) {
   const navigate = useNavigate();
   const params = useParams();
@@ -83,7 +94,13 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
   const [statusFilter, setStatusFilter] = useState(initialStatus || 'all');
   const [sortBy, setSortBy] = useState('applicationDate');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const { canApproveLoans, canRejectLoans } = useAdmin();
+  const { canApproveLoans, canRejectLoans, currentUser } = useAdmin();
+
+  const allowedStatuses: string[] | null =
+    currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category
+      ? (SUB_ADMIN_ALLOWED_STATUSES[currentUser.sub_admin_category] ?? null)
+      : null;
+  const canShowStatus = (status: string) => !allowedStatuses || allowedStatuses.includes(status);
 
   // Real data state
   const [applications, setApplications] = useState<LoanApplication[]>([]);
@@ -109,10 +126,25 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
   useEffect(() => {
     if (initialStatus) return;
     const statusFromUrl = searchParams.get('status');
-    if (statusFromUrl && ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'overdue', 'cleared', 'rejected', 'ready_for_disbursement', 'repeat_disbursal', 'ready_to_repeat_disbursal'].includes(statusFromUrl)) {
-      setStatusFilter(statusFromUrl);
+    const validStatuses = ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'overdue', 'cleared', 'rejected', 'ready_for_disbursement', 'repeat_disbursal', 'ready_to_repeat_disbursal'];
+    if (statusFromUrl && validStatuses.includes(statusFromUrl)) {
+      const allowed = currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category
+        ? (SUB_ADMIN_ALLOWED_STATUSES[currentUser.sub_admin_category] ?? null)
+        : null;
+      if (!allowed || allowed.includes(statusFromUrl)) {
+        setStatusFilter(statusFromUrl);
+      } else {
+        setStatusFilter(allowed[0] || 'all');
+      }
     }
-  }, [searchParams, initialStatus]);
+  }, [searchParams, initialStatus, currentUser?.role, currentUser?.sub_admin_category]);
+
+  // Enforce allowed status for sub-admins: if current filter is not allowed, reset to 'all'
+  useEffect(() => {
+    if (allowedStatuses && !allowedStatuses.includes(statusFilter)) {
+      setStatusFilter(allowedStatuses[0] || 'all');
+    }
+  }, [allowedStatuses, statusFilter]);
 
   // Memoized callbacks to prevent re-renders
   const handleSort = useCallback((field: string) => {
@@ -622,6 +654,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
         <div className="space-y-4">
           {/* Status Filter Buttons - First Row */}
           <div className="flex overflow-x-auto scrollbar-hide items-center gap-2 pb-2 -mx-3 sm:mx-0 px-3 sm:px-0">
+            {canShowStatus('all') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('all')}
@@ -642,6 +675,8 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 <Download className={`w-4 h-4 ${downloadingExcel === 'all' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
+            )}
+            {canShowStatus('submitted') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('submitted')}
@@ -662,6 +697,8 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 <Download className={`w-4 h-4 ${downloadingExcel === 'submitted' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
+            )}
+            {canShowStatus('under_review') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('under_review')}
@@ -682,6 +719,8 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 <Download className={`w-4 h-4 ${downloadingExcel === 'under_review' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
+            )}
+            {canShowStatus('follow_up') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('follow_up')}
@@ -702,6 +741,8 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 <Download className={`w-4 h-4 ${downloadingExcel === 'follow_up' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
+            )}
+            {canShowStatus('disbursal') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('disbursal')}
@@ -722,6 +763,8 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 <Download className={`w-4 h-4 ${downloadingExcel === 'disbursal' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
+            )}
+            {canShowStatus('ready_for_disbursement') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('ready_for_disbursement')}
@@ -742,6 +785,8 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 <Download className={`w-4 h-4 ${downloadingExcel === 'ready_for_disbursement' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
+            )}
+            {canShowStatus('repeat_disbursal') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('repeat_disbursal')}
@@ -762,6 +807,8 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 <Download className={`w-4 h-4 ${downloadingExcel === 'repeat_disbursal' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
+            )}
+            {canShowStatus('ready_to_repeat_disbursal') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('ready_to_repeat_disbursal')}
@@ -782,6 +829,8 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 <Download className={`w-4 h-4 ${downloadingExcel === 'ready_to_repeat_disbursal' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
+            )}
+            {canShowStatus('account_manager') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('account_manager')}
@@ -802,6 +851,8 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 <Download className={`w-4 h-4 ${downloadingExcel === 'account_manager' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
+            )}
+            {canShowStatus('overdue') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('overdue')}
@@ -822,6 +873,8 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 <Download className={`w-4 h-4 ${downloadingExcel === 'overdue' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
+            )}
+            {canShowStatus('cleared') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('cleared')}
@@ -842,6 +895,8 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 <Download className={`w-4 h-4 ${downloadingExcel === 'cleared' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
+            )}
+            {canShowStatus('rejected') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('rejected')}
@@ -862,6 +917,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 <Download className={`w-4 h-4 ${downloadingExcel === 'rejected' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
+            )}
           </div>
 
           {/* Search Bar - Second Row */}
@@ -890,7 +946,8 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
         </div>
       </div>
 
-      {/* Statistics Cards */}
+      {/* Statistics Cards – hidden for sub-admins; they only see assign counts on tabs */}
+      {currentUser?.role !== 'sub_admin' && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
           <div className="flex items-center justify-between">
@@ -952,6 +1009,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
           </div>
         </div>
       </div>
+      )}
 
       {/* Bulk Payout Action Bar */}
       {selectedApplications.length > 0 && (
@@ -1209,8 +1267,13 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                        application.cibilScore >= 650 ? 'Good' : 'Poor'}
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex flex-col gap-1">
+                      {application.assignmentType && (
+                        <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${application.assignmentType === 'primary' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'}`}>
+                          {application.assignmentType === 'primary' ? 'My assign' : 'Temp assign'}
+                        </span>
+                      )}
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColors[application.status] || 'bg-gray-100 text-gray-800'}`}>
                         {getStatusLabel(application.status)}
                       </span>
