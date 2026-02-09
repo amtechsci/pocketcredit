@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useLocation, Link } from 'react-router-dom';
 import { Search, Menu, Settings, LogOut, ChevronDown, Calendar } from 'lucide-react';
 import { AdminLogin } from './admin/AdminLogin';
 import { AdminDashboard } from './admin/pages/AdminDashboard';
@@ -188,16 +188,16 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
               <div className="flex items-center gap-2">
                 <Logo size="sm" variant="default" />
               </div>
-              {/* Desktop Navigation */}
+              {/* Desktop Navigation – use Link so right-click / Ctrl+click open in new tab */}
               <nav className="hidden md:flex items-center gap-4 lg:gap-6">
                 {navigationItems.map((item) => (
-                  <button
+                  <Link
                     key={item.path}
-                    onClick={() => navigate(item.path)}
+                    to={item.path}
                     className={`px-2 lg:px-3 py-2 rounded-md text-xs lg:text-sm font-medium transition-colors ${getActiveClasses(item.path, item.color)}`}
                   >
                     {item.label}
-                  </button>
+                  </Link>
                 ))}
               </nav>
               {/* Mobile Menu Button */}
@@ -304,16 +304,14 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
             </SheetHeader>
             <nav className="flex flex-col p-4 space-y-1">
               {navigationItems.map((item) => (
-                <button
+                <Link
                   key={item.path}
-                  onClick={() => {
-                    navigate(item.path);
-                    setMobileMenuOpen(false);
-                  }}
-                  className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium transition-colors ${getActiveClasses(item.path, item.color)} hover:bg-gray-50`}
+                  to={item.path}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium transition-colors ${getActiveClasses(item.path, item.color)} hover:bg-gray-50 block`}
                 >
                   {item.label}
-                </button>
+                </Link>
               ))}
             </nav>
             <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200 bg-gray-50">
