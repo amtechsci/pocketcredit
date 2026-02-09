@@ -81,12 +81,28 @@ const formatFullAddress = (loan) => {
 
 const formatDateDDMMYYYY = (dateStr) => {
     if (!dateStr) return '';
+    const s = String(dateStr).trim();
+    // Parse ISO date (YYYY-MM-DD or with time) as calendar date so timezone never drops leading zero or shifts day
+    const isoMatch = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+        const year = parseInt(isoMatch[1], 10);
+        const month = parseInt(isoMatch[2], 10);
+        const day = parseInt(isoMatch[3], 10);
+        if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            const dd = String(day).padStart(2, '0');
+            const mm = String(month).padStart(2, '0');
+            return `${dd}${mm}${year}`;
+        }
+    }
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return '';
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const year = date.getFullYear();
-    return `${day}${month}${year}`;
+    let out = `${day}${month}${year}`;
+    // Ensure 8 digits so leading zero is never missing (e.g. 05022026 not 5022026)
+    if (out.length === 7 && /^\d{7}$/.test(out)) out = '0' + out;
+    return out;
 };
 
 const getGenderCode = (gender) => {
@@ -186,8 +202,8 @@ const escapeCSV = (value, preserveLeadingZero = false) => {
     return str;
 };
 
-/** CIBIL CSV column indices (0-based) to prefix with tab + quote so Excel keeps leading zeros: DOB, State, PIN, Address Category, dates (opened, last payment, closed, reported), Account Type, Ownership */
-const CIBIL_FORCE_QUOTE_INDICES = [1, 24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40];
+/** CIBIL CSV column indices (0-based) to prefix with tab + quote so Excel keeps leading zeros: DOB, State, PIN, Address Category, dates, Account Type, Ownership, Asset Classification */
+const CIBIL_FORCE_QUOTE_INDICES = [1, 24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 53];
 
 /**
  * GET /api/admin/reports/cibil/disbursal
@@ -236,7 +252,8 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
             const gender = getGenderCode(loan.gender);
             const stateCode = getStateCode(loan.state);
             const dateOpened = formatDateDDMMYYYY(loan.disbursed_at || loan.processed_at);
-            const dateReported = formatDateDDMMYYYY(new Date());
+            const now = new Date();
+            const dateReported = formatDateDDMMYYYY(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
 
             const loanAmount = parseFloat(loan.loan_amount) || 0;
             let processingFee = parseFloat(loan.processing_fee) || 0;
@@ -301,6 +318,7 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 la.id as loan_id, la.application_number, la.loan_amount,
                 la.disbursal_amount, la.processing_fee, la.total_interest,
                 la.total_repayable, la.disbursed_at, la.processed_at,
+                la.closed_date,
                 la.updated_at as cleared_at, la.exhausted_period_days,
                 la.processed_penalty, la.status, la.plan_snapshot,
                 ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
@@ -321,10 +339,10 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
 
         const params = [];
         if (from_date && to_date) {
-            sql += ` AND DATE(la.updated_at) BETWEEN ? AND ?`;
+            sql += ` AND DATE(COALESCE(la.closed_date, la.updated_at)) BETWEEN ? AND ?`;
             params.push(from_date, to_date);
         }
-        sql += ` ORDER BY la.updated_at DESC`;
+        sql += ` ORDER BY COALESCE(la.closed_date, la.updated_at) DESC`;
 
         const loans = await executeQuery(sql, params);
 
@@ -334,8 +352,11 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
             const gender = getGenderCode(loan.gender);
             const stateCode = getStateCode(loan.state);
             const dateOpened = formatDateDDMMYYYY(loan.disbursed_at || loan.processed_at);
-            const dateCleared = formatDateDDMMYYYY(loan.cleared_at);
-            const dateReported = formatDateDDMMYYYY(new Date());
+            // Use closed_date (actual last payment/closure date); fallback to updated_at for legacy rows
+            const dateLastPayment = formatDateDDMMYYYY(loan.closed_date || loan.cleared_at);
+            const dateCleared = formatDateDDMMYYYY(loan.closed_date || loan.cleared_at);
+            const now = new Date();
+            const dateReported = formatDateDDMMYYYY(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
 
             const loanAmount = parseFloat(loan.loan_amount) || 0;
             let processingFee = parseFloat(loan.processing_fee) || 0;
@@ -360,7 +381,7 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 formatFullAddress(loan), stateCode, loan.pincode || '', '02', '',
                 '', '', '', '', '',
                 'NB86590001', 'SPHEETIFINTECH', 'PLL' + loan.loan_id,
-                '69', '1', dateOpened, dateCleared, dateCleared, dateReported,
+                '69', '1', dateOpened, dateLastPayment, dateCleared, dateReported,
                 Math.round(loanAmount), 0, '', '',
                 '', '', '', '', '', '',
                 '', assetClass, '', '', '', '',
@@ -432,7 +453,8 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
             const stateCode = getStateCode(loan.state);
             const dateOpened = formatDateDDMMYYYY(loan.disbursed_at || loan.processed_at);
             const dateCleared = formatDateDDMMYYYY(loan.cleared_at || loan.settlement_date);
-            const dateReported = formatDateDDMMYYYY(new Date());
+            const now = new Date();
+            const dateReported = formatDateDDMMYYYY(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
 
             let processingFee = parseFloat(loan.processing_fee) || 0;
             let gst = processingFee * 0.18;
@@ -552,7 +574,8 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
             const gender = getGenderCode(loan.gender);
             const stateCode = getStateCode(loan.state);
             const dateOpened = formatDateDDMMYYYY(loan.disbursed_at || loan.processed_at) || '01011970';
-            const dateReported = formatDateDDMMYYYY(new Date());
+            const now = new Date();
+            const dateReported = formatDateDDMMYYYY(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
 
             let processingFee = parseFloat(loan.processing_fee) || 0;
             let gst = processingFee * 0.18;

@@ -904,9 +904,10 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           const instalmentAmount = toDecimal2(baseAmount + penaltyAmount);
           
           // Preserve stored status and paid_date if available (for account_manager loans with payment tracking)
-          let emiStatus = 'pending';
+          // For cleared loans, always show all EMIs as paid (fixes EMI details showing Pending for closed loans)
+          let emiStatus = (loan.status === 'cleared') ? 'paid' : 'pending';
           let paidDate = null;
-          if (storedEmiSchedule && Array.isArray(storedEmiSchedule)) {
+          if (loan.status !== 'cleared' && storedEmiSchedule && Array.isArray(storedEmiSchedule)) {
             const storedEmi = storedEmiSchedule.find(e => 
               (e.emi_number === i + 1 || e.instalment_no === i + 1)
             ) || storedEmiSchedule[i];
@@ -918,6 +919,9 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
                 paidDate = storedEmi.paid_date;
               }
             }
+          } else if (loan.status === 'cleared' && storedEmiSchedule && Array.isArray(storedEmiSchedule)) {
+            const storedEmi = storedEmiSchedule[i] || storedEmiSchedule.find(e => (e.emi_number === i + 1 || e.instalment_no === i + 1));
+            if (storedEmi && storedEmi.paid_date) paidDate = storedEmi.paid_date;
           }
           
           const scheduleEntry = {
@@ -968,7 +972,7 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
         
         // Always merge status from emi_schedule to preserve payment tracking
         // emi_schedule is the source of truth for payment status (updated when payments are made)
-        // This applies to both account_manager and non-account_manager loans
+        // For cleared loans, keep status as 'paid' and do NOT overwrite with stored emi_schedule (which may still say pending)
         try {
           let emiScheduleArray = null;
           if (loan.emi_schedule) {
@@ -986,11 +990,16 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
                 (emi.instalment_no === instalmentNo || emi.emi_number === instalmentNo)
               ) || emiScheduleArray[index];
               
+              // For cleared loans, always keep status 'paid'; otherwise use emi_schedule or existing
+              const status = (loan.status === 'cleared')
+                ? 'paid'
+                : (emiFromSchedule?.status || instalment.status || 'pending');
+              
               // Use status and paid_date from emi_schedule if available
               if (emiFromSchedule) {
                 const mergedInstalment = {
                   ...instalment,
-                  status: emiFromSchedule.status || instalment.status || 'pending'
+                  status
                 };
                 
                 // Preserve paid_date if available
@@ -1000,18 +1009,18 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
                 
                 return mergedInstalment;
               }
-              // If no matching EMI in emi_schedule, keep existing status or default to pending
+              // If no matching EMI in emi_schedule, keep existing status or default to pending (or paid for cleared)
               return {
                 ...instalment,
-                status: instalment.status || 'pending'
+                status: instalment.status || (loan.status === 'cleared' ? 'paid' : 'pending')
               };
             });
             console.log(`✅ Merged EMI status from emi_schedule into repayment schedule (account_manager: ${isAccountManager})`);
           } else {
-            // No emi_schedule found, ensure all have status (keep existing or set to pending)
+            // No emi_schedule found, ensure all have status (keep existing or set to pending / paid for cleared)
             schedule = schedule.map((instalment) => ({
               ...instalment,
-              status: instalment.status || 'pending'
+              status: instalment.status || (loan.status === 'cleared' ? 'paid' : 'pending')
             }));
           }
         } catch (emiScheduleError) {

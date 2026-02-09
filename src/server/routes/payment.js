@@ -824,7 +824,7 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                     try {
                         const loanDetails = await executeQuery(
                             `SELECT 
-                                id, processed_amount, loan_amount,
+                                id, user_id, processed_amount, loan_amount, total_repayable,
                                 processed_post_service_fee, fees_breakdown, plan_snapshot,
                                 status
                             FROM loan_applications 
@@ -859,12 +859,13 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                                 
                                 // If total payments >= outstanding balance (with small tolerance for rounding)
                                 if (totalPaid >= outstandingBalance - 0.01) {
-                                    // Mark loan as cleared
+                                    const closedAmount = parseFloat(loan.total_repayable) || outstandingBalance;
+                                    // Mark loan as cleared and set closed_date/closed_amount for correct display
                                     await executeQuery(
                                         `UPDATE loan_applications 
-                                         SET status = 'cleared', updated_at = NOW() 
+                                         SET status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW() 
                                          WHERE id = ?`,
-                                        [loanId]
+                                        [closedAmount, loanId]
                                     );
                                     
                                     console.log(`✅ Loan #${loanId} fully paid and marked as CLEARED`);
@@ -1603,7 +1604,7 @@ router.post('/webhook', async (req, res) => {
                         // Get loan details to calculate outstanding balance
                             const loanDetails = await executeQuery(
                                 `SELECT 
-                                    id, processed_amount, loan_amount,
+                                    id, user_id, processed_amount, loan_amount, total_repayable,
                                     processed_post_service_fee, fees_breakdown, plan_snapshot,
                                     emi_schedule, status
                                 FROM loan_applications 
@@ -1736,11 +1737,26 @@ router.post('/webhook', async (req, res) => {
                                 
                                 // Clear the loan if conditions are met
                                 if (shouldClearLoan) {
+                                    const closedAmount = parseFloat(loan.total_repayable) || 0;
+                                    const todayStr = new Date().toISOString().split('T')[0];
+                                    let updateParams = [closedAmount, paymentOrder.loan_id];
+                                    let updateSet = `status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()`;
+                                    // For full_payment/pre-close, mark all EMIs as paid in emi_schedule so EMI details show Paid
+                                    if ((paymentType === 'full_payment' || paymentType === 'pre-close') && loan.emi_schedule) {
+                                        try {
+                                            let emiArr = typeof loan.emi_schedule === 'string' ? JSON.parse(loan.emi_schedule) : loan.emi_schedule;
+                                            if (Array.isArray(emiArr) && emiArr.length > 0) {
+                                                emiArr = emiArr.map(emi => ({ ...emi, status: 'paid', paid_date: todayStr }));
+                                                updateSet = `emi_schedule = ?, status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()`;
+                                                updateParams = [JSON.stringify(emiArr), closedAmount, paymentOrder.loan_id];
+                                            }
+                                        } catch (e) {
+                                            console.warn('⚠️ Could not update emi_schedule for cleared loan (non-fatal):', e.message);
+                                        }
+                                    }
                                     await executeQuery(
-                                        `UPDATE loan_applications 
-                                         SET status = 'cleared', updated_at = NOW() 
-                                         WHERE id = ?`,
-                                        [paymentOrder.loan_id]
+                                        `UPDATE loan_applications SET ${updateSet} WHERE id = ?`,
+                                        updateParams
                                     );
                                     
                                     // Update transaction description to note loan was cleared
@@ -2095,7 +2111,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                             try {
                                     const loanDetails = await executeQuery(
                                         `SELECT 
-                                            id, processed_amount, loan_amount,
+                                            id, user_id, processed_amount, loan_amount, total_repayable,
                                             processed_post_service_fee, fees_breakdown, plan_snapshot,
                                             emi_schedule, status
                                         FROM loan_applications 
@@ -2226,11 +2242,25 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                             
                                             // Clear the loan if conditions are met
                                             if (shouldClearLoan) {
+                                                const closedAmount = parseFloat(loan.total_repayable) || 0;
+                                                const todayStr = new Date().toISOString().split('T')[0];
+                                                let updateParams = [closedAmount, paymentOrder.loan_id];
+                                                let updateSet = `status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()`;
+                                                if ((paymentType === 'full_payment' || paymentType === 'pre-close') && loan.emi_schedule) {
+                                                    try {
+                                                        let emiArr = typeof loan.emi_schedule === 'string' ? JSON.parse(loan.emi_schedule) : loan.emi_schedule;
+                                                        if (Array.isArray(emiArr) && emiArr.length > 0) {
+                                                            emiArr = emiArr.map(emi => ({ ...emi, status: 'paid', paid_date: todayStr }));
+                                                            updateSet = `emi_schedule = ?, status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()`;
+                                                            updateParams = [JSON.stringify(emiArr), closedAmount, paymentOrder.loan_id];
+                                                        }
+                                                    } catch (e) {
+                                                        console.warn('⚠️ Could not update emi_schedule for cleared loan (non-fatal):', e.message);
+                                                    }
+                                                }
                                                 await executeQuery(
-                                                    `UPDATE loan_applications 
-                                                     SET status = 'cleared', updated_at = NOW() 
-                                                     WHERE id = ?`,
-                                                    [paymentOrder.loan_id]
+                                                    `UPDATE loan_applications SET ${updateSet} WHERE id = ?`,
+                                                    updateParams
                                                 );
                                                 
                                                 // Update transaction description to note loan was cleared

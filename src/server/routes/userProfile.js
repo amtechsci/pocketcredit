@@ -318,6 +318,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         la.processed_amount, la.exhausted_period_days, la.processed_p_fee,
         la.processed_post_service_fee, la.processed_gst, la.processed_interest,
         la.processed_penalty, la.processed_due_date, la.emi_schedule,
+        DATE_FORMAT(la.closed_date, '%Y-%m-%d') as closed_date,
+        la.closed_amount,
         es.status as enach_status
       FROM loan_applications la
       LEFT JOIN (
@@ -1195,6 +1197,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           processed_penalty: app.processed_penalty,
           processed_due_date: app.processed_due_date,
           emi_schedule: app.emi_schedule || null,
+          closed_date: app.closed_date || null,
+          closed_amount: app.closed_amount != null ? parseFloat(app.closed_amount) : null,
           enach_status: app.enach_status || null
         };
       })
@@ -3146,7 +3150,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
       // Verify loan exists and get loan data (including plan_snapshot for credit limit check)
       const loans = await executeQuery(
-        'SELECT id, user_id, status, plan_snapshot FROM loan_applications WHERE id = ?',
+        'SELECT id, user_id, status, plan_snapshot, total_repayable, emi_schedule FROM loan_applications WHERE id = ?',
         [loanIdInt]
       );
 
@@ -3156,14 +3160,26 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
         if (loan.user_id == userIdInt || loan.user_id == userId) {
           console.log(`✅ Loan ownership confirmed. Current status: ${loan.status}`);
 
-          // Update loan status to cleared
-          await executeQuery(`
-            UPDATE loan_applications 
-            SET 
-              status = 'cleared',
-              updated_at = NOW()
-            WHERE id = ?
-          `, [loanIdInt]);
+          const closedAmount = parseFloat(loan.total_repayable) || 0;
+          const todayStr = new Date().toISOString().split('T')[0];
+          let updateSet = `status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()`;
+          let updateParams = [closedAmount, loanIdInt];
+          if (loan.emi_schedule) {
+            try {
+              let emiArr = typeof loan.emi_schedule === 'string' ? JSON.parse(loan.emi_schedule) : loan.emi_schedule;
+              if (Array.isArray(emiArr) && emiArr.length > 0) {
+                emiArr = emiArr.map(emi => ({ ...emi, status: 'paid', paid_date: todayStr }));
+                updateSet = `emi_schedule = ?, status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()`;
+                updateParams = [JSON.stringify(emiArr), closedAmount, loanIdInt];
+              }
+            } catch (e) {
+              console.warn('⚠️ Could not update emi_schedule for cleared loan (non-fatal):', e.message);
+            }
+          }
+          await executeQuery(
+            `UPDATE loan_applications SET ${updateSet} WHERE id = ?`,
+            updateParams
+          );
 
           console.log(`✅ Loan #${loanIdInt} marked as cleared (${txType} received)`);
 
@@ -3355,9 +3371,9 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 
       console.log(`💳 Processing EMI payment for loan #${loanIdInt}, user #${userIdInt}`);
 
-      // Get loan with emi_schedule
+      // Get loan with emi_schedule and total_repayable (for closed_amount when clearing)
       const loans = await executeQuery(
-        'SELECT id, user_id, status, emi_schedule, plan_snapshot FROM loan_applications WHERE id = ?',
+        'SELECT id, user_id, status, emi_schedule, plan_snapshot, total_repayable FROM loan_applications WHERE id = ?',
         [loanIdInt]
       );
 
@@ -3465,14 +3481,13 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 // All EMIs paid - treat like full_payment: clear loan, send NOC, etc.
                 console.log(`💰 All ${totalEmis} EMIs paid - clearing loan and sending NOC`);
 
-                // Update loan status to cleared
-                await executeQuery(`
-                  UPDATE loan_applications 
-                  SET 
-                    status = 'cleared',
-                    updated_at = NOW()
-                  WHERE id = ?
-                `, [loanIdInt]);
+                const closedAmount = parseFloat(loan.total_repayable) || 0;
+                await executeQuery(
+                  `UPDATE loan_applications 
+                   SET status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()
+                   WHERE id = ?`,
+                  [closedAmount, loanIdInt]
+                );
 
                 console.log(`✅ Loan #${loanIdInt} marked as cleared (all EMIs paid)`);
 
