@@ -11,6 +11,7 @@ const { calculateLoanInterestAndPenalty } = require('./loanCalculationJob');
 const { updateOverdueLoans } = require('./updateOverdueLoans');
 const { runSMSNotificationJob } = require('./smsNotificationJob');
 const { runSyncTempAssignments } = require('./syncTempAssignmentsJob');
+const { runProcessJobQueue } = require('./processJobQueue');
 
 /**
  * Register all scheduled jobs
@@ -44,6 +45,14 @@ async function registerJobs() {
     await runSyncTempAssignments();
   }, {
     timezone: 'Asia/Kolkata', // IST
+    runOnInit: false
+  });
+
+  // Job queue worker - process queued SMS (e.g. account manager assigned) every minute
+  cronManager.everyMinutes(1, 'process-job-queue', async () => {
+    await runProcessJobQueue();
+  }, {
+    timezone: 'Asia/Kolkata',
     runOnInit: false
   });
 

@@ -6669,8 +6669,14 @@ export function UserProfileDetail() {
                           : null;
 
                         // Loan closed fields
-                        const loanClosedAmount = loan.status === 'cleared' ? (loan.closed_amount || totalAmount) : 'N/A';
-                        const loanClosedDate = loan.status === 'cleared' ? (loan.closed_date || loan.updatedAt) : 'N/A';
+                        // Use closed_amount / closed_date from backend for cleared loans.
+                        // Do NOT fall back to updatedAt for date, otherwise it can show the current update time instead of actual closure date.
+                        const loanClosedAmount = loan.status === 'cleared'
+                          ? (loan.closed_amount || totalAmount)
+                          : 'N/A';
+                        const loanClosedDate = loan.status === 'cleared' && loan.closed_date
+                          ? loan.closed_date
+                          : 'N/A';
 
                         // EMI Schedule - get ONLY from loan.emi_schedule (raw data, no calculations)
                         let emiSchedule: any[] = [];

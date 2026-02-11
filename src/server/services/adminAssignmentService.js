@@ -338,7 +338,8 @@ async function assignAccountManagerForLoan(loanId, userId) {
     'UPDATE loan_applications SET assigned_account_manager_id = ? WHERE id = ?',
     [adminId, loanId]
   );
-  await sendAccountManagerAssignedSms(userId, loanId, adminId);
+  const jobQueue = require('./jobQueueService');
+  jobQueue.enqueue(jobQueue.JOB_TYPE_ACC_MANAGER_SMS, { userId, loanId, adminId }).catch(err => console.error('Enqueue acc_manager_sms:', err.message));
 }
 
 /**
@@ -414,9 +415,10 @@ async function redistributeOnDeactivate(adminId, category) {
       userToSms[row.user_id] = { loanId: row.id, adminId: targetAdminId };
     }
   }
-  for (const uid of Object.keys(userToSms)) {
-    const { loanId: lid, adminId: aid } = userToSms[uid];
-    await sendAccountManagerAssignedSms(uid, lid, aid);
+  const jobQueue = require('./jobQueueService');
+  const payloads = Object.entries(userToSms).map(([uid, v]) => ({ userId: uid, loanId: v.loanId, adminId: v.adminId }));
+  if (payloads.length > 0) {
+    jobQueue.enqueueMany(jobQueue.JOB_TYPE_ACC_MANAGER_SMS, payloads).catch(err => console.error('Enqueue acc_manager_sms bulk:', err.message));
   }
 }
 
@@ -472,9 +474,10 @@ async function redistributeOnNewSubAdmin(category) {
       );
       userToLoanAndAdmin[uid] = { loanId: row.id, adminId: targetAdminId };
     }
-    for (const uid of Object.keys(userToLoanAndAdmin)) {
-      const { loanId, adminId } = userToLoanAndAdmin[uid];
-      await sendAccountManagerAssignedSms(uid, loanId, adminId);
+    const jobQueue = require('./jobQueueService');
+    const payloads = Object.entries(userToLoanAndAdmin).map(([uid, v]) => ({ userId: uid, loanId: v.loanId, adminId: v.adminId }));
+    if (payloads.length > 0) {
+      jobQueue.enqueueMany(jobQueue.JOB_TYPE_ACC_MANAGER_SMS, payloads).catch(err => console.error('Enqueue acc_manager_sms bulk:', err.message));
     }
     return;
   }
@@ -506,5 +509,6 @@ module.exports = {
   assignRecoveryOfficerForLoan,
   redistributeOnDeactivate,
   redistributeOnNewSubAdmin,
-  syncTempAssignmentsForCategory
+  syncTempAssignmentsForCategory,
+  sendAccountManagerAssignedSms
 };
