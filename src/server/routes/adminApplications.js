@@ -126,7 +126,13 @@ router.get('/', authenticateAdmin, async (req, res) => {
         la.assigned_account_manager_id,
         la.temp_assigned_account_manager_id,
         la.assigned_recovery_officer_id,
-        la.temp_assigned_recovery_officer_id
+        la.temp_assigned_recovery_officer_id,
+        av.name as verify_user_name,
+        avt.name as temp_verify_user_name,
+        am.name as acc_manager_name,
+        amt.name as temp_acc_manager_name,
+        ar.name as recovery_officer_name,
+        art.name as temp_recovery_officer_name
       FROM loan_applications la
       LEFT JOIN users u ON la.user_id = u.id
       LEFT JOIN (
@@ -158,6 +164,12 @@ router.get('/', authenticateAdmin, async (req, res) => {
           )
       ) a ON u.id = a.user_id
       LEFT JOIN loan_plans lp ON la.loan_plan_id = lp.id
+      LEFT JOIN admins av ON la.assigned_verify_admin_id = av.id
+      LEFT JOIN admins avt ON la.temp_assigned_verify_admin_id = avt.id
+      LEFT JOIN admins am ON la.assigned_account_manager_id = am.id
+      LEFT JOIN admins amt ON la.temp_assigned_account_manager_id = amt.id
+      LEFT JOIN admins ar ON la.assigned_recovery_officer_id = ar.id
+      LEFT JOIN admins art ON la.temp_assigned_recovery_officer_id = art.id
     `;
 
     let whereConditions = [];
@@ -367,8 +379,21 @@ router.get('/', authenticateAdmin, async (req, res) => {
         city: app.city || 'N/A', // Use actual city
         state: app.state || 'N/A', // Use actual state
         pincode: app.pincode || '000000', // Use actual pincode
-        assignedManager: 'Unassigned', // This would need to be added to the database
-        recoveryOfficer: 'Unassigned', // This would need to be added to the database
+        assignedManager: (() => {
+          const name = app.temp_acc_manager_name || app.acc_manager_name;
+          return name || 'N/A';
+        })(),
+        recoveryOfficer: (() => {
+          const name = app.temp_recovery_officer_name || app.recovery_officer_name;
+          return name || 'N/A';
+        })(),
+        subAdminAssignments: (() => {
+          const verifyName = (app.temp_verify_user_name || app.verify_user_name) || 'N/A';
+          const accManagerName = (app.temp_acc_manager_name || app.acc_manager_name) || 'N/A';
+          const recoveryName = (app.temp_recovery_officer_name || app.recovery_officer_name) || 'N/A';
+          const isOverdue = app.status === 'overdue';
+          return { verifyUserName: verifyName, accManagerName, recoveryOfficerName: recoveryName, isOverdue };
+        })(),
         assignmentType: assignmentType,
         // Additional real data fields
         dateOfBirth: app.date_of_birth,
@@ -1732,9 +1757,10 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
     const exportData = applications.map(app => {
       const applicantName = `${app.first_name || ''} ${app.last_name || ''}`.trim() || 'Unknown User';
       const address = app.address_line1 ? `${app.address_line1}${app.address_line2 ? ', ' + app.address_line2 : ''}` : '';
-      
+      const shortLoanId = `PLL${app.id}`;
+
       return {
-        'Application ID': app.applicationNumber || app.id,
+        'Application ID': shortLoanId,
         'Applicant Name': applicantName,
         'Mobile': app.mobile || '',
         'Email': app.email || '',

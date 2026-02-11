@@ -32,7 +32,7 @@ interface LoanApplication {
   userId?: string; // User ID for fetching comments
   loanAmount: number;
   loanType: 'personal' | 'business';
-  status: 'applied' | 'under_review' | 'follow_up' | 'disbursal' | 'account_manager' | 'cleared' | 'rejected' | 'pending_documents' | 'ready_for_disbursement' | 'ready_to_repeat_disbursal';
+  status: 'applied' | 'submitted' | 'under_review' | 'follow_up' | 'disbursal' | 'account_manager' | 'overdue' | 'cleared' | 'rejected' | 'pending_documents' | 'ready_for_disbursement' | 'ready_to_repeat_disbursal';
   applicationDate: string;
   assignedManager: string;
   recoveryOfficer: string;
@@ -58,6 +58,13 @@ interface LoanApplication {
   pincode: string;
   /** For sub-admin: 'primary' = my assign, 'temp' = temp assign (covering for someone on leave) */
   assignmentType?: 'primary' | 'temp' | null;
+  /** Sub-admin assignments (names) for display: verify user, acc manager, recovery officer, agency */
+  subAdminAssignments?: {
+    verifyUserName: string;
+    accManagerName: string;
+    recoveryOfficerName: string;
+    isOverdue: boolean;
+  };
 }
 
 interface ProfileComment {
@@ -1165,6 +1172,9 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                     <ArrowUpDown className="w-3 h-3" />
                   </button>
                 </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Sub-Admins
+                </th>
                 {(statusFilter === 'ready_for_disbursement' || statusFilter === 'ready_to_repeat_disbursal') && (
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Comments
@@ -1298,6 +1308,26 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                       <Calendar className="w-3 h-3" />
                       {formatDate(application.applicationDate)}
                     </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    {(() => {
+                      const s = application.subAdminAssignments;
+                      const status = application.status;
+                      const afterDisbursal = status === 'account_manager';
+                      const overdue = status === 'overdue';
+                      const verifyUser = s?.verifyUserName ?? 'N/A';
+                      const accManager = (afterDisbursal || overdue) ? (s?.accManagerName ?? 'N/A') : 'N/A';
+                      const recoveryOfficer = overdue ? (s?.recoveryOfficerName ?? 'N/A') : 'N/A';
+                      const agency = overdue ? 'YES' : 'NO';
+                      return (
+                        <div className="text-xs text-gray-700 space-y-0.5 font-mono">
+                          <div>Verify user: {verifyUser}</div>
+                          <div>ACC Manager: {accManager}</div>
+                          <div>Recovery officer: {recoveryOfficer}</div>
+                          <div>Agency: {agency}</div>
+                        </div>
+                      );
+                    })()}
                   </td>
                   {(statusFilter === 'ready_for_disbursement' || statusFilter === 'ready_to_repeat_disbursal') && application.userId && (
                     <td className="px-6 py-4">
