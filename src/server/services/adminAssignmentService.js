@@ -14,23 +14,45 @@ const ensureDb = async () => {
 
 /**
  * Check if an admin is currently temporarily inactive (weekly off or date-range leave).
- * weekly_off_days: comma-separated 0-6 (0=Sunday .. 6=Saturday).
- * temp_inactive_from / temp_inactive_to: leave date range (inclusive).
+ *
+ * - weekly_off_days: comma-separated 0-6 (0=Sunday .. 6=Saturday).
+ * - temp_inactive_from / temp_inactive_to: leave date range (inclusive).
+ *
+ * Uses the server's local calendar date (no explicit timezone conversion).
+ * Also supports open-ended ranges:
+ *   - from + NULL to  => on leave from "from" onwards
+ *   - NULL from + to  => on leave until "to"
  */
 function isAdminTempInactiveToday(row) {
+  // Use local server date (YYYY-MM-DD) and day-of-week (0-6)
   const today = new Date();
   const dayOfWeek = today.getDay(); // 0=Sun, 6=Sat
-  const todayStr = today.toISOString().slice(0, 10); // YYYY-MM-DD
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  const todayStr = `${year}-${month}-${day}`; // YYYY-MM-DD
 
   if (row.weekly_off_days) {
-    const days = String(row.weekly_off_days).split(',').map(d => parseInt(d.trim(), 10)).filter(n => !Number.isNaN(n));
+    const days = String(row.weekly_off_days)
+      .split(',')
+      .map(d => parseInt(d.trim(), 10))
+      .filter(n => !Number.isNaN(n));
     if (days.includes(dayOfWeek)) return true;
   }
 
-  if (row.temp_inactive_from && row.temp_inactive_to) {
-    const from = String(row.temp_inactive_from).slice(0, 10);
-    const to = String(row.temp_inactive_to).slice(0, 10);
-    if (todayStr >= from && todayStr <= to) return true;
+  if (row.temp_inactive_from || row.temp_inactive_to) {
+    const from = row.temp_inactive_from ? String(row.temp_inactive_from).slice(0, 10) : null;
+    const to = row.temp_inactive_to ? String(row.temp_inactive_to).slice(0, 10) : null;
+
+    if (from && to) {
+      if (todayStr >= from && todayStr <= to) return true;
+    } else if (from && !to) {
+      // Open-ended from date
+      if (todayStr >= from) return true;
+    } else if (!from && to) {
+      // Open-ended to date
+      if (todayStr <= to) return true;
+    }
   }
 
   return false;

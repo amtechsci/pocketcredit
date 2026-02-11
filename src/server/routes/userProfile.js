@@ -1182,7 +1182,12 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           interest: app.total_interest || totalInterest,
           totalAmount: app.total_repayable || totalAmount,
           reason: app.rejection_reason || app.loan_purpose || 'N/A',
-          statusDate: app.approved_at || app.disbursed_at || app.created_at,
+          // Status date used in admin Status Log:
+          // - For cleared loans, show the actual closed_date if available
+          // - Otherwise for running/other statuses fall back to approved/disbursed/created
+          statusDate: app.status === 'cleared'
+            ? (app.closed_date || app.updated_at || app.disbursed_at || app.approved_at || app.created_at)
+            : (app.approved_at || app.disbursed_at || app.created_at),
           createdAt: app.created_at,
           created_at: app.created_at, // Add created_at for frontend compatibility
           updatedAt: app.updated_at || app.created_at,

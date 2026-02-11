@@ -1899,6 +1899,14 @@ class AdminApiService {
     return this.request('GET', `/team/${id}/activity`, undefined, { limit });
   }
 
+  /**
+   * Reset a team member's password (admin-to-admin).
+   * This is intended for super admins managing other admins.
+   */
+  async resetTeamMemberPassword(id: string, newPassword: string): Promise<ApiResponse<{ message: string }>> {
+    return this.request('PUT', `/team/${id}/password`, { newPassword });
+  }
+
   // ==================== Partner Management APIs ====================
 
   /**

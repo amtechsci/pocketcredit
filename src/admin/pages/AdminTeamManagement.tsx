@@ -25,7 +25,8 @@ import {
   Upload,
   Filter,
   RefreshCw,
-  Loader2
+  Loader2,
+  Key
 } from 'lucide-react';
 import { adminApiService } from '../../services/adminApi';
 
@@ -124,6 +125,15 @@ export function AdminTeamManagement() {
     stats: { today: number; week: number; month: number };
   } | null>(null);
   const [loadingActivity, setLoadingActivity] = useState(false);
+
+  // Change password state
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [passwordUser, setPasswordUser] = useState<AdminUser | null>(null);
+  const [passwordForm, setPasswordForm] = useState({
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [passwordError, setPasswordError] = useState<string | null>(null);
 
   const [newUser, setNewUser] = useState({
     name: '',
@@ -261,22 +271,35 @@ export function AdminTeamManagement() {
     }
   };
 
-  // 0=Sun, 1=Mon, ... 6=Sat. Same logic as backend.
+  // 0=Sun, 1=Mon, ... 6=Sat. Mirrors backend leave logic (local calendar date).
   const isOnLeaveToday = (member: AdminUser): boolean => {
     const today = new Date();
     const dayOfWeek = today.getDay();
-    const todayStr = today.toISOString().slice(0, 10);
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${year}-${month}-${day}`;
+
     if (member.weekly_off_days) {
       const days = Array.isArray(member.weekly_off_days)
         ? member.weekly_off_days
         : String(member.weekly_off_days).split(',').map(d => parseInt(String(d).trim(), 10)).filter(n => !Number.isNaN(n));
       if (days.includes(dayOfWeek)) return true;
     }
-    if (member.temp_inactive_from && member.temp_inactive_to) {
-      const from = String(member.temp_inactive_from).slice(0, 10);
-      const to = String(member.temp_inactive_to).slice(0, 10);
-      if (todayStr >= from && todayStr <= to) return true;
+
+    if (member.temp_inactive_from || member.temp_inactive_to) {
+      const from = member.temp_inactive_from ? String(member.temp_inactive_from).slice(0, 10) : null;
+      const to = member.temp_inactive_to ? String(member.temp_inactive_to).slice(0, 10) : null;
+
+      if (from && to) {
+        if (todayStr >= from && todayStr <= to) return true;
+      } else if (from && !to) {
+        if (todayStr >= from) return true;
+      } else if (!from && to) {
+        if (todayStr <= to) return true;
+      }
     }
+
     return false;
   };
 
@@ -407,6 +430,62 @@ export function AdminTeamManagement() {
       temp_inactive_to: user.temp_inactive_to ? String(user.temp_inactive_to).slice(0, 10) : ''
     });
     setShowEditModal(true);
+  };
+
+  const handleOpenChangePassword = (user: AdminUser) => {
+    setPasswordUser(user);
+    setPasswordForm({
+      newPassword: '',
+      confirmPassword: ''
+    });
+    setPasswordError(null);
+    setShowChangePasswordModal(true);
+  };
+
+  const handleChangePassword = async () => {
+    if (!passwordUser) return;
+
+    const trimmedPassword = passwordForm.newPassword.trim();
+    if (!trimmedPassword || !passwordForm.confirmPassword.trim()) {
+      setPasswordError('Both password fields are required');
+      return;
+    }
+
+    if (trimmedPassword.length < 8) {
+      setPasswordError('Password must be at least 8 characters long');
+      return;
+    }
+
+    if (trimmedPassword !== passwordForm.confirmPassword.trim()) {
+      setPasswordError('Passwords do not match');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setPasswordError(null);
+      const response = await adminApiService.resetTeamMemberPassword(passwordUser.id, trimmedPassword);
+
+      if (response.status === 'success') {
+        setShowChangePasswordModal(false);
+        setPasswordUser(null);
+        setPasswordForm({ newPassword: '', confirmPassword: '' });
+
+        const message = response.message || 'Password updated successfully';
+        if (typeof (window as any).toast?.success === 'function') {
+          (window as any).toast.success(message);
+        } else {
+          alert(message);
+        }
+      } else {
+        setPasswordError(response.message || 'Failed to update password');
+      }
+    } catch (err: any) {
+      console.error('Failed to update password:', err);
+      setPasswordError(err.message || 'Failed to update password');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleUpdateUser = async () => {
@@ -735,6 +814,13 @@ export function AdminTeamManagement() {
                   title="View Activity"
                 >
                   <Activity className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => handleOpenChangePassword(member)}
+                  className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200 text-xs"
+                  title="Change Password"
+                >
+                  <Key className="w-3 h-3" />
                 </button>
                 <button
                   onClick={() => handleToggleUserStatus(member.id)}
@@ -1332,6 +1418,96 @@ export function AdminTeamManagement() {
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Change Password Modal */}
+      {showChangePasswordModal && passwordUser && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-lg font-semibold text-gray-900">Change Password - {passwordUser.name}</h4>
+              <button
+                onClick={() => {
+                  setShowChangePasswordModal(false);
+                  setPasswordUser(null);
+                  setPasswordForm({ newPassword: '', confirmPassword: '' });
+                  setPasswordError(null);
+                }}
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5" />
+                  <p className="text-sm text-yellow-800">
+                    <strong>Security tip:</strong> Share the new password with the user over a secure channel
+                    and ask them to change it after login.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">New Password</label>
+                <input
+                  type="password"
+                  value={passwordForm.newPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter new password"
+                  minLength={8}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Confirm New Password</label>
+                <input
+                  type="password"
+                  value={passwordForm.confirmPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Re-enter new password"
+                  minLength={8}
+                />
+              </div>
+
+              {passwordError && (
+                <p className="text-sm text-red-600">{passwordError}</p>
+              )}
+            </div>
+
+            <div className="flex gap-3 pt-4 mt-6 border-t border-gray-200">
+              <button
+                onClick={() => {
+                  setShowChangePasswordModal(false);
+                  setPasswordUser(null);
+                  setPasswordForm({ newPassword: '', confirmPassword: '' });
+                  setPasswordError(null);
+                }}
+                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleChangePassword}
+                disabled={saving}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Update Password'
+                )}
+              </button>
             </div>
           </div>
         </div>

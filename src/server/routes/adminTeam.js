@@ -862,6 +862,91 @@ router.patch('/:id/status', authenticateAdmin, async (req, res) => {
 });
 
 /**
+ * PUT /api/admin/team/:id/password
+ * Reset admin team member password (admin-to-admin)
+ * Only super admins (including super_admin/master_admin) are allowed to use this.
+ * This route does NOT require the current password and should be used carefully.
+ */
+router.put('/:id/password', authenticateAdmin, async (req, res) => {
+  try {
+    await ensureDbInitialized();
+    const { id } = req.params;
+    const { newPassword } = req.body || {};
+
+    // Only super-level admins can reset passwords
+    if (
+      req.admin.role !== 'superadmin' &&
+      req.admin.role !== 'super_admin' &&
+      req.admin.role !== 'master_admin'
+    ) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Only super admin can reset team member passwords'
+      });
+    }
+
+    // Encourage admins to use their own "change password" flow instead
+    if (id === req.admin.id) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Use the Change Password option to update your own password'
+      });
+    }
+
+    if (!newPassword || typeof newPassword !== 'string') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'New password is required'
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'New password must be at least 8 characters long'
+      });
+    }
+
+    const admins = await executeQuery(
+      'SELECT id, email, name FROM admins WHERE id = ?',
+      [id]
+    );
+
+    if (admins.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Admin not found'
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await executeQuery(
+      'UPDATE admins SET password = ?, updated_at = NOW() WHERE id = ?',
+      [hashedPassword, id]
+    );
+
+    // Log activity for audit trail (do not log the password)
+    await logAdminActivity(req.admin.id, 'reset_admin_password', {
+      admin_id: id,
+      target_email: admins[0].email,
+      target_name: admins[0].name
+    });
+
+    res.json({
+      status: 'success',
+      message: 'Password reset successfully'
+    });
+  } catch (error) {
+    console.error('Reset admin password error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to reset password'
+    });
+  }
+});
+
+/**
  * PUT /api/admin/team/:id/permissions
  * Update admin permissions
  */

@@ -6730,8 +6730,8 @@ export function UserProfileDetail() {
                         // Don't round interestTillToday or final amount - match user side calculation exactly
                         const preCloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
 
-                        // Status log
-                        const statusLog = `${loan.status} - ${formatDate(loan.statusDate || loan.updatedAt)}`;
+                        // Status log (show only status, no date)
+                        const statusLog = loan.status || 'N/A';
 
                         // Auto pay
                         const autoPay = loan.auto_pay_enabled ? 'Yes' : 'No';
