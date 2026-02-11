@@ -3161,16 +3161,17 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
           console.log(`✅ Loan ownership confirmed. Current status: ${loan.status}`);
 
           const closedAmount = parseFloat(loan.total_repayable) || 0;
-          const todayStr = new Date().toISOString().split('T')[0];
-          let updateSet = `status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()`;
-          let updateParams = [closedAmount, loanIdInt];
+          // Use the transaction date chosen by admin as the loan closed date
+          const closedDate = txDate;
+          let updateSet = `status = 'cleared', closed_date = ?, closed_amount = ?, updated_at = NOW()`;
+          let updateParams = [closedDate, closedAmount, loanIdInt];
           if (loan.emi_schedule) {
             try {
               let emiArr = typeof loan.emi_schedule === 'string' ? JSON.parse(loan.emi_schedule) : loan.emi_schedule;
               if (Array.isArray(emiArr) && emiArr.length > 0) {
-                emiArr = emiArr.map(emi => ({ ...emi, status: 'paid', paid_date: todayStr }));
-                updateSet = `emi_schedule = ?, status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()`;
-                updateParams = [JSON.stringify(emiArr), closedAmount, loanIdInt];
+                emiArr = emiArr.map(emi => ({ ...emi, status: 'paid', paid_date: closedDate }));
+                updateSet = `emi_schedule = ?, status = 'cleared', closed_date = ?, closed_amount = ?, updated_at = NOW()`;
+                updateParams = [JSON.stringify(emiArr), closedDate, closedAmount, loanIdInt];
               }
             } catch (e) {
               console.warn('⚠️ Could not update emi_schedule for cleared loan (non-fatal):', e.message);
@@ -3482,11 +3483,13 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                 console.log(`💰 All ${totalEmis} EMIs paid - clearing loan and sending NOC`);
 
                 const closedAmount = parseFloat(loan.total_repayable) || 0;
+                // Use the EMI payment transaction date as closed_date so it matches actual last payment date
+                const closedDate = txDate;
                 await executeQuery(
                   `UPDATE loan_applications 
-                   SET status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()
+                   SET status = 'cleared', closed_date = ?, closed_amount = ?, updated_at = NOW()
                    WHERE id = ?`,
-                  [closedAmount, loanIdInt]
+                  [closedDate, closedAmount, loanIdInt]
                 );
 
                 console.log(`✅ Loan #${loanIdInt} marked as cleared (all EMIs paid)`);
