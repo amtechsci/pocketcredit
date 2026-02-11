@@ -72,11 +72,13 @@ async function enqueueMany(type, payloads) {
  */
 async function claimPending(type, limit = DEFAULT_BATCH_SIZE) {
   await initializeDatabase();
+  // MySQL has issues with placeholders in LIMIT; inline validated integer instead.
+  const limitInt = Number.isFinite(Number(limit)) ? Math.max(1, Number(limit)) : DEFAULT_BATCH_SIZE;
   const rows = await executeQuery(
     `SELECT id, payload FROM job_queue
      WHERE type = ? AND status = 'pending' AND attempts < max_attempts
-     ORDER BY id ASC LIMIT ?`,
-    [type, limit]
+     ORDER BY id ASC LIMIT ${limitInt}`,
+    [type]
   );
   if (!rows || rows.length === 0) return [];
   const ids = rows.map(r => r.id);
