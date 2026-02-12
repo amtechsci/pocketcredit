@@ -20,27 +20,9 @@ router.get('/recent', async (req, res) => {
     `);
     
     if (tableCheck[0].count === 0) {
-      console.log('⚠️ activity_logs table does not exist, returning mock data');
-      
-      // Return mock data if table doesn't exist
-      const mockActivities = [
-        {
-          id: '1',
-          timestamp: new Date().toISOString(),
-          type: 'system_event',
-          action: 'GET /admin/dashboard',
-          priority: 'high',
-          metadata: { method: 'GET', path: '/admin/dashboard' },
-          user: null,
-          admin: null,
-          ipAddress: '127.0.0.1',
-          userAgent: 'Mozilla/5.0...'
-        }
-      ];
-      
       return res.json({
         status: 'success',
-        data: mockActivities
+        data: []
       });
     }
     
@@ -69,16 +51,6 @@ router.get('/recent', async (req, res) => {
       LIMIT ${parseInt(limit)}
     `);
     
-    console.log(`✅ Found ${activities.length} activities in database`);
-    if (activities.length > 0) {
-      console.log('📋 Sample activity:', {
-        id: activities[0].id,
-        type: activities[0].type,
-        action: activities[0].action,
-        metadata: activities[0].metadata,
-        metadataType: typeof activities[0].metadata
-      });
-    }
     
     // Transform the data
     const transformedActivities = activities.map(activity => {

@@ -103,8 +103,6 @@ class ApiService {
       this.baseURL = `http://${hostname}:3002/api`;
     }
 
-    console.log('🌐 API Base URL:', this.baseURL);
-
     this.api = axios.create({
       baseURL: this.baseURL,
       timeout: 30000, // Increased timeout to 30 seconds
@@ -122,8 +120,6 @@ class ApiService {
           config.headers.Authorization = `Bearer ${token}`;
           // Also set lowercase version for compatibility
           config.headers.authorization = `Bearer ${token}`;
-        } else {
-          console.warn('⚠️ No JWT token found in localStorage for request:', config.url);
         }
         // If data is FormData, remove Content-Type header so axios can set it with boundary
         if (config.data instanceof FormData) {
@@ -136,42 +132,14 @@ class ApiService {
       }
     );
 
-    // Request interceptor for logging (reduced for production)
     this.api.interceptors.request.use(
-      (config: any) => {
-        // Only log in development
-        if (process.env.NODE_ENV === 'development') {
-          console.log(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
-        }
-        return config;
-      },
-      (error: any) => {
-        console.error('API Request Error:', error);
-        return Promise.reject(error);
-      }
+      (config: any) => config,
+      (error: any) => Promise.reject(error)
     );
 
-    // Response interceptor for error handling
     this.api.interceptors.response.use(
-      (response: AxiosResponse) => {
-        // Only log in development
-        if (process.env.NODE_ENV === 'development') {
-          console.log(`API Response: ${response.status} ${response.config.url}`);
-        }
-        return response;
-      },
-      (error: any) => {
-        console.error('API Response Error:', error.response?.data || error.message);
-
-        // Handle specific error cases
-        if (error.response?.status === 401) {
-          // Session expired or invalid
-          console.log('Session expired, redirecting to login');
-          // Don't automatically redirect here, let components handle it
-        }
-
-        return Promise.reject(error);
-      }
+      (response: AxiosResponse) => response,
+      (error: any) => Promise.reject(error)
     );
   }
 

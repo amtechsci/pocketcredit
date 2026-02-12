@@ -98,23 +98,15 @@ class AdminApiService {
       this.setAuthHeader(this.token);
     }
 
-    // Add request interceptor for debugging
+    // Add request interceptor
     this.api.interceptors.request.use(
-      (config) => {
-        console.log('Admin API Request:', config.method?.toUpperCase(), config.url);
-        return config;
-      },
-      (error) => {
-        console.error('Admin API Request Error:', error);
-        return Promise.reject(error);
-      }
+      (config) => config,
+      (error) => Promise.reject(error)
     );
 
-    // Add response interceptor for debugging and auth handling
+    // Add response interceptor for auth handling
     this.api.interceptors.response.use(
       (response: AxiosResponse) => {
-        console.log('Admin API Response:', response.status, response.config.url);
-        
         // Check for session warning headers
         const warningHeader = response.headers['x-session-warning'];
         const timeRemaining = response.headers['x-session-time-remaining'];
@@ -132,8 +124,6 @@ class AdminApiService {
         return response;
       },
       (error) => {
-        console.error('Admin API Response Error:', error.response?.data || error.message);
-
         // Handle authentication errors
         if (error.response) {
           const status = error.response.status;
@@ -142,8 +132,6 @@ class AdminApiService {
 
           // Check for session expired due to inactivity
           if (code === 'SESSION_EXPIRED' || message.toLowerCase().includes('session expired due to inactivity')) {
-            console.log('Session expired due to inactivity, clearing credentials and redirecting to login');
-            
             // Clear authentication data
             this.token = null;
             this.clearAuthHeader();
@@ -171,8 +159,6 @@ class AdminApiService {
             message.toLowerCase().includes('admin not found') ||
             message.toLowerCase().includes('admin access required')
           ) {
-            console.log('Authentication error detected, clearing credentials and redirecting to login');
-
             // Clear authentication data
             this.token = null;
             this.clearAuthHeader();
@@ -226,8 +212,6 @@ class AdminApiService {
         message.toLowerCase().includes('admin not found') ||
         message.toLowerCase().includes('admin access required')
       ) {
-        console.log('Authentication error detected in direct axios call, clearing credentials and redirecting to login');
-
         // Clear authentication data
         this.token = null;
         this.clearAuthHeader();

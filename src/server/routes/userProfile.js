@@ -286,7 +286,6 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     }
 
     const user = users[0];
-    console.log('👤 User data:', user);
 
     // Get user's selected loan plan if exists
     let selectedLoanPlan = null;

@@ -52,9 +52,6 @@ import {
   DialogDescription,
 } from '../../components/ui/dialog';
 
-
-
-
 const BANK_LIST = [
   "Axis Bank",
   "Bank of Baroda - Retail Banking",
@@ -1247,7 +1244,6 @@ export function UserProfileDetail() {
     setContactInfoError(null); // Clear previous errors
     try {
       const response = await adminApiService.updateUserContactInfo(params.userId!, contactInfoForm);
-      console.log('Contact info update response:', response);
       
       if (response.status === 'success') {
         toast.success('Contact information updated successfully!');
@@ -2968,7 +2964,6 @@ export function UserProfileDetail() {
               aadharLinkedMobile={userData?.aadharLinkedMobile}
               userId={params.userId}
               onDataReceived={(data) => {
-                console.log('UAN Data received:', data);
                 // Refresh user data to show updated info
                 if (params.userId) {
                   adminApiService.getUserProfile(params.userId).then((response) => {
@@ -3255,7 +3250,6 @@ export function UserProfileDetail() {
   // Documents Tab
   const renderDocumentsTab = () => {
     const documents = getUserData('documents');
-    console.log('Documents data:', documents);
     return (
       <div className="space-y-6">
         {/* Upload Document Section */}
@@ -3629,17 +3623,14 @@ export function UserProfileDetail() {
     setLoadingStatement(true);
     try {
       const response = await adminApiService.getBankStatement(params.userId);
-      console.log('Bank statement API response:', response);
       // Check for both 'status' and 'success' properties (API might return either)
       const isSuccess = (response.status === 'success' || response.success === true);
       if (isSuccess && response.data) {
         // Update both for backward compatibility and new table view
         setBankStatement(response.data.statement);
         const statementsList = response.data.statements || [];
-        console.log('Setting bank statements:', statementsList.length, 'statements');
         setBankStatements(statementsList);
       } else {
-        console.warn('API response not successful or missing data:', response);
         // Still set empty array if no data
         setBankStatements([]);
       }
@@ -3827,7 +3818,6 @@ export function UserProfileDetail() {
       try {
         // Call Start Upload API to generate upload URL for manual statement
         const response = await adminApiService.startBankStatementUploadForStatement(params.userId, statementId);
-        console.log('Start upload response:', response);
         
         // Check for both 'status' and 'success' properties (API might return either)
         const isSuccess = (response.status === 'success' || response.success === true);
@@ -3868,7 +3858,6 @@ export function UserProfileDetail() {
       setVerifyingStatement(true);
       try {
         const response = await adminApiService.checkBankStatementStatus(params.userId, statementId);
-        console.log('Status check response:', response);
         
         const isSuccess = (response.status === 'success' || response.success === true);
         
@@ -3922,7 +3911,6 @@ export function UserProfileDetail() {
         setVerifyingStatement(true);
         try {
           const response = await adminApiService.uploadFileForStatement(params.userId, statementId, file);
-          console.log('Upload file response:', response);
           
           if (response.status === 'success' || response.success === true) {
             toast.success('File uploaded successfully');
@@ -4726,7 +4714,6 @@ export function UserProfileDetail() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
 
-      console.log('✅ Excel downloaded successfully');
     } catch (error: any) {
       console.error('Error downloading Excel:', error);
       alert('Failed to download Excel report: ' + (error.message || 'Unknown error'));
@@ -5024,17 +5011,12 @@ export function UserProfileDetail() {
   const fetchLoanDocuments = async (loanId: number) => {
     setDocumentsLoading(prev => ({ ...prev, [loanId]: true }));
     try {
-      console.log(`🔍 Fetching documents for loan ${loanId}...`);
       const response = await adminApiService.getLoanDocuments(loanId);
-      console.log(`📄 Admin documents response for loan ${loanId}:`, response);
       if ((response.success || response.status === 'success') && response.data?.documents) {
-        console.log(`✅ Found ${response.data.documents.length} documents for loan ${loanId}`);
         response.data.documents.forEach((doc: any) => {
-          console.log(`  - ${doc.document_name} (${doc.document_type})`);
         });
         setLoanDocuments(prev => ({ ...prev, [loanId]: response.data!.documents }));
       } else {
-        console.log(`⚠️ No documents found for loan ${loanId} or invalid response`);
         setLoanDocuments(prev => ({ ...prev, [loanId]: [] }));
       }
     } catch (error: any) {
@@ -5448,12 +5430,9 @@ export function UserProfileDetail() {
 
     try {
       const response = await adminApiService.getLoanCalculation(loanId);
-      console.log(`📊 [Fetch Loan Calculation] Response for loan #${loanId}:`, response);
       if ((response.success || response.status === 'success') && response.data) {
         setLoanCalculations(prev => ({ ...prev, [loanId]: response.data }));
-        console.log(`✅ [Fetch Loan Calculation] Stored calculation for loan #${loanId}, disbursal amount: ₹${response.data?.disbursal?.amount || 'N/A'}`);
       } else {
-        console.warn(`⚠️ [Fetch Loan Calculation] Invalid response for loan #${loanId}:`, response);
       }
     } catch (error) {
       console.error(`❌ Error fetching calculation for loan ${loanId}:`, error);
@@ -5538,7 +5517,6 @@ export function UserProfileDetail() {
         });
 
         if (response.success || response.status === 'success') {
-          console.log('Loan updated successfully:', response);
           // Refresh the user data to show updated values
           const profileResponse = await adminApiService.getUserProfile(params.userId!);
           if (profileResponse.status === 'success') {
@@ -6456,7 +6434,6 @@ export function UserProfileDetail() {
                         // Trust backend value completely (0 is valid - means disbursed today, no interest yet)
                         if (typeof calculation?.interest?.interestTillToday === 'number') {
                           interestTillToday = calculation.interest.interestTillToday;
-                          console.log(`[Admin Preclose] Using backend interestTillToday: ${interestTillToday}`);
                         } else {
                           // Fallback: Calculate on frontend using same logic as backend
                           // Extract UTC date from timestamp to avoid timezone issues
@@ -6499,7 +6476,6 @@ export function UserProfileDetail() {
                             exhaustedDays = Math.max(0, inclusiveDays);
                             // Don't round - show exact value
                             interestTillToday = principal * calculation.interest.rate_per_day * exhaustedDays;
-                            console.log(`[Admin Preclose] Calculated interestTillToday: ${interestTillToday} (exhaustedDays: ${exhaustedDays})`);
                           }
                         }
 
@@ -7604,7 +7580,6 @@ export function UserProfileDetail() {
 
     // Debug logging to help identify where PDF URL is located
     if (full_report && !experianPdfUrl) {
-      console.log('🔍 PDF URL not found. Checking full_report structure:', {
         hasPdfUrlInDb: !!pdf_url,
         hasResult: !!full_report.result,
         hasModel: !!full_report.result?.model,
@@ -7615,59 +7590,11 @@ export function UserProfileDetail() {
         topLevelKeys: Object.keys(full_report)
       });
     } else if (experianPdfUrl) {
-      console.log('✅ PDF URL found:', experianPdfUrl);
     }
     const accountSummary = reportData.CAIS_Account?.CAIS_Account_DETAILS || [];
     const enquirySummary = reportData.CAPS?.CAPS_Summary || {};
     const capsApplications = reportData.CAPS?.CAPS_Application_Details || [];
     const currentApplication = reportData.Current_Application || {};
-
-    // Debug: Always log to help identify structure
-    console.log('🔍 Admin Credit Analytics Debug:', {
-      accountSummaryLength: accountSummary.length,
-      hasReportData: !!reportData,
-      hasCAISAccount: !!reportData.CAIS_Account,
-      reportDataKeys: reportData ? Object.keys(reportData) : [],
-      caisAccountKeys: reportData.CAIS_Account ? Object.keys(reportData.CAIS_Account) : []
-    });
-
-    // Debug: Log first account to see actual field names and values
-    if (accountSummary.length > 0) {
-      const firstAccount = accountSummary[0];
-      console.log('🔍 Admin Credit Analytics - First Account Structure:', {
-        allKeys: Object.keys(firstAccount),
-        sampleAccount: firstAccount,
-        overdueFields: {
-          Amount_Overdue: firstAccount.Amount_Overdue,
-          'Amount_Overdue (type)': typeof firstAccount.Amount_Overdue,
-          Overdue_Amount: firstAccount.Overdue_Amount,
-          AmountOverdue: firstAccount.AmountOverdue,
-          Current_Balance: firstAccount.Current_Balance,
-          'Current_Balance (type)': typeof firstAccount.Current_Balance,
-          Subscriber_Name: firstAccount.Subscriber_Name,
-          Account_Status: firstAccount.Account_Status
-        },
-        // Check all fields that might contain "overdue" or "due"
-        allOverdueRelatedFields: Object.keys(firstAccount).filter(key =>
-          key.toLowerCase().includes('overdue') ||
-          key.toLowerCase().includes('due') ||
-          key.toLowerCase().includes('outstanding') ||
-          key.toLowerCase().includes('dpd') ||
-          key.toLowerCase().includes('past')
-        ).reduce((acc, key) => {
-          acc[key] = firstAccount[key];
-          return acc;
-        }, {} as any),
-        // Also check all numeric fields that might be overdue amounts
-        allNumericFields: Object.keys(firstAccount).filter(key => {
-          const value = firstAccount[key];
-          return typeof value === 'number' || (typeof value === 'string' && !isNaN(parseFloat(value)) && parseFloat(value) > 0);
-        }).reduce((acc, key) => {
-          acc[key] = firstAccount[key];
-          return acc;
-        }, {} as any)
-      });
-    }
 
     // Get credit score from report if not in database
     // Check multiple sources for credit score
@@ -7996,7 +7923,6 @@ export function UserProfileDetail() {
                 // Show debug button if PDF URL not found but report exists
                 <button
                   onClick={() => {
-                    console.log('📄 Full Report Structure:', JSON.stringify(full_report, null, 2));
                     toast.info('Check browser console for full report structure. PDF URL may be in a different location.');
                   }}
                   className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-yellow-600 text-white text-xs sm:text-sm rounded-lg hover:bg-yellow-700 transition-colors whitespace-nowrap"
