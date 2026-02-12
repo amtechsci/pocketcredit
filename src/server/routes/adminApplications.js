@@ -164,12 +164,12 @@ router.get('/', authenticateAdmin, async (req, res) => {
           )
       ) a ON u.id = a.user_id
       LEFT JOIN loan_plans lp ON la.loan_plan_id = lp.id
-      LEFT JOIN admins av ON la.assigned_verify_admin_id = av.id
-      LEFT JOIN admins avt ON la.temp_assigned_verify_admin_id = avt.id
-      LEFT JOIN admins am ON la.assigned_account_manager_id = am.id
-      LEFT JOIN admins amt ON la.temp_assigned_account_manager_id = amt.id
-      LEFT JOIN admins ar ON la.assigned_recovery_officer_id = ar.id
-      LEFT JOIN admins art ON la.temp_assigned_recovery_officer_id = art.id
+      LEFT JOIN admins av ON la.assigned_verify_admin_id COLLATE utf8mb4_unicode_ci = av.id
+      LEFT JOIN admins avt ON la.temp_assigned_verify_admin_id COLLATE utf8mb4_unicode_ci = avt.id
+      LEFT JOIN admins am ON la.assigned_account_manager_id COLLATE utf8mb4_unicode_ci = am.id
+      LEFT JOIN admins amt ON la.temp_assigned_account_manager_id COLLATE utf8mb4_unicode_ci = amt.id
+      LEFT JOIN admins ar ON la.assigned_recovery_officer_id COLLATE utf8mb4_unicode_ci = ar.id
+      LEFT JOIN admins art ON la.temp_assigned_recovery_officer_id COLLATE utf8mb4_unicode_ci = art.id
     `;
 
     let whereConditions = [];
