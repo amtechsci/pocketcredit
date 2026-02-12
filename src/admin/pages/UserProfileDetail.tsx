@@ -7578,19 +7578,6 @@ export function UserProfileDetail() {
         null;
     }
 
-    // Debug logging to help identify where PDF URL is located
-    if (full_report && !experianPdfUrl) {
-        hasPdfUrlInDb: !!pdf_url,
-        hasResult: !!full_report.result,
-        hasModel: !!full_report.result?.model,
-        hasData: !!full_report.result?.data,
-        resultKeys: full_report.result ? Object.keys(full_report.result) : [],
-        modelKeys: full_report.result?.model ? Object.keys(full_report.result.model) : [],
-        dataKeys: full_report.result?.data ? Object.keys(full_report.result.data) : [],
-        topLevelKeys: Object.keys(full_report)
-      });
-    } else if (experianPdfUrl) {
-    }
     const accountSummary = reportData.CAIS_Account?.CAIS_Account_DETAILS || [];
     const enquirySummary = reportData.CAPS?.CAPS_Summary || {};
     const capsApplications = reportData.CAPS?.CAPS_Application_Details || [];
