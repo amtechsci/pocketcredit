@@ -147,8 +147,26 @@ export function CreditAnalyticsCard({ userKycCompleted }: CreditAnalyticsCardPro
           <p className="text-sm font-semibold text-red-900 mb-2">Mobile number did not match</p>
           <p className="text-xs text-gray-800">{actualMessage}</p>
         </div>
+        <Button
+          onClick={handlePerformCreditCheck}
+          disabled={performingCheck}
+          variant="outline"
+          className="border-red-300 text-red-700 hover:bg-red-50"
+        >
+          {performingCheck ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+              Retrying...
+            </>
+          ) : (
+            <>
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Retry
+            </>
+          )}
+        </Button>
         {checked_at && (
-          <p className="text-xs text-gray-500">Report Date: {new Date(checked_at).toLocaleDateString('en-GB')}</p>
+          <p className="text-xs text-gray-500 mt-4">Report Date: {new Date(checked_at).toLocaleDateString('en-GB')}</p>
         )}
       </Card>
     );

@@ -1844,6 +1844,13 @@ class ApiService {
   async getStoredUANData(): Promise<ApiResponse<any>> {
     return this.request('GET', '/digitap/uan/stored');
   }
+
+  /**
+   * Get partners for Our Partners page (public)
+   */
+  async getPartnersForDisplay(): Promise<ApiResponse<Array<{ id: number; name: string; category: string | null; activities: string | null; status: string }>>> {
+    return this.request('GET', '/partners-display');
+  }
 }
 
 // Export singleton instance

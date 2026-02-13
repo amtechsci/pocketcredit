@@ -99,15 +99,15 @@ const ProfileCompletionPageSimple = () => {
     // Limit to 8 digits (DDMMYYYY)
     const limited = numbers.slice(0, 8);
 
-    // Add slashes automatically
+    // Add slashes automatically: "/" after 2 digits (DD), "/" after 4 digits (MM)
     let formatted = '';
     if (limited.length > 0) {
       formatted = limited.slice(0, 2); // DD
-      if (limited.length >= 3) {
-        formatted += '/' + limited.slice(2, 4); // MM
+      if (limited.length >= 2) {
+        formatted += '/' + limited.slice(2, 4); // /MM
       }
-      if (limited.length >= 5) {
-        formatted += '/' + limited.slice(4, 8); // YYYY
+      if (limited.length >= 4) {
+        formatted += '/' + limited.slice(4, 8); // /YYYY
       }
     }
 

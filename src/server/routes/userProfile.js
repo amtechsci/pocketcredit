@@ -319,7 +319,13 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         la.processed_penalty, la.processed_due_date, la.emi_schedule,
         DATE_FORMAT(la.closed_date, '%Y-%m-%d') as closed_date,
         la.closed_amount,
-        es.status as enach_status
+        es.status as enach_status,
+        av.name as verify_user_name,
+        avt.name as temp_verify_user_name,
+        am.name as acc_manager_name,
+        amt.name as temp_acc_manager_name,
+        ar.name as recovery_officer_name,
+        art.name as temp_recovery_officer_name
       FROM loan_applications la
       LEFT JOIN (
         SELECT es1.loan_application_id, es1.status
@@ -330,6 +336,12 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           WHERE es2.loan_application_id = es1.loan_application_id
         )
       ) es ON la.id = es.loan_application_id
+      LEFT JOIN admins av ON la.assigned_verify_admin_id COLLATE utf8mb4_unicode_ci = av.id
+      LEFT JOIN admins avt ON la.temp_assigned_verify_admin_id COLLATE utf8mb4_unicode_ci = avt.id
+      LEFT JOIN admins am ON la.assigned_account_manager_id COLLATE utf8mb4_unicode_ci = am.id
+      LEFT JOIN admins amt ON la.temp_assigned_account_manager_id COLLATE utf8mb4_unicode_ci = amt.id
+      LEFT JOIN admins ar ON la.assigned_recovery_officer_id COLLATE utf8mb4_unicode_ci = ar.id
+      LEFT JOIN admins art ON la.temp_assigned_recovery_officer_id COLLATE utf8mb4_unicode_ci = art.id
       WHERE la.user_id = ?
       ORDER BY la.created_at DESC
     `, [userId]);
@@ -1203,7 +1215,21 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           emi_schedule: app.emi_schedule || null,
           closed_date: app.closed_date || null,
           closed_amount: app.closed_amount != null ? parseFloat(app.closed_amount) : null,
-          enach_status: app.enach_status || null
+          enach_status: app.enach_status || null,
+          subAdminAssignments: (() => {
+            const status = app.status;
+            const afterDisbursal = status === 'account_manager';
+            const overdue = status === 'overdue';
+            const verifyName = (app.temp_verify_user_name || app.verify_user_name) || 'N/A';
+            const accManagerName = (app.temp_acc_manager_name || app.acc_manager_name) || 'N/A';
+            const recoveryName = (app.temp_recovery_officer_name || app.recovery_officer_name) || 'N/A';
+            return {
+              verifyUserName: verifyName,
+              accManagerName: (afterDisbursal || overdue) ? accManagerName : 'N/A',
+              recoveryOfficerName: overdue ? recoveryName : 'N/A',
+              isOverdue: !!overdue
+            };
+          })()
         };
       })
     };

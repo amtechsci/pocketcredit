@@ -1408,19 +1408,12 @@ export function DynamicDashboardPage() {
                     <h3 className="text-lg font-semibold text-gray-900 mb-4">Contact Us</h3>
 
                     <div className="space-y-2">
-                      {/* Send E-mail */}
-                      <button
-                        onClick={() => navigate('/send-email')}
-                        className="w-full bg-white rounded-lg p-3 flex items-center justify-between hover:bg-gray-50 transition-colors border border-gray-200"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
-                            <Mail className="w-5 h-5 text-blue-600" />
-                          </div>
-                          <span className="text-base font-medium text-gray-900">Send E-mail</span>
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-gray-400" />
-                      </button>
+                      {/* Send E-mail - text only */}
+                      <div className="w-full bg-white rounded-lg p-3 border border-gray-200">
+                        <p className="text-sm text-gray-700">
+                          Send E-mail on <a href="mailto:support@pocketcredit.in" className="text-blue-600 hover:underline">support@pocketcredit.in</a>
+                        </p>
+                      </div>
 
                       {/* Change Mobile Number */}
                       <button

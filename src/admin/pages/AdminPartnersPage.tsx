@@ -42,6 +42,8 @@ interface Partner {
   partner_uuid: string;
   client_id: string;
   name: string;
+  category: string | null;
+  activities: string | null;
   email: string | null;
   public_key_path: string | null;
   allowed_ips: string | null;
@@ -108,6 +110,8 @@ export function AdminPartnersPage() {
     client_id: '',
     client_secret: '',
     name: '',
+    category: '',
+    activities: '',
     email: '',
     public_key_path: '',
     public_key_pem: '',
@@ -116,6 +120,8 @@ export function AdminPartnersPage() {
 
   const [editForm, setEditForm] = useState({
     name: '',
+    category: '',
+    activities: '',
     email: '',
     public_key_path: '',
     public_key_pem: '',
@@ -179,6 +185,8 @@ export function AdminPartnersPage() {
       client_id: '',
       client_secret: '',
       name: '',
+      category: '',
+      activities: '',
       email: '',
       public_key_path: '',
       public_key_pem: '',
@@ -191,6 +199,8 @@ export function AdminPartnersPage() {
     setEditingPartner(p);
     setEditForm({
       name: p.name,
+      category: p.category || '',
+      activities: p.activities || '',
       email: p.email || '',
       public_key_path: p.public_key_path || '',
       public_key_pem: '',
@@ -211,6 +221,8 @@ export function AdminPartnersPage() {
         client_id: addForm.client_id.trim(),
         client_secret: addForm.client_secret,
         name: addForm.name.trim(),
+        category: addForm.category.trim() || undefined,
+        activities: addForm.activities.trim() || undefined,
         email: addForm.email.trim() || undefined,
         public_key_path: addForm.public_key_pem.trim() ? undefined : (addForm.public_key_path.trim() || undefined),
         public_key_pem: addForm.public_key_pem.trim() || undefined,
@@ -231,6 +243,8 @@ export function AdminPartnersPage() {
       setSaving(true);
       await adminApiService.updatePartner(editingPartner.id, {
         name: editForm.name.trim(),
+        category: editForm.category.trim() || undefined,
+        activities: editForm.activities.trim() || undefined,
         email: editForm.email.trim() || undefined,
         public_key_path: editForm.public_key_pem.trim() ? undefined : (editForm.public_key_path.trim() || undefined),
         public_key_pem: editForm.public_key_pem.trim() || undefined,
@@ -303,6 +317,7 @@ export function AdminPartnersPage() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Client ID</TableHead>
+                    <TableHead>Category / Activities</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -313,6 +328,12 @@ export function AdminPartnersPage() {
                     <TableRow key={p.id}>
                       <TableCell className="font-medium">{p.name}</TableCell>
                       <TableCell className="font-mono text-xs">{p.client_id}</TableCell>
+                      <TableCell className="text-sm">
+                        {p.category && <span>{p.category}</span>}
+                        {p.category && p.activities && ' / '}
+                        {p.activities && <span>{p.activities}</span>}
+                        {!p.category && !p.activities && '—'}
+                      </TableCell>
                       <TableCell>{p.email || '—'}</TableCell>
                       <TableCell>
                         <Badge variant={p.is_active ? 'default' : 'secondary'}>
@@ -467,6 +488,25 @@ export function AdminPartnersPage() {
               />
             </div>
             <div className="grid gap-2">
+              <Label htmlFor="add-category">Category</Label>
+              <Input
+                id="add-category"
+                value={addForm.category}
+                onChange={(e) => setAddForm((f) => ({ ...f, category: e.target.value }))}
+                placeholder="e.g. Communication Service - Outbound Dialing"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="add-activities">Activities</Label>
+              <Textarea
+                id="add-activities"
+                value={addForm.activities}
+                onChange={(e) => setAddForm((f) => ({ ...f, activities: e.target.value }))}
+                placeholder="e.g. Outbound Dialing, Customer Communication"
+                rows={2}
+              />
+            </div>
+            <div className="grid gap-2">
               <Label htmlFor="add-email">Email</Label>
               <Input
                 id="add-email"
@@ -530,6 +570,34 @@ export function AdminPartnersPage() {
             {editingPartner && (
               <>
                 <p className="text-xs text-gray-500 font-mono">Client ID: {editingPartner.client_id}</p>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-name">Name *</Label>
+                  <Input
+                    id="edit-name"
+                    value={editForm.name}
+                    onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="Partner display name"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-category">Category</Label>
+                  <Input
+                    id="edit-category"
+                    value={editForm.category}
+                    onChange={(e) => setEditForm((f) => ({ ...f, category: e.target.value }))}
+                    placeholder="e.g. Communication Service"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-activities">Activities</Label>
+                  <Textarea
+                    id="edit-activities"
+                    value={editForm.activities}
+                    onChange={(e) => setEditForm((f) => ({ ...f, activities: e.target.value }))}
+                    placeholder="e.g. Outbound Dialing, Customer Communication"
+                    rows={2}
+                  />
+                </div>
                 <div className="grid gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
                   <Label className="flex items-center gap-1.5 text-gray-700">
                     <Link2 className="w-4 h-4" />
@@ -560,15 +628,6 @@ export function AdminPartnersPage() {
                 </div>
               </>
             )}
-            <div className="grid gap-2">
-              <Label htmlFor="edit-name">Name *</Label>
-              <Input
-                id="edit-name"
-                value={editForm.name}
-                onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="Partner display name"
-              />
-            </div>
             <div className="grid gap-2">
               <Label htmlFor="edit-email">Email</Label>
               <Input

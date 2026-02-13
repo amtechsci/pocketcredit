@@ -7538,6 +7538,24 @@ export function UserProfileDetail() {
             </p>
           </div>
 
+          <Button
+            onClick={() => handlePerformCreditCheck(true)}
+            disabled={performingCreditCheck}
+            className="bg-red-600 hover:bg-red-700 text-white"
+          >
+            {performingCreditCheck ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                Retrying...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Retry
+              </>
+            )}
+          </Button>
+
           {request_id && (
             <div className="mt-6 pt-4 border-t border-gray-200 text-xs text-gray-500">
               <p><strong>Request ID:</strong> {request_id}</p>
@@ -12171,6 +12189,27 @@ export function UserProfileDetail() {
                   );
                 })()}
               </div>
+              {/* Sub-Admins row (same format as LoanApplicationsQueue) */}
+              {(() => {
+                const loans = getArray('loans');
+                const latestLoan = loans && loans.length > 0 ? loans[0] : null;
+                const s = latestLoan?.subAdminAssignments;
+                if (!s) return null;
+                const verifyUser = s.verifyUserName ?? 'N/A';
+                const accManager = s.accManagerName ?? 'N/A';
+                const recoveryOfficer = s.recoveryOfficerName ?? 'N/A';
+                const agency = s.isOverdue ? 'YES' : 'NO';
+                return (
+                  <div className="mt-2 pb-2 -mx-3 sm:mx-0 px-3 sm:px-0">
+                    <div className="text-xs text-gray-700 space-y-0.5 font-mono">
+                      <div>Verify user: {verifyUser}</div>
+                      <div>ACC Manager: {accManager}</div>
+                      <div>Recovery officer: {recoveryOfficer}</div>
+                      <div>Agency: {agency}</div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 

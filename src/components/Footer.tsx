@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
-import { Facebook, Twitter, Linkedin, Instagram, Mail, Phone, MapPin } from 'lucide-react';
+import { Facebook, Twitter, Linkedin, Instagram, Mail, MapPin } from 'lucide-react';
 import { usePolicies } from '../hooks/usePolicies';
+import { Logo } from './Logo';
 
 export function Footer() {
   const { policies } = usePolicies(); // Fetch policies from API
@@ -16,6 +17,7 @@ export function Footer() {
     { label: 'About Us', path: '/about' },
     { label: 'Media / Press', path: '/media' },
     { label: 'Careers', path: '/careers' },
+    { label: 'Our Partners', path: '/partners' },
   ];
 
   const contactInfo = [
@@ -29,16 +31,8 @@ export function Footer() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8">
           {/* Company Info */}
           <div className="lg:col-span-1">
-            <div className="flex items-center gap-2 mb-4">
-              <div 
-                className="w-8 h-8 rounded-lg flex items-center justify-center"
-                style={{ backgroundColor: '#0052FF' }}
-              >
-                <span className="text-white font-bold">PC</span>
-              </div>
-              <span className="text-lg font-semibold" style={{ color: '#1E2A3B' }}>
-                Pocket Credit
-              </span>
+            <div className="flex items-center mb-4">
+              <Logo size="md" className="flex-shrink-0" />
             </div>
             <p className="text-sm text-gray-600 mb-4 leading-relaxed">
               Your trusted platform for instant personal and business loans. 

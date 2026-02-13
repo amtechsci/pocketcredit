@@ -57,7 +57,6 @@ import { GrievanceRedressalPage } from './components/pages/GrievanceRedressalPag
 import { DisclaimerPage } from './components/pages/DisclaimerPage';
 import { AboutPage } from './components/pages/AboutPage';
 import { ChangeMobileNumberPage } from './components/pages/ChangeMobileNumberPage';
-import { SendEmailPage } from './components/pages/SendEmailPage';
 import { Logo } from './components/Logo';
 import AdminApp from './AdminApp';
 import PartnerApp from './PartnerApp';
@@ -662,16 +661,6 @@ function AppContent() {
           isAuthenticated ? (
             <DashboardLayout>
               <ChangeMobileNumberPage />
-            </DashboardLayout>
-          ) : (
-            <Navigate to="/auth" replace />
-          )
-        } />
-
-        <Route path="/send-email" element={
-          isAuthenticated ? (
-            <DashboardLayout>
-              <SendEmailPage />
             </DashboardLayout>
           ) : (
             <Navigate to="/auth" replace />

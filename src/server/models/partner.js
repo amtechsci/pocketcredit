@@ -76,7 +76,7 @@ const findAllPartners = async () => {
   try {
     await initializeDatabase();
     const partners = await executeQuery(
-      'SELECT id, partner_uuid, client_id, name, email, public_key_path, allowed_ips, is_active, created_at, updated_at FROM partners ORDER BY created_at DESC'
+      'SELECT id, partner_uuid, client_id, name, category, activities, email, public_key_path, allowed_ips, is_active, created_at, updated_at FROM partners ORDER BY created_at DESC'
     );
     return partners || [];
   } catch (error) {
@@ -94,7 +94,7 @@ const findPartnerById = async (id) => {
   try {
     await initializeDatabase();
     const partners = await executeQuery(
-      'SELECT id, partner_uuid, client_id, name, email, public_key_path, allowed_ips, is_active, created_at, updated_at FROM partners WHERE id = ?',
+      'SELECT id, partner_uuid, client_id, name, category, activities, email, public_key_path, allowed_ips, is_active, created_at, updated_at FROM partners WHERE id = ?',
       [id]
     );
     return partners && partners.length > 0 ? partners[0] : null;
@@ -116,7 +116,7 @@ const updatePartner = async (id, updates) => {
     const partner = await findPartnerById(id);
     if (!partner) return null;
 
-    const allowed = ['name', 'email', 'public_key_path', 'allowed_ips', 'is_active', 'client_secret'];
+    const allowed = ['name', 'category', 'activities', 'email', 'public_key_path', 'allowed_ips', 'is_active', 'client_secret'];
     const setClauses = [];
     const values = [];
 
@@ -160,6 +160,8 @@ const createPartner = async (partnerData) => {
       client_id,
       client_secret,
       name,
+      category = null,
+      activities = null,
       email = null,
       public_key_path = null,
       allowed_ips = null
@@ -170,11 +172,11 @@ const createPartner = async (partnerData) => {
 
     const query = `
       INSERT INTO partners (
-        partner_uuid, client_id, client_secret, name, email, public_key_path, allowed_ips, is_active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
+        partner_uuid, client_id, client_secret, name, category, activities, email, public_key_path, allowed_ips, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
     `;
 
-    const values = [partner_uuid, client_id, hashedSecret, name, email, public_key_path, allowed_ips];
+    const values = [partner_uuid, client_id, hashedSecret, name, category, activities, email, public_key_path, allowed_ips];
     const result = await executeQuery(query, values);
 
     return {

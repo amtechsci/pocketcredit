@@ -15,6 +15,22 @@ const router = express.Router();
 
 const PARTNERS_KEYS_DIR = path.join(__dirname, '..', 'partner_keys', 'partners');
 
+/** Ensure category and activities columns exist (migration) */
+async function ensurePartnersColumns() {
+  for (const col of [
+    { name: 'category', def: 'VARCHAR(255) DEFAULT NULL' },
+    { name: 'activities', def: 'TEXT DEFAULT NULL' }
+  ]) {
+    try {
+      await executeQuery(`ALTER TABLE partners ADD COLUMN ${col.name} ${col.def}`);
+    } catch (e) {
+      if (e.code !== 'ER_DUP_FIELDNAME' && !String(e.message || '').includes('Duplicate column')) {
+        console.warn('Partners migration:', e.message);
+      }
+    }
+  }
+}
+
 /**
  * Validate that a string looks like a PEM key (public key).
  * @param {string} pem - Raw PEM content
@@ -71,6 +87,8 @@ const requireSuperadmin = (req, res, next) => {
  */
 router.get('/', authenticateAdmin, requireSuperadmin, async (req, res) => {
   try {
+    await initializeDatabase();
+    await ensurePartnersColumns();
     const partners = await findAllPartners();
     res.json({ status: 'success', data: { partners } });
   } catch (error) {
@@ -107,7 +125,7 @@ router.get('/:id', authenticateAdmin, requireSuperadmin, async (req, res) => {
  */
 router.post('/', authenticateAdmin, requireSuperadmin, async (req, res) => {
   try {
-    const { client_id, client_secret, name, email, public_key_path, public_key_pem, allowed_ips } = req.body;
+    const { client_id, client_secret, name, category, activities, email, public_key_path, public_key_pem, allowed_ips } = req.body;
     if (!client_id || !client_secret || !name) {
       return res.status(400).json({
         status: 'error',
@@ -132,6 +150,8 @@ router.post('/', authenticateAdmin, requireSuperadmin, async (req, res) => {
       client_id: clientIdTrimmed,
       client_secret,
       name: String(name).trim(),
+      category: category ? String(category).trim() : null,
+      activities: activities ? String(activities).trim() : null,
       email: email ? String(email).trim() : null,
       public_key_path: resolvedPublicKeyPath,
       allowed_ips: allowed_ips != null ? String(allowed_ips).trim() : null
@@ -158,9 +178,11 @@ router.put('/:id', authenticateAdmin, requireSuperadmin, async (req, res) => {
     if (!partner) {
       return res.status(404).json({ status: 'error', message: 'Partner not found' });
     }
-    const { name, email, public_key_path, public_key_pem, allowed_ips, is_active, client_secret } = req.body;
+    const { name, category, activities, email, public_key_path, public_key_pem, allowed_ips, is_active, client_secret } = req.body;
     const updates = {};
     if (name !== undefined) updates.name = String(name).trim();
+    if (category !== undefined) updates.category = category ? String(category).trim() : null;
+    if (activities !== undefined) updates.activities = activities ? String(activities).trim() : null;
     if (email !== undefined) updates.email = email ? String(email).trim() : null;
     if (allowed_ips !== undefined) updates.allowed_ips = allowed_ips != null ? String(allowed_ips).trim() : null;
     if (typeof is_active === 'boolean') updates.is_active = is_active ? 1 : 0;
