@@ -56,21 +56,21 @@ async function registerJobs() {
     runOnInit: false
   });
 
-  // SMS Notification Job - DISABLED (OneXtel API authentication needs configuration)
-  // Uncomment when SMS API is properly configured
-  // cronManager.everyMinutes(1, 'sms-notifications', async () => {
-  //   await runSMSNotificationJob();
-  // }, {
-  //   timezone: 'Asia/Kolkata', // IST
-  //   runOnInit: false // Don't run on server start
-  // });
+  // SMS Notification Job
+  // Ensure OneXtel API keys are configured in .env
+  cronManager.everyMinutes(1, 'sms-notifications', async () => {
+    await runSMSNotificationJob();
+  }, {
+    timezone: 'Asia/Kolkata', // IST
+    runOnInit: false // Don't run on server start
+  });
 
   // Add more jobs here as needed
   // Example:
   // cronManager.hourly(0, 'hourly-task', async () => {
   //   // Your hourly task
   // });
-  
+
   // cronManager.everyMinutes(15, 'quarterly-task', async () => {
   //   // Your task that runs every 15 minutes
   // });

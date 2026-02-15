@@ -410,7 +410,7 @@ export function AdminPartnersPage() {
                           </TableCell>
                           <TableCell>{formatDate(lead.lead_shared_at)}</TableCell>
                           <TableCell>
-                            {lead.application_number || '—'}
+                            {lead.loan_application_id ? `PLL${lead.loan_application_id}` : (lead.application_number || '—')}
                             {lead.disbursal_amount != null && ` / ₹${lead.disbursal_amount}`}
                           </TableCell>
                           <TableCell>

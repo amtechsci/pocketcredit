@@ -41,20 +41,20 @@ router.post('/login', authenticatePartnerBasic, async (req, res) => {
     // Check if this is a dashboard request (from web browser)
     // Dashboard requests should NOT be encrypted for frontend compatibility
     const isDashboardRequest = req.headers['x-dashboard-request'] === 'true' ||
-                               req.headers['x-requested-with'] === 'XMLHttpRequest' || 
-                               (req.headers['origin'] && req.headers['origin'].includes('pocketcredit.in')) ||
-                               (req.headers['referer'] && req.headers['referer'].includes('/partner/'));
+      req.headers['x-requested-with'] === 'XMLHttpRequest' ||
+      (req.headers['origin'] && req.headers['origin'].includes('pocketcredit.in')) ||
+      (req.headers['referer'] && req.headers['referer'].includes('/partner/'));
 
     // Check if client explicitly requests unencrypted response (for testing/debugging)
-    const requestUnencrypted = req.headers['x-no-encryption'] === 'true' || 
-                                req.query.no_encryption === 'true';
+    const requestUnencrypted = req.headers['x-no-encryption'] === 'true' ||
+      req.query.no_encryption === 'true';
 
     // Only encrypt for API-to-API communication, not for dashboard or when explicitly requested
-    const shouldEncrypt = !isDashboardRequest && 
-                         !requestUnencrypted &&
-                         process.env.PARTNER_API_ENCRYPTION_ENABLED === 'true' && 
-                         partner.public_key_path;
-    
+    const shouldEncrypt = !isDashboardRequest &&
+      !requestUnencrypted &&
+      process.env.PARTNER_API_ENCRYPTION_ENABLED === 'true' &&
+      partner.public_key_path;
+
     if (isDashboardRequest) {
       console.log('📱 Dashboard login request detected - skipping encryption');
     }
@@ -101,25 +101,25 @@ router.post('/login', authenticatePartnerBasic, async (req, res) => {
 router.post('/refresh-token', authenticatePartnerBasic, async (req, res) => {
   try {
     // Debug: Log all headers that might contain refresh token (for troubleshooting)
-    const relevantHeaders = Object.keys(req.headers).filter(k => 
+    const relevantHeaders = Object.keys(req.headers).filter(k =>
       k.toLowerCase().includes('refresh') || k.toLowerCase().includes('token')
     );
     if (relevantHeaders.length > 0) {
       console.log('🔍 Refresh token endpoint - Relevant headers found:', relevantHeaders);
     }
-    
+
     // Express normalizes headers to lowercase
     // Try common header name variations
     let refreshTokenHeader = null;
-    
+
     // Check common header name patterns (Express converts to lowercase)
     const headerVariations = [
       'refresh_token',
-      'refresh-token', 
+      'refresh-token',
       'x-refresh-token',
       'x-refresh_token'
     ];
-    
+
     for (const headerName of headerVariations) {
       if (req.headers[headerName]) {
         refreshTokenHeader = req.headers[headerName];
@@ -127,7 +127,7 @@ router.post('/refresh-token', authenticatePartnerBasic, async (req, res) => {
         break;
       }
     }
-    
+
     // If not found in common patterns, search all headers (case-insensitive)
     if (!refreshTokenHeader) {
       for (const [key, value] of Object.entries(req.headers)) {
@@ -139,21 +139,21 @@ router.post('/refresh-token', authenticatePartnerBasic, async (req, res) => {
         }
       }
     }
-    
+
     // Also check request body (common pattern for token refresh)
     const refreshTokenFromBody = req.body?.refresh_token || req.body?.refreshToken;
     if (refreshTokenFromBody) {
       console.log('✅ Found refresh token in request body');
     }
-    
+
     // Get token from header or body
     const tokenSource = refreshTokenHeader || refreshTokenFromBody;
-    
+
     if (!tokenSource) {
       // Enhanced debugging
       console.log('❌ Refresh token not found. All headers:', Object.keys(req.headers));
       console.log('❌ Request body:', req.body);
-      
+
       return res.status(401).json({
         status: false,
         code: 4114,
@@ -180,7 +180,7 @@ router.post('/refresh-token', authenticatePartnerBasic, async (req, res) => {
 
     // Verify partner exists and is active
     const partner = await findPartnerByUuid(decoded.partner_id);
-    
+
     if (!partner || !partner.is_active) {
       return res.status(401).json({
         status: false,
@@ -249,12 +249,12 @@ const generateUTMLink = (partnerUuid, mobileNumber) => {
   const utmSource = encodeURIComponent(partnerUuid);
   const utmMedium = 'partner_api';
   const utmCampaign = encodeURIComponent(`lead_${mobileNumber}_${Date.now()}`);
-  
+
   // If base URL is bit.ly, append UTM params
   if (baseUrl.includes('bit.ly')) {
     return `${baseUrl}?utm_source=${utmSource}&utm_medium=${utmMedium}&utm_campaign=${utmCampaign}`;
   }
-  
+
   // For custom URLs, append UTM params
   const separator = baseUrl.includes('?') ? '&' : '?';
   return `${baseUrl}${separator}utm_source=${utmSource}&utm_medium=${utmMedium}&utm_campaign=${utmCampaign}`;
@@ -302,7 +302,7 @@ const calculateAge = (dateOfBirth) => {
  */
 const validateFunnelChecks = (requestData) => {
   const errors = [];
-  
+
   // Age validation (18-45)
   if (requestData.date_of_birth) {
     const age = calculateAge(requestData.date_of_birth);
@@ -312,12 +312,12 @@ const validateFunnelChecks = (requestData) => {
       errors.push(`Age ${age} is outside required range (18-45)`);
     }
   }
-  
+
   // Employment type validation (must be Salaried)
   if (requestData.employment_type && requestData.employment_type.toLowerCase() !== 'salaried') {
     errors.push('Employment type must be Salaried');
   }
-  
+
   // Salary validation (min 20k)
   if (requestData.monthly_salary) {
     const salary = parseFloat(requestData.monthly_salary);
@@ -325,7 +325,7 @@ const validateFunnelChecks = (requestData) => {
       errors.push('Monthly salary must be 20,000 or above');
     }
   }
-  
+
   // Payment mode validation (must be Bank Transfer)
   if (requestData.payment_mode) {
     const paymentMode = requestData.payment_mode.toLowerCase();
@@ -333,7 +333,7 @@ const validateFunnelChecks = (requestData) => {
       errors.push('Income payment mode must be Bank Transfer');
     }
   }
-  
+
   return errors;
 };
 
@@ -349,9 +349,9 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
 
     // Check if request is encrypted
     let requestData = req.body;
-    const isEncrypted = (requestData.partnerId === partner.partner_uuid || requestData.partnerId === partner.client_id) && 
-                        requestData.encryptedData && 
-                        requestData.encryptedKey;
+    const isEncrypted = (requestData.partnerId === partner.partner_uuid || requestData.partnerId === partner.client_id) &&
+      requestData.encryptedData &&
+      requestData.encryptedKey;
 
     // Decrypt if encrypted
     if (isEncrypted) {
@@ -383,10 +383,10 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
     }
 
     // Validate required fields
-    const { 
-      first_name, 
-      last_name, 
-      mobile_number, 
+    const {
+      first_name,
+      last_name,
+      mobile_number,
       pan_number,
       // Optional funnel check fields
       date_of_birth,
@@ -467,13 +467,13 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
       const existingUser = existingUsers[0];
 
       // Check user status (hold, suspended, inactive, etc.)
-      const isUserOnHold = existingUser.application_hold_reason || 
-                          (existingUser.hold_until_date && new Date(existingUser.hold_until_date) > new Date());
-      
-      if (existingUser.status === 'suspended' || 
-          existingUser.status === 'inactive' || 
-          isUserOnHold ||
-          existingUser.eligibility_status === 'not_eligible') {
+      const isUserOnHold = existingUser.application_hold_reason ||
+        (existingUser.hold_until_date && new Date(existingUser.hold_until_date) > new Date());
+
+      if (existingUser.status === 'suspended' ||
+        existingUser.status === 'inactive' ||
+        isUserOnHold ||
+        existingUser.eligibility_status === 'not_eligible') {
         // User is on hold, suspended, inactive, or not eligible - treat as active user
         dedupeStatus = 'active_user';
         dedupeCode = 2006;
@@ -504,38 +504,72 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
       }
     }
 
-    // Store lead in partner_leads table
+    // Check if lead already exists for this partner
     try {
-      await executeQuery(
-        `INSERT INTO partner_leads (
-          partner_id, partner_uuid, user_id, first_name, last_name, mobile_number, pan_number,
-          date_of_birth, employment_type, monthly_salary, payment_mode,
-          dedupe_status, dedupe_code, utm_link, utm_source, utm_medium, utm_campaign,
-          lead_shared_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW())`,
-        [
-          partner.id,
-          partner.partner_uuid,
-          userId,
-          first_name,
-          last_name,
-          String(mobile_number),
-          pan_number.toUpperCase(),
-          date_of_birth || null,
-          employment_type || null,
-          monthly_salary ? parseFloat(monthly_salary) : null,
-          payment_mode || null,
-          dedupeStatus,
-          dedupeCode,
-          utmLink,
-          utmSource,
-          utmMedium,
-          utmCampaign
-        ]
+      const existingLeads = await executeQuery(
+        `SELECT id FROM partner_leads WHERE partner_id = ? AND mobile_number = ? LIMIT 1`,
+        [partner.id, String(mobile_number)]
       );
+
+      if (existingLeads && existingLeads.length > 0) {
+        // Update existing lead
+        await executeQuery(
+          `UPDATE partner_leads 
+           SET dedupe_status = ?, dedupe_code = ?, updated_at = NOW(),
+               first_name = ?, last_name = ?, pan_number = ?,
+               date_of_birth = ?, employment_type = ?, monthly_salary = ?, payment_mode = ?,
+               utm_link = ?, utm_source = ?, utm_medium = ?, utm_campaign = ?
+           WHERE id = ?`,
+          [
+            dedupeStatus,
+            dedupeCode,
+            first_name,
+            last_name,
+            pan_number.toUpperCase(),
+            date_of_birth || null,
+            employment_type || null,
+            monthly_salary ? parseFloat(monthly_salary) : null,
+            payment_mode || null,
+            utmLink,
+            utmSource,
+            utmMedium,
+            utmCampaign,
+            existingLeads[0].id
+          ]
+        );
+      } else {
+        // Store new lead in partner_leads table
+        await executeQuery(
+          `INSERT INTO partner_leads (
+            partner_id, partner_uuid, user_id, first_name, last_name, mobile_number, pan_number,
+            date_of_birth, employment_type, monthly_salary, payment_mode,
+            dedupe_status, dedupe_code, utm_link, utm_source, utm_medium, utm_campaign,
+            lead_shared_at, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW())`,
+          [
+            partner.id,
+            partner.partner_uuid,
+            userId,
+            first_name,
+            last_name,
+            String(mobile_number),
+            pan_number.toUpperCase(),
+            date_of_birth || null,
+            employment_type || null,
+            monthly_salary ? parseFloat(monthly_salary) : null,
+            payment_mode || null,
+            dedupeStatus,
+            dedupeCode,
+            utmLink,
+            utmSource,
+            utmMedium,
+            utmCampaign
+          ]
+        );
+      }
     } catch (leadError) {
-      console.error('Error storing partner lead:', leadError);
-      // Continue even if lead storage fails
+      console.error('Error processing partner lead:', leadError);
+      // Continue even if lead storage/update fails
     }
 
     // Prepare response
@@ -558,7 +592,7 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
     if (isEncrypted) {
       const encryptionEnabled = process.env.PARTNER_API_ENCRYPTION_ENABLED === 'true';
       const hasPublicKey = !!partner.public_key_path;
-      
+
       console.log('🔍 Encryption check:', {
         isEncrypted,
         encryptionEnabled,
@@ -566,7 +600,7 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
         hasPublicKey,
         publicKeyPath: partner.public_key_path
       });
-      
+
       if (encryptionEnabled && hasPublicKey) {
         try {
           const partnerPublicKey = loadKeyFromFile(partner.public_key_path);
