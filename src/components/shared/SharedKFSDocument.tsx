@@ -743,6 +743,10 @@ export function SharedKFSDocument({ kfsData }: SharedKFSDocumentProps) {
                         <li>Payment of Loans after the due date may impact your credit scores maintained by the Credit Information Companies.</li>
                     </ul>
                 </div>
+
+                <div className="mb-3">
+                    <p className="text-xs font-bold">NOTE : Payment gateway charges to be borne by the borrower. The charges will be reflected on the payment page for your reference while making the payment.</p>
+                </div>
             </div>
         </div >
     );
