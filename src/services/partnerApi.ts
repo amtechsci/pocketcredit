@@ -3,7 +3,7 @@
  * Handles authentication and API calls for partner dashboard
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3001' : 'https://pocketcredit.in');
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3002' : 'https://pocketcredit.in');
 
 export interface PartnerLoginResponse {
   status: boolean;
@@ -41,6 +41,7 @@ export interface PartnerLead {
   user_registered_at: string | null;
   loan_application_id: number | null;
   loan_status: string | null;
+  user_status: string | null;
   disbursed_at: string | null;
   disbursal_amount: number | null;
   payout_eligible: number;
@@ -102,19 +103,15 @@ class PartnerApiService {
     const result = await response.json();
 
     if (!response.ok) {
-      // Handle authentication errors
-      if (response.status === 401) {
-        // Clear tokens on auth failure
+      // Handle authentication errors - clear tokens so UI can redirect to login
+      const isAuthError = response.status === 401 || result?.code === 4114;
+      if (isAuthError) {
         this.accessToken = null;
         localStorage.removeItem('partner_access_token');
         localStorage.removeItem('partner_refresh_token');
-        // Return more detailed error message
-        const errorMessage = result.message || result.code 
-          ? `${result.message || 'Authentication failed'} (Code: ${result.code || 'N/A'})`
-          : 'Authentication failed. Please check your Client ID and Client Secret.';
-        throw new Error(errorMessage);
+        throw new Error('PARTNER_SESSION_EXPIRED');
       }
-      throw new Error(result.message || `Request failed: ${response.statusText}`);
+      throw new Error(result?.message || `Request failed: ${response.statusText}`);
     }
 
     return result as T;
@@ -216,6 +213,8 @@ class PartnerApiService {
     page?: number;
     limit?: number;
     status?: string;
+    user_status?: string;
+    loan_status?: string;
     start_date?: string;
     end_date?: string;
   }): Promise<{
@@ -236,6 +235,8 @@ class PartnerApiService {
     if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
     if (params?.status) queryParams.append('status', params.status);
+    if (params?.user_status) queryParams.append('user_status', params.user_status);
+    if (params?.loan_status) queryParams.append('loan_status', params.loan_status);
     if (params?.start_date) queryParams.append('start_date', params.start_date);
     if (params?.end_date) queryParams.append('end_date', params.end_date);
 

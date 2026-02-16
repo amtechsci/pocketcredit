@@ -513,6 +513,7 @@ const startServer = async () => {
 
     // Start the server
     app.listen(PORT, () => {
+      console.log(`✅ Backend API running at http://localhost:${PORT}`);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);

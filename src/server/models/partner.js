@@ -76,7 +76,7 @@ const findAllPartners = async () => {
   try {
     await initializeDatabase();
     const partners = await executeQuery(
-      'SELECT id, partner_uuid, client_id, name, category, activities, email, public_key_path, allowed_ips, is_active, created_at, updated_at FROM partners ORDER BY created_at DESC'
+      'SELECT id, partner_uuid, client_id, name, category, activities, email, public_key_path, allowed_ips, is_active, payout_percentage, created_at, updated_at FROM partners ORDER BY created_at DESC'
     );
     return partners || [];
   } catch (error) {
@@ -94,7 +94,7 @@ const findPartnerById = async (id) => {
   try {
     await initializeDatabase();
     const partners = await executeQuery(
-      'SELECT id, partner_uuid, client_id, name, category, activities, email, public_key_path, allowed_ips, is_active, created_at, updated_at FROM partners WHERE id = ?',
+      'SELECT id, partner_uuid, client_id, name, category, activities, email, public_key_path, allowed_ips, is_active, payout_percentage, created_at, updated_at FROM partners WHERE id = ?',
       [id]
     );
     return partners && partners.length > 0 ? partners[0] : null;
@@ -116,7 +116,7 @@ const updatePartner = async (id, updates) => {
     const partner = await findPartnerById(id);
     if (!partner) return null;
 
-    const allowed = ['name', 'category', 'activities', 'email', 'public_key_path', 'allowed_ips', 'is_active', 'client_secret'];
+    const allowed = ['name', 'category', 'activities', 'email', 'public_key_path', 'allowed_ips', 'is_active', 'client_secret', 'payout_percentage'];
     const setClauses = [];
     const values = [];
 
@@ -164,7 +164,8 @@ const createPartner = async (partnerData) => {
       activities = null,
       email = null,
       public_key_path = null,
-      allowed_ips = null
+      allowed_ips = null,
+      payout_percentage = 2
     } = partnerData;
 
     // Hash the client secret
@@ -172,11 +173,11 @@ const createPartner = async (partnerData) => {
 
     const query = `
       INSERT INTO partners (
-        partner_uuid, client_id, client_secret, name, category, activities, email, public_key_path, allowed_ips, is_active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
+        partner_uuid, client_id, client_secret, name, category, activities, email, public_key_path, allowed_ips, is_active, payout_percentage, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW(), NOW())
     `;
 
-    const values = [partner_uuid, client_id, hashedSecret, name, category, activities, email, public_key_path, allowed_ips];
+    const values = [partner_uuid, client_id, hashedSecret, name, category, activities, email, public_key_path, allowed_ips, payout_percentage == null ? 2 : payout_percentage];
     const result = await executeQuery(query, values);
 
     return {

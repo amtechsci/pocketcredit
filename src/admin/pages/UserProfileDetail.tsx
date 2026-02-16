@@ -39,9 +39,10 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
+import { UANEmploymentInfo } from '../../components/pages/UANEmploymentInfo';
+import { maskMobileLast4 } from '../utils/mask';
 import { adminApiService } from '../../services/adminApi';
 import { toast } from 'sonner';
-import { UANEmploymentInfo } from '../../components/pages/UANEmploymentInfo';
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '../../components/ui/tooltip';
 import { Button } from '../../components/ui/button';
 import {
@@ -151,7 +152,7 @@ const INDIAN_STATES = [
   'Puducherry'
 ];
 
-export function UserProfileDetail() {
+function UserProfileDetail() {
   const navigate = useNavigate();
   const params = useParams();
   const [activeTab, setActiveTab] = useState('personal');
@@ -330,12 +331,7 @@ export function UserProfileDetail() {
   const [referenceEditValues, setReferenceEditValues] = useState<{ [key: number]: { name?: string; phone?: string; relation?: string } }>({});
   const [newReference, setNewReference] = useState({ name: '', phone: '', relation: '' });
   const [referenceErrors, setReferenceErrors] = useState({ name: '', phone: '', relation: '' });
-  const [noteForm, setNoteForm] = useState({
-    subject: '',
-    note: '',
-    category: '',
-    priority: ''
-  });
+  const [noteForm, setNoteForm] = useState({ note: '' });
   const [smsForm, setSmsForm] = useState({
     message: '',
     templateId: ''
@@ -1691,18 +1687,27 @@ export function UserProfileDetail() {
   };
 
   const handleNoteSubmit = async () => {
+    const content = (noteForm.note || '').trim();
+    if (!content) {
+      toast.error('Note content is required');
+      return;
+    }
     try {
-      const response = await adminApiService.addNote(params.userId!, noteForm);
+      const response = await adminApiService.addNote(params.userId!, { note: content });
       if (response.status === 'success') {
-        alert('Note added successfully!');
+        toast.success('Note added successfully');
         setShowAddNoteModal(false);
-        setNoteForm({ subject: '', note: '', category: '', priority: '' });
+        setNoteForm({ note: '' });
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success' && profileResponse.data) {
+          setUserData(profileResponse.data);
+        }
       } else {
-        alert('Failed to add note');
+        toast.error(response.message || 'Failed to add note');
       }
     } catch (error) {
       console.error('Error adding note:', error);
-      alert('Error adding note');
+      toast.error('Failed to add note');
     }
   };
 
@@ -2537,11 +2542,7 @@ export function UserProfileDetail() {
                 </span>
               )}
             </div>
-            <div className="text-sm font-semibold text-gray-900">{getUserData('mobile')}</div>
-          </div>
-          <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
-            <div className="text-xs font-medium text-gray-500 mb-1">Alt Mobile</div>
-            <div className="text-sm font-semibold text-gray-900">{userData?.alternateMobile || 'N/A'}</div>
+            <div className="text-sm font-semibold text-gray-900">{shouldMaskMobile('profile') ? maskMobileLast4(getUserData('mobile')) : getUserData('mobile')}</div>
           </div>
           <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
             <div className="text-xs font-medium text-gray-500 mb-1">Email</div>
@@ -2784,24 +2785,8 @@ export function UserProfileDetail() {
             <div className="space-y-2 text-sm">
               <div>
                 <span className="text-gray-500">Primary:</span>
-                <span className="ml-2 font-medium text-gray-900">{getUserData('mobile')}</span>
+                <span className="ml-2 font-medium text-gray-900">{shouldMaskMobile('profile') ? maskMobileLast4(getUserData('mobile')) : getUserData('mobile')}</span>
               </div>
-              <div>
-                <span className="text-gray-500">Alternate:</span>
-                <span className="ml-2 text-gray-900">{userData?.alternateMobile || 'N/A'}</span>
-              </div>
-              {userData?.aadharLinkedMobile && (
-                <div>
-                  <span className="text-gray-500">Aadhar linked number:</span>
-                  <span className="ml-2 text-gray-900">{userData.aadharLinkedMobile}</span>
-                </div>
-              )}
-              {userData?.accountAggregatorMobile && (
-                <div>
-                  <span className="text-gray-500">Account aggregator linked number:</span>
-                  <span className="ml-2 text-gray-900">{userData.accountAggregatorMobile}</span>
-                </div>
-              )}
               <div>
                 <span className="text-gray-500">Email:</span>
                 <span className="ml-2 text-gray-900 truncate">{getUserData('email') && getUserData('email') !== 'N/A' ? getUserData('email') : (userData?.personalEmail || userData?.officialEmail || 'N/A')}</span>
@@ -2963,8 +2948,8 @@ export function UserProfileDetail() {
             <UANEmploymentInfo 
               aadharLinkedMobile={userData?.aadharLinkedMobile}
               userId={params.userId}
+              maskMobile={shouldMaskMobile('profile')}
               onDataReceived={(data) => {
-                // Refresh user data to show updated info
                 if (params.userId) {
                   adminApiService.getUserProfile(params.userId).then((response) => {
                     if (response.status === 'success' && response.data) {
@@ -4530,7 +4515,7 @@ export function UserProfileDetail() {
                         </div>
                       ) : (
                         <>
-                          <span>{ref.phone || 'N/A'}</span>
+                          <span>{shouldMaskMobile('profile') ? maskMobileLast4(ref.phone) : (ref.phone || 'N/A')}</span>
                           {canEditUsers && (
                             <button
                               onClick={() => handleEditReference(ref.id, 'phone')}
@@ -7534,7 +7519,7 @@ export function UserProfileDetail() {
               mobile number did not match
             </p>
             <p className="text-sm text-gray-800">
-              mobile number {maskedMobile ? `[${maskedMobile}]` : '[N/A]'}, received number ({userMobile})
+              mobile number {maskedMobile ? `[${maskedMobile}]` : '[N/A]'}, received number ({isNbfcAdmin ? maskMobileLast4(userMobile) : userMobile})
             </p>
           </div>
 
@@ -7777,7 +7762,7 @@ export function UserProfileDetail() {
                         </td>
                         <td className="border border-red-300 px-3 py-3">
                           <span className="px-2 py-1 rounded text-xs font-semibold bg-gray-200 text-gray-700">
-                            {account.Account_Status || 'N/A'}
+                            {account.Account_Status === '11' ? 'ACTIVE' : (account.Account_Status === '13' || account.Account_Status === '93' ? 'CLOSED' : (account.Account_Status || 'N/A'))}
                           </span>
                         </td>
                         <td className="border border-red-300 px-3 py-3">
@@ -7869,7 +7854,7 @@ export function UserProfileDetail() {
             </div>
             <div>
               <p className="text-sm font-semibold text-gray-700">Mobile Phone</p>
-              <p className="text-sm text-gray-900">{userData?.mobile || userData?.phone || '-'}</p>
+              <p className="text-sm text-gray-900">{shouldMaskMobile('profile') ? maskMobileLast4(userData?.mobile || userData?.phone) : (userData?.mobile || userData?.phone || '-')}</p>
             </div>
             <div>
               <p className="text-sm font-semibold text-gray-700">PAN</p>
@@ -7909,8 +7894,8 @@ export function UserProfileDetail() {
                   </>
                 )}
               </button>
-              {/* Experian PDF Download Button */}
-              {experianPdfUrl ? (
+              {/* Experian PDF Download Button - hidden for NBFC Admin per spec */}
+              {!isNbfcAdmin && experianPdfUrl ? (
                 <button
                   onClick={() => {
                     if (experianPdfUrl) {
@@ -7924,7 +7909,7 @@ export function UserProfileDetail() {
                   <Download className="w-4 h-4" />
                   Download Experian PDF
                 </button>
-              ) : full_report ? (
+              ) : !isNbfcAdmin && full_report ? (
                 // Show debug button if PDF URL not found but report exists
                 <button
                   onClick={() => {
@@ -8190,8 +8175,11 @@ export function UserProfileDetail() {
 
         {/* Credit Account Information */}
         {accountSummary && accountSummary.length > 0 && (() => {
-          // Helper: Check if account is closed (Status 13-17)
-          const isClosed = (status: any) => ['13', '14', '15', '16', '17'].includes(String(status));
+          // Helper: Check if account is closed by status (13–17 = closed, 93 = closed/written-off, etc.)
+          const closedStatusCodes = ['13', '14', '15', '16', '17', '93'];
+          const isClosedByStatus = (status: any) => closedStatusCodes.includes(String(status));
+          // Account is closed if status is closed OR it has a Date_Closed (bureau-reported closure)
+          const isClosed = (acc: any) => isClosedByStatus(acc.Account_Status) || !!(acc.Date_Closed && String(acc.Date_Closed).trim());
 
           // Helper: Parse Date (YYYYMMDD)
           const parseDate = (dStr: string) => {
@@ -8199,15 +8187,15 @@ export function UserProfileDetail() {
             return new Date(parseInt(dStr.substring(0, 4)), parseInt(dStr.substring(4, 6)) - 1, parseInt(dStr.substring(6, 8)));
           };
 
-          // Filter Active Accounts
-          const activeAccounts = accountSummary.filter((acc: any) => !isClosed(acc.Account_Status));
+          // Filter Active Accounts (not closed by status and no Date_Closed)
+          const activeAccounts = accountSummary.filter((acc: any) => !isClosed(acc));
 
           // Filter Closed Accounts active in last 2 years
           const twoYearsAgo = new Date();
           twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
 
           const closedAccounts = accountSummary.filter((acc: any) => {
-            if (!isClosed(acc.Account_Status)) return false;
+            if (!isClosed(acc)) return false;
             // Check if closed/reported date is within last 2 years
             const date = parseDate(acc.Date_Closed) || parseDate(acc.Date_Reported);
             return date ? date >= twoYearsAgo : true; // default include if no date
@@ -8262,9 +8250,9 @@ export function UserProfileDetail() {
                             {account.Date_Reported || '-'}
                           </td>
                           <td className="border border-gray-300 px-2 py-2">
-                            <span className={`px-2 py-1 rounded text-xs font-semibold ${isClosed(account.Account_Status) ? 'bg-gray-200 text-gray-700' : 'bg-green-100 text-green-800'
+                            <span className={`px-2 py-1 rounded text-xs font-semibold ${isClosed(account) ? 'bg-gray-200 text-gray-700' : 'bg-green-100 text-green-800'
                               }`}>
-                              {account.Account_Status || 'N/A'}
+                              {account.Account_Status === '11' ? 'ACTIVE' : (account.Account_Status === '13' || account.Account_Status === '93' ? 'CLOSED' : (account.Account_Status || 'N/A'))}
                             </span>
                           </td>
                           <td className="border border-gray-300 px-2 py-2">
@@ -8338,9 +8326,9 @@ export function UserProfileDetail() {
                         <p className="font-semibold text-sm text-gray-900">{account.Subscriber_Name}</p>
                         <p className="text-xs text-gray-500">{account.Account_Type}</p>
                       </div>
-                      <span className={`px-2 py-1 rounded text-xs font-semibold ${account.Account_Status === 'ACTIVE' || account.Account_Status === '11' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+                      <span className={`px-2 py-1 rounded text-xs font-semibold ${account.Account_Status === 'ACTIVE' || account.Account_Status === '11' ? 'bg-green-100 text-green-700' : (account.Account_Status === '13' || account.Account_Status === '93' ? 'bg-gray-100 text-gray-700' : 'bg-gray-100 text-gray-700')
                         }`}>
-                        {account.Account_Status === '11' ? 'ACTIVE' : account.Account_Status}
+                        {account.Account_Status === '11' ? 'ACTIVE' : (account.Account_Status === '13' || account.Account_Status === '93' ? 'CLOSED' : account.Account_Status)}
                       </span>
                     </div>
 
@@ -8404,11 +8392,11 @@ export function UserProfileDetail() {
                         <td className="px-4 py-3">{openDate ? `${openDate.substring(6, 8)}/${openDate.substring(4, 6)}/${openDate.substring(0, 4)}` : '-'}</td>
                         <td className="px-4 py-3 font-semibold text-indigo-600">{accountAge}</td>
                         <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded text-xs font-semibold ${account.Account_Status === 'CLOSED' || account.Account_Status === '13' ? 'bg-gray-200 text-gray-700' :
+                          <span className={`px-2 py-1 rounded text-xs font-semibold ${account.Account_Status === 'CLOSED' || account.Account_Status === '13' || account.Account_Status === '93' ? 'bg-gray-200 text-gray-700' :
                             account.Account_Status === 'ACTIVE' || account.Account_Status === '11' ? 'bg-green-200 text-green-700' :
                               'bg-yellow-200 text-yellow-700'
                             }`}>
-                            {account.Account_Status === '11' ? 'ACTIVE' : account.Account_Status === '13' ? 'CLOSED' : account.Account_Status}
+                            {account.Account_Status === '11' ? 'ACTIVE' : (account.Account_Status === '13' || account.Account_Status === '93' ? 'CLOSED' : account.Account_Status)}
                           </span>
                         </td>
                       </tr>
@@ -8481,11 +8469,11 @@ export function UserProfileDetail() {
                         <p className="font-semibold text-sm text-gray-900">{account.Subscriber_Name}</p>
                         <p className="text-xs text-gray-500">{account.Account_Type} - {account.Account_Number}</p>
                       </div>
-                      <span className={`px-2 py-1 rounded text-xs font-semibold ${account.Account_Status === 'CLOSED' || account.Account_Status === '13' ? 'bg-gray-200 text-gray-700' :
+                      <span className={`px-2 py-1 rounded text-xs font-semibold ${account.Account_Status === 'CLOSED' || account.Account_Status === '13' || account.Account_Status === '93' ? 'bg-gray-200 text-gray-700' :
                         account.Account_Status === 'ACTIVE' || account.Account_Status === '11' ? 'bg-green-200 text-green-700' :
                           'bg-yellow-200 text-yellow-700'
                         }`}>
-                        {account.Account_Status === '11' ? 'ACTIVE' : account.Account_Status === '13' ? 'CLOSED' : account.Account_Status}
+                        {account.Account_Status === '11' ? 'ACTIVE' : (account.Account_Status === '13' || account.Account_Status === '93' ? 'CLOSED' : account.Account_Status)}
                       </span>
                     </div>
 
@@ -9155,146 +9143,40 @@ export function UserProfileDetail() {
           </div>
         </div>
 
-        {/* Notes Table */}
+        {/* Notes Table - simple: Content, Created By, Date */}
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Note ID</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Note Content</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created By</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created Date</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Modified</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {getArray('notes').map((note, index) => (
-                <tr key={index} className="hover:bg-gray-50">
-                  <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {note.noteId || `NOTE${String(index + 1).padStart(6, '0')}`}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${note.category === 'credit' ? 'bg-green-100 text-green-800' :
-                      note.category === 'verification' ? 'bg-blue-100 text-blue-800' :
-                        note.category === 'risk' ? 'bg-red-100 text-red-800' :
-                          note.category === 'general' ? 'bg-gray-100 text-gray-800' :
-                            'bg-purple-100 text-purple-800'
-                      }`}>
-                      {note.category?.toUpperCase() || 'GENERAL'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${note.priority === 'high' ? 'bg-red-100 text-red-800' :
-                      note.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                        note.priority === 'low' ? 'bg-green-100 text-green-800' :
-                          'bg-gray-100 text-gray-800'
-                      }`}>
-                      {note.priority?.toUpperCase() || 'MEDIUM'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {note.subject || 'Admin Note'}
-                  </td>
-                  <td className="px-3 py-4 text-sm text-gray-900 max-w-xs truncate">
-                    {note.note}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {note.admin}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatDate(note.date)}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatDate(note.lastModified || note.date)}
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${note.status === 'active' ? 'bg-green-100 text-green-800' :
-                      note.status === 'archived' ? 'bg-gray-100 text-gray-800' :
-                        note.status === 'flagged' ? 'bg-red-100 text-red-800' :
-                          'bg-blue-100 text-blue-800'
-                      }`}>
-                      {note.status || 'ACTIVE'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-4 whitespace-nowrap text-sm font-medium">
-                    <div className="flex items-center gap-2">
-                      <button className="text-blue-600 hover:text-blue-900">
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button className="text-green-600 hover:text-green-900">
-                        <CheckCircle className="w-4 h-4" />
-                      </button>
-                      <button className="text-orange-600 hover:text-orange-900">
-                        <Flag className="w-4 h-4" />
-                      </button>
-                      <button className="text-gray-600 hover:text-gray-900">
-                        <Edit className="w-4 h-4" />
-                      </button>
-                    </div>
+              {getArray('notes').length === 0 ? (
+                <tr>
+                  <td colSpan={3} className="px-3 py-8 text-center text-sm text-gray-500">
+                    No notes yet. Click &quot;Add Note&quot; to add one.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                getArray('notes').map((note, index) => (
+                  <tr key={note.noteId ?? index} className="hover:bg-gray-50">
+                    <td className="px-3 py-4 text-sm text-gray-900 whitespace-pre-wrap align-top max-w-md">
+                      {note.note || '—'}
+                    </td>
+                    <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {note.admin || '—'}
+                    </td>
+                    <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {formatDate(note.date)}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
-        </div>
-
-        {/* Summary Cards */}
-        <div className="mt-4 sm:mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <div className="bg-blue-50 p-3 sm:p-4 rounded-lg">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <FileText className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600" />
-              </div>
-              <div className="ml-3 sm:ml-4">
-                <p className="text-xs sm:text-sm font-medium text-blue-600">Total Notes</p>
-                <p className="text-xl sm:text-2xl font-semibold text-blue-900">{getUserData('notes')?.length || 0}</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-green-50 p-3 sm:p-4 rounded-lg">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <CheckCircle className="w-6 h-6 sm:w-8 sm:h-8 text-green-600" />
-              </div>
-              <div className="ml-3 sm:ml-4">
-                <p className="text-xs sm:text-sm font-medium text-green-600">Active</p>
-                <p className="text-xl sm:text-2xl font-semibold text-green-900">
-                  {getArray('notes').filter(note => note.status === 'active').length}
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-red-50 p-3 sm:p-4 rounded-lg">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <Flag className="w-6 h-6 sm:w-8 sm:h-8 text-red-600" />
-              </div>
-              <div className="ml-3 sm:ml-4">
-                <p className="text-xs sm:text-sm font-medium text-red-600">Flagged</p>
-                <p className="text-xl sm:text-2xl font-semibold text-red-900">
-                  {getArray('notes').filter(note => note.status === 'flagged').length}
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-purple-50 p-3 sm:p-4 rounded-lg">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <User className="w-6 h-6 sm:w-8 sm:h-8 text-purple-600" />
-              </div>
-              <div className="ml-3 sm:ml-4">
-                <p className="text-xs sm:text-sm font-medium text-purple-600">Admins</p>
-                <p className="text-xl sm:text-2xl font-semibold text-purple-900">
-                  {new Set(getArray('notes').map(note => note.admin)).size}
-                </p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -9426,7 +9308,7 @@ export function UserProfileDetail() {
                     </span>
                   </td>
                   <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {sms.recipient || getUserData('mobile')}
+                    {shouldMaskMobile('profile') ? maskMobileLast4(sms.recipient || getUserData('mobile')) : (sms.recipient || getUserData('mobile'))}
                   </td>
                   <td className="px-3 py-4 text-sm text-gray-900 max-w-xs truncate">
                     {sms.message}
@@ -11081,117 +10963,47 @@ export function UserProfileDetail() {
       )}
 
 
-      {/* Add Note Modal */}
+      {/* Add Note Modal - simple: Note Content only */}
       {
         showAddNoteModal && (
           <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: '#00000024' }}>
-            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto border border-gray-200 ring-1 ring-gray-200">
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-lg mx-4 border border-gray-200 ring-1 ring-gray-200">
               <div className="flex items-center justify-between mb-4">
                 <h4 className="text-lg font-semibold text-gray-900">Add Note</h4>
                 <button
-                  onClick={() => setShowAddNoteModal(false)}
+                  onClick={() => { setShowAddNoteModal(false); setNoteForm({ note: '' }); }}
                   className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full p-1 transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <form className="space-y-4">
-                {/* Note Category and Priority */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Category *</label>
-                    <select
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
-                      <option value="">Select Category</option>
-                      <option value="general">General</option>
-                      <option value="credit">Credit Related</option>
-                      <option value="verification">Verification</option>
-                      <option value="risk">Risk Assessment</option>
-                      <option value="payment">Payment Related</option>
-                      <option value="document">Document Related</option>
-                      <option value="follow_up">Follow Up</option>
-                      <option value="other">Other</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Priority *</label>
-                    <select
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
-                      <option value="">Select Priority</option>
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                      <option value="urgent">Urgent</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Subject and Note Content */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Subject *</label>
-                  <input
-                    type="text"
-                    placeholder="Enter note subject"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-
+              <form
+                className="space-y-4"
+                onSubmit={(e) => { e.preventDefault(); handleNoteSubmit(); }}
+              >
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Note Content *</label>
                   <textarea
-                    placeholder="Enter detailed note content"
-                    rows={6}
+                    value={noteForm.note}
+                    onChange={(e) => setNoteForm({ note: e.target.value })}
+                    placeholder="Enter note content"
+                    rows={5}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   />
                 </div>
 
-                {/* Visibility and Status */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Visibility</label>
-                    <select
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="private">Private</option>
-                      <option value="team">Team Only</option>
-                      <option value="public">Public</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
-                    <select
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="active">Active</option>
-                      <option value="archived">Archived</option>
-                      <option value="flagged">Flagged</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex gap-3 pt-4">
+                <div className="flex gap-3 pt-2">
                   <button
                     type="submit"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      alert('Note added successfully!');
-                      setShowAddNoteModal(false);
-                    }}
                     className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
                   >
                     Add Note
                   </button>
                   <button
                     type="button"
-                    onClick={() => setShowAddNoteModal(false)}
+                    onClick={() => { setShowAddNoteModal(false); setNoteForm({ note: '' }); }}
                     className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
                   >
                     Cancel
@@ -12088,7 +11900,7 @@ export function UserProfileDetail() {
                 {getUserData('clid') && <span className="whitespace-nowrap flex-shrink-0">CLID: {getUserData('clid')}</span>}
                 <span className="flex items-center gap-1 whitespace-nowrap flex-shrink-0">
                   <Phone className="w-3 h-3" />
-                  {getUserData('mobile')}
+                  {shouldMaskMobile('profile') ? maskMobileLast4(getUserData('mobile')) : getUserData('mobile')}
                 </span>
                 <span className="flex items-center gap-1 whitespace-nowrap flex-shrink-0">
                   <Mail className="w-3 h-3 flex-shrink-0" />
@@ -12306,3 +12118,6 @@ export function UserProfileDetail() {
     </div>
   );
 }
+
+export { UserProfileDetail };
+export default UserProfileDetail;

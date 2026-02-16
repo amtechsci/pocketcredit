@@ -18,6 +18,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
+import { maskMobileLast4 } from '../utils/mask';
 import { adminApiService } from '../../services/adminApi';
 import { toast } from 'sonner';
 
@@ -92,6 +93,8 @@ const SUB_ADMIN_ALLOWED_STATUSES: Record<string, string[]> = {
   recovery_officer: ['all', 'overdue'],
   debt_agency: ['all', 'overdue']
 };
+// NBFC Admin: Over Due (when on /overdue), Ready for Disbursement, Repeat Loan Ready for Disbursal
+const NBFC_ADMIN_ALLOWED_STATUSES = ['overdue', 'ready_for_disbursement', 'ready_to_repeat_disbursal'];
 
 export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueueProps = {}) {
   const navigate = useNavigate();
@@ -101,13 +104,16 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
   const [statusFilter, setStatusFilter] = useState(initialStatus || 'all');
   const [sortBy, setSortBy] = useState('applicationDate');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const { canApproveLoans, canRejectLoans, currentUser } = useAdmin();
+  const { canApproveLoans, canRejectLoans, currentUser, isNbfcAdmin, shouldMaskMobile } = useAdmin();
 
   const allowedStatuses: string[] | null =
-    currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category
-      ? (SUB_ADMIN_ALLOWED_STATUSES[currentUser.sub_admin_category] ?? null)
-      : null;
+    currentUser?.role === 'nbfc_admin'
+      ? NBFC_ADMIN_ALLOWED_STATUSES
+      : currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category
+        ? (SUB_ADMIN_ALLOWED_STATUSES[currentUser.sub_admin_category] ?? null)
+        : null;
   const canShowStatus = (status: string) => !allowedStatuses || allowedStatuses.includes(status);
+  const maskMobileInQueue = isNbfcAdmin && shouldMaskMobile('ready_disbursement') && (statusFilter === 'ready_for_disbursement' || statusFilter === 'ready_to_repeat_disbursal');
 
   // Real data state
   const [applications, setApplications] = useState<LoanApplication[]>([]);
@@ -135,9 +141,11 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
     const statusFromUrl = searchParams.get('status');
     const validStatuses = ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'overdue', 'cleared', 'rejected', 'ready_for_disbursement', 'repeat_disbursal', 'ready_to_repeat_disbursal'];
     if (statusFromUrl && validStatuses.includes(statusFromUrl)) {
-      const allowed = currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category
-        ? (SUB_ADMIN_ALLOWED_STATUSES[currentUser.sub_admin_category] ?? null)
-        : null;
+      const allowed = currentUser?.role === 'nbfc_admin'
+        ? NBFC_ADMIN_ALLOWED_STATUSES
+        : currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category
+          ? (SUB_ADMIN_ALLOWED_STATUSES[currentUser.sub_admin_category] ?? null)
+          : null;
       if (!allowed || allowed.includes(statusFromUrl)) {
         setStatusFilter(statusFromUrl);
       } else {
@@ -146,12 +154,15 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
     }
   }, [searchParams, initialStatus, currentUser?.role, currentUser?.sub_admin_category]);
 
-  // Enforce allowed status for sub-admins: if current filter is not allowed, reset to 'all'
+  // Enforce allowed status for sub-admins: if current filter is not allowed, reset (unless we're on initialStatus page e.g. Over Due)
   useEffect(() => {
-    if (allowedStatuses && !allowedStatuses.includes(statusFilter)) {
-      setStatusFilter(allowedStatuses[0] || 'all');
+    if (!allowedStatuses) return;
+    if (initialStatus && statusFilter === initialStatus) return; // keep e.g. overdue when on Over Due page
+    if (!allowedStatuses.includes(statusFilter)) {
+      const defaultStatus = isNbfcAdmin ? 'ready_for_disbursement' : (allowedStatuses[0] || 'all');
+      setStatusFilter(defaultStatus);
     }
-  }, [allowedStatuses, statusFilter]);
+  }, [allowedStatuses, statusFilter, initialStatus, isNbfcAdmin]);
 
   // Memoized callbacks to prevent re-renders
   const handleSort = useCallback((field: string) => {
@@ -771,6 +782,29 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               </button>
             </div>
             )}
+            {/* NBFC on Over Due page: show Overdue tab first so it appears on top and is active */}
+            {isNbfcAdmin && initialStatus === 'overdue' && canShowStatus('overdue') && (
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button
+                onClick={() => handleStatusFilter('overdue')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
+                  statusFilter === 'overdue'
+                    ? 'bg-red-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                Over Due <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'overdue' ? 'bg-red-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.overdueApplications || 0}</span>
+              </button>
+              <button
+                onClick={() => handleExportExcel('overdue')}
+                disabled={downloadingExcel === 'overdue'}
+                className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
+                title="Download Excel"
+              >
+                <Download className={`w-4 h-4 ${downloadingExcel === 'overdue' ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
+            )}
             {canShowStatus('ready_for_disbursement') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
@@ -859,7 +893,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               </button>
             </div>
             )}
-            {canShowStatus('overdue') && (
+            {canShowStatus('overdue') && !(isNbfcAdmin && initialStatus === 'overdue') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => handleStatusFilter('overdue')}
@@ -953,8 +987,8 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
         </div>
       </div>
 
-      {/* Statistics Cards – hidden for sub-admins; they only see assign counts on tabs */}
-      {currentUser?.role !== 'sub_admin' && (
+      {/* Statistics Cards – hidden for sub-admins and NBFC admin; they only see status tabs */}
+      {currentUser?.role !== 'sub_admin' && currentUser?.role !== 'nbfc_admin' && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
           <div className="flex items-center justify-between">
@@ -1152,15 +1186,6 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                   Type
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <button 
-                    onClick={() => handleSort('cibilScore')}
-                    className="flex items-center gap-1 hover:text-gray-700 transition-colors"
-                  >
-                    CIBIL
-                    <ArrowUpDown className="w-3 h-3" />
-                  </button>
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Status
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1231,7 +1256,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                     <div className="text-sm text-gray-900">
                       <div className="flex items-center gap-1 mb-1">
                         <Phone className="w-3 h-3" />
-                        {application.mobile}
+                        {maskMobileInQueue ? maskMobileLast4(application.mobile) : application.mobile}
                       </div>
                       <div className="text-xs text-gray-500">{application.email}</div>
                     </div>
@@ -1240,44 +1265,11 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                     <div className="text-sm font-semibold text-gray-900">
                       {formatCurrency(application.loanAmount)}
                     </div>
-                    {application.disbursalAmount && application.disbursalAmount !== application.loanAmount && (
-                    <div className="text-xs text-gray-500">
-                        Disbursal: {formatCurrency(application.disbursalAmount)}
-                      </div>
-                    )}
-                    {application.feesBreakdown && application.feesBreakdown.length > 0 && (
-                      <div className="text-xs text-gray-500 mt-1">
-                        {application.feesBreakdown.filter((f: any) => f.application_method === 'deduct_from_disbursal').map((f: any) => (
-                          <div key={f.name}>{f.name}: {formatCurrency(f.amount)}</div>
-                        ))}
-                      </div>
-                    )}
-                    <div className="text-xs text-gray-500 mt-1">
-                      Income: {formatCurrency(application.monthlyIncome)}
-                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900 capitalize">{application.loanType}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className={`w-2 h-2 rounded-full mr-2 ${
-                        application.cibilScore >= 750 ? 'bg-green-500' :
-                        application.cibilScore >= 650 ? 'bg-yellow-500' : 'bg-red-500'
-                      }`}></div>
-                      <span className={`text-sm font-medium ${
-                        application.cibilScore >= 750 ? 'text-green-700' :
-                        application.cibilScore >= 650 ? 'text-yellow-700' : 'text-red-700'
-                      }`}>
-                        {application.cibilScore}
-                      </span>
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {application.cibilScore >= 750 ? 'Excellent' :
-                       application.cibilScore >= 650 ? 'Good' : 'Poor'}
-                    </div>
-                  </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex flex-col gap-1">
                       {application.assignmentType && (
                         <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${application.assignmentType === 'primary' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'}`}>

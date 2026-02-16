@@ -163,8 +163,14 @@ export function PartnerLeadDetailPage() {
                   </div>
                   <div className="p-4 bg-gray-50 rounded-lg">
                     <p className="text-sm text-gray-500">Loan Status</p>
-                    <p className="text-gray-900 font-medium">{lead.loan_status || 'N/A'}</p>
+                    <p className="text-gray-900 font-medium">{lead.loan_status ? lead.loan_status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : 'N/A'}</p>
                   </div>
+                  {lead.user_status === 'on_hold' && (
+                    <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
+                      <p className="text-sm text-amber-700 font-medium">User status: Hold</p>
+                      <p className="text-xs text-amber-600 mt-0.5">This user is on hold in the system.</p>
+                    </div>
+                  )}
                   {lead.disbursed_at && (
                     <>
                       <div className="p-4 bg-gray-50 rounded-lg">

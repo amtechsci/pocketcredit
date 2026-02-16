@@ -12,6 +12,8 @@ interface UANEmploymentInfoProps {
   aadharLinkedMobile?: string | null;
   userId?: string | number; // Required when using admin API
   onDataReceived?: (data: any) => void;
+  /** When true (e.g. admin profile), display mobile as XXXXXX1234 */
+  maskMobile?: boolean;
 }
 
 // Helper to extract UAN data from various response structures
@@ -54,7 +56,14 @@ function extractUANData(data: any) {
   };
 }
 
-export function UANEmploymentInfo({ aadharLinkedMobile, userId, onDataReceived }: UANEmploymentInfoProps) {
+function maskMobileLast4(value: string | null | undefined): string {
+  if (value == null || typeof value !== 'string') return value ?? '—';
+  const s = String(value).trim();
+  if (s.length <= 4) return 'XXXX';
+  return 'XXXXXX' + s.slice(-4);
+}
+
+export function UANEmploymentInfo({ aadharLinkedMobile, userId, onDataReceived, maskMobile }: UANEmploymentInfoProps) {
   // Determine if we're in admin mode (userId provided means admin is making request on behalf of user)
   const isAdminMode = !!userId;
   const [mobile, setMobile] = useState('');
@@ -300,7 +309,7 @@ export function UANEmploymentInfo({ aadharLinkedMobile, userId, onDataReceived }
                 {uanData.mobile && (
                   <div>
                     <span className="text-gray-500">Mobile:</span>{' '}
-                    <span className="font-medium">{uanData.mobile}</span>
+                    <span className="font-medium">{maskMobile ? maskMobileLast4(uanData.mobile) : uanData.mobile}</span>
                   </div>
                 )}
                 {uanData.gender && (

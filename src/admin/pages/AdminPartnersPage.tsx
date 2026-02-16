@@ -48,6 +48,7 @@ interface Partner {
   public_key_path: string | null;
   allowed_ips: string | null;
   is_active: number;
+  payout_percentage: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -115,7 +116,8 @@ export function AdminPartnersPage() {
     email: '',
     public_key_path: '',
     public_key_pem: '',
-    allowed_ips: ''
+    allowed_ips: '',
+    payout_percentage: '2'
   });
 
   const [editForm, setEditForm] = useState({
@@ -127,7 +129,8 @@ export function AdminPartnersPage() {
     public_key_pem: '',
     allowed_ips: '',
     is_active: true,
-    client_secret: ''
+    client_secret: '',
+    payout_percentage: ''
   });
 
   const fetchPartners = async () => {
@@ -190,7 +193,8 @@ export function AdminPartnersPage() {
       email: '',
       public_key_path: '',
       public_key_pem: '',
-      allowed_ips: ''
+      allowed_ips: '',
+      payout_percentage: '2'
     });
     setShowAddModal(true);
   };
@@ -206,7 +210,8 @@ export function AdminPartnersPage() {
       public_key_pem: '',
       allowed_ips: p.allowed_ips || '',
       is_active: !!p.is_active,
-      client_secret: ''
+      client_secret: '',
+      payout_percentage: p.payout_percentage != null ? String(p.payout_percentage) : ''
     });
     setShowEditModal(true);
   };
@@ -226,7 +231,8 @@ export function AdminPartnersPage() {
         email: addForm.email.trim() || undefined,
         public_key_path: addForm.public_key_pem.trim() ? undefined : (addForm.public_key_path.trim() || undefined),
         public_key_pem: addForm.public_key_pem.trim() || undefined,
-        allowed_ips: addForm.allowed_ips.trim() || undefined
+        allowed_ips: addForm.allowed_ips.trim() || undefined,
+        payout_percentage: addForm.payout_percentage === '' ? undefined : parseFloat(addForm.payout_percentage)
       });
       setShowAddModal(false);
       fetchPartners();
@@ -250,6 +256,7 @@ export function AdminPartnersPage() {
         public_key_pem: editForm.public_key_pem.trim() || undefined,
         allowed_ips: editForm.allowed_ips.trim() || undefined,
         is_active: editForm.is_active,
+        payout_percentage: editForm.payout_percentage === '' ? undefined : parseFloat(editForm.payout_percentage),
         ...(editForm.client_secret.trim() ? { client_secret: editForm.client_secret } : {})
       });
       setShowEditModal(false);
@@ -320,6 +327,7 @@ export function AdminPartnersPage() {
                     <TableHead>Category / Activities</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Payout %</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -340,6 +348,7 @@ export function AdminPartnersPage() {
                           {p.is_active ? 'Active' : 'Inactive'}
                         </Badge>
                       </TableCell>
+                      <TableCell>{p.payout_percentage != null ? `${p.payout_percentage}%` : '2%'}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
                           <Button
@@ -454,11 +463,11 @@ export function AdminPartnersPage() {
 
       {/* Add Partner Modal */}
       <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
+        <DialogContent className="max-w-md max-h-[90vh] flex flex-col p-0">
+          <DialogHeader className="shrink-0 px-6 pt-6 pb-2">
             <DialogTitle>Add New Partner</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 py-4 px-6 overflow-y-auto min-h-0 flex-1">
             <div className="grid gap-2">
               <Label htmlFor="add-client_id">Client ID *</Label>
               <Input
@@ -545,8 +554,22 @@ export function AdminPartnersPage() {
                 placeholder="1.2.3.4, 5.6.7.8"
               />
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="add-payout_percentage">Payout % (of disbursal, first loan only)</Label>
+              <Input
+                id="add-payout_percentage"
+                type="number"
+                min={0}
+                max={100}
+                step={0.5}
+                value={addForm.payout_percentage}
+                onChange={(e) => setAddForm((f) => ({ ...f, payout_percentage: e.target.value }))}
+                placeholder="2"
+              />
+              <p className="text-xs text-gray-500">Default 2. Used for partner payout on first disbursed loan per lead.</p>
+            </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 px-6 pb-6 pt-4 border-t bg-gray-50/80">
             <Button variant="outline" onClick={() => setShowAddModal(false)}>Cancel</Button>
             <Button
               onClick={handleCreatePartner}
@@ -562,11 +585,11 @@ export function AdminPartnersPage() {
 
       {/* Edit Partner Modal */}
       <Dialog open={showEditModal} onOpenChange={(open) => { setShowEditModal(open); if (!open) setEditingPartner(null); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
+        <DialogContent className="max-w-md max-h-[90vh] flex flex-col p-0">
+          <DialogHeader className="shrink-0 px-6 pt-6 pb-2">
             <DialogTitle>Edit Partner</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 py-4 px-6 overflow-y-auto min-h-0 flex-1">
             {editingPartner && (
               <>
                 <p className="text-xs text-gray-500 font-mono">Client ID: {editingPartner.client_id}</p>
@@ -677,6 +700,20 @@ export function AdminPartnersPage() {
                 placeholder="Leave blank to keep current"
               />
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-payout_percentage">Payout % (of disbursal, first loan only)</Label>
+              <Input
+                id="edit-payout_percentage"
+                type="number"
+                min={0}
+                max={100}
+                step={0.5}
+                value={editForm.payout_percentage}
+                onChange={(e) => setEditForm((f) => ({ ...f, payout_percentage: e.target.value }))}
+                placeholder="2"
+              />
+              <p className="text-xs text-gray-500">Used for partner payout on first disbursed loan per lead.</p>
+            </div>
             <div className="flex items-center gap-2">
               <Switch
                 id="edit-is_active"
@@ -686,7 +723,7 @@ export function AdminPartnersPage() {
               <Label htmlFor="edit-is_active">Active</Label>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 px-6 pb-6 pt-4 border-t bg-gray-50/80">
             <Button variant="outline" onClick={() => setShowEditModal(false)}>Cancel</Button>
             <Button
               onClick={handleUpdatePartner}

@@ -6,8 +6,8 @@
 const { executeQuery, initializeDatabase } = require('../config/database');
 
 /**
- * Calculate payout eligibility based on 20-day rule
- * Payout is applicable only for leads where loan disbursal is completed within 20 days from lead share date
+ * Calculate payout eligibility based on 30-day rule
+ * Payout is applicable only for leads where loan disbursal is completed within 30 days from lead share date
  */
 const calculatePayoutEligibility = async (leadId) => {
   try {
@@ -65,8 +65,8 @@ const calculatePayoutEligibility = async (leadId) => {
     
     const daysDiff = Math.floor((disbursalDate - leadShareDate) / (1000 * 60 * 60 * 24));
 
-    // Payout eligible if disbursed within 20 days
-    const eligible = daysDiff <= 20;
+    // Payout eligible if disbursed within 30 days
+    const eligible = daysDiff <= 30;
 
     // Update lead with payout eligibility
     await executeQuery(
@@ -81,7 +81,7 @@ const calculatePayoutEligibility = async (leadId) => {
       days_to_disbursal: daysDiff,
       reason: eligible 
         ? `Disbursed within ${daysDiff} days` 
-        : `Disbursed after ${daysDiff} days (20 days limit)`
+        : `Disbursed after ${daysDiff} days (30 days limit)`
     };
   } catch (error) {
     console.error('Error calculating payout eligibility:', error);
@@ -90,17 +90,19 @@ const calculatePayoutEligibility = async (leadId) => {
 };
 
 /**
- * Calculate payout amount based on disbursal amount
- * This is a placeholder - actual payout calculation should be based on business rules
+ * Calculate payout amount based on disbursal amount and payout percentage
+ * @param {number|string} disbursalAmount - Disbursal amount
+ * @param {number|null} payoutPercentage - Partner's payout % (from partners.payout_percentage); fallback to env or 2
  */
-const calculatePayoutAmount = (disbursalAmount) => {
+const calculatePayoutAmount = (disbursalAmount, payoutPercentage = null) => {
   if (!disbursalAmount || disbursalAmount <= 0) {
     return 0;
   }
 
-  // Example: 2% of disbursal amount (adjust based on business rules)
-  const payoutPercentage = parseFloat(process.env.PARTNER_PAYOUT_PERCENTAGE) || 2;
-  const payoutAmount = (parseFloat(disbursalAmount) * payoutPercentage) / 100;
+  const pct = payoutPercentage != null
+    ? parseFloat(payoutPercentage)
+    : (parseFloat(process.env.PARTNER_PAYOUT_PERCENTAGE) || 2);
+  const payoutAmount = (parseFloat(disbursalAmount) * pct) / 100;
 
   return Math.round(payoutAmount * 100) / 100; // Round to 2 decimal places
 };
@@ -129,20 +131,52 @@ const getPayoutGrade = (disbursalAmount) => {
 };
 
 /**
- * Update lead with payout information
+ * Update lead with payout information.
+ * Payout is only for the first loan per lead: if this lead already has a payout (payout_amount set),
+ * we do not overwrite (no payout for second/subsequent loans).
  */
 const updateLeadPayout = async (leadId, disbursalAmount, disbursedAt) => {
   try {
     await initializeDatabase();
 
-    // Calculate payout eligibility
+    const { findPartnerById } = require('../models/partner');
+
+    const leadRows = await executeQuery(
+      `SELECT id, partner_id, payout_amount, disbursed_at
+       FROM partner_leads WHERE id = ?`,
+      [leadId]
+    );
+    if (!leadRows || leadRows.length === 0) {
+      return { eligible: false, reason: 'Lead not found' };
+    }
+    const lead = leadRows[0];
+
+    // First-loan-only: we only give payout for the first disbursal per lead
+    if (lead.disbursed_at != null) {
+      return {
+        eligible: lead.payout_amount != null && parseFloat(lead.payout_amount) > 0,
+        payout_amount: lead.payout_amount || 0,
+        payout_grade: null,
+        days_to_disbursal: null,
+        skipped: true,
+        reason: 'Payout only for first loan; this lead already has a disbursal recorded'
+      };
+    }
+
+    // Calculate payout eligibility (30-day rule)
     const eligibility = await calculatePayoutEligibility(leadId);
 
-    // Calculate payout amount if eligible
-    const payoutAmount = eligibility.eligible ? calculatePayoutAmount(disbursalAmount) : 0;
+    let payoutPercentage = null;
+    if (lead.partner_id) {
+      const partner = await findPartnerById(lead.partner_id);
+      if (partner && partner.payout_percentage != null) {
+        payoutPercentage = partner.payout_percentage;
+      }
+    }
+
+    const payoutAmount = eligibility.eligible ? calculatePayoutAmount(disbursalAmount, payoutPercentage) : 0;
     const payoutGrade = eligibility.eligible ? getPayoutGrade(disbursalAmount) : null;
 
-    // Update lead
     await executeQuery(
       `UPDATE partner_leads
        SET disbursal_amount = ?,

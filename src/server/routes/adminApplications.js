@@ -65,6 +65,25 @@ router.get('/', authenticateAdmin, async (req, res) => {
       dateTo = ''
     } = req.query;
 
+    // Enforce status by role: sub-admins and NBFC only see allowed statuses (backend permission)
+    const subCategory = req.admin?.sub_admin_category;
+    let effectiveStatus = status;
+    if (req.admin?.role === 'nbfc_admin') {
+      const nbfcAllowed = ['overdue', 'ready_for_disbursement', 'ready_to_repeat_disbursal'];
+      effectiveStatus = (status && nbfcAllowed.includes(status)) ? status : 'ready_for_disbursement';
+    } else if (req.admin?.role === 'sub_admin' && subCategory) {
+      const allowedByCategory = {
+        verify_user: ['submitted', 'under_review', 'follow_up', 'disbursal', 'ready_for_disbursement'],
+        qa_user: ['disbursal', 'ready_for_disbursement'],
+        account_manager: ['account_manager'],
+        recovery_officer: ['overdue'],
+        debt_agency: ['overdue']
+      };
+      const allowed = allowedByCategory[subCategory];
+      if (allowed && (!status || status === 'all' || !allowed.includes(status))) {
+        effectiveStatus = 'all';
+      }
+    }
 
     // Build the base query with basic JOINs to get essential user data
     let baseQuery = `
@@ -175,13 +194,13 @@ router.get('/', authenticateAdmin, async (req, res) => {
     let whereConditions = [];
     let queryParams = [];
 
-    // Status filter
-    if (status && status !== 'all') {
+    // Status filter (use effectiveStatus so sub_admin/nbfc_admin cannot see disallowed statuses)
+    if (effectiveStatus && effectiveStatus !== 'all') {
       whereConditions.push('la.status = ?');
-      queryParams.push(status);
+      queryParams.push(effectiveStatus);
       
       // Special handling for cleared status: only show cleared loans where user has no current active loan
-      if (status === 'cleared') {
+      if (effectiveStatus === 'cleared') {
         whereConditions.push(`NOT EXISTS (
           SELECT 1 
           FROM loan_applications la2 
@@ -192,17 +211,32 @@ router.get('/', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // Search filter
+    // Search filter (name, phone, email, application_number, and loan ID e.g. PLL267 or 267)
     if (search) {
-      whereConditions.push(`(
-        u.first_name LIKE ? OR 
-        u.last_name LIKE ? OR 
-        u.phone LIKE ? OR 
-        u.email LIKE ? OR 
-        la.application_number LIKE ?
-      )`);
       const searchTerm = `%${search}%`;
-      queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+      const trimmed = String(search).trim();
+      const pllMatch = trimmed.match(/^pll(\d+)$/i);
+      const loanIdBySearch = pllMatch ? parseInt(pllMatch[1], 10) : (/^\d+$/.test(trimmed) ? parseInt(trimmed, 10) : null);
+      if (loanIdBySearch != null) {
+        whereConditions.push(`(
+          u.first_name LIKE ? OR
+          u.last_name LIKE ? OR
+          u.phone LIKE ? OR
+          u.email LIKE ? OR
+          la.application_number LIKE ? OR
+          la.id = ?
+        )`);
+        queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, loanIdBySearch);
+      } else {
+        whereConditions.push(`(
+          u.first_name LIKE ? OR
+          u.last_name LIKE ? OR
+          u.phone LIKE ? OR
+          u.email LIKE ? OR
+          la.application_number LIKE ?
+        )`);
+        queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+      }
     }
 
     // Loan type filter
@@ -222,13 +256,12 @@ router.get('/', authenticateAdmin, async (req, res) => {
     }
 
     // Sub-admin: restrict to assigned applications and allowed statuses
-    const subCategory = req.admin?.sub_admin_category;
     if (req.admin?.role === 'sub_admin' && subCategory) {
       const adminId = req.admin.id;
       if (subCategory === 'verify_user') {
         whereConditions.push('(la.assigned_verify_admin_id = ? OR la.temp_assigned_verify_admin_id = ?)');
         queryParams.push(adminId, adminId);
-        if (!status || status === 'all') {
+        if (!effectiveStatus || effectiveStatus === 'all') {
           whereConditions.push("la.status IN ('submitted','under_review','follow_up','disbursal','ready_for_disbursement')");
         }
       } else if (subCategory === 'qa_user') {
@@ -242,6 +275,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
       } else if (subCategory === 'recovery_officer') {
         whereConditions.push('(la.assigned_recovery_officer_id = ? OR la.temp_assigned_recovery_officer_id = ?)');
         queryParams.push(adminId, adminId);
+        whereConditions.push("la.status = 'overdue'");
+      } else if (subCategory === 'debt_agency') {
         whereConditions.push("la.status = 'overdue'");
       }
     }
@@ -1468,22 +1503,48 @@ router.put('/:applicationId/loan-plan', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Get application statistics (for sub_admins: only assigned-to-me counts)
+// Get application statistics (for sub_admins: only assigned-to-me counts; for nbfc_admin: only allowed statuses)
 router.get('/stats/overview', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
 
-    const isSubAdmin = req.admin?.role === 'sub_admin';
+    const role = req.admin?.role;
+    const isSubAdmin = role === 'sub_admin';
+    const isNbfcAdmin = role === 'nbfc_admin';
     const subCat = req.admin?.sub_admin_category;
     const adminId = req.admin?.id;
+
+    const nbfcAllowedStatuses = ['overdue', 'ready_for_disbursement', 'ready_to_repeat_disbursal'];
+    const subAdminAllowedByCategory = {
+      verify_user: ['submitted', 'under_review', 'follow_up', 'disbursal', 'ready_for_disbursement'],
+      qa_user: ['disbursal', 'ready_for_disbursement'],
+      account_manager: ['account_manager'],
+      recovery_officer: ['overdue'],
+      debt_agency: ['overdue']
+    };
 
     let total = 0;
     let statusCounts = {};
     let typeCounts = {};
     let amountResult = [{ totalAmount: 0, averageAmount: 0 }];
 
-    if (isSubAdmin && subCat && adminId) {
-      // Sub-admin: return only assigned counts (or for debt_agency, total overdue)
+    if (isNbfcAdmin) {
+      // NBFC: only counts for allowed statuses (no assignment filter)
+      const statusResult = await executeQuery(
+        `SELECT status, COUNT(*) as count FROM loan_applications WHERE status IN (?, ?, ?) GROUP BY status`,
+        ['overdue', 'ready_for_disbursement', 'ready_to_repeat_disbursal']
+      );
+      statusResult.forEach(row => {
+        statusCounts[row.status] = row.count;
+        total += Number(row.count);
+      });
+      const amountRows = await executeQuery(
+        `SELECT SUM(loan_amount) as totalAmount, AVG(loan_amount) as averageAmount FROM loan_applications WHERE status IN (?, ?, ?)`,
+        ['overdue', 'ready_for_disbursement', 'ready_to_repeat_disbursal']
+      );
+      amountResult = amountRows.length ? amountRows : [{ totalAmount: 0, averageAmount: 0 }];
+    } else if (isSubAdmin && subCat && adminId) {
+      // Sub-admin: return only assigned counts for allowed statuses (or for debt_agency, total overdue)
       if (subCat === 'debt_agency') {
         const overdueResult = await executeQuery(
           "SELECT COUNT(*) as total FROM loan_applications WHERE status = 'overdue'"
@@ -1493,12 +1554,14 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       } else {
         const assignedCol = subCat === 'verify_user' ? 'assigned_verify_admin_id' : subCat === 'qa_user' ? 'assigned_qa_admin_id' : subCat === 'account_manager' ? 'assigned_account_manager_id' : subCat === 'recovery_officer' ? 'assigned_recovery_officer_id' : null;
         const tempCol = subCat === 'verify_user' ? 'temp_assigned_verify_admin_id' : subCat === 'qa_user' ? 'temp_assigned_qa_admin_id' : subCat === 'account_manager' ? 'temp_assigned_account_manager_id' : subCat === 'recovery_officer' ? 'temp_assigned_recovery_officer_id' : null;
-        if (assignedCol && tempCol) {
+        const allowed = subAdminAllowedByCategory[subCat];
+        if (assignedCol && tempCol && Array.isArray(allowed)) {
+          const placeholders = allowed.map(() => '?').join(',');
           const statusResult = await executeQuery(
             `SELECT status, COUNT(*) as count FROM loan_applications la
-             WHERE (la.${assignedCol} = ? OR la.${tempCol} = ?)
+             WHERE (la.${assignedCol} = ? OR la.${tempCol} = ?) AND la.status IN (${placeholders})
              GROUP BY status`,
-            [adminId, adminId]
+            [adminId, adminId, ...allowed]
           );
           statusResult.forEach(row => {
             statusCounts[row.status] = row.count;
@@ -1588,6 +1651,26 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
       dateTo = ''
     } = req.query;
 
+    // Enforce status by role (same as list endpoint)
+    const exportSubCategory = req.admin?.sub_admin_category;
+    let effectiveStatus = status;
+    if (req.admin?.role === 'nbfc_admin') {
+      const nbfcAllowed = ['overdue', 'ready_for_disbursement', 'ready_to_repeat_disbursal'];
+      effectiveStatus = (status && nbfcAllowed.includes(status)) ? status : 'ready_for_disbursement';
+    } else if (req.admin?.role === 'sub_admin' && exportSubCategory) {
+      const allowedByCategory = {
+        verify_user: ['submitted', 'under_review', 'follow_up', 'disbursal', 'ready_for_disbursement'],
+        qa_user: ['disbursal', 'ready_for_disbursement'],
+        account_manager: ['account_manager'],
+        recovery_officer: ['overdue'],
+        debt_agency: ['overdue']
+      };
+      const allowed = allowedByCategory[exportSubCategory];
+      if (allowed && (!status || status === 'all' || !allowed.includes(status))) {
+        effectiveStatus = 'all';
+      }
+    }
+
     // Build the same query as the main GET endpoint but without pagination
     let baseQuery = `
       SELECT DISTINCT
@@ -1671,13 +1754,12 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
     let whereConditions = [];
     let queryParams = [];
 
-    // Status filter
-    if (status && status !== 'all') {
+    // Status filter (use effectiveStatus for permission enforcement)
+    if (effectiveStatus && effectiveStatus !== 'all') {
       whereConditions.push('la.status = ?');
-      queryParams.push(status);
+      queryParams.push(effectiveStatus);
       
-      // Special handling for cleared status: only show cleared loans where user has no current active loan
-      if (status === 'cleared') {
+      if (effectiveStatus === 'cleared') {
         whereConditions.push(`NOT EXISTS (
           SELECT 1 
           FROM loan_applications la2 
@@ -1688,17 +1770,32 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // Search filter
+    // Search filter (name, phone, email, application_number, and loan ID e.g. PLL267 or 267)
     if (search) {
-      whereConditions.push(`(
-        u.first_name LIKE ? OR 
-        u.last_name LIKE ? OR 
-        u.phone LIKE ? OR 
-        u.email LIKE ? OR 
-        la.application_number LIKE ?
-      )`);
       const searchTerm = `%${search}%`;
-      queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+      const trimmed = String(search).trim();
+      const pllMatch = trimmed.match(/^pll(\d+)$/i);
+      const loanIdBySearch = pllMatch ? parseInt(pllMatch[1], 10) : (/^\d+$/.test(trimmed) ? parseInt(trimmed, 10) : null);
+      if (loanIdBySearch != null) {
+        whereConditions.push(`(
+          u.first_name LIKE ? OR
+          u.last_name LIKE ? OR
+          u.phone LIKE ? OR
+          u.email LIKE ? OR
+          la.application_number LIKE ? OR
+          la.id = ?
+        )`);
+        queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, loanIdBySearch);
+      } else {
+        whereConditions.push(`(
+          u.first_name LIKE ? OR
+          u.last_name LIKE ? OR
+          u.phone LIKE ? OR
+          u.email LIKE ? OR
+          la.application_number LIKE ?
+        )`);
+        queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+      }
     }
 
     // Loan type filter
@@ -1715,6 +1812,32 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
     if (dateTo) {
       whereConditions.push('DATE(la.created_at) <= ?');
       queryParams.push(dateTo);
+    }
+
+    // Sub-admin: restrict to assigned applications and allowed statuses (same as list endpoint)
+    if (req.admin?.role === 'sub_admin' && exportSubCategory) {
+      const adminId = req.admin.id;
+      if (exportSubCategory === 'verify_user') {
+        whereConditions.push('(la.assigned_verify_admin_id = ? OR la.temp_assigned_verify_admin_id = ?)');
+        queryParams.push(adminId, adminId);
+        if (!effectiveStatus || effectiveStatus === 'all') {
+          whereConditions.push("la.status IN ('submitted','under_review','follow_up','disbursal','ready_for_disbursement')");
+        }
+      } else if (exportSubCategory === 'qa_user') {
+        whereConditions.push('(la.assigned_qa_admin_id = ? OR la.temp_assigned_qa_admin_id = ?)');
+        queryParams.push(adminId, adminId);
+        whereConditions.push("la.status IN ('disbursal','ready_for_disbursement')");
+      } else if (exportSubCategory === 'account_manager') {
+        whereConditions.push('(la.assigned_account_manager_id = ? OR la.temp_assigned_account_manager_id = ?)');
+        queryParams.push(adminId, adminId);
+        whereConditions.push("la.status IN ('account_manager')");
+      } else if (exportSubCategory === 'recovery_officer') {
+        whereConditions.push('(la.assigned_recovery_officer_id = ? OR la.temp_assigned_recovery_officer_id = ?)');
+        queryParams.push(adminId, adminId);
+        whereConditions.push("la.status = 'overdue'");
+      } else if (exportSubCategory === 'debt_agency') {
+        whereConditions.push("la.status = 'overdue'");
+      }
     }
 
     // Add WHERE clause if conditions exist

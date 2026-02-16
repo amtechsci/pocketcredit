@@ -4,7 +4,7 @@ import { Search, Menu, Settings, LogOut, ChevronDown, Calendar } from 'lucide-re
 import { AdminLogin } from './admin/AdminLogin';
 import { AdminDashboard } from './admin/pages/AdminDashboard';
 import { LoanApplicationsQueue } from './admin/pages/LoanApplicationsQueue';
-import { UserProfileDetail } from './admin/pages/UserProfileDetail';
+import UserProfileDetail from './admin/pages/UserProfileDetail';
 import { AdminUsersPage } from './admin/pages/AdminUsersPage';
 import { PendingExtensionsPage } from './admin/pages/PendingExtensionsPage';
 import { ActivityLogsPage } from './admin/pages/ActivityLogsPage';
@@ -27,7 +27,7 @@ import { ApprovedPage } from './admin/pages/ApprovedPage';
 import { QAVerificationPage } from './admin/pages/QAVerificationPage';
 import { AccountManagerPage } from './admin/pages/AccountManagerPage';
 import { OverduePage } from './admin/pages/OverduePage';
-import { AdminProvider } from './admin/context/AdminContext';
+import { AdminProvider, useAdmin } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
 import { useAdminAutoLogout } from './admin/hooks/useAdminAutoLogout';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './components/ui/sheet';
@@ -57,6 +57,15 @@ export interface AdminUser {
 
 // Base path is always /stpl
 const BASE_PATH = '/stpl';
+
+// NBFC admins see applications instead of dashboard; redirect /dashboard to applications
+function DashboardOrRedirect() {
+  const { currentUser } = useAdmin();
+  if (currentUser?.role === 'nbfc_admin') {
+    return <Navigate to={`${BASE_PATH}/applications?status=ready_for_disbursement`} replace />;
+  }
+  return <AdminDashboard />;
+}
 
 // Admin Layout Component
 function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -105,7 +114,12 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
   });
 
   const isActive = (path: string) => {
-    return location.pathname === path || location.pathname.startsWith(path + '/');
+    const [pathname, search] = path.split('?');
+    const pathOnly = pathname || path;
+    const searchPart = search ? '?' + search : '';
+    const pathMatch = location.pathname === pathOnly || location.pathname.startsWith(pathOnly + '/');
+    const searchMatch = !searchPart || location.search === searchPart;
+    return pathMatch && searchMatch;
   };
 
   const isSuperAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'super_admin';
@@ -125,7 +139,8 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
   } else if (currentUser?.role === 'nbfc_admin') {
     navByRole.push(
       { path: `${BASE_PATH}/overdue`, label: 'Over Due', color: 'red' },
-      { path: `${BASE_PATH}/applications`, label: 'Applications', color: 'blue' }
+      { path: `${BASE_PATH}/applications?status=ready_for_disbursement`, label: 'Ready for Disbursement', color: 'blue' },
+      { path: `${BASE_PATH}/applications?status=ready_to_repeat_disbursal`, label: 'Repeat Loan Ready for Disbursal', color: 'blue' }
     );
   } else {
     navByRole.push(
@@ -341,7 +356,11 @@ function AdminLoginPage() {
 
   const handleLogin = (user: AdminUser) => {
     localStorage.setItem('adminUser', JSON.stringify(user));
-    navigate(`${BASE_PATH}/dashboard`);
+    if (user.role === 'nbfc_admin') {
+      navigate(`${BASE_PATH}/applications?status=ready_for_disbursement`);
+    } else {
+      navigate(`${BASE_PATH}/dashboard`);
+    }
   };
 
   return (
@@ -401,7 +420,7 @@ export default function AdminApp() {
         <Route path="login" element={<AdminLoginPage />} />
         <Route path="dashboard" element={
           <ProtectedRoute>
-            <AdminDashboard />
+            <DashboardOrRedirect />
           </ProtectedRoute>
         } />
         <Route path="applications" element={

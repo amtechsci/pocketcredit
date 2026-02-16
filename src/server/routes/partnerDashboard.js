@@ -12,7 +12,7 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
     await initializeDatabase();
     const partner = req.partner;
 
-    const { page = 1, limit = 50, status, start_date, end_date } = req.query;
+    const { page = 1, limit = 50, status, user_status, loan_status, start_date, end_date } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     let query = `
@@ -28,7 +28,8 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
         pl.lead_shared_at,
         pl.user_registered_at,
         pl.loan_application_id,
-        pl.loan_status,
+        COALESCE(la.status, pl.loan_status) as loan_status,
+        u.status as user_status,
         pl.disbursed_at,
         pl.disbursal_amount,
         pl.payout_eligible,
@@ -50,6 +51,23 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
     if (status) {
       query += ` AND pl.dedupe_status = ?`;
       params.push(status);
+    }
+
+    if (user_status) {
+      if (user_status === 'active') {
+        query += ` AND (u.status = 'active' OR pl.user_id IS NULL)`;
+      } else if (user_status === 'on_hold') {
+        query += ` AND u.status = 'on_hold'`;
+      }
+    }
+
+    if (loan_status) {
+      if (loan_status === 'none') {
+        query += ` AND la.id IS NULL`;
+      } else {
+        query += ` AND (COALESCE(la.status, pl.loan_status) COLLATE utf8mb4_unicode_ci) = ?`;
+        params.push(loan_status);
+      }
     }
 
     if (start_date) {
@@ -81,26 +99,45 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
       return lead; // Keep UTM link for fresh leads (2005)
     });
 
-    // Get total count
+    // Get total count (same filters as main query, with joins for user_status/loan_status)
     let countQuery = `
       SELECT COUNT(*) as total
-      FROM partner_leads
-      WHERE partner_id = ?
+      FROM partner_leads pl
+      LEFT JOIN users u ON pl.user_id = u.id
+      LEFT JOIN loan_applications la ON pl.loan_application_id = la.id
+      WHERE pl.partner_id = ?
     `;
     const countParams = [partner.id];
 
     if (status) {
-      countQuery += ` AND dedupe_status = ?`;
+      countQuery += ` AND pl.dedupe_status = ?`;
       countParams.push(status);
     }
 
+    if (user_status) {
+      if (user_status === 'active') {
+        countQuery += ` AND (u.status = 'active' OR pl.user_id IS NULL)`;
+      } else if (user_status === 'on_hold') {
+        countQuery += ` AND u.status = 'on_hold'`;
+      }
+    }
+
+    if (loan_status) {
+      if (loan_status === 'none') {
+        countQuery += ` AND la.id IS NULL`;
+      } else {
+        countQuery += ` AND (COALESCE(la.status, pl.loan_status) COLLATE utf8mb4_unicode_ci) = ?`;
+        countParams.push(loan_status);
+      }
+    }
+
     if (start_date) {
-      countQuery += ` AND DATE(lead_shared_at) >= ?`;
+      countQuery += ` AND DATE(pl.lead_shared_at) >= ?`;
       countParams.push(start_date);
     }
 
     if (end_date) {
-      countQuery += ` AND DATE(lead_shared_at) <= ?`;
+      countQuery += ` AND DATE(pl.lead_shared_at) <= ?`;
       countParams.push(end_date);
     }
 
@@ -236,7 +273,8 @@ router.get('/lead/:leadId', authenticatePartnerToken, async (req, res) => {
         u.status as user_status,
         la.application_number,
         la.loan_amount,
-        la.status as loan_status,
+        COALESCE(la.status, pl.loan_status) as loan_status,
+        u.status as user_status,
         la.disbursed_at,
         la.created_at as loan_created_at
       FROM partner_leads pl

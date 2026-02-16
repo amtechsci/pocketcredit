@@ -1038,6 +1038,29 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       followUps = [];
     }
 
+    // Fetch user notes (admin notes)
+    let userNotes = [];
+    try {
+      const notesRows = await executeQuery(`
+        SELECT un.id, un.user_id, un.note_content, un.created_by, un.created_at, un.updated_at,
+               a.name as admin_name, a.email as admin_email
+        FROM user_notes un
+        LEFT JOIN admins a ON un.created_by = a.id
+        WHERE un.user_id = ?
+        ORDER BY un.created_at DESC
+      `, [userId]);
+      userNotes = (notesRows || []).map(row => ({
+        noteId: row.id,
+        note: row.note_content,
+        admin: row.admin_name || row.admin_email || 'Admin',
+        date: row.created_at,
+        lastModified: row.updated_at
+      }));
+    } catch (error) {
+      console.error('Error fetching user notes:', error);
+      userNotes = [];
+    }
+
     // Transform user data to match frontend expectations
     const userProfile = {
       id: user.id,
@@ -1124,7 +1147,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       references: references || [],
       transactions: [],
       followUps: followUps || [],
-      notes: [],
+      notes: userNotes,
       smsHistory: [],
       bankStatement: bankStatement,
       bankStatementRecords: bankStatementRecords, // All bank statement records
@@ -3899,22 +3922,39 @@ router.post('/:userId/follow-ups', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Add note
+// Add note (simple: note content only)
 router.post('/:userId/notes', authenticateAdmin, async (req, res) => {
   try {
-    console.log('📝 Adding note for user:', req.params.userId);
     await initializeDatabase();
     const { userId } = req.params;
-    const { subject, note, category, priority } = req.body;
+    const noteContent = (req.body.note != null ? String(req.body.note) : (req.body.note_content != null ? String(req.body.note_content) : '')).trim();
+    const adminId = req.admin?.id;
 
-    // For now, we'll store note info in memory since table doesn't exist yet
-    console.log('✅ Note added successfully (stored in memory)');
+    if (!noteContent) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Note content is required'
+      });
+    }
+    if (!adminId) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Unauthorized'
+      });
+    }
+
+    const result = await executeQuery(
+      `INSERT INTO user_notes (user_id, note_content, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, NOW(), NOW())`,
+      [userId, noteContent, adminId]
+    );
+    const insertId = result?.insertId;
+
     res.json({
       status: 'success',
       message: 'Note added successfully',
-      data: { userId, subject, note, category, priority }
+      data: { id: insertId, userId, note: noteContent }
     });
-
   } catch (error) {
     console.error('Add note error:', error);
     res.status(500).json({

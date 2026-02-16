@@ -26,7 +26,8 @@ export function PartnerDashboardPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [filters, setFilters] = useState({
-    status: '',
+    user_status: '',
+    loan_status: '',
     start_date: '',
     end_date: '',
   });
@@ -48,7 +49,8 @@ export function PartnerDashboardPage() {
         partnerApiService.getLeads({
           page,
           limit: 50,
-          ...(filters.status && { status: filters.status }),
+          ...(filters.user_status && { user_status: filters.user_status }),
+          ...(filters.loan_status && { loan_status: filters.loan_status }),
           ...(filters.start_date && { start_date: filters.start_date }),
           ...(filters.end_date && { end_date: filters.end_date }),
         }),
@@ -63,6 +65,11 @@ export function PartnerDashboardPage() {
         setTotalPages(leadsResponse.data.pagination.total_pages);
       }
     } catch (error: any) {
+      if (error?.message === 'PARTNER_SESSION_EXPIRED') {
+        logout();
+        navigate('/partner/login', { replace: true });
+        return;
+      }
       console.error('Error loading dashboard:', error);
     } finally {
       setLoading(false);
@@ -91,6 +98,12 @@ export function PartnerDashboardPage() {
       currency: 'INR',
       maximumFractionDigits: 0,
     }).format(amount);
+  };
+
+  const formatLoanStatus = (status: string | null) => {
+    if (!status) return 'N/A';
+    if (status === 'on_hold') return 'Hold';
+    return status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   };
 
   const getStatusBadge = (status: string) => {
@@ -200,7 +213,7 @@ export function PartnerDashboardPage() {
 
         {/* Filters and Search */}
         <div className="bg-white rounded-lg shadow mb-6 p-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
@@ -213,20 +226,40 @@ export function PartnerDashboardPage() {
             </div>
 
             <select
-              value={filters.status}
-              onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+              value={filters.user_status}
+              onChange={(e) => { setFilters({ ...filters, user_status: e.target.value }); setPage(1); }}
               className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
-              <option value="">All Status</option>
-              <option value="fresh_lead">Fresh Lead</option>
-              <option value="registered_user">Registered User</option>
-              <option value="active_user">Active User</option>
+              <option value="">All User Status</option>
+              <option value="active">Active</option>
+              <option value="on_hold">Hold</option>
+            </select>
+
+            <select
+              value={filters.loan_status}
+              onChange={(e) => { setFilters({ ...filters, loan_status: e.target.value }); setPage(1); }}
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">All Loan Status</option>
+              <option value="none">N/A (No application)</option>
+              <option value="submitted">Submitted</option>
+              <option value="under_review">Under Review</option>
+              <option value="follow_up">Follow Up</option>
+              <option value="qa_verification">QA Verification</option>
+              <option value="approved">Approved</option>
+              <option value="ready_for_disbursement">Ready for Disbursement</option>
+              <option value="disbursal">Disbursal</option>
+              <option value="account_manager">Disbursed</option>
+              <option value="overdue">Overdue</option>
+              <option value="cleared">Cleared</option>
+              <option value="rejected">Rejected</option>
+              <option value="cancelled">Cancelled</option>
             </select>
 
             <input
               type="date"
               value={filters.start_date}
-              onChange={(e) => setFilters({ ...filters, start_date: e.target.value })}
+              onChange={(e) => { setFilters({ ...filters, start_date: e.target.value }); setPage(1); }}
               placeholder="Start Date"
               className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
@@ -234,7 +267,7 @@ export function PartnerDashboardPage() {
             <input
               type="date"
               value={filters.end_date}
-              onChange={(e) => setFilters({ ...filters, end_date: e.target.value })}
+              onChange={(e) => { setFilters({ ...filters, end_date: e.target.value }); setPage(1); }}
               placeholder="End Date"
               className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
@@ -294,12 +327,21 @@ export function PartnerDashboardPage() {
                             <div className="text-sm text-gray-500">{lead.mobile_number}</div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(lead.dedupe_status)}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {getStatusBadge(lead.dedupe_status)}
+                            {lead.user_status === 'on_hold' && (
+                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800" title="User is on hold">
+                                Hold
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {formatDate(lead.lead_shared_at)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {lead.loan_status || 'N/A'}
+                          {formatLoanStatus(lead.loan_status)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">

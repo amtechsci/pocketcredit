@@ -15,11 +15,12 @@ const router = express.Router();
 
 const PARTNERS_KEYS_DIR = path.join(__dirname, '..', 'partner_keys', 'partners');
 
-/** Ensure category and activities columns exist (migration) */
+/** Ensure category, activities, and payout_percentage columns exist (migration) */
 async function ensurePartnersColumns() {
   for (const col of [
     { name: 'category', def: 'VARCHAR(255) DEFAULT NULL' },
-    { name: 'activities', def: 'TEXT DEFAULT NULL' }
+    { name: 'activities', def: 'TEXT DEFAULT NULL' },
+    { name: 'payout_percentage', def: 'DECIMAL(5,2) DEFAULT 2.00 NULL' }
   ]) {
     try {
       await executeQuery(`ALTER TABLE partners ADD COLUMN ${col.name} ${col.def}`);
@@ -125,7 +126,7 @@ router.get('/:id', authenticateAdmin, requireSuperadmin, async (req, res) => {
  */
 router.post('/', authenticateAdmin, requireSuperadmin, async (req, res) => {
   try {
-    const { client_id, client_secret, name, category, activities, email, public_key_path, public_key_pem, allowed_ips } = req.body;
+    const { client_id, client_secret, name, category, activities, email, public_key_path, public_key_pem, allowed_ips, payout_percentage } = req.body;
     if (!client_id || !client_secret || !name) {
       return res.status(400).json({
         status: 'error',
@@ -154,7 +155,8 @@ router.post('/', authenticateAdmin, requireSuperadmin, async (req, res) => {
       activities: activities ? String(activities).trim() : null,
       email: email ? String(email).trim() : null,
       public_key_path: resolvedPublicKeyPath,
-      allowed_ips: allowed_ips != null ? String(allowed_ips).trim() : null
+      allowed_ips: allowed_ips != null ? String(allowed_ips).trim() : null,
+      payout_percentage: payout_percentage != null ? parseFloat(payout_percentage) : 2
     });
     res.status(201).json({ status: 'success', data: partner });
   } catch (error) {
@@ -178,7 +180,7 @@ router.put('/:id', authenticateAdmin, requireSuperadmin, async (req, res) => {
     if (!partner) {
       return res.status(404).json({ status: 'error', message: 'Partner not found' });
     }
-    const { name, category, activities, email, public_key_path, public_key_pem, allowed_ips, is_active, client_secret } = req.body;
+    const { name, category, activities, email, public_key_path, public_key_pem, allowed_ips, is_active, client_secret, payout_percentage } = req.body;
     const updates = {};
     if (name !== undefined) updates.name = String(name).trim();
     if (category !== undefined) updates.category = category ? String(category).trim() : null;
@@ -187,6 +189,7 @@ router.put('/:id', authenticateAdmin, requireSuperadmin, async (req, res) => {
     if (allowed_ips !== undefined) updates.allowed_ips = allowed_ips != null ? String(allowed_ips).trim() : null;
     if (typeof is_active === 'boolean') updates.is_active = is_active ? 1 : 0;
     if (client_secret && String(client_secret).trim()) updates.client_secret = String(client_secret).trim();
+    if (payout_percentage !== undefined) updates.payout_percentage = payout_percentage === '' || payout_percentage == null ? null : parseFloat(payout_percentage);
 
     if (public_key_pem && String(public_key_pem).trim()) {
       try {
