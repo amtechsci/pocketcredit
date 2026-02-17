@@ -2071,6 +2071,8 @@ router.get('/export/idfc-bank-csv', authenticateAdmin, async (req, res) => {
         u.first_name,
         u.last_name,
         u.email,
+        u.personal_email,
+        u.official_email,
         ub.id as bank_id,
         ub.account_number,
         ub.ifsc_code,
@@ -2145,7 +2147,8 @@ router.get('/export/idfc-bank-csv', authenticateAdmin, async (req, res) => {
       const ifsc = loan.ifsc_code || '';
       const bankName = loan.bank_name || '';
       const transactionType = bankName.toUpperCase().includes('IDFC') ? 'IFT' : 'NEFT';
-      const email = loan.email || '';
+      // Use priority: personal_email > official_email > email (same as other parts of the system)
+      const email = loan.personal_email || loan.official_email || loan.email || '';
       const remarks = `PLL${loan.id}`;
 
       // Build CSV row
