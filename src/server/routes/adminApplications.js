@@ -1330,16 +1330,85 @@ router.put('/:applicationId/amount', authenticateAdmin, async (req, res) => {
       });
     }
 
-    // Update loan amount
+    // Recalculate all calculated fields when loan_amount changes
+    const { getLoanCalculation } = require('../utils/loanCalculations');
+    let updateFields = ['loan_amount = ?'];
+    let updateValues = [parseFloat(amount)];
+    
+    try {
+      // Temporarily update loan_amount to get correct calculation
+      await executeQuery(
+        'UPDATE loan_applications SET loan_amount = ? WHERE id = ?',
+        [parseFloat(amount), applicationId]
+      );
+      
+      // Get recalculated values
+      const calculation = await getLoanCalculation(parseInt(applicationId));
+      
+      if (calculation) {
+        // Get disbursal amount (check disbursal.amount first as that's what getLoanCalculation returns)
+        const disbursalAmount = calculation.disbursal?.amount || calculation.disbAmount || calculation.disbursalAmount || parseFloat(amount);
+        
+        // Get processing fee (sum of disbursal fees + GST)
+        const processingFee = ((calculation.totals?.disbursalFee || 0) + (calculation.totals?.disbursalFeeGST || 0)) || calculation.processingFee || 0;
+        
+        // Get total interest
+        const totalInterest = calculation.interest?.amount || calculation.interest || 0;
+        
+        // Get total repayable
+        const totalRepayable = calculation.total?.repayable || calculation.totalRepayable || parseFloat(amount);
+        
+        // Update all calculated fields
+        updateFields.push('disbursal_amount = ?');
+        updateFields.push('processing_fee = ?');
+        updateFields.push('total_interest = ?');
+        updateFields.push('total_repayable = ?');
+        
+        updateValues.push(disbursalAmount);
+        updateValues.push(processingFee);
+        updateValues.push(totalInterest);
+        updateValues.push(totalRepayable);
+        
+        // Update fees_breakdown if available
+        if (calculation.fees) {
+          const allFees = [
+            ...(calculation.fees.deductFromDisbursal || []),
+            ...(calculation.fees.addToTotal || [])
+          ];
+          if (allFees.length > 0) {
+            const feesBreakdown = allFees.map(fee => ({
+              fee_name: fee.fee_name,
+              fee_amount: fee.fee_amount,
+              gst_amount: fee.gst_amount,
+              fee_percent: fee.fee_percent,
+              total_with_gst: fee.total_with_gst,
+              application_method: fee.application_method || 'deduct_from_disbursal'
+            }));
+            updateFields.push('fees_breakdown = ?');
+            updateValues.push(JSON.stringify(feesBreakdown));
+          }
+        }
+      }
+    } catch (calcError) {
+      console.error(`Failed to recalculate fields for loan ${applicationId}:`, calcError);
+      // Continue with just loan_amount update
+    }
+
+    // Update all fields
+    updateValues.push(applicationId);
     await executeQuery(
-      'UPDATE loan_applications SET loan_amount = ?, updated_at = NOW() WHERE id = ?',
-      [parseFloat(amount), applicationId]
+      `UPDATE loan_applications SET ${updateFields.join(', ')}, updated_at = NOW() WHERE id = ?`,
+      updateValues
     );
 
     res.json({
       status: 'success',
       message: 'Loan amount updated successfully',
-      data: { applicationId, loan_amount: parseFloat(amount) }
+      data: { 
+        applicationId, 
+        loan_amount: parseFloat(amount),
+        disbursal_amount: disbursalAmount
+      }
     });
 
   } catch (error) {
@@ -1997,7 +2066,7 @@ router.get('/export/idfc-bank-csv', authenticateAdmin, async (req, res) => {
         la.id,
         la.application_number as applicationNumber,
         la.user_id as userId,
-        la.disbursal_amount as loanAmount,
+        la.loan_amount as loanAmount,
         la.status,
         u.first_name,
         u.last_name,
@@ -2053,17 +2122,23 @@ router.get('/export/idfc-bank-csv', authenticateAdmin, async (req, res) => {
       }
 
       // Get loan calculation for correct disbursal amount
-      let disbursalAmount = loan.loanAmount; // fallback
+      let disbursalAmount = loan.loanAmount; // fallback to principal if everything else fails
       try {
         const calculation = await getLoanCalculation(loan.id);
-        if (calculation && calculation.disbursal && calculation.disbursal.amount != null) {
+
+        // Prefer the net disbursed amount from calculations (principal minus fees)
+        // Check disbursal.amount first as that's what getLoanCalculation returns
+        if (calculation && calculation.disbursal?.amount != null) {
           disbursalAmount = calculation.disbursal.amount;
+        } else if (calculation && calculation.disbAmount != null) {
+          disbursalAmount = calculation.disbAmount;
         } else if (calculation && calculation.disbursalAmount != null) {
+          // Backward‑compat: some callers might expose disbursalAmount
           disbursalAmount = calculation.disbursalAmount;
         }
       } catch (error) {
         console.error(`Failed to get loan calculation for loan ${loan.id}:`, error);
-        // Use fallback amount
+        // Keep fallback amount
       }
 
       // Get bank details
@@ -2122,6 +2197,208 @@ router.get('/export/idfc-bank-csv', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to export IDFC Bank CSV',
+      error: error.message
+    });
+  }
+});
+
+// Fix/recalculate disbursal_amount for loans (admin utility endpoint)
+router.post('/fix-disbursal-amounts', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { loanIds, status, recalculateAll } = req.body;
+
+    // Only allow super_admin or admin roles
+    if (req.admin?.role !== 'admin' && req.admin?.role !== 'super_admin') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Only admins can fix disbursal amounts'
+      });
+    }
+
+    const { getLoanCalculation } = require('../utils/loanCalculations');
+    let loansToFix = [];
+
+    if (recalculateAll) {
+      // Recalculate all loans that are not yet processed
+      const query = `
+        SELECT id, loan_amount, disbursal_amount, processing_fee, total_interest, total_repayable, status, processed_at
+        FROM loan_applications
+        WHERE processed_at IS NULL
+        ORDER BY id ASC
+      `;
+      loansToFix = await executeQuery(query);
+    } else if (loanIds && Array.isArray(loanIds) && loanIds.length > 0) {
+      // Fix specific loan IDs
+      const placeholders = loanIds.map(() => '?').join(',');
+      const query = `
+        SELECT id, loan_amount, disbursal_amount, processing_fee, total_interest, total_repayable, status, processed_at
+        FROM loan_applications
+        WHERE id IN (${placeholders})
+      `;
+      loansToFix = await executeQuery(query, loanIds);
+    } else if (status) {
+      // Fix loans with specific status
+      const query = `
+        SELECT id, loan_amount, disbursal_amount, processing_fee, total_interest, total_repayable, status, processed_at
+        FROM loan_applications
+        WHERE status = ? AND processed_at IS NULL
+        ORDER BY id ASC
+      `;
+      loansToFix = await executeQuery(query, [status]);
+    } else {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Please provide loanIds array, status, or set recalculateAll=true'
+      });
+    }
+
+    if (loansToFix.length === 0) {
+      return res.json({
+        status: 'success',
+        message: 'No loans found to fix',
+        data: { fixed: 0, failed: 0, skipped: 0 }
+      });
+    }
+
+    const results = {
+      fixed: 0,
+      failed: 0,
+      skipped: 0,
+      details: []
+    };
+
+    for (const loan of loansToFix) {
+      // Skip if already processed
+      if (loan.processed_at) {
+        results.skipped++;
+        results.details.push({
+          loanId: loan.id,
+          status: 'skipped',
+          reason: 'Loan already processed'
+        });
+        continue;
+      }
+
+      try {
+        // Get recalculated values
+        const calculation = await getLoanCalculation(loan.id);
+        
+        if (!calculation) {
+          results.skipped++;
+          results.details.push({
+            loanId: loan.id,
+            status: 'skipped',
+            reason: 'Could not get calculation'
+          });
+          continue;
+        }
+
+        // Get all calculated values
+        const newDisbursalAmount = calculation.disbursal?.amount || calculation.disbAmount || calculation.disbursalAmount || loan.loan_amount;
+        const newProcessingFee = ((calculation.totals?.disbursalFee || 0) + (calculation.totals?.disbursalFeeGST || 0)) || calculation.processingFee || 0;
+        const newTotalInterest = calculation.interest?.amount || calculation.interest || 0;
+        const newTotalRepayable = calculation.total?.repayable || calculation.totalRepayable || loan.loan_amount;
+
+        // Check if any values need updating
+        const oldDisbursalAmount = parseFloat(loan.disbursal_amount) || loan.loan_amount;
+        const oldProcessingFee = parseFloat(loan.processing_fee) || 0;
+        const oldTotalInterest = parseFloat(loan.total_interest) || 0;
+        const oldTotalRepayable = parseFloat(loan.total_repayable) || loan.loan_amount;
+
+        const needsUpdate = 
+          Math.abs(newDisbursalAmount - oldDisbursalAmount) > 0.01 ||
+          Math.abs(newProcessingFee - oldProcessingFee) > 0.01 ||
+          Math.abs(newTotalInterest - oldTotalInterest) > 0.01 ||
+          Math.abs(newTotalRepayable - oldTotalRepayable) > 0.01;
+
+        if (needsUpdate) {
+          const updateFields = [];
+          const updateValues = [];
+          
+          updateFields.push('disbursal_amount = ?');
+          updateFields.push('processing_fee = ?');
+          updateFields.push('total_interest = ?');
+          updateFields.push('total_repayable = ?');
+          
+          updateValues.push(newDisbursalAmount);
+          updateValues.push(newProcessingFee);
+          updateValues.push(newTotalInterest);
+          updateValues.push(newTotalRepayable);
+          
+          // Update fees_breakdown if available
+          if (calculation.fees) {
+            const allFees = [
+              ...(calculation.fees.deductFromDisbursal || []),
+              ...(calculation.fees.addToTotal || [])
+            ];
+            if (allFees.length > 0) {
+              const feesBreakdown = allFees.map(fee => ({
+                fee_name: fee.fee_name,
+                fee_amount: fee.fee_amount,
+                gst_amount: fee.gst_amount,
+                fee_percent: fee.fee_percent,
+                total_with_gst: fee.total_with_gst,
+                application_method: fee.application_method || 'deduct_from_disbursal'
+              }));
+              updateFields.push('fees_breakdown = ?');
+              updateValues.push(JSON.stringify(feesBreakdown));
+            }
+          }
+          
+          updateValues.push(loan.id);
+          await executeQuery(
+            `UPDATE loan_applications SET ${updateFields.join(', ')}, updated_at = NOW() WHERE id = ?`,
+            updateValues
+          );
+          
+          results.fixed++;
+          results.details.push({
+            loanId: loan.id,
+            status: 'fixed',
+            oldValues: {
+              disbursal_amount: oldDisbursalAmount,
+              processing_fee: oldProcessingFee,
+              total_interest: oldTotalInterest,
+              total_repayable: oldTotalRepayable
+            },
+            newValues: {
+              disbursal_amount: newDisbursalAmount,
+              processing_fee: newProcessingFee,
+              total_interest: newTotalInterest,
+              total_repayable: newTotalRepayable
+            }
+          });
+        } else {
+          results.skipped++;
+          results.details.push({
+            loanId: loan.id,
+            status: 'skipped',
+            reason: 'All calculated fields already correct'
+          });
+        }
+      } catch (error) {
+        results.failed++;
+        results.details.push({
+          loanId: loan.id,
+          status: 'failed',
+          error: error.message
+        });
+        console.error(`Failed to fix disbursal_amount for loan ${loan.id}:`, error);
+      }
+    }
+
+    res.json({
+      status: 'success',
+      message: `Fixed ${results.fixed} loans, ${results.failed} failed, ${results.skipped} skipped`,
+      data: results
+    });
+
+  } catch (error) {
+    console.error('Fix disbursal amounts error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fix disbursal amounts',
       error: error.message
     });
   }

@@ -456,6 +456,72 @@ async function adjustFirstTimeLoanAmount(userId, monthlySalary) {
       [newLoanAmount, pendingLoan.id]
     );
 
+    // Recalculate all calculated fields when loan_amount changes
+    const { getLoanCalculation } = require('./loanCalculations');
+    let updateFields = [];
+    let updateValues = [];
+    
+    try {
+      const calculation = await getLoanCalculation(pendingLoan.id);
+      
+      if (calculation) {
+        // Get disbursal amount (check disbursal.amount first as that's what getLoanCalculation returns)
+        const disbursalAmount = calculation.disbursal?.amount || calculation.disbAmount || calculation.disbursalAmount || newLoanAmount;
+        
+        // Get processing fee (sum of disbursal fees + GST)
+        const processingFee = ((calculation.totals?.disbursalFee || 0) + (calculation.totals?.disbursalFeeGST || 0)) || calculation.processingFee || 0;
+        
+        // Get total interest
+        const totalInterest = calculation.interest?.amount || calculation.interest || 0;
+        
+        // Get total repayable
+        const totalRepayable = calculation.total?.repayable || calculation.totalRepayable || newLoanAmount;
+        
+        // Update all calculated fields
+        updateFields.push('disbursal_amount = ?');
+        updateFields.push('processing_fee = ?');
+        updateFields.push('total_interest = ?');
+        updateFields.push('total_repayable = ?');
+        
+        updateValues.push(disbursalAmount);
+        updateValues.push(processingFee);
+        updateValues.push(totalInterest);
+        updateValues.push(totalRepayable);
+        
+        // Update fees_breakdown if available
+        if (calculation.fees) {
+          const allFees = [
+            ...(calculation.fees.deductFromDisbursal || []),
+            ...(calculation.fees.addToTotal || [])
+          ];
+          if (allFees.length > 0) {
+            const feesBreakdown = allFees.map(fee => ({
+              fee_name: fee.fee_name,
+              fee_amount: fee.fee_amount,
+              gst_amount: fee.gst_amount,
+              fee_percent: fee.fee_percent,
+              total_with_gst: fee.total_with_gst,
+              application_method: fee.application_method || 'deduct_from_disbursal'
+            }));
+            updateFields.push('fees_breakdown = ?');
+            updateValues.push(JSON.stringify(feesBreakdown));
+          }
+        }
+        
+        // Update all fields
+        updateValues.push(pendingLoan.id);
+        await executeQuery(
+          `UPDATE loan_applications 
+           SET ${updateFields.join(', ')}, updated_at = NOW() 
+           WHERE id = ?`,
+          updateValues
+        );
+      }
+    } catch (calcError) {
+      console.error(`[CreditLimit] Failed to recalculate fields for loan ${pendingLoan.id}:`, calcError);
+      // Continue - loan amount update already succeeded
+    }
+
     // ALSO update user's loan_limit in users table
     // This is the credit limit that determines how much the user can borrow
     await executeQuery(
