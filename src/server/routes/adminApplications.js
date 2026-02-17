@@ -2092,8 +2092,8 @@ router.get('/export/idfc-bank-csv', authenticateAdmin, async (req, res) => {
       });
     }
 
-    // Import loan calculation function
-    const { getLoanCalculation } = require('../utils/loanCalculations');
+    // Use full calculation (plan fees + GST) so disbursal amount matches UI (e.g. PLL306: 6010.56 not 7200)
+    const { getFullLoanCalculation, getLoanCalculation } = require('../utils/loanCalculations');
 
     // Helper function to escape CSV values
     const escapeCsvValue = (value) => {
@@ -2121,36 +2121,20 @@ router.get('/export/idfc-bank-csv', authenticateAdmin, async (req, res) => {
         continue;
       }
 
-      // Get loan calculation for correct disbursal amount
-      let disbursalAmount = loan.loanAmount; // fallback to principal if everything else fails
+      // Get disbursal amount from full calculation (plan fees + GST) so it matches UI
+      let disbursalAmount = loan.loanAmount;
       try {
-        const calculation = await getLoanCalculation(loan.id);
-
-        // Prefer the net disbursed amount from calculations (principal minus fees)
-        // getLoanCalculation uses calculateLoanValues which returns disbAmount (not disbursal.amount)
-        // Check disbAmount first, then check disbursal.amount (for calculateCompleteLoanValues compatibility)
-        if (calculation && calculation.disbAmount != null) {
-          disbursalAmount = calculation.disbAmount;
-        } else if (calculation && calculation.disbursal?.amount != null) {
-          disbursalAmount = calculation.disbursal.amount;
-        } else if (calculation && calculation.disbursalAmount != null) {
-          // Backward‑compat: some callers might expose disbursalAmount
-          disbursalAmount = calculation.disbursalAmount;
-        } else if (calculation) {
-          // Log warning if calculation exists but doesn't have disbursal amount
-          console.warn(`Loan ${loan.id} (PLL${loan.id}): Calculation exists but no disbursal amount found. Using loan_amount ${loan.loanAmount} as fallback. Calculation keys:`, Object.keys(calculation));
-          if (loan.id === 306) {
-            console.log(`[DEBUG PLL306] Full calculation object:`, JSON.stringify(calculation, null, 2));
-          }
+        const fullCalc = await getFullLoanCalculation(loan.id);
+        if (fullCalc && fullCalc.disbursal?.amount != null) {
+          disbursalAmount = fullCalc.disbursal.amount;
+        } else {
+          const calculation = await getLoanCalculation(loan.id);
+          if (calculation?.disbAmount != null) disbursalAmount = calculation.disbAmount;
+          else if (calculation?.disbursal?.amount != null) disbursalAmount = calculation.disbursal.amount;
+          else if (calculation?.disbursalAmount != null) disbursalAmount = calculation.disbursalAmount;
         }
       } catch (error) {
         console.error(`Failed to get loan calculation for loan ${loan.id} (PLL${loan.id}):`, error);
-        // Keep fallback amount
-      }
-      
-      // Debug log for PLL306
-      if (loan.id === 306) {
-        console.log(`[DEBUG PLL306] Loan amount: ${loan.loanAmount}, Final disbursal amount: ${disbursalAmount}`);
       }
 
       // Get bank details

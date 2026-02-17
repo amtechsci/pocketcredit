@@ -725,6 +725,128 @@ async function getLoanCalculation(loanIdOrDb, loanIdParam, customDays = null) {
 }
 
 /**
+ * Get full loan calculation using plan snapshot and calculateCompleteLoanValues.
+ * Returns the same structure as the UI/API (disbursal.amount = principal - deduct fees - GST).
+ * Use this when you need the correct disbursal amount for plans with fee breakdown + GST (e.g. IDFC CSV export).
+ * @param {number} loanId - Loan application ID
+ * @returns {Promise<Object|null>} Full calculation with disbursal.amount, totals, etc., or null if loan not found / calculation fails
+ */
+async function getFullLoanCalculation(loanId) {
+  const { executeQuery } = require('../config/database');
+
+  try {
+    const loans = await executeQuery(
+      `SELECT 
+        id, loan_amount, status, disbursed_at, processed_at,
+        plan_snapshot, fees_breakdown, loan_plan_id, interest_percent_per_day, user_id
+      FROM loan_applications 
+      WHERE id = ?`,
+      [loanId]
+    );
+
+    if (!loans || loans.length === 0) return null;
+    const loan = loans[0];
+
+    let planSnapshot = null;
+    if (loan.plan_snapshot) {
+      try {
+        planSnapshot = typeof loan.plan_snapshot === 'string' ? JSON.parse(loan.plan_snapshot) : loan.plan_snapshot;
+      } catch (e) {
+        planSnapshot = null;
+      }
+    }
+
+    let feesBreakdown = [];
+    if (loan.fees_breakdown) {
+      try {
+        feesBreakdown = typeof loan.fees_breakdown === 'string' ? JSON.parse(loan.fees_breakdown) : loan.fees_breakdown;
+      } catch (e) {}
+    }
+
+    if (!planSnapshot) {
+      planSnapshot = {
+        plan_type: 'single',
+        repayment_days: 15,
+        interest_percent_per_day: parseFloat(loan.interest_percent_per_day || 0.001),
+        calculate_by_salary_date: false,
+        fees: (feesBreakdown || []).map(f => ({
+          fee_name: f.fee_name || f.name || 'Fee',
+          fee_percent: f.fee_percent ?? f.percent ?? 0,
+          application_method: f.application_method || 'deduct_from_disbursal'
+        }))
+      };
+    } else if (!planSnapshot.fees || !Array.isArray(planSnapshot.fees) || planSnapshot.fees.length === 0) {
+      planSnapshot.fees = (feesBreakdown || []).map(f => ({
+        fee_name: f.fee_name || f.name || 'Fee',
+        fee_percent: f.fee_percent ?? f.percent ?? 0,
+        application_method: f.application_method || 'deduct_from_disbursal'
+      }));
+      if (planSnapshot.fees.length === 0 && loan.loan_plan_id) {
+        const planFees = await executeQuery(
+          `SELECT lpf.fee_percent, ft.fee_name, ft.application_method
+           FROM loan_plan_fees lpf
+           INNER JOIN fee_types ft ON lpf.fee_type_id = ft.id
+           WHERE lpf.loan_plan_id = ? AND ft.is_active = 1
+           ORDER BY ft.fee_name ASC`,
+          [loan.loan_plan_id]
+        );
+        if (planFees && planFees.length > 0) {
+          planSnapshot.fees = planFees.map(pf => ({
+            fee_name: pf.fee_name || 'Fee',
+            fee_percent: parseFloat(pf.fee_percent || 0),
+            application_method: pf.application_method || 'deduct_from_disbursal'
+          }));
+        }
+      }
+    } else {
+      planSnapshot.fees = planSnapshot.fees.map(fee => {
+        const name = (fee.fee_name || '').toLowerCase();
+        const method = name.includes('post service') ? 'add_to_total' : (fee.application_method || 'deduct_from_disbursal');
+        return { ...fee, application_method: method };
+      });
+    }
+
+    const users = await executeQuery(
+      'SELECT id, salary_date FROM users WHERE id = ?',
+      [loan.user_id]
+    );
+    const userData = users && users.length > 0 ? { user_id: users[0].id, salary_date: users[0].salary_date } : { user_id: null, salary_date: null };
+
+    const loanData = {
+      loan_amount: parseFloat(loan.loan_amount || 0),
+      loan_id: loan.id,
+      status: loan.status,
+      disbursed_at: loan.disbursed_at
+    };
+
+    const planData = {
+      plan_id: planSnapshot.plan_id || null,
+      plan_type: planSnapshot.plan_type || 'single',
+      repayment_days: planSnapshot.repayment_days || null,
+      total_duration_days: planSnapshot.total_duration_days || planSnapshot.repayment_days || null,
+      interest_percent_per_day: parseFloat(planSnapshot.interest_percent_per_day || loan.interest_percent_per_day || 0.001),
+      calculate_by_salary_date: planSnapshot.calculate_by_salary_date === 1 || planSnapshot.calculate_by_salary_date === true,
+      emi_count: planSnapshot.emi_count || null,
+      emi_frequency: planSnapshot.emi_frequency || null,
+      fees: planSnapshot.fees || []
+    };
+
+    let finalCalculationDate = null;
+    if (loan.processed_at && ['account_manager', 'cleared'].includes(loan.status)) {
+      const d = loan.processed_at;
+      if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)) finalCalculationDate = d.split('T')[0].split(' ')[0];
+      else if (d instanceof Date) finalCalculationDate = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+    }
+
+    const options = { calculationDate: finalCalculationDate };
+    return calculateCompleteLoanValues(loanData, planData, userData, options);
+  } catch (error) {
+    console.error(`getFullLoanCalculation(${loanId}):`, error.message);
+    return null;
+  }
+}
+
+/**
  * Update loan calculation fields in database
  * @param {number|Object} loanIdOrDb - Loan application ID (number) OR legacy db connection (for backward compatibility)
  * @param {number|Object} loanIdOrUpdates - Loan application ID (if first param is db) OR updates object
@@ -1018,6 +1140,7 @@ module.exports = {
   getSalaryDateForMonth,
   calculateCompleteLoanValues,
   getLoanCalculation,
+  getFullLoanCalculation,
   updateLoanCalculation,
   calculateInterestDays,
   // Helper functions for string-based date handling
