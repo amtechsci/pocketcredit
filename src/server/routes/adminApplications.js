@@ -1346,8 +1346,8 @@ router.put('/:applicationId/amount', authenticateAdmin, async (req, res) => {
       const calculation = await getLoanCalculation(parseInt(applicationId));
       
       if (calculation) {
-        // Get disbursal amount (check disbursal.amount first as that's what getLoanCalculation returns)
-        const disbursalAmount = calculation.disbursal?.amount || calculation.disbAmount || calculation.disbursalAmount || parseFloat(amount);
+        // Get disbursal amount (getLoanCalculation uses calculateLoanValues which returns disbAmount)
+        const disbursalAmount = calculation.disbAmount || calculation.disbursal?.amount || calculation.disbursalAmount || parseFloat(amount);
         
         // Get processing fee (sum of disbursal fees + GST)
         const processingFee = ((calculation.totals?.disbursalFee || 0) + (calculation.totals?.disbursalFeeGST || 0)) || calculation.processingFee || 0;
@@ -2127,18 +2127,30 @@ router.get('/export/idfc-bank-csv', authenticateAdmin, async (req, res) => {
         const calculation = await getLoanCalculation(loan.id);
 
         // Prefer the net disbursed amount from calculations (principal minus fees)
-        // Check disbursal.amount first as that's what getLoanCalculation returns
-        if (calculation && calculation.disbursal?.amount != null) {
-          disbursalAmount = calculation.disbursal.amount;
-        } else if (calculation && calculation.disbAmount != null) {
+        // getLoanCalculation uses calculateLoanValues which returns disbAmount (not disbursal.amount)
+        // Check disbAmount first, then check disbursal.amount (for calculateCompleteLoanValues compatibility)
+        if (calculation && calculation.disbAmount != null) {
           disbursalAmount = calculation.disbAmount;
+        } else if (calculation && calculation.disbursal?.amount != null) {
+          disbursalAmount = calculation.disbursal.amount;
         } else if (calculation && calculation.disbursalAmount != null) {
           // Backward‑compat: some callers might expose disbursalAmount
           disbursalAmount = calculation.disbursalAmount;
+        } else if (calculation) {
+          // Log warning if calculation exists but doesn't have disbursal amount
+          console.warn(`Loan ${loan.id} (PLL${loan.id}): Calculation exists but no disbursal amount found. Using loan_amount ${loan.loanAmount} as fallback. Calculation keys:`, Object.keys(calculation));
+          if (loan.id === 306) {
+            console.log(`[DEBUG PLL306] Full calculation object:`, JSON.stringify(calculation, null, 2));
+          }
         }
       } catch (error) {
-        console.error(`Failed to get loan calculation for loan ${loan.id}:`, error);
+        console.error(`Failed to get loan calculation for loan ${loan.id} (PLL${loan.id}):`, error);
         // Keep fallback amount
+      }
+      
+      // Debug log for PLL306
+      if (loan.id === 306) {
+        console.log(`[DEBUG PLL306] Loan amount: ${loan.loanAmount}, Final disbursal amount: ${disbursalAmount}`);
       }
 
       // Get bank details
@@ -2294,8 +2306,8 @@ router.post('/fix-disbursal-amounts', authenticateAdmin, async (req, res) => {
           continue;
         }
 
-        // Get all calculated values
-        const newDisbursalAmount = calculation.disbursal?.amount || calculation.disbAmount || calculation.disbursalAmount || loan.loan_amount;
+        // Get all calculated values (getLoanCalculation uses calculateLoanValues which returns disbAmount)
+        const newDisbursalAmount = calculation.disbAmount || calculation.disbursal?.amount || calculation.disbursalAmount || loan.loan_amount;
         const newProcessingFee = ((calculation.totals?.disbursalFee || 0) + (calculation.totals?.disbursalFeeGST || 0)) || calculation.processingFee || 0;
         const newTotalInterest = calculation.interest?.amount || calculation.interest || 0;
         const newTotalRepayable = calculation.total?.repayable || calculation.totalRepayable || loan.loan_amount;

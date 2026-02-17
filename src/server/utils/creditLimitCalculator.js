@@ -465,8 +465,8 @@ async function adjustFirstTimeLoanAmount(userId, monthlySalary) {
       const calculation = await getLoanCalculation(pendingLoan.id);
       
       if (calculation) {
-        // Get disbursal amount (check disbursal.amount first as that's what getLoanCalculation returns)
-        const disbursalAmount = calculation.disbursal?.amount || calculation.disbAmount || calculation.disbursalAmount || newLoanAmount;
+        // Get disbursal amount (getLoanCalculation uses calculateLoanValues which returns disbAmount)
+        const disbursalAmount = calculation.disbAmount || calculation.disbursal?.amount || calculation.disbursalAmount || newLoanAmount;
         
         // Get processing fee (sum of disbursal fees + GST)
         const processingFee = ((calculation.totals?.disbursalFee || 0) + (calculation.totals?.disbursalFeeGST || 0)) || calculation.processingFee || 0;

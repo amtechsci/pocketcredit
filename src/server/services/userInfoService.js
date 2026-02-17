@@ -478,10 +478,22 @@ async function saveAddressFromPANAPI(userId, panData, panNumber) {
       firstAddress.street_name,
       firstAddress.locality
     ].filter(Boolean).join(', ') || null;
-    const city = firstAddress.city || null;
-    const state = firstAddress.state || null;
-    const pincode = firstAddress.pincode || firstAddress.postal_code || null;
+    
+    // Use default values for required fields that cannot be null
+    // If PAN API doesn't provide city/state/pincode, use empty string or 'Unknown'
+    const city = (firstAddress.city && firstAddress.city.trim()) || 'Unknown';
+    const state = (firstAddress.state && firstAddress.state.trim()) || 'Unknown';
+    const pincode = (firstAddress.pincode || firstAddress.postal_code) || '';
     const country = firstAddress.country || 'India';
+
+    // Skip saving if address data is completely empty (only has defaults)
+    const hasValidAddressData = addressLine1.trim() || addressLine2 || 
+                                 (city !== 'Unknown') || (state !== 'Unknown') || pincode;
+    
+    if (!hasValidAddressData) {
+      console.log(`⚠️ Skipping address save for user ${userId} - PAN API returned empty address data`);
+      return { success: false, error: 'No valid address data in PAN response', skipped: true };
+    }
 
     // Check if address already exists for this source
     const existing = await executeQuery(

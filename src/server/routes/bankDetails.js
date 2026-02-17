@@ -23,7 +23,7 @@ router.get('/enach-status', requireAuth, async (req, res) => {
       // Check for active eNACH subscriptions using the new Cashfree system
       const existingEnach = await executeQuery(
         `SELECT es.subscription_id, es.cf_subscription_id, es.status, es.mandate_status, 
-                es.loan_application_id, es.created_at, es.authorized_at
+                es.loan_application_id, es.created_at, es.activated_at
          FROM enach_subscriptions es
          INNER JOIN loan_applications la ON es.loan_application_id = la.id
          WHERE la.user_id = ? 

@@ -688,23 +688,41 @@ async function handleSubscriptionStatusChanged(eventData, requestId) {
             authorization_time: authorizationTime || null
         };
         
-        const updateResult = await executeQuery(
-            `UPDATE enach_subscriptions 
-             SET status = ?,
-                 mandate_status = ?,
-                 authorized_at = ?,
-                 cashfree_response = ?,
-                 updated_at = NOW()
-             WHERE subscription_id = ? OR cf_subscription_id = ?`,
-            [
+        // Set activated_at when subscription becomes ACTIVE
+        // Note: authorization_time is stored in cashfree_response JSON, not as a separate column
+        const updateQuery = finalStatus === 'ACTIVE' && authorizationTime
+            ? `UPDATE enach_subscriptions 
+               SET status = ?,
+                   mandate_status = ?,
+                   activated_at = ?,
+                   cashfree_response = ?,
+                   updated_at = NOW()
+               WHERE subscription_id = ? OR cf_subscription_id = ?`
+            : `UPDATE enach_subscriptions 
+               SET status = ?,
+                   mandate_status = ?,
+                   cashfree_response = ?,
+                   updated_at = NOW()
+               WHERE subscription_id = ? OR cf_subscription_id = ?`;
+        
+        const updateParams = finalStatus === 'ACTIVE' && authorizationTime
+            ? [
                 finalStatus,
                 mandateStatus,
-                authorizationTime ? new Date(authorizationTime) : null,
+                new Date(authorizationTime),
                 JSON.stringify(updatedResponse),
                 subscriptionId,
                 cfSubscriptionId
             ]
-        );
+            : [
+                finalStatus,
+                mandateStatus,
+                JSON.stringify(updatedResponse),
+                subscriptionId,
+                cfSubscriptionId
+            ];
+        
+        const updateResult = await executeQuery(updateQuery, updateParams);
 
         const affectedRows = updateResult?.affectedRows || updateResult || 0;
         
