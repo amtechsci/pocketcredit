@@ -115,6 +115,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
   const canShowStatus = (status: string) => !allowedStatuses || allowedStatuses.includes(status);
   const maskMobileInQueue = isNbfcAdmin && shouldMaskMobile('ready_disbursement') && (statusFilter === 'ready_for_disbursement' || statusFilter === 'ready_to_repeat_disbursal');
 
+
   // Real data state
   const [applications, setApplications] = useState<LoanApplication[]>([]);
   const [loading, setLoading] = useState(true);
@@ -131,6 +132,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
   const [processingPayouts, setProcessingPayouts] = useState<string[]>([]);
   const [payoutResults, setPayoutResults] = useState<{ success: string[]; failed: Array<{ id: string; error: string }> } | null>(null);
   const [downloadingExcel, setDownloadingExcel] = useState<string | null>(null);
+  const [downloadingBankCsv, setDownloadingBankCsv] = useState<string | null>(null);
   const [userComments, setUserComments] = useState<{ [userId: string]: ProfileComment[] }>({});
   const [loadingComments, setLoadingComments] = useState<{ [userId: string]: boolean }>({});
   const [expandedComments, setExpandedComments] = useState<{ [userId: string]: boolean }>({});
@@ -371,6 +373,45 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
       toast.error('Failed to export Excel file: ' + (error.message || 'Unknown error'));
     } finally {
       setDownloadingExcel(null);
+    }
+  };
+
+  const handleDownloadBankCsv = async (status: 'ready_for_disbursement' | 'ready_to_repeat_disbursal') => {
+    try {
+      setDownloadingBankCsv(status);
+
+      // Use backend endpoint to generate CSV
+      const blob = await adminApiService.exportIdfcBankCsv(status);
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+
+      const statusLabel =
+        status === 'ready_for_disbursement'
+          ? 'ready_for_disbursement'
+          : 'ready_to_repeat_disbursal';
+
+      link.download = `idfc_payout_${statusLabel}_${new Date()
+        .toISOString()
+        .split('T')[0]}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast.success(
+        `Bank CSV downloaded successfully for ${statusLabel.replace(
+          /_/g,
+          ' '
+        )}`
+      );
+    } catch (error: any) {
+      console.error('Error downloading bank CSV:', error);
+      toast.error(error.message || 'Failed to download bank CSV file');
+    } finally {
+      setDownloadingBankCsv(null);
     }
   };
 
@@ -818,12 +859,12 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 Ready for Disbursement <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'ready_for_disbursement' ? 'bg-indigo-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.readyForDisbursementApplications || 0}</span>
               </button>
               <button
-                onClick={() => handleExportExcel('ready_for_disbursement')}
-                disabled={downloadingExcel === 'ready_for_disbursement'}
-                className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
-                title="Download Excel"
+                onClick={() => handleDownloadBankCsv('ready_for_disbursement')}
+                disabled={downloadingBankCsv === 'ready_for_disbursement'}
+                className="p-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
+                title="Download Bank CSV"
               >
-                <Download className={`w-4 h-4 ${downloadingExcel === 'ready_for_disbursement' ? 'animate-pulse' : ''}`} />
+                <Download className={`w-4 h-4 ${downloadingBankCsv === 'ready_for_disbursement' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
             )}
@@ -862,12 +903,12 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 Repeat Loan Ready for Disbursal <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'ready_to_repeat_disbursal' ? 'bg-blue-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.readyToRepeatDisbursalApplications || 0}</span>
               </button>
               <button
-                onClick={() => handleExportExcel('ready_to_repeat_disbursal')}
-                disabled={downloadingExcel === 'ready_to_repeat_disbursal'}
-                className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
-                title="Download Excel"
+                onClick={() => handleDownloadBankCsv('ready_to_repeat_disbursal')}
+                disabled={downloadingBankCsv === 'ready_to_repeat_disbursal'}
+                className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
+                title="Download Bank CSV"
               >
-                <Download className={`w-4 h-4 ${downloadingExcel === 'ready_to_repeat_disbursal' ? 'animate-pulse' : ''}`} />
+                <Download className={`w-4 h-4 ${downloadingBankCsv === 'ready_to_repeat_disbursal' ? 'animate-pulse' : ''}`} />
               </button>
             </div>
             )}

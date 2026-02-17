@@ -6,41 +6,46 @@ require('dotenv').config();
 /**
  * Session Configuration Middleware
  * Configures express-session with Redis store for 24-hour sessions
- * 
+ *
  * NOTE: This is primarily kept for backward compatibility and hybrid auth fallback.
  * Main authentication now uses JWT tokens (see middleware/jwtAuth.js)
  * The requireAuth function below is LEGACY and not used - use jwtAuth.requireAuth instead
  */
-
-// Get Redis client
-const redisClient = getRedisClient();
-
-// Session configuration
-const sessionConfig = {
-  store: redisClient ? new RedisStore({ 
-    client: redisClient,
-    prefix: 'pocket-credit:session:',
-    ttl: 86400 // 24 hours in seconds
-  }) : undefined, // Fallback to memory store if Redis unavailable
-  
-  secret: process.env.SESSION_SECRET || 'pocket-credit-session-secret-2025',
-  resave: false,
-  saveUninitialized: false,
-  rolling: true, // Reset expiry on each request
-  cookie: {
-    secure: false, // Allow HTTP for now (set to true when using HTTPS)
-    httpOnly: true, // Prevent XSS attacks
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours in milliseconds
-    sameSite: 'lax' // CSRF protection
-  },
-  name: 'pocket-credit-session' // Custom session name
-};
 
 /**
  * Initialize session middleware
  * @returns {Function} Express session middleware
  */
 const initializeSession = () => {
+  const redisClient = getRedisClient();
+  const useRedisStore = !!redisClient;
+
+  if (!useRedisStore && process.env.NODE_ENV === 'production') {
+    console.warn('⚠️  Redis client not available, falling back to in-memory session store. This is NOT recommended in production.');
+  }
+
+  const sessionConfig = {
+    store: useRedisStore
+      ? new RedisStore({
+          client: redisClient,
+          prefix: 'pocket-credit:session:',
+          ttl: 86400 // 24 hours in seconds
+        })
+      : undefined, // Fallback to memory store if Redis unavailable
+
+    secret: process.env.SESSION_SECRET || 'pocket-credit-session-secret-2025',
+    resave: false,
+    saveUninitialized: false,
+    rolling: true, // Reset expiry on each request
+    cookie: {
+      secure: process.env.NODE_ENV === 'production', // Use secure cookies in production (HTTPS)
+      httpOnly: true, // Prevent XSS attacks
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours in milliseconds
+      sameSite: 'lax' // CSRF protection
+    },
+    name: 'pocket-credit-session' // Custom session name
+  };
+
   return session(sessionConfig);
 };
 

@@ -1953,4 +1953,178 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
   }
 });
 
+// Export IDFC Bank CSV for disbursement
+router.get('/export/idfc-bank-csv', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    
+    const { status } = req.query;
+    
+    // Only allow ready_for_disbursement and ready_to_repeat_disbursal
+    if (status !== 'ready_for_disbursement' && status !== 'ready_to_repeat_disbursal') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid status. Only ready_for_disbursement and ready_to_repeat_disbursal are allowed.'
+      });
+    }
+
+    // Enforce status by role
+    const exportSubCategory = req.admin?.sub_admin_category;
+    let effectiveStatus = status;
+    if (req.admin?.role === 'nbfc_admin') {
+      const nbfcAllowed = ['ready_for_disbursement', 'ready_to_repeat_disbursal'];
+      if (!nbfcAllowed.includes(status)) {
+        effectiveStatus = 'ready_for_disbursement';
+      }
+    } else if (req.admin?.role === 'sub_admin' && exportSubCategory) {
+      const allowedByCategory = {
+        verify_user: ['ready_for_disbursement'],
+        qa_user: ['ready_for_disbursement'],
+        account_manager: ['ready_to_repeat_disbursal']
+      };
+      const allowed = allowedByCategory[exportSubCategory];
+      if (allowed && !allowed.includes(status)) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'You do not have permission to export this status'
+        });
+      }
+    }
+
+    // Get loans with the specified status
+    const loansQuery = `
+      SELECT DISTINCT
+        la.id,
+        la.application_number as applicationNumber,
+        la.user_id as userId,
+        la.disbursal_amount as loanAmount,
+        la.status,
+        u.first_name,
+        u.last_name,
+        u.email,
+        ub.id as bank_id,
+        ub.account_number,
+        ub.ifsc_code,
+        ub.bank_name,
+        ub.account_holder_name
+      FROM loan_applications la
+      LEFT JOIN users u ON la.user_id = u.id
+      LEFT JOIN bank_details ub ON u.id = ub.user_id AND ub.is_primary = 1
+      WHERE la.status = ?
+      ORDER BY la.id ASC
+    `;
+
+    const loans = await executeQuery(loansQuery, [effectiveStatus]);
+
+    if (!loans || loans.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'No loans found for export'
+      });
+    }
+
+    // Import loan calculation function
+    const { getLoanCalculation } = require('../utils/loanCalculations');
+
+    // Helper function to escape CSV values
+    const escapeCsvValue = (value) => {
+      if (value === null || value === undefined) return '';
+      const str = String(value).replace(/\r?\n/g, ' ');
+      if (/[",]/.test(str)) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const DEBIT_ACCOUNT_NUMBER = '10050210822';
+    const today = new Date();
+    const transactionDate = today.toLocaleDateString('en-GB'); // DD/MM/YYYY
+
+    // CSV header
+    const header = 'Beneficiary Name,Beneficiary Account Number,IFSC,Transaction Type,Debit Account Number,Transaction Date,Amount,Currency,Beneficiary Email ID,Remarks,Custom Header – 1,Custom Header – 2,Custom Header – 3,Custom Header – 4,Custom Header – 5';
+    const rows = [header];
+
+    // Process each loan
+    for (const loan of loans) {
+      // Skip loans without bank details
+      if (!loan.account_number || !loan.ifsc_code) {
+        console.warn(`Skipping loan ${loan.id} - missing bank details`);
+        continue;
+      }
+
+      // Get loan calculation for correct disbursal amount
+      let disbursalAmount = loan.loanAmount; // fallback
+      try {
+        const calculation = await getLoanCalculation(loan.id);
+        if (calculation && calculation.disbursal && calculation.disbursal.amount != null) {
+          disbursalAmount = calculation.disbursal.amount;
+        } else if (calculation && calculation.disbursalAmount != null) {
+          disbursalAmount = calculation.disbursalAmount;
+        }
+      } catch (error) {
+        console.error(`Failed to get loan calculation for loan ${loan.id}:`, error);
+        // Use fallback amount
+      }
+
+      // Get bank details
+      const beneficiaryName = loan.account_holder_name || 
+                            `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 
+                            'N/A';
+      const beneficiaryAccountNumber = loan.account_number || '';
+      const ifsc = loan.ifsc_code || '';
+      const bankName = loan.bank_name || '';
+      const transactionType = bankName.toUpperCase().includes('IDFC') ? 'IFT' : 'NEFT';
+      const email = loan.email || '';
+      const remarks = `PLL${loan.id}`;
+
+      // Build CSV row
+      const row = [
+        escapeCsvValue(beneficiaryName),
+        escapeCsvValue(beneficiaryAccountNumber),
+        escapeCsvValue(ifsc),
+        escapeCsvValue(transactionType),
+        escapeCsvValue(DEBIT_ACCOUNT_NUMBER),
+        escapeCsvValue(transactionDate),
+        escapeCsvValue(typeof disbursalAmount === 'number' ? disbursalAmount.toFixed(2) : disbursalAmount),
+        escapeCsvValue('INR'),
+        escapeCsvValue(email),
+        escapeCsvValue(remarks),
+        '', // Custom Header – 1
+        '', // Custom Header – 2
+        '', // Custom Header – 3
+        '', // Custom Header – 4
+        ''  // Custom Header – 5
+      ].join(',');
+
+      rows.push(row);
+    }
+
+    // Check if we have any valid rows (more than just header)
+    if (rows.length === 1) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'No loans with valid bank details found for export'
+      });
+    }
+
+    const csvContent = rows.join('\r\n');
+    const statusLabel = effectiveStatus === 'ready_for_disbursement' 
+      ? 'ready_for_disbursement' 
+      : 'ready_to_repeat_disbursal';
+    const filename = `idfc_payout_${statusLabel}_${new Date().toISOString().split('T')[0]}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csvContent);
+
+  } catch (error) {
+    console.error('Export IDFC Bank CSV error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to export IDFC Bank CSV',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;

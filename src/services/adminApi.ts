@@ -605,6 +605,23 @@ class AdminApiService {
     return await response.blob();
   }
 
+  async exportIdfcBankCsv(status: 'ready_for_disbursement' | 'ready_to_repeat_disbursal'): Promise<Blob> {
+    const token = localStorage.getItem('adminToken');
+    const response = await fetch(`${this.api.defaults.baseURL}/applications/export/idfc-bank-csv?status=${status}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: 'Failed to export IDFC Bank CSV' }));
+      throw new Error(errorData.message || 'Failed to export IDFC Bank CSV');
+    }
+
+    return await response.blob();
+  }
+
   // Admin Settings - Member Tiers
   async getMemberTiers(): Promise<ApiResponse<any>> {
     return this.request('GET', '/settings/member-tiers');

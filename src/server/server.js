@@ -226,9 +226,6 @@ app.use(cookieParser());
 // Activity logging middleware
 app.use(activityLoggerMiddleware());
 
-// Session middleware
-app.use(initializeSession());
-
 // Static file serving for uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -499,6 +496,9 @@ const startServer = async () => {
 
     // Initialize Redis connection
     await initializeRedis();
+
+    // Session middleware (after Redis is initialized so we can use RedisStore)
+    app.use(initializeSession());
 
     // Start activity processor
     await activityProcessor.start();
