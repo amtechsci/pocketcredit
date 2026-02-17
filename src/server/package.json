@@ -35,7 +35,8 @@
     "puppeteer": "^24.25.0",
     "redis": "^5.8.2",
     "twilio": "^4.14.0",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

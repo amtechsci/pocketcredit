@@ -2022,7 +2022,7 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Export IDFC Bank CSV for disbursement
+// Export IDFC Bank Excel (.xlsx) for disbursement
 router.get('/export/idfc-bank-csv', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
@@ -2096,24 +2096,32 @@ router.get('/export/idfc-bank-csv', authenticateAdmin, async (req, res) => {
 
     // Use full calculation (plan fees + GST) so disbursal amount matches UI (e.g. PLL306: 6010.56 not 7200)
     const { getFullLoanCalculation, getLoanCalculation } = require('../utils/loanCalculations');
-
-    // Helper function to escape CSV values
-    const escapeCsvValue = (value) => {
-      if (value === null || value === undefined) return '';
-      const str = String(value).replace(/\r?\n/g, ' ');
-      if (/[",]/.test(str)) {
-        return `"${str.replace(/"/g, '""')}"`;
-      }
-      return str;
-    };
+    const XLSX = require('xlsx');
 
     const DEBIT_ACCOUNT_NUMBER = '10050210822';
     const today = new Date();
     const transactionDate = today.toLocaleDateString('en-GB'); // DD/MM/YYYY
 
-    // CSV header
-    const header = 'Beneficiary Name,Beneficiary Account Number,IFSC,Transaction Type,Debit Account Number,Transaction Date,Amount,Currency,Beneficiary Email ID,Remarks,Custom Header – 1,Custom Header – 2,Custom Header – 3,Custom Header – 4,Custom Header – 5';
-    const rows = [header];
+    // Excel headers
+    const headers = [
+      'Beneficiary Name',
+      'Beneficiary Account Number',
+      'IFSC',
+      'Transaction Type',
+      'Debit Account Number',
+      'Transaction Date',
+      'Amount',
+      'Currency',
+      'Beneficiary Email ID',
+      'Remarks',
+      'Custom Header – 1',
+      'Custom Header – 2',
+      'Custom Header – 3',
+      'Custom Header – 4',
+      'Custom Header – 5'
+    ];
+
+    const rows = [];
 
     // Process each loan
     for (const loan of loans) {
@@ -2151,51 +2159,78 @@ router.get('/export/idfc-bank-csv', authenticateAdmin, async (req, res) => {
       const email = loan.personal_email || loan.official_email || loan.email || '';
       const remarks = `PLL${loan.id}`;
 
-      // Build CSV row
-      const row = [
-        escapeCsvValue(beneficiaryName),
-        escapeCsvValue(beneficiaryAccountNumber),
-        escapeCsvValue(ifsc),
-        escapeCsvValue(transactionType),
-        escapeCsvValue(DEBIT_ACCOUNT_NUMBER),
-        escapeCsvValue(transactionDate),
-        escapeCsvValue(typeof disbursalAmount === 'number' ? disbursalAmount.toFixed(2) : disbursalAmount),
-        escapeCsvValue('INR'),
-        escapeCsvValue(email),
-        escapeCsvValue(remarks),
+      // Build Excel row
+      rows.push([
+        beneficiaryName,
+        beneficiaryAccountNumber,
+        ifsc,
+        transactionType,
+        DEBIT_ACCOUNT_NUMBER,
+        transactionDate, // Excel will preserve date format
+        typeof disbursalAmount === 'number' ? disbursalAmount : parseFloat(disbursalAmount) || 0,
+        'INR',
+        email,
+        remarks,
         '', // Custom Header – 1
         '', // Custom Header – 2
         '', // Custom Header – 3
         '', // Custom Header – 4
         ''  // Custom Header – 5
-      ].join(',');
-
-      rows.push(row);
+      ]);
     }
 
-    // Check if we have any valid rows (more than just header)
-    if (rows.length === 1) {
+    // Check if we have any valid rows
+    if (rows.length === 0) {
       return res.status(404).json({
         status: 'error',
         message: 'No loans with valid bank details found for export'
       });
     }
 
-    const csvContent = rows.join('\r\n');
+    // Create workbook and worksheet
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    
+    // Set column widths for better readability
+    const columnWidths = [
+      { wch: 25 }, // Beneficiary Name
+      { wch: 20 }, // Beneficiary Account Number
+      { wch: 12 }, // IFSC
+      { wch: 15 }, // Transaction Type
+      { wch: 18 }, // Debit Account Number
+      { wch: 15 }, // Transaction Date
+      { wch: 12 }, // Amount
+      { wch: 10 }, // Currency
+      { wch: 30 }, // Beneficiary Email ID
+      { wch: 12 }, // Remarks
+      { wch: 15 }, // Custom Header – 1
+      { wch: 15 }, // Custom Header – 2
+      { wch: 15 }, // Custom Header – 3
+      { wch: 15 }, // Custom Header – 4
+      { wch: 15 }  // Custom Header – 5
+    ];
+    worksheet['!cols'] = columnWidths;
+
+    // Create workbook
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'IDFC Payout');
+
+    // Generate Excel file buffer
+    const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
     const statusLabel = effectiveStatus === 'ready_for_disbursement' 
       ? 'ready_for_disbursement' 
       : 'ready_to_repeat_disbursal';
-    const filename = `idfc_payout_${statusLabel}_${new Date().toISOString().split('T')[0]}.csv`;
+    const filename = `idfc_payout_${statusLabel}_${new Date().toISOString().split('T')[0]}.xlsx`;
 
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(csvContent);
+    res.send(excelBuffer);
 
   } catch (error) {
-    console.error('Export IDFC Bank CSV error:', error);
+    console.error('Export IDFC Bank Excel error:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Failed to export IDFC Bank CSV',
+      message: 'Failed to export IDFC Bank Excel',
       error: error.message
     });
   }

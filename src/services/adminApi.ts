@@ -615,8 +615,8 @@ class AdminApiService {
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ message: 'Failed to export IDFC Bank CSV' }));
-      throw new Error(errorData.message || 'Failed to export IDFC Bank CSV');
+      const errorData = await response.json().catch(() => ({ message: 'Failed to export IDFC Bank Excel' }));
+      throw new Error(errorData.message || 'Failed to export IDFC Bank Excel');
     }
 
     return await response.blob();

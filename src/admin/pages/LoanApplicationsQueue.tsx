@@ -380,7 +380,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
     try {
       setDownloadingBankCsv(status);
 
-      // Use backend endpoint to generate CSV
+      // Use backend endpoint to generate Excel (.xlsx)
       const blob = await adminApiService.exportIdfcBankCsv(status);
       
       // Create download link
@@ -393,16 +393,17 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
           ? 'ready_for_disbursement'
           : 'ready_to_repeat_disbursal';
 
+      // Use .xlsx extension for Excel file
       link.download = `idfc_payout_${statusLabel}_${new Date()
         .toISOString()
-        .split('T')[0]}.csv`;
+        .split('T')[0]}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
 
       toast.success(
-        `Bank CSV downloaded successfully for ${statusLabel.replace(
+        `Bank Excel file downloaded successfully for ${statusLabel.replace(
           /_/g,
           ' '
         )}`
@@ -862,7 +863,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 onClick={() => handleDownloadBankCsv('ready_for_disbursement')}
                 disabled={downloadingBankCsv === 'ready_for_disbursement'}
                 className="p-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
-                title="Download Bank CSV"
+                title="Download Bank Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingBankCsv === 'ready_for_disbursement' ? 'animate-pulse' : ''}`} />
               </button>
@@ -906,7 +907,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                 onClick={() => handleDownloadBankCsv('ready_to_repeat_disbursal')}
                 disabled={downloadingBankCsv === 'ready_to_repeat_disbursal'}
                 className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
-                title="Download Bank CSV"
+                title="Download Bank Excel"
               >
                 <Download className={`w-4 h-4 ${downloadingBankCsv === 'ready_to_repeat_disbursal' ? 'animate-pulse' : ''}`} />
               </button>
