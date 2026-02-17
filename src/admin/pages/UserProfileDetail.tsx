@@ -2787,6 +2787,24 @@ function UserProfileDetail() {
                 <span className="text-gray-500">Primary:</span>
                 <span className="ml-2 font-medium text-gray-900">{shouldMaskMobile('profile') ? maskMobileLast4(getUserData('mobile')) : getUserData('mobile')}</span>
               </div>
+              {!isNbfcAdmin && userData?.alternateMobile && userData.alternateMobile !== 'N/A' && (
+                <div>
+                  <span className="text-gray-500">Alternate:</span>
+                  <span className="ml-2 font-medium text-gray-900">{userData.alternateMobile}</span>
+                </div>
+              )}
+              {userData?.aadharLinkedMobile && (
+                <div>
+                  <span className="text-gray-500">Aadhar Linked:</span>
+                  <span className="ml-2 font-medium text-gray-900">{isNbfcAdmin ? maskMobileLast4(userData.aadharLinkedMobile) : userData.aadharLinkedMobile}</span>
+                </div>
+              )}
+              {userData?.accountAggregatorMobile && (
+                <div>
+                  <span className="text-gray-500">Account Aggregator Linked:</span>
+                  <span className="ml-2 font-medium text-gray-900">{isNbfcAdmin ? maskMobileLast4(userData.accountAggregatorMobile) : userData.accountAggregatorMobile}</span>
+                </div>
+              )}
               <div>
                 <span className="text-gray-500">Email:</span>
                 <span className="ml-2 text-gray-900 truncate">{getUserData('email') && getUserData('email') !== 'N/A' ? getUserData('email') : (userData?.personalEmail || userData?.officialEmail || 'N/A')}</span>
