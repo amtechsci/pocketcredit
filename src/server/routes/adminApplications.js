@@ -539,13 +539,13 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
     const total = countResult[0]?.total || 0;
 
     const dataQuery = `
-      SELECT DISTINCT
+      SELECT
         u.id as userId,
         u.phone as mobile,
         u.email,
         CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as userName,
         u.pan_number as panNumber,
-        DATE_FORMAT(u.moved_to_tvr_at, '%Y-%m-%d %H:%i:%s') as movedToTvrAt,
+        u.moved_to_tvr_at as movedToTvrAt,
         u.moved_to_tvr_by as movedToTvrBy,
         a.name as movedByAdminName,
         la.id as latestLoanId,
