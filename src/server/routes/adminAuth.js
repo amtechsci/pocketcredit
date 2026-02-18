@@ -56,6 +56,14 @@ router.post('/login', validate(schemas.adminLogin), async (req, res) => {
       });
     }
 
+    // Follow-up user: only allow mobile OTP login, block email/password login
+    if (admin.role === 'sub_admin' && admin.sub_admin_category === 'follow_up_user') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Follow-up user accounts can only login via mobile OTP. Please use mobile login.'
+      });
+    }
+
     // Debt agency: allow login only from whitelisted IP
     if (admin.role === 'sub_admin' && admin.sub_admin_category === 'debt_agency' && admin.whitelisted_ip) {
       const clientIp = (req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || '').trim();
@@ -368,7 +376,7 @@ router.post('/verify-otp', async (req, res) => {
 
       if (columnCheck[0].count > 0) {
         admins = await executeQuery(
-          'SELECT id, name, email, phone, role, permissions, is_active FROM admins WHERE phone = ?',
+          'SELECT id, name, email, phone, role, sub_admin_category, whitelisted_ip, permissions, is_active FROM admins WHERE phone = ?',
           [mobile]
         );
       }
@@ -391,6 +399,19 @@ router.post('/verify-otp', async (req, res) => {
         status: 'error',
         message: 'Admin account is deactivated'
       });
+    }
+
+    // Follow-up user: check IP whitelist
+    if (admin.role === 'sub_admin' && admin.sub_admin_category === 'follow_up_user' && admin.whitelisted_ip) {
+      const clientIp = (req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || '').trim();
+      const allowedIps = admin.whitelisted_ip.split(',').map(s => s.trim()).filter(Boolean);
+      const allowed = allowedIps.some(ip => clientIp === ip || clientIp === `::ffff:${ip}`);
+      if (!allowed) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Login allowed only from whitelisted IP address'
+        });
+      }
     }
 
     // Generate token (20 minutes expiration for security)

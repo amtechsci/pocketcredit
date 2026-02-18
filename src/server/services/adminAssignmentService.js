@@ -94,6 +94,7 @@ const tempCols = {
   qa_user: 'temp_assigned_qa_admin_id',
   account_manager: 'temp_assigned_account_manager_id',
   recovery_officer: 'temp_assigned_recovery_officer_id',
+  follow_up_user: 'temp_assigned_follow_up_admin_id',
   debt_agency: null
 };
 
@@ -135,6 +136,7 @@ async function syncTempAssignmentsForCategory(category) {
     qa_user: 'assigned_qa_admin_id',
     account_manager: 'assigned_account_manager_id',
     recovery_officer: 'assigned_recovery_officer_id',
+    follow_up_user: 'assigned_follow_up_admin_id',
     debt_agency: null
   };
   const assignedCol = assignedCols[category];
@@ -313,6 +315,36 @@ async function getNextRecoveryOfficerId() {
 }
 
 /**
+ * Assign next follow-up user (round-robin, same logic as verify user).
+ */
+async function getNextFollowUpAdminId() {
+  const admins = await getActiveSubAdmins('follow_up_user');
+  if (admins.length === 0) return null;
+  if (admins.length === 1) return admins[0].id;
+
+  const counts = await executeQuery(
+    `SELECT assigned_follow_up_admin_id, COUNT(*) as c FROM loan_applications
+     WHERE status IN ('submitted','under_review','follow_up') AND assigned_follow_up_admin_id IS NOT NULL
+     GROUP BY assigned_follow_up_admin_id`
+  );
+  const countByAdmin = {};
+  admins.forEach(a => { countByAdmin[a.id] = 0; });
+  counts.forEach(r => { countByAdmin[r.assigned_follow_up_admin_id] = Number(r.c); });
+
+  let minId = admins[0].id;
+  let minCount = countByAdmin[minId] ?? 0;
+  for (let i = 1; i < admins.length; i++) {
+    const id = admins[i].id;
+    const c = countByAdmin[id] ?? 0;
+    if (c < minCount) {
+      minCount = c;
+      minId = id;
+    }
+  }
+  return minId;
+}
+
+/**
  * Assign verify user when loan status becomes submitted (or when first submitted).
  */
 async function assignVerifyUserForLoan(loanId) {
@@ -321,6 +353,19 @@ async function assignVerifyUserForLoan(loanId) {
   await ensureDb();
   await executeQuery(
     'UPDATE loan_applications SET assigned_verify_admin_id = ? WHERE id = ?',
+    [adminId, loanId]
+  );
+}
+
+/**
+ * Assign follow-up user when loan status becomes submitted.
+ */
+async function assignFollowUpUserForLoan(loanId) {
+  const adminId = await getNextFollowUpAdminId();
+  if (!adminId) return;
+  await ensureDb();
+  await executeQuery(
+    'UPDATE loan_applications SET assigned_follow_up_admin_id = ? WHERE id = ?',
     [adminId, loanId]
   );
 }
@@ -405,6 +450,7 @@ async function redistributeOnDeactivate(adminId, category) {
     qa_user: 'assigned_qa_admin_id',
     account_manager: 'assigned_account_manager_id',
     recovery_officer: 'assigned_recovery_officer_id',
+    follow_up_user: 'assigned_follow_up_admin_id',
     debt_agency: null
   };
   const col = columns[category];
@@ -416,7 +462,9 @@ async function redistributeOnDeactivate(adminId, category) {
       ? ` AND status = 'qa_verification'`
       : category === 'account_manager'
         ? ` AND status = 'account_manager'`
-        : ` AND status = 'overdue'`;
+        : category === 'follow_up_user'
+          ? ` AND status IN ('submitted','under_review','follow_up')`
+          : ` AND status = 'overdue'`;
 
   const selectCols = category === 'account_manager' ? 'id, user_id' : 'id';
   const affected = await executeQuery(
@@ -458,6 +506,7 @@ async function redistributeOnNewSubAdmin(category) {
     qa_user: 'assigned_qa_admin_id',
     account_manager: 'assigned_account_manager_id',
     recovery_officer: 'assigned_recovery_officer_id',
+    follow_up_user: 'assigned_follow_up_admin_id',
     debt_agency: null
   };
   const col = columns[category];
@@ -469,7 +518,9 @@ async function redistributeOnNewSubAdmin(category) {
       ? ` AND status = 'qa_verification'`
       : category === 'account_manager'
         ? ` AND status = 'account_manager'`
-        : ` AND status = 'overdue'`;
+        : category === 'follow_up_user'
+          ? ` AND status IN ('submitted','under_review','follow_up')`
+          : ` AND status = 'overdue'`;
 
   const activeIds = active.map(a => a.id);
 
@@ -525,10 +576,12 @@ module.exports = {
   getNextQAAdminId,
   getNextAccountManagerId,
   getNextRecoveryOfficerId,
+  getNextFollowUpAdminId,
   assignVerifyUserForLoan,
   assignQAUserForLoan,
   assignAccountManagerForLoan,
   assignRecoveryOfficerForLoan,
+  assignFollowUpUserForLoan,
   redistributeOnDeactivate,
   redistributeOnNewSubAdmin,
   syncTempAssignmentsForCategory,

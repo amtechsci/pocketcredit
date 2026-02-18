@@ -27,6 +27,8 @@ import { ApprovedPage } from './admin/pages/ApprovedPage';
 import { QAVerificationPage } from './admin/pages/QAVerificationPage';
 import { AccountManagerPage } from './admin/pages/AccountManagerPage';
 import { OverduePage } from './admin/pages/OverduePage';
+import { TvrIdsPage } from './admin/pages/TvrIdsPage';
+import { FollowUpUserPage } from './admin/pages/FollowUpUserPage';
 import { AdminProvider, useAdmin } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
 import { useAdminAutoLogout } from './admin/hooks/useAdminAutoLogout';
@@ -42,7 +44,7 @@ import {
 import { Avatar, AvatarFallback } from './components/ui/avatar';
 
 export type AdminRole = 'superadmin' | 'manager' | 'officer' | 'super_admin' | 'master_admin' | 'nbfc_admin' | 'sub_admin';
-export type SubAdminCategory = 'verify_user' | 'qa_user' | 'account_manager' | 'recovery_officer' | 'debt_agency';
+export type SubAdminCategory = 'verify_user' | 'qa_user' | 'account_manager' | 'recovery_officer' | 'debt_agency' | 'follow_up_user';
 
 export interface AdminUser {
   id: string;
@@ -135,6 +137,12 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
       navByRole.push({ path: `${BASE_PATH}/applications`, label: 'Applications', color: 'blue' });
     } else if (subCat === 'recovery_officer' || subCat === 'debt_agency') {
       navByRole.push({ path: `${BASE_PATH}/overdue`, label: 'Over Due', color: 'red' });
+    } else if (subCat === 'follow_up_user') {
+      navByRole.push(
+        { path: `${BASE_PATH}/follow-up?tab=submitted`, label: 'Submitted', color: 'blue' },
+        { path: `${BASE_PATH}/follow-up?tab=follow_up`, label: 'Follow Up', color: 'orange' },
+        { path: `${BASE_PATH}/follow-up?tab=tvr`, label: 'TVR IDs', color: 'purple' }
+      );
     }
   } else if (currentUser?.role === 'nbfc_admin') {
     navByRole.push(
@@ -156,6 +164,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
     );
     if (isSuperAdmin) {
       navByRole.push(
+        { path: `${BASE_PATH}/tvr-ids`, label: 'TVR IDs', color: 'purple' },
         { path: `${BASE_PATH}/partners`, label: 'Partners', color: 'blue' },
         { path: `${BASE_PATH}/team-management`, label: 'Team Management', color: 'blue' }
       );
@@ -163,7 +172,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
   }
   const navigationItems = navByRole;
   const showSearch = isSuperAdmin || currentUser?.role === 'manager' || currentUser?.role === 'officer' || currentUser?.role === 'master_admin'
-    || (currentUser?.role === 'sub_admin' && ['verify_user', 'qa_user', 'account_manager', 'recovery_officer'].includes(subCat || ''))
+    || (currentUser?.role === 'sub_admin' && ['verify_user', 'qa_user', 'account_manager', 'recovery_officer', 'follow_up_user'].includes(subCat || ''))
     || currentUser?.role === 'nbfc_admin';
 
   const getActiveClasses = (path: string, color: string) => {
@@ -471,6 +480,16 @@ export default function AdminApp() {
         <Route path="overdue" element={
           <ProtectedRoute>
             <OverduePage />
+          </ProtectedRoute>
+        } />
+        <Route path="follow-up" element={
+          <ProtectedRoute>
+            <FollowUpUserPage />
+          </ProtectedRoute>
+        } />
+        <Route path="tvr-ids" element={
+          <ProtectedRoute>
+            <TvrIdsPage />
           </ProtectedRoute>
         } />
         <Route path="activity-logs" element={

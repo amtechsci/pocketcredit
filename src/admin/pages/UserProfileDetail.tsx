@@ -215,6 +215,7 @@ function UserProfileDetail() {
   const [recheckingChargeStatus, setRecheckingChargeStatus] = useState<{ [key: string]: boolean }>({});
 
   const { canEditUsers, currentUser, shouldHideTransactionTab, isDebtAgency, isNbfcAdmin, shouldMaskMobile } = useAdmin();
+  const isFollowUpUser = currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category === 'follow_up_user';
 
   // Tab list and effective active tab (must be defined before any hook that uses effectiveActiveTab)
   const allTabsList = [
@@ -239,9 +240,12 @@ function UserProfileDetail() {
     { id: 'enach', label: 'E-NACH', icon: CreditCard },
   ];
   const debtAgencyHiddenTabIdsList = ['kyc', 'documents', 'bank', 'applied-loans', 'transactions', 'validation', 'credit-analytics', 'profile-comments', 'enach'];
+  // Follow-up user: only show documents, reference, and follow-up tabs
+  const followUpUserAllowedTabIds = ['documents', 'reference', 'follow-up'];
   const tabsFiltered = allTabsList.filter((tab) => {
     if (shouldHideTransactionTab && tab.id === 'transactions') return false;
     if (isDebtAgency && debtAgencyHiddenTabIdsList.includes(tab.id)) return false;
+    if (isFollowUpUser && !followUpUserAllowedTabIds.includes(tab.id)) return false;
     return true;
   });
   const visibleTabIdsList = tabsFiltered.map((t) => t.id);
@@ -6969,6 +6973,7 @@ function UserProfileDetail() {
                     >
                       Cancel{hasAccountManagerLoan ? ' (Disabled - Account Manager Loan)' : ''}
                     </option>
+                    <option value="move_to_tvr">Move to TVR</option>
                   </select>
                 </div>
 
@@ -7268,6 +7273,25 @@ function UserProfileDetail() {
                           </div>
                         </div>
                       )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Move to TVR Section */}
+                {selectedAction === 'move_to_tvr' && (
+                  <div>
+                    <div className="bg-purple-50 border border-purple-200 rounded-md p-4">
+                      <div className="flex items-start">
+                        <AlertCircle className="w-5 h-5 text-purple-600 mr-2 mt-0.5" />
+                        <div>
+                          <span className="text-sm font-medium text-purple-800 block mb-2">
+                            Move to TVR: This will mark the user as moved to TVR.
+                          </span>
+                          <span className="text-sm text-purple-700">
+                            The user will appear in the TVR IDs tab. This action is recorded in validation history.
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}

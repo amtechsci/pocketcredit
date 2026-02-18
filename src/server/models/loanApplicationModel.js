@@ -255,10 +255,12 @@ const createApplication = async (userId, applicationData) => {
     // Assign to verify user when status is submitted (round-robin)
     if (initialStatus === 'submitted') {
       try {
-        const { assignVerifyUserForLoan } = require('../services/adminAssignmentService');
+        const { assignVerifyUserForLoan, assignFollowUpUserForLoan } = require('../services/adminAssignmentService');
         await assignVerifyUserForLoan(insertedId);
+        // Also assign to follow-up user when status becomes submitted
+        await assignFollowUpUserForLoan(insertedId);
       } catch (err) {
-        console.error('Assign verify user for new loan failed:', err);
+        console.error('Assign verify user/follow-up user for new loan failed:', err);
       }
     }
 

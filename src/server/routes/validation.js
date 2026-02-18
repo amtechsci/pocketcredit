@@ -9,7 +9,7 @@ router.get('/options/:type', authenticateAdmin, async (req, res) => {
   try {
     const { type } = req.params;
 
-    if (!['need_document', 'not_process', 'process', 'cancel', 're_process', 'unhold', 'delete'].includes(type)) {
+    if (!['need_document', 'not_process', 'process', 'cancel', 're_process', 'unhold', 'delete', 'move_to_tvr'].includes(type)) {
       return res.status(400).json({
         status: 'error',
         message: 'Invalid validation type'
@@ -80,7 +80,7 @@ router.post('/options', authenticateAdmin, async (req, res) => {
       });
     }
 
-    if (!['need_document', 'not_process', 'process', 'cancel', 're_process', 'unhold', 'delete'].includes(type)) {
+    if (!['need_document', 'not_process', 'process', 'cancel', 're_process', 'unhold', 'delete', 'move_to_tvr'].includes(type)) {
       return res.status(400).json({
         status: 'error',
         message: 'Invalid validation type'
@@ -137,7 +137,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
       });
     }
 
-    if (!['need_document', 'process', 'not_process', 'cancel', 're_process', 'unhold', 'delete', 'qa_verification', 'qa_approve'].includes(actionType)) {
+    if (!['need_document', 'process', 'not_process', 'cancel', 're_process', 'unhold', 'delete', 'qa_verification', 'qa_approve', 'move_to_tvr'].includes(actionType)) {
       return res.status(400).json({
         status: 'error',
         message: 'Invalid action type'
@@ -560,6 +560,15 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
         [userId]
       );
       console.log(`✅ User ${userId} marked as ACTIVE (QA Approved)`);
+    } else if (actionType === 'move_to_tvr') {
+      // Move to TVR: Mark user as moved to TVR
+      await executeQuery(
+        `UPDATE users 
+         SET moved_to_tvr = 1, moved_to_tvr_at = NOW(), moved_to_tvr_by = ?, updated_at = CURRENT_TIMESTAMP 
+         WHERE id = ?`,
+        [finalAdminId, userId]
+      );
+      console.log(`✅ User ${userId} moved to TVR by admin ${finalAdminId}`);
     }
 
     // Build response message

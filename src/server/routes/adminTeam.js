@@ -7,7 +7,7 @@ const { redistributeOnDeactivate, redistributeOnNewSubAdmin, syncTempAssignments
 const router = express.Router();
 
 const VALID_ADMIN_ROLES = ['superadmin', 'manager', 'officer', 'super_admin', 'master_admin', 'nbfc_admin', 'sub_admin'];
-const SUB_ADMIN_CATEGORIES = ['verify_user', 'qa_user', 'account_manager', 'recovery_officer', 'debt_agency'];
+const SUB_ADMIN_CATEGORIES = ['verify_user', 'qa_user', 'account_manager', 'recovery_officer', 'debt_agency', 'follow_up_user'];
 
 // Ensure database is initialized
 let dbInitialized = false;

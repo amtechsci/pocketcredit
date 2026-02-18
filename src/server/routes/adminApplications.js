@@ -146,12 +146,16 @@ router.get('/', authenticateAdmin, async (req, res) => {
         la.temp_assigned_account_manager_id,
         la.assigned_recovery_officer_id,
         la.temp_assigned_recovery_officer_id,
+        la.assigned_follow_up_admin_id,
+        la.temp_assigned_follow_up_admin_id,
         av.name as verify_user_name,
         avt.name as temp_verify_user_name,
         am.name as acc_manager_name,
         amt.name as temp_acc_manager_name,
         ar.name as recovery_officer_name,
-        art.name as temp_recovery_officer_name
+        art.name as temp_recovery_officer_name,
+        af.name as follow_up_user_name,
+        aft.name as temp_follow_up_user_name
       FROM loan_applications la
       LEFT JOIN users u ON la.user_id = u.id
       LEFT JOIN (
@@ -189,6 +193,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
       LEFT JOIN admins amt ON la.temp_assigned_account_manager_id COLLATE utf8mb4_unicode_ci = amt.id
       LEFT JOIN admins ar ON la.assigned_recovery_officer_id COLLATE utf8mb4_unicode_ci = ar.id
       LEFT JOIN admins art ON la.temp_assigned_recovery_officer_id COLLATE utf8mb4_unicode_ci = art.id
+      LEFT JOIN admins af ON la.assigned_follow_up_admin_id COLLATE utf8mb4_unicode_ci = af.id
+      LEFT JOIN admins aft ON la.temp_assigned_follow_up_admin_id COLLATE utf8mb4_unicode_ci = aft.id
     `;
 
     let whereConditions = [];
@@ -276,6 +282,12 @@ router.get('/', authenticateAdmin, async (req, res) => {
         whereConditions.push('(la.assigned_recovery_officer_id = ? OR la.temp_assigned_recovery_officer_id = ?)');
         queryParams.push(adminId, adminId);
         whereConditions.push("la.status = 'overdue'");
+      } else if (subCategory === 'follow_up_user') {
+        whereConditions.push('(la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)');
+        queryParams.push(adminId, adminId);
+        if (!effectiveStatus || effectiveStatus === 'all') {
+          whereConditions.push("la.status IN ('submitted','under_review','follow_up')");
+        }
       } else if (subCategory === 'debt_agency') {
         whereConditions.push("la.status = 'overdue'");
       }
@@ -359,8 +371,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
     // For sub-admin: determine assignment type (primary = my assign, temp = temp assign)
     const adminId = req.admin?.id;
     const subCat = req.admin?.sub_admin_category;
-    const assignedCol = subCat === 'verify_user' ? 'assigned_verify_admin_id' : subCat === 'qa_user' ? 'assigned_qa_admin_id' : subCat === 'account_manager' ? 'assigned_account_manager_id' : subCat === 'recovery_officer' ? 'assigned_recovery_officer_id' : null;
-    const tempCol = subCat === 'verify_user' ? 'temp_assigned_verify_admin_id' : subCat === 'qa_user' ? 'temp_assigned_qa_admin_id' : subCat === 'account_manager' ? 'temp_assigned_account_manager_id' : subCat === 'recovery_officer' ? 'temp_assigned_recovery_officer_id' : null;
+    const assignedCol = subCat === 'verify_user' ? 'assigned_verify_admin_id' : subCat === 'qa_user' ? 'assigned_qa_admin_id' : subCat === 'account_manager' ? 'assigned_account_manager_id' : subCat === 'recovery_officer' ? 'assigned_recovery_officer_id' : subCat === 'follow_up_user' ? 'assigned_follow_up_admin_id' : null;
+    const tempCol = subCat === 'verify_user' ? 'temp_assigned_verify_admin_id' : subCat === 'qa_user' ? 'temp_assigned_qa_admin_id' : subCat === 'account_manager' ? 'temp_assigned_account_manager_id' : subCat === 'recovery_officer' ? 'temp_assigned_recovery_officer_id' : subCat === 'follow_up_user' ? 'temp_assigned_follow_up_admin_id' : null;
 
     // Transform the data to match the expected format
     const applicationsWithUserData = applications.map(app => {
@@ -1589,6 +1601,7 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       qa_user: ['disbursal', 'ready_for_disbursement'],
       account_manager: ['account_manager'],
       recovery_officer: ['overdue'],
+      follow_up_user: ['submitted', 'under_review', 'follow_up'],
       debt_agency: ['overdue']
     };
 
@@ -1621,8 +1634,8 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
         total = overdueResult[0]?.total || 0;
         statusCounts = { overdue: total };
       } else {
-        const assignedCol = subCat === 'verify_user' ? 'assigned_verify_admin_id' : subCat === 'qa_user' ? 'assigned_qa_admin_id' : subCat === 'account_manager' ? 'assigned_account_manager_id' : subCat === 'recovery_officer' ? 'assigned_recovery_officer_id' : null;
-        const tempCol = subCat === 'verify_user' ? 'temp_assigned_verify_admin_id' : subCat === 'qa_user' ? 'temp_assigned_qa_admin_id' : subCat === 'account_manager' ? 'temp_assigned_account_manager_id' : subCat === 'recovery_officer' ? 'temp_assigned_recovery_officer_id' : null;
+        const assignedCol = subCat === 'verify_user' ? 'assigned_verify_admin_id' : subCat === 'qa_user' ? 'assigned_qa_admin_id' : subCat === 'account_manager' ? 'assigned_account_manager_id' : subCat === 'recovery_officer' ? 'assigned_recovery_officer_id' : subCat === 'follow_up_user' ? 'assigned_follow_up_admin_id' : null;
+        const tempCol = subCat === 'verify_user' ? 'temp_assigned_verify_admin_id' : subCat === 'qa_user' ? 'temp_assigned_qa_admin_id' : subCat === 'account_manager' ? 'temp_assigned_account_manager_id' : subCat === 'recovery_officer' ? 'temp_assigned_recovery_officer_id' : subCat === 'follow_up_user' ? 'temp_assigned_follow_up_admin_id' : null;
         const allowed = subAdminAllowedByCategory[subCat];
         if (assignedCol && tempCol && Array.isArray(allowed)) {
           const placeholders = allowed.map(() => '?').join(',');
@@ -2434,6 +2447,98 @@ router.post('/fix-disbursal-amounts', authenticateAdmin, async (req, res) => {
       status: 'error',
       message: 'Failed to fix disbursal amounts',
       error: error.message
+    });
+  }
+});
+
+// Get TVR IDs (users moved to TVR)
+router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+
+    const {
+      page = 1,
+      limit = 50,
+      search = ''
+    } = req.query;
+
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Build query for users moved to TVR
+    let whereConditions = ['u.moved_to_tvr = 1'];
+    let queryParams = [];
+
+    // Search filter
+    if (search) {
+      whereConditions.push(`(
+        u.phone LIKE ? OR 
+        u.email LIKE ? OR 
+        CONCAT(u.first_name, ' ', u.last_name) LIKE ? OR
+        u.pan_number LIKE ?
+      )`);
+      const searchPattern = `%${search}%`;
+      queryParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
+    }
+
+    // Get total count
+    const countQuery = `
+      SELECT COUNT(DISTINCT u.id) as total
+      FROM users u
+      WHERE ${whereConditions.join(' AND ')}
+    `;
+    const countResult = await executeQuery(countQuery, queryParams);
+    const total = countResult[0]?.total || 0;
+
+    // Get TVR users with their latest loan application
+    const dataQuery = `
+      SELECT DISTINCT
+        u.id as userId,
+        u.phone as mobile,
+        u.email,
+        CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as userName,
+        u.pan_number as panNumber,
+        DATE_FORMAT(u.moved_to_tvr_at, '%Y-%m-%d %H:%i:%s') as movedToTvrAt,
+        u.moved_to_tvr_by as movedToTvrBy,
+        a.name as movedByAdminName,
+        la.id as latestLoanId,
+        la.application_number as latestApplicationNumber,
+        la.status as latestLoanStatus,
+        la.loan_amount as latestLoanAmount,
+        DATE_FORMAT(la.created_at, '%Y-%m-%d') as latestLoanDate
+      FROM users u
+      LEFT JOIN admins a ON u.moved_to_tvr_by = a.id
+      LEFT JOIN loan_applications la ON u.id = la.user_id 
+        AND la.id = (
+          SELECT MAX(id) 
+          FROM loan_applications 
+          WHERE user_id = u.id
+        )
+      WHERE ${whereConditions.join(' AND ')}
+      ORDER BY u.moved_to_tvr_at DESC
+      LIMIT ? OFFSET ?
+    `;
+    queryParams.push(parseInt(limit), offset);
+
+    const tvrUsers = await executeQuery(dataQuery, queryParams);
+
+    res.json({
+      status: 'success',
+      data: {
+        users: tvrUsers || [],
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          totalPages: Math.ceil(total / parseInt(limit))
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching TVR IDs:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch TVR IDs'
     });
   }
 });
