@@ -514,13 +514,14 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
       search = ''
     } = req.query;
 
-    const numLimit = Number(limit) || 50;
-    const numPage = Number(page) || 1;
+    const numLimit = parseInt(limit, 10) || 50; // Use parseInt with radix
+    const numPage = parseInt(page, 10) || 1;
     const offset = (numPage - 1) * numLimit;
 
     let whereConditions = ['u.moved_to_tvr = 1'];
     let queryParams = [];
 
+    // Search logic remains the same...
     if (search) {
       whereConditions.push(`(
         u.phone LIKE ? OR 
@@ -532,14 +533,7 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
       queryParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
     }
 
-    const countQuery = `
-      SELECT COUNT(DISTINCT u.id) as total
-      FROM users u
-      WHERE ${whereConditions.join(' AND ')}
-    `;
-    const countResult = await executeQuery(countQuery, queryParams);
-    const total = countResult[0]?.total || 0;
-
+    // Fix for the Data Query Params
     const dataQuery = `
       SELECT
         u.id as userId,
@@ -567,7 +561,10 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
       ORDER BY u.moved_to_tvr_at DESC
       LIMIT ? OFFSET ?
     `;
-    queryParams.push(numLimit, offset);
+
+    // CRITICAL FIX: Ensure these are numbers in the array
+    queryParams.push(numLimit); 
+    queryParams.push(offset);
 
     const tvrUsers = await executeQuery(dataQuery, queryParams);
 
