@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateAdmin } = require('../middleware/auth');
+const { authenticateAdmin, generateToken } = require('../middleware/auth');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { downloadFromS3 } = require('../services/s3Service');
 // pdf-parse v2.x - try to get the actual parsing function
@@ -1549,6 +1549,84 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch Account Manager users'
+    });
+  }
+});
+
+/**
+ * Generate short-lived admin-as-user token for Account Aggregator (AA-only) flow.
+ * Only follow_up_user sub-admins are allowed, and only for users assigned to them.
+ */
+router.post('/:userId/aa-impersonate', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+
+    const admin = req.admin;
+    const { userId } = req.params;
+
+    if (!admin) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Admin authentication required'
+      });
+    }
+
+    // Only follow_up_user sub-admins can impersonate users for AA flow
+    if (admin.role !== 'sub_admin' || admin.sub_admin_category !== 'follow_up_user') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Only follow-up user sub-admins can use AA impersonation'
+      });
+    }
+
+    if (!userId || isNaN(parseInt(userId, 10))) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid userId is required'
+      });
+    }
+
+    const numericUserId = parseInt(userId, 10);
+
+    // Safety: ensure this user has at least one loan assigned to this follow-up admin
+    const assignedLoans = await executeQuery(
+      `SELECT id FROM loan_applications 
+       WHERE user_id = ? 
+         AND status IN ('submitted','under_review','follow_up')
+         AND (assigned_follow_up_admin_id = ? OR temp_assigned_follow_up_admin_id = ?)
+       LIMIT 1`,
+      [numericUserId, admin.id, admin.id]
+    );
+
+    if (!assignedLoans || assignedLoans.length === 0) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'No eligible loans assigned to this follow-up user for the specified user'
+      });
+    }
+
+    // Generate a short-lived user JWT token with AA-only scope
+    const token = generateToken(
+      {
+        id: numericUserId,
+        role: 'user',
+        adminAsUser: true,
+        scope: 'aa_only',
+        actingAdminId: admin.id
+      },
+      '15m'
+    );
+
+    return res.json({
+      status: 'success',
+      message: 'AA impersonation token generated successfully',
+      data: { token }
+    });
+  } catch (error) {
+    console.error('AA impersonation error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to generate AA impersonation token'
     });
   }
 });

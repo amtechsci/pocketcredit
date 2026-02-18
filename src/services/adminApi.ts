@@ -364,6 +364,11 @@ class AdminApiService {
     return this.request('GET', `/user-profile/${userId}/enach-subscriptions/charge-history`);
   }
 
+  // Generate short-lived admin-as-user token for AA-only flow
+  async getAaImpersonationToken(userId: string): Promise<ApiResponse<{ token: string }>> {
+    return this.request('POST', `/users/${userId}/aa-impersonate`);
+  }
+
   async recheckEnachChargeStatus(userId: string, chargeId: string): Promise<ApiResponse<any>> {
     return this.request('POST', `/user-profile/${userId}/enach-subscriptions/charge-history/${chargeId}/recheck-status`);
   }

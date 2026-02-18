@@ -49,6 +49,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } else {
       localStorage.removeItem('pocket_user');
       localStorage.removeItem('pocket_user_token'); // Also clear JWT token
+      localStorage.removeItem('pocket_admin_aa_mode'); // Clear AA impersonation flag
     }
   };
 

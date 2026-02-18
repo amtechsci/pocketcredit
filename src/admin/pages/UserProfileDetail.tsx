@@ -215,6 +215,7 @@ function UserProfileDetail() {
   const [recheckingChargeStatus, setRecheckingChargeStatus] = useState<{ [key: string]: boolean }>({});
 
   const { canEditUsers, currentUser, shouldHideTransactionTab, isDebtAgency, isNbfcAdmin, shouldMaskMobile } = useAdmin();
+  const isFollowUpUserAdmin = currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category === 'follow_up_user';
   const isFollowUpUser = currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category === 'follow_up_user';
 
   // Tab list and effective active tab (must be defined before any hook that uses effectiveActiveTab)
@@ -6905,6 +6906,28 @@ function UserProfileDetail() {
         <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-semibold text-gray-900">Validation Status</h3>
+            {isFollowUpUserAdmin && currentUserData?.id && (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const resp = await adminApiService.getAaImpersonationToken(currentUserData.id.toString());
+                    if (resp.status === 'success' && resp.data?.token) {
+                      const url = `/aa-admin-login?token=${encodeURIComponent(resp.data.token)}`;
+                      window.open(url, '_blank');
+                    } else {
+                      toast.error(resp.message || 'Failed to generate AA login link');
+                    }
+                  } catch (err: any) {
+                    console.error('AA impersonation error:', err);
+                    toast.error(err.response?.data?.message || err.message || 'Failed to generate AA login link');
+                  }
+                }}
+                className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-purple-600 text-white hover:bg-purple-700"
+              >
+                Open AA as User
+              </button>
+            )}
           </div>
 
           {/* Warning message if account_manager loan exists */}

@@ -92,6 +92,47 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Admin-as-user AA login page: accepts a short-lived token and creates a user session
+function AaAdminLoginPage() {
+  const { refreshUser } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const token = params.get('token');
+
+    if (!token) {
+      navigate('/', { replace: true });
+      return;
+    }
+
+    // Store token and mark AA impersonation mode
+    localStorage.setItem('pocket_user_token', token);
+    localStorage.setItem('pocket_admin_aa_mode', '1');
+
+    // Refresh user profile and then go to AA step
+    (async () => {
+      try {
+        await refreshUser();
+      } catch (err) {
+        console.error('AA admin login refresh error:', err);
+      } finally {
+        navigate('/link-salary-bank-account', { replace: true });
+      }
+    })();
+  }, [location.search, navigate, refreshUser]);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-4" />
+        <p className="text-gray-600 text-sm">Preparing Account Aggregator view…</p>
+      </div>
+    </div>
+  );
+}
+
 // Admin Access Page Component
 function AdminAccessPage() {
   return (
@@ -233,13 +274,36 @@ function BankDetailsRedirect() {
 }
 
 function AppContent() {
-  const { isAuthenticated, user, isLoading } = useAuth();
+  const { isAuthenticated, user, isLoading, refreshUser } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
 
   // Initialize UTM tracking on app load and whenever URL search (e.g. partner link) changes
   useEffect(() => {
     initializeUTMTracking();
   }, [location.search]);
+
+  // AA-only admin-as-user guard: restrict routes when in AA impersonation mode
+  useEffect(() => {
+    const isAaMode = localStorage.getItem('pocket_admin_aa_mode') === '1';
+    if (!isAaMode) return;
+
+    const allowedPrefixes = [
+      '/aa-admin-login',
+      '/link-salary-bank-account',
+      '/account-aggregator',
+      '/account-aggregator-flow',
+      '/user-references',
+      '/application-under-review'
+    ];
+
+    const path = location.pathname || '';
+    const isAllowed = allowedPrefixes.some(prefix => path.startsWith(prefix));
+
+    if (!isAllowed) {
+      navigate('/link-salary-bank-account', { replace: true });
+    }
+  }, [location.pathname, navigate]);
 
   // Show loading spinner while checking authentication
   if (isLoading) {
@@ -253,6 +317,12 @@ function AppContent() {
   return (
     <div className="min-h-screen">
       <Routes>
+        {/* Admin-as-user AA login entry point */}
+        <Route path="/aa-admin-login" element={
+          <DashboardLayout>
+            <AaAdminLoginPage />
+          </DashboardLayout>
+        } />
         {/* Public Pages with Header and Footer */}
         <Route path="/" element={
           <LayoutWithHeaderFooter>
