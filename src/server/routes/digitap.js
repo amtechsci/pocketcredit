@@ -836,47 +836,7 @@ router.post('/uan/admin/basic', authenticateAdmin, async (req, res) => {
         result.error || null
       ]);
 
-      // If successful, also save to user_info_records for easy access
-      if (resultCode === 101 && result.data?.result) {
-        try {
-          const existingRecord = await executeQuery(`
-            SELECT id FROM user_info_records 
-            WHERE user_id = ? AND source = 'uan_passbook'
-            ORDER BY id DESC LIMIT 1
-          `, [userIdInt]);
-
-          const recordData = {
-            employee_details: result.data.result.employee_details,
-            est_details: result.data.result.est_details,
-            overall_pf_balance: result.data.result.overall_pf_balance,
-            request_id: result.data.request_id,
-            timestamp: new Date().toISOString()
-          };
-
-          if (existingRecord.length > 0) {
-            await executeQuery(`
-              UPDATE user_info_records 
-              SET additional_details = ?, updated_at = NOW()
-              WHERE id = ?
-            `, [
-              JSON.stringify(recordData),
-              existingRecord[0].id
-            ]);
-          } else {
-            await executeQuery(`
-              INSERT INTO user_info_records 
-              (user_id, source, additional_details, created_at, updated_at)
-              VALUES (?, 'uan_passbook', ?, NOW(), NOW())
-            `, [
-              userIdInt,
-              JSON.stringify(recordData)
-            ]);
-          }
-        } catch (saveError) {
-          console.error('Error saving UAN data to user_info_records:', saveError);
-          // Continue even if save fails
-        }
-      }
+      // UAN data is already persisted in digitap_responses above; no secondary table needed.
     } catch (dbError) {
       console.error('Error storing UAN request:', dbError);
       // Continue even if storage fails
