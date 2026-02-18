@@ -241,8 +241,8 @@ function UserProfileDetail() {
     { id: 'enach', label: 'E-NACH', icon: CreditCard },
   ];
   const debtAgencyHiddenTabIdsList = ['kyc', 'documents', 'bank', 'applied-loans', 'transactions', 'validation', 'credit-analytics', 'profile-comments', 'enach'];
-  // Follow-up user: only show documents, reference, and follow-up tabs
-  const followUpUserAllowedTabIds = ['documents', 'reference', 'follow-up'];
+  // Follow-up user: only show documents, reference, follow-up, and statement-verification tabs
+  const followUpUserAllowedTabIds = ['documents', 'reference', 'follow-up', 'statement-verification'];
   const tabsFiltered = allTabsList.filter((tab) => {
     if (shouldHideTransactionTab && tab.id === 'transactions') return false;
     if (isDebtAgency && debtAgencyHiddenTabIdsList.includes(tab.id)) return false;
@@ -11809,28 +11809,6 @@ function UserProfileDetail() {
             <ArrowLeft className="w-4 h-4" />
             <span className="hidden sm:inline">Back to Applications</span>
           </button>
-          {isFollowUpUserAdmin && currentUserData?.id && (
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  const resp = await adminApiService.getAaImpersonationToken(currentUserData.id.toString());
-                  if (resp.status === 'success' && resp.data?.token) {
-                    const url = `/aa-admin-login?token=${encodeURIComponent(resp.data.token)}`;
-                    window.open(url, '_blank');
-                  } else {
-                    toast.error(resp.message || 'Failed to generate AA login link');
-                  }
-                } catch (err: any) {
-                  console.error('AA impersonation error:', err);
-                  toast.error(err.response?.data?.message || err.message || 'Failed to generate AA login link');
-                }
-              }}
-              className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-purple-600 text-white hover:bg-purple-700"
-            >
-              Open AA as User
-            </button>
-          )}
         </div>
       </div>
 

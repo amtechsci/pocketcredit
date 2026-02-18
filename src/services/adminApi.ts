@@ -130,6 +130,10 @@ class AdminApiService {
           const message = error.response.data?.message || '';
           const code = error.response.data?.code || '';
 
+          // Check if we're on the login page (don't redirect login errors)
+          const isLoginPage = window.location.pathname === '/stpl/login';
+          const hasToken = !!this.token;
+
           // Check for session expired due to inactivity
           if (code === 'SESSION_EXPIRED' || message.toLowerCase().includes('session expired due to inactivity')) {
             // Clear authentication data
@@ -149,15 +153,29 @@ class AdminApiService {
             return Promise.reject(error);
           }
 
-          // Check for other auth-related errors
+          // Check for login-related errors (OTP, IP whitelist, etc.) - don't redirect these
+          const isLoginError = 
+            message.toLowerCase().includes('invalid otp') ||
+            message.toLowerCase().includes('otp not found') ||
+            message.toLowerCase().includes('otp expired') ||
+            message.toLowerCase().includes('whitelisted ip') ||
+            message.toLowerCase().includes('ip address') ||
+            message.toLowerCase().includes('admin not found with this mobile') ||
+            message.toLowerCase().includes('account is deactivated') ||
+            (status === 403 && (isLoginPage || !hasToken));
+
+          // Only redirect auth errors if user is already logged in (not during login flow)
           if (
-            status === 401 ||
-            status === 403 ||
-            message.toLowerCase().includes('invalid') && message.toLowerCase().includes('token') ||
-            message.toLowerCase().includes('expired') && message.toLowerCase().includes('token') ||
-            message.toLowerCase().includes('access token required') ||
-            message.toLowerCase().includes('admin not found') ||
-            message.toLowerCase().includes('admin access required')
+            !isLoginError &&
+            hasToken &&
+            (
+              status === 401 ||
+              (status === 403 && !message.toLowerCase().includes('digitap') && !message.toLowerCase().includes('bank data service')) ||
+              message.toLowerCase().includes('invalid') && message.toLowerCase().includes('token') ||
+              message.toLowerCase().includes('expired') && message.toLowerCase().includes('token') ||
+              message.toLowerCase().includes('access token required') ||
+              message.toLowerCase().includes('admin access required')
+            )
           ) {
             // Clear authentication data
             this.token = null;

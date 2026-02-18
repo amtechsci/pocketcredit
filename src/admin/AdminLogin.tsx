@@ -105,11 +105,17 @@ export function AdminLogin({ onLogin }: AdminLoginProps) {
       if (response.status === 'success' && response.data) {
         onLogin(response.data.admin);
       } else {
-        setError(response.message || 'Invalid OTP');
+        // Set clear error message
+        const errorMsg = response.message || 'Invalid OTP';
+        setError(errorMsg);
+        // Keep error visible - don't clear it automatically
       }
     } catch (error: any) {
       console.error('Verify OTP error:', error);
-      setError(error.response?.data?.message || 'OTP verification failed. Please try again.');
+      // Extract clear error message from response
+      const errorMsg = error.response?.data?.message || 'OTP verification failed. Please try again.';
+      setError(errorMsg);
+      // Keep error visible - don't clear it automatically
     } finally {
       setIsLoading(false);
     }
@@ -226,8 +232,11 @@ export function AdminLogin({ onLogin }: AdminLoginProps) {
               </div>
 
               {error && (
-                <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                  <p className="text-sm text-red-600">{error}</p>
+                <div className="bg-red-50 border-2 border-red-400 rounded-md p-4">
+                  <p className="text-sm font-medium text-red-800">{error}</p>
+                  {error.includes('IP') && (
+                    <p className="text-xs text-red-600 mt-1">Please contact your administrator to whitelist your IP address.</p>
+                  )}
                 </div>
               )}
 
@@ -268,8 +277,11 @@ export function AdminLogin({ onLogin }: AdminLoginProps) {
                   </div>
 
                   {error && (
-                    <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                      <p className="text-sm text-red-600">{error}</p>
+                    <div className="bg-red-50 border-2 border-red-400 rounded-md p-4">
+                      <p className="text-sm font-medium text-red-800">{error}</p>
+                      {error.includes('IP') && (
+                        <p className="text-xs text-red-600 mt-1">Please contact your administrator to whitelist your IP address.</p>
+                      )}
                     </div>
                   )}
 
@@ -306,8 +318,17 @@ export function AdminLogin({ onLogin }: AdminLoginProps) {
                   </div>
 
                   {error && (
-                    <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                      <p className="text-sm text-red-600">{error}</p>
+                    <div className="bg-red-50 border-2 border-red-400 rounded-md p-4">
+                      <p className="text-sm font-medium text-red-800">{error}</p>
+                      {error.includes('IP') && (
+                        <p className="text-xs text-red-600 mt-1">Please contact your administrator to whitelist your IP address.</p>
+                      )}
+                      {error.includes('OTP') && !error.includes('expired') && (
+                        <p className="text-xs text-red-600 mt-1">Please check the OTP sent to your mobile number and try again.</p>
+                      )}
+                      {error.includes('expired') && (
+                        <p className="text-xs text-red-600 mt-1">Please request a new OTP.</p>
+                      )}
                     </div>
                   )}
 

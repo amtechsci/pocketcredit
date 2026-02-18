@@ -25,7 +25,35 @@ interface RegisteredUser {
   updated_at: string;
   phone_verified: boolean;
   profile_completion_step: number;
+  currentStep?: string | null;
 }
+
+// Map backend step names to user-friendly display names
+const getStepDisplayName = (step: string | null | undefined): string => {
+  if (!step) return 'Not started';
+  
+  const stepMap: Record<string, string> = {
+    'application': 'Apply loan page',
+    'kyc-verification': 'Digilocker page',
+    'pan-verification': 'PAN number page',
+    'aa-consent': 'Account Aggregator page',
+    'credit-analytics': 'Credit analytics page',
+    'employment-details': 'Employment details page',
+    'bank-statement': 'Bank statement page',
+    'bank-details': 'Bank details page',
+    'references': 'References page',
+    'upload-documents': 'Documents page',
+    'steps': 'Completed',
+    'step-2': 'Step 2 page',
+    'language': 'Language spoken page',
+    'e-nach': 'E-nach page',
+    'selfie': 'Selfie page',
+    'kfs': 'KFS page',
+    'agreement': 'Agreement page'
+  };
+  
+  return stepMap[step] || step.charAt(0).toUpperCase() + step.slice(1).replace(/-/g, ' ');
+};
 
 export function RegisteredPage() {
   const navigate = useNavigate();
@@ -177,6 +205,11 @@ export function RegisteredPage() {
                                 : 'No Name'}
                             </div>
                             <div className="text-sm text-gray-500">ID: {user.id}</div>
+                            {user.currentStep && (
+                              <div className="text-xs text-blue-600 mt-1 font-medium">
+                                📍 {getStepDisplayName(user.currentStep)}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>

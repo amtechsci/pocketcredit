@@ -103,6 +103,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
     } = req.query;
 
     // Build the base query
+    // Get the latest loan application's current_step for each user
     let baseQuery = `
       SELECT 
         u.id,
@@ -117,7 +118,14 @@ router.get('/', authenticateAdmin, async (req, res) => {
         u.last_login_at as lastLogin,
         COUNT(la.id) as totalApplications,
         SUM(CASE WHEN la.status = 'approved' THEN 1 ELSE 0 END) as approvedApplications,
-        SUM(CASE WHEN la.status = 'rejected' THEN 1 ELSE 0 END) as rejectedApplications
+        SUM(CASE WHEN la.status = 'rejected' THEN 1 ELSE 0 END) as rejectedApplications,
+        (
+          SELECT la2.current_step 
+          FROM loan_applications la2 
+          WHERE la2.user_id = u.id 
+          ORDER BY la2.created_at DESC, la2.id DESC 
+          LIMIT 1
+        ) as currentStep
       FROM users u
       LEFT JOIN loan_applications la ON u.id = la.user_id
     `;
@@ -215,7 +223,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
       lastLogin: user.lastLogin,
       totalApplications: parseInt(user.totalApplications) || 0,
       approvedApplications: parseInt(user.approvedApplications) || 0,
-      rejectedApplications: parseInt(user.rejectedApplications) || 0
+      rejectedApplications: parseInt(user.rejectedApplications) || 0,
+      currentStep: user.currentStep || null
     }));
 
     res.json({
@@ -1123,7 +1132,14 @@ router.get('/registered/list', authenticateAdmin, async (req, res) => {
         u.phone_verified,
         u.profile_completion_step,
         DATE_FORMAT(u.created_at, '%Y-%m-%d') as created_at,
-        DATE_FORMAT(u.updated_at, '%Y-%m-%d') as updated_at
+        DATE_FORMAT(u.updated_at, '%Y-%m-%d') as updated_at,
+        (
+          SELECT la.current_step 
+          FROM loan_applications la 
+          WHERE la.user_id = u.id 
+          ORDER BY la.created_at DESC, la.id DESC 
+          LIMIT 1
+        ) as currentStep
       FROM users u
       ${whereClause}
       ORDER BY u.created_at DESC
@@ -1202,7 +1218,14 @@ router.get('/approved/list', authenticateAdmin, async (req, res) => {
         u.income_range,
         DATE_FORMAT(u.date_of_birth, '%Y-%m-%d') as date_of_birth,
         DATE_FORMAT(u.created_at, '%Y-%m-%d') as created_at,
-        DATE_FORMAT(u.updated_at, '%Y-%m-%d') as updated_at
+        DATE_FORMAT(u.updated_at, '%Y-%m-%d') as updated_at,
+        (
+          SELECT la.current_step 
+          FROM loan_applications la 
+          WHERE la.user_id = u.id 
+          ORDER BY la.created_at DESC, la.id DESC 
+          LIMIT 1
+        ) as currentStep
       FROM users u
       ${whereClause}
       ORDER BY u.updated_at DESC
