@@ -419,7 +419,7 @@ class AdminApiService {
   }
 
   async getTvrIds(params: { page?: number; limit?: number; search?: string }): Promise<ApiResponse<any>> {
-    return this.request('GET', '/loan-applications/tvr-ids', undefined, params);
+    return this.request('GET', '/applications/tvr-ids', undefined, params);
   }
 
   async approveLoan(loanId: string, data: any = {}): Promise<ApiResponse<any>> {

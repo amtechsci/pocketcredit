@@ -92,8 +92,8 @@ const SUB_ADMIN_ALLOWED_STATUSES: Record<string, string[]> = {
   account_manager: ['all', 'repeat_disbursal', 'ready_to_repeat_disbursal'],
   recovery_officer: ['all', 'overdue'],
   debt_agency: ['all', 'overdue'],
-  // Follow-up user: only work on early stages, not disbursal
-  follow_up_user: ['all', 'submitted', 'under_review', 'follow_up'],
+  // Follow-up user: only Submitted and Follow Up (no All, no Under Review)
+  follow_up_user: ['submitted', 'follow_up'],
 };
 // NBFC Admin: Over Due (when on /overdue), Ready for Disbursement, Repeat Loan Ready for Disbursal
 const NBFC_ADMIN_ALLOWED_STATUSES = ['overdue', 'ready_for_disbursement', 'ready_to_repeat_disbursal'];
