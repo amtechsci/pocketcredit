@@ -514,14 +514,13 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
       search = ''
     } = req.query;
 
-    const numLimit = parseInt(limit, 10) || 50; // Use parseInt with radix
-    const numPage = parseInt(page, 10) || 1;
+    const numLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500);
+    const numPage = Math.max(parseInt(page, 10) || 1, 1);
     const offset = (numPage - 1) * numLimit;
 
     let whereConditions = ['u.moved_to_tvr = 1'];
     let queryParams = [];
 
-    // Search logic remains the same...
     if (search) {
       whereConditions.push(`(
         u.phone LIKE ? OR 
@@ -533,7 +532,16 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
       queryParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
     }
 
-    // Fix for the Data Query Params
+    // Count total for pagination (same WHERE, no LIMIT)
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM users u
+      WHERE ${whereConditions.join(' AND ')}
+    `;
+    const countResult = await executeQuery(countQuery, queryParams);
+    const total = countResult[0] ? Number(countResult[0].total) : 0;
+
+    // LIMIT/OFFSET inlined (validated integers) — some MySQL setups reject them as bound params
     const dataQuery = `
       SELECT
         u.id as userId,
@@ -559,12 +567,8 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
         )
       WHERE ${whereConditions.join(' AND ')}
       ORDER BY u.moved_to_tvr_at DESC
-      LIMIT ? OFFSET ?
+      LIMIT ${numLimit} OFFSET ${offset}
     `;
-
-    // CRITICAL FIX: Ensure these are numbers in the array
-    queryParams.push(numLimit); 
-    queryParams.push(offset);
 
     const tvrUsers = await executeQuery(dataQuery, queryParams);
 

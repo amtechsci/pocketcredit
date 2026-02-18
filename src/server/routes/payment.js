@@ -17,7 +17,7 @@ const { authenticateToken } = require('../middleware/auth');
  */
 function extractPaymentReference(payment) {
   if (!payment || typeof payment !== 'object') return null;
-  const utr = payment.payment_utr || payment.utr || payment.bank_reference_number || payment.reference_number || null;
+  const utr = payment.bank_reference || payment.payment_utr || payment.utr || payment.bank_reference_number || payment.reference_number || null;
   if (utr && String(utr).trim()) return String(utr).trim();
   const msg = payment.payment_message;
   if (msg && String(msg).trim() && !String(msg).includes('::')) return String(msg).trim();
@@ -1340,6 +1340,7 @@ router.post('/webhook', async (req, res) => {
         const bankReferenceNumber = extractPaymentReference(payment);
         
         console.log(`💰 Bank reference number extracted: ${bankReferenceNumber || 'Not found'} (from payment object)`, {
+            bank_reference: payment?.bank_reference,
             payment_message: payment?.payment_message,
             payment_utr: payment?.payment_utr,
             bank_reference_number: payment?.bank_reference_number,
@@ -2024,10 +2025,11 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
         
         const paymentForRef = paymentData && typeof paymentData === 'object' ? paymentData : cashfreeData;
         const bankReferenceNumber = extractPaymentReference(paymentForRef) ||
-                                   cashfreeData?.payment_utr || cashfreeData?.payment_message || null;
+                                   cashfreeData?.bank_reference || cashfreeData?.payment_utr || cashfreeData?.payment_message || null;
         
         console.log(`💰 Cashfree order status: ${cashfreeOrderStatus}, Payment received: ${paymentReceived}`);
         console.log(`💰 Bank reference number from API: ${bankReferenceNumber || 'Not found'}`, {
+            bank_reference: paymentData?.bank_reference || cashfreeData?.bank_reference,
             payment_message: paymentData?.payment_message || cashfreeData?.payment_message,
             payment_utr: paymentData?.payment_utr || cashfreeData?.payment_utr,
             bank_reference_number: paymentData?.bank_reference_number,
