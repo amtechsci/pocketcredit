@@ -319,6 +319,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         la.processed_penalty, la.processed_due_date, la.emi_schedule,
         DATE_FORMAT(la.closed_date, '%Y-%m-%d') as closed_date,
         la.closed_amount,
+        la.current_step,
         es.status as enach_status,
         av.name as verify_user_name,
         avt.name as temp_verify_user_name,
@@ -1086,6 +1087,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       status: user.status || 'active',
       profileStatus: profileStatus, // Latest loan application status
       assignedManager: assignedManager, // Assigned account manager name
+      currentStep: (applications && applications.length > 0) ? applications[0].current_step : null, // Where user stopped in onboarding
       registeredDate: user.created_at, // For admin UI compatibility
       createdAt: user.created_at,
       updatedAt: user.updated_at,

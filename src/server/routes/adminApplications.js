@@ -200,6 +200,9 @@ router.get('/', authenticateAdmin, async (req, res) => {
     let whereConditions = [];
     let queryParams = [];
 
+    // Exclude users moved to TVR from all status tabs (Submitted, Under Review, etc.)
+    whereConditions.push('(COALESCE(u.moved_to_tvr, 0) = 0)');
+
     // Status filter (use effectiveStatus so sub_admin/nbfc_admin cannot see disallowed statuses)
     if (effectiveStatus && effectiveStatus !== 'all') {
       whereConditions.push('la.status = ?');
@@ -1611,9 +1614,12 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
     let amountResult = [{ totalAmount: 0, averageAmount: 0 }];
 
     if (isNbfcAdmin) {
-      // NBFC: only counts for allowed statuses (no assignment filter)
+      // NBFC: only counts for allowed statuses (no assignment filter), exclude TVR users
       const statusResult = await executeQuery(
-        `SELECT status, COUNT(*) as count FROM loan_applications WHERE status IN (?, ?, ?) GROUP BY status`,
+        `SELECT la.status, COUNT(*) as count FROM loan_applications la
+         INNER JOIN users u ON la.user_id = u.id
+         WHERE la.status IN (?, ?, ?) AND (COALESCE(u.moved_to_tvr, 0) = 0)
+         GROUP BY la.status`,
         ['overdue', 'ready_for_disbursement', 'ready_to_repeat_disbursal']
       );
       statusResult.forEach(row => {
@@ -1621,15 +1627,17 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
         total += Number(row.count);
       });
       const amountRows = await executeQuery(
-        `SELECT SUM(loan_amount) as totalAmount, AVG(loan_amount) as averageAmount FROM loan_applications WHERE status IN (?, ?, ?)`,
+        `SELECT SUM(la.loan_amount) as totalAmount, AVG(la.loan_amount) as averageAmount
+         FROM loan_applications la INNER JOIN users u ON la.user_id = u.id
+         WHERE la.status IN (?, ?, ?) AND (COALESCE(u.moved_to_tvr, 0) = 0)`,
         ['overdue', 'ready_for_disbursement', 'ready_to_repeat_disbursal']
       );
       amountResult = amountRows.length ? amountRows : [{ totalAmount: 0, averageAmount: 0 }];
     } else if (isSubAdmin && subCat && adminId) {
-      // Sub-admin: return only assigned counts for allowed statuses (or for debt_agency, total overdue)
+      // Sub-admin: return only assigned counts for allowed statuses (or for debt_agency, total overdue), exclude TVR users
       if (subCat === 'debt_agency') {
         const overdueResult = await executeQuery(
-          "SELECT COUNT(*) as total FROM loan_applications WHERE status = 'overdue'"
+          `SELECT COUNT(*) as total FROM loan_applications la INNER JOIN users u ON la.user_id = u.id WHERE la.status = 'overdue' AND (COALESCE(u.moved_to_tvr, 0) = 0)`
         );
         total = overdueResult[0]?.total || 0;
         statusCounts = { overdue: total };
@@ -1640,9 +1648,10 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
         if (assignedCol && tempCol && Array.isArray(allowed)) {
           const placeholders = allowed.map(() => '?').join(',');
           const statusResult = await executeQuery(
-            `SELECT status, COUNT(*) as count FROM loan_applications la
-             WHERE (la.${assignedCol} = ? OR la.${tempCol} = ?) AND la.status IN (${placeholders})
-             GROUP BY status`,
+            `SELECT la.status, COUNT(*) as count FROM loan_applications la
+             INNER JOIN users u ON la.user_id = u.id
+             WHERE (la.${assignedCol} = ? OR la.${tempCol} = ?) AND la.status IN (${placeholders}) AND (COALESCE(u.moved_to_tvr, 0) = 0)
+             GROUP BY la.status`,
             [adminId, adminId, ...allowed]
           );
           statusResult.forEach(row => {
@@ -1652,31 +1661,39 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
         }
       }
     } else {
-      // Full admin: global counts
-      const totalResult = await executeQuery('SELECT COUNT(*) as total FROM loan_applications');
+      // Full admin: global counts, exclude TVR users
+      const totalResult = await executeQuery(
+        `SELECT COUNT(*) as total FROM loan_applications la INNER JOIN users u ON la.user_id = u.id WHERE (COALESCE(u.moved_to_tvr, 0) = 0)`
+      );
       total = totalResult[0].total;
 
       const statusResult = await executeQuery(`
-        SELECT status, COUNT(*) as count
-        FROM loan_applications
-        GROUP BY status
+        SELECT la.status, COUNT(*) as count
+        FROM loan_applications la
+        INNER JOIN users u ON la.user_id = u.id
+        WHERE (COALESCE(u.moved_to_tvr, 0) = 0)
+        GROUP BY la.status
       `);
       statusResult.forEach(row => {
         statusCounts[row.status] = row.count;
       });
 
       const typeResult = await executeQuery(`
-        SELECT loan_purpose, COUNT(*) as count
-        FROM loan_applications
-        GROUP BY loan_purpose
+        SELECT la.loan_purpose, COUNT(*) as count
+        FROM loan_applications la
+        INNER JOIN users u ON la.user_id = u.id
+        WHERE (COALESCE(u.moved_to_tvr, 0) = 0)
+        GROUP BY la.loan_purpose
       `);
       typeResult.forEach(row => {
         typeCounts[row.loan_purpose] = row.count;
       });
 
       amountResult = await executeQuery(`
-        SELECT SUM(loan_amount) as totalAmount, AVG(loan_amount) as averageAmount
-        FROM loan_applications
+        SELECT SUM(la.loan_amount) as totalAmount, AVG(la.loan_amount) as averageAmount
+        FROM loan_applications la
+        INNER JOIN users u ON la.user_id = u.id
+        WHERE (COALESCE(u.moved_to_tvr, 0) = 0)
       `);
     }
 
@@ -1835,6 +1852,9 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
 
     let whereConditions = [];
     let queryParams = [];
+
+    // Exclude users moved to TVR from export
+    whereConditions.push('(COALESCE(u.moved_to_tvr, 0) = 0)');
 
     // Status filter (use effectiveStatus for permission enforcement)
     if (effectiveStatus && effectiveStatus !== 'all') {
@@ -2092,9 +2112,9 @@ router.get('/export/idfc-bank-csv', authenticateAdmin, async (req, res) => {
         ub.bank_name,
         ub.account_holder_name
       FROM loan_applications la
-      LEFT JOIN users u ON la.user_id = u.id
+      INNER JOIN users u ON la.user_id = u.id
       LEFT JOIN bank_details ub ON u.id = ub.user_id AND ub.is_primary = 1
-      WHERE la.status = ?
+      WHERE la.status = ? AND (COALESCE(u.moved_to_tvr, 0) = 0)
       ORDER BY la.id ASC
     `;
 

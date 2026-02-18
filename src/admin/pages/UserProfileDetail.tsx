@@ -243,6 +243,31 @@ function UserProfileDetail() {
   const debtAgencyHiddenTabIdsList = ['kyc', 'documents', 'bank', 'applied-loans', 'transactions', 'validation', 'credit-analytics', 'profile-comments', 'enach'];
   // Follow-up user: only show documents, reference, follow-up, and statement-verification tabs
   const followUpUserAllowedTabIds = ['documents', 'reference', 'follow-up', 'statement-verification'];
+
+  // Map backend step names to user-friendly display (for profile header)
+  const getStepDisplayName = (step: string | null | undefined): string => {
+    if (!step) return 'Not started';
+    const stepMap: Record<string, string> = {
+      'application': 'Apply loan page',
+      'kyc-verification': 'Digilocker page',
+      'pan-verification': 'PAN number page',
+      'aa-consent': 'Account Aggregator page',
+      'credit-analytics': 'Credit analytics page',
+      'employment-details': 'Employment details page',
+      'bank-statement': 'Bank statement page',
+      'bank-details': 'Bank details page',
+      'references': 'References page',
+      'upload-documents': 'Documents page',
+      'steps': 'Completed',
+      'step-2': 'Step 2 page',
+      'language': 'Language spoken page',
+      'e-nach': 'E-nach page',
+      'selfie': 'Selfie page',
+      'kfs': 'KFS page',
+      'agreement': 'Agreement page'
+    };
+    return stepMap[step] || step.charAt(0).toUpperCase() + step.slice(1).replace(/-/g, ' ');
+  };
   const tabsFiltered = allTabsList.filter((tab) => {
     if (shouldHideTransactionTab && tab.id === 'transactions') return false;
     if (isDebtAgency && debtAgencyHiddenTabIdsList.includes(tab.id)) return false;
@@ -12043,6 +12068,9 @@ function UserProfileDetail() {
                     </span>
                   );
                 })()}
+                <span className="px-2 py-1 text-xs font-semibold rounded whitespace-nowrap flex-shrink-0 bg-indigo-100 text-indigo-800">
+                  Current step: {getStepDisplayName(getUserData('currentStep', null))}
+                </span>
               </div>
               {/* Sub-Admins row (same format as LoanApplicationsQueue) */}
               {(() => {
