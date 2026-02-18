@@ -63,6 +63,10 @@ const BASE_PATH = '/stpl';
 // NBFC admins see applications instead of dashboard; redirect /dashboard to applications
 function DashboardOrRedirect() {
   const { currentUser } = useAdmin();
+  // Follow-up sub-admin: no dashboard, go straight to Follow Up view
+  if (currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category === 'follow_up_user') {
+    return <Navigate to={`${BASE_PATH}/follow-up?tab=submitted`} replace />;
+  }
   if (currentUser?.role === 'nbfc_admin') {
     return <Navigate to={`${BASE_PATH}/applications?status=ready_for_disbursement`} replace />;
   }
