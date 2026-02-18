@@ -10,6 +10,21 @@ const cashfreePayment = require('../services/cashfreePayment');
 const { authenticateToken } = require('../middleware/auth');
 
 /**
+ * Extract UTR/reference from payment object. Prefers actual UTR fields; avoids using
+ * payment_message when it looks like a status (e.g. "00::Transaction Success").
+ * @param {object} payment - Cashfree payment object
+ * @returns {string|null} UTR or reference to store, or null
+ */
+function extractPaymentReference(payment) {
+  if (!payment || typeof payment !== 'object') return null;
+  const utr = payment.payment_utr || payment.utr || payment.bank_reference_number || payment.reference_number || null;
+  if (utr && String(utr).trim()) return String(utr).trim();
+  const msg = payment.payment_message;
+  if (msg && String(msg).trim() && !String(msg).includes('::')) return String(msg).trim();
+  return null;
+}
+
+/**
  * Helper function to generate NOC HTML content
  * @param {object} nocData - NOC data object
  * @returns {string} HTML content for NOC document
@@ -1270,6 +1285,42 @@ router.post('/webhook', async (req, res) => {
 
         console.log('🔔 Payment webhook received:', payload);
 
+        // Log to webhook_logs so we can inspect what Cashfree sent (e.g. UTR fields)
+        try {
+            const orderIdForLog = payload?.data?.order?.order_id || null;
+            const headers = {};
+            Object.keys(req.headers || {}).forEach(key => { headers[key] = req.headers[key]; });
+            let rawPayload = null;
+            try {
+                rawPayload = JSON.stringify({ method: req.method, url: req.url, headers, query: req.query, body: payload }, null, 2);
+            } catch (e) {
+                rawPayload = JSON.stringify({ method: req.method, url: req.url, error: 'Could not serialize payload' });
+            }
+            await executeQuery(
+                `INSERT INTO webhook_logs 
+                 (webhook_type, http_method, endpoint, headers, query_params, body_data, raw_payload, 
+                  request_id, client_ref_num, status, ip_address, user_agent, processed, processing_error, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NOW())`,
+                [
+                    'payment_gateway',
+                    req.method,
+                    '/api/payment/webhook',
+                    JSON.stringify(headers),
+                    req.query && Object.keys(req.query).length > 0 ? JSON.stringify(req.query) : null,
+                    JSON.stringify(payload),
+                    rawPayload,
+                    payload?.type || null,
+                    orderIdForLog,
+                    payload?.type || null,
+                    req.ip || req.connection?.remoteAddress || req.headers?.['x-forwarded-for'] || req.headers?.['x-real-ip'] || null,
+                    req.headers?.['user-agent'] || null
+                ]
+            );
+            console.log('📝 [Payment Webhook] Logged to webhook_logs: payment_gateway');
+        } catch (logErr) {
+            console.error('❌ [Payment Webhook] Error logging to webhook_logs:', logErr);
+        }
+
         // Verify signature (optional but recommended)
         // const isValid = cashfreePayment.verifyWebhookSignature(signature, payload);
         // if (!isValid) {
@@ -1285,14 +1336,8 @@ router.post('/webhook', async (req, res) => {
         const orderId = order.order_id;
         const orderAmount = order.order_amount;
         
-        // Extract bank reference number from payment object
-        // Cashfree provides bank reference in various fields: payment_message, payment_utr, bank_reference_number, utr
-        const bankReferenceNumber = payment?.payment_message || 
-                                   payment?.payment_utr || 
-                                   payment?.bank_reference_number || 
-                                   payment?.utr || 
-                                   payment?.reference_number ||
-                                   null;
+        // Extract UTR/reference: prefer actual UTR fields; payment_message is often a status like "00::Transaction Success"
+        const bankReferenceNumber = extractPaymentReference(payment);
         
         console.log(`💰 Bank reference number extracted: ${bankReferenceNumber || 'Not found'} (from payment object)`, {
             payment_message: payment?.payment_message,
@@ -1977,14 +2022,9 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
         const payments = cashfreeData.payments || cashfreeData.payment || [];
         const paymentData = Array.isArray(payments) && payments.length > 0 ? payments[0] : (payments || cashfreeData.payment || {});
         
-        const bankReferenceNumber = paymentData?.payment_message || 
-                                   paymentData?.payment_utr || 
-                                   paymentData?.bank_reference_number || 
-                                   paymentData?.utr || 
-                                   paymentData?.reference_number ||
-                                   cashfreeData?.payment_message ||
-                                   cashfreeData?.payment_utr ||
-                                   null;
+        const paymentForRef = paymentData && typeof paymentData === 'object' ? paymentData : cashfreeData;
+        const bankReferenceNumber = extractPaymentReference(paymentForRef) ||
+                                   cashfreeData?.payment_utr || cashfreeData?.payment_message || null;
         
         console.log(`💰 Cashfree order status: ${cashfreeOrderStatus}, Payment received: ${paymentReceived}`);
         console.log(`💰 Bank reference number from API: ${bankReferenceNumber || 'Not found'}`, {
