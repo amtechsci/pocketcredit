@@ -18,8 +18,8 @@ const ensureDbInitialized = async () => {
   }
 };
 
-const ADMIN_SELECT_WITH_LEAVE = 'id, name, email, role, sub_admin_category, whitelisted_ip, weekly_off_days, temp_inactive_from, temp_inactive_to, permissions, is_active, last_login, created_at, updated_at';
-const ADMIN_SELECT_WITHOUT_LEAVE = 'id, name, email, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at';
+const ADMIN_SELECT_WITH_LEAVE = 'id, name, email, phone, role, sub_admin_category, whitelisted_ip, weekly_off_days, temp_inactive_from, temp_inactive_to, permissions, is_active, last_login, created_at, updated_at';
+const ADMIN_SELECT_WITHOUT_LEAVE = 'id, name, email, phone, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at';
 
 async function getAdminById(id) {
   try {
@@ -85,8 +85,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
     const { page = 1, limit = 50, role, search } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    const selectWithLeave = 'id, name, email, role, sub_admin_category, whitelisted_ip, weekly_off_days, temp_inactive_from, temp_inactive_to, permissions, is_active, last_login, created_at, updated_at';
-    const selectWithoutLeave = 'id, name, email, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at';
+    const selectWithLeave = 'id, name, email, phone, role, sub_admin_category, whitelisted_ip, weekly_off_days, temp_inactive_from, temp_inactive_to, permissions, is_active, last_login, created_at, updated_at';
+    const selectWithoutLeave = 'id, name, email, phone, role, sub_admin_category, whitelisted_ip, permissions, is_active, last_login, created_at, updated_at';
 
     let whereClause = ' WHERE 1=1';
     if (role && role !== 'all') whereClause += ' AND role = ?';
@@ -517,17 +517,21 @@ router.post('/', authenticateAdmin, async (req, res) => {
     }
 
     const subCategory = role === 'sub_admin' ? sub_admin_category : null;
-    const allowedIp = role === 'sub_admin' && sub_admin_category === 'debt_agency' ? (whitelisted_ip || null) : null;
+    // Whitelisted IP allowed for debt_agency and follow_up_user
+    const allowedIp = role === 'sub_admin' && (sub_admin_category === 'debt_agency' || sub_admin_category === 'follow_up_user')
+      ? (whitelisted_ip || null)
+      : null;
 
-    // Create admin (omit phone/department if your admins table does not have these columns)
+    // Create admin (include phone if column exists)
     const adminId = uuidv4();
     await executeQuery(`
-      INSERT INTO admins (id, name, email, password, role, sub_admin_category, whitelisted_ip, permissions, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
+      INSERT INTO admins (id, name, email, phone, password, role, sub_admin_category, whitelisted_ip, permissions, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
     `, [
       adminId,
       name,
       email.toLowerCase(),
+      phone || null,
       hashedPassword,
       role,
       subCategory,
@@ -637,8 +641,8 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
       params.push(email.toLowerCase());
     }
 
-    // Omit phone/department - not all schemas have these columns on admins
-    // if (phone !== undefined) { updates.push('phone = ?'); params.push(phone); }
+    // Update phone/department if provided (for schemas that support these columns)
+    if (phone !== undefined) { updates.push('phone = ?'); params.push(phone || null); }
     // if (department !== undefined) { updates.push('department = ?'); params.push(department); }
 
     if (role !== undefined) {
