@@ -14,6 +14,18 @@ const { generateLoanAgreementHTML } = require('../utils/loanAgreementHtmlGenerat
 
 const router = express.Router();
 
+/** Application statuses that mean the user has submitted (past onboarding); show "Completed" not raw step e.g. bank_details */
+const POST_SUBMISSION_STATUSES = new Set([
+  'submitted', 'under_review', 'follow_up', 'disbursal', 'ready_for_disbursement',
+  'ready_to_repeat_disbursal', 'repeat_disbursal', 'account_manager', 'overdue',
+  'cleared', 'rejected', 'cancelled', 'qa_verification'
+]);
+
+function effectiveCurrentStep(dbStep, latestAppStatus) {
+  if (latestAppStatus && POST_SUBMISSION_STATUSES.has(latestAppStatus)) return 'steps';
+  return dbStep || null;
+}
+
 /**
  * Format date to YYYY-MM-DD without timezone conversion
  */
@@ -1087,7 +1099,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       status: user.status || 'active',
       profileStatus: profileStatus, // Latest loan application status
       assignedManager: assignedManager, // Assigned account manager name
-      currentStep: (applications && applications.length > 0) ? applications[0].current_step : null, // Where user stopped in onboarding
+      currentStep: (applications && applications.length > 0) ? effectiveCurrentStep(applications[0].current_step, applications[0].status) : null, // Where user stopped in onboarding; show "Completed" when status is under_review etc.
       registeredDate: user.created_at, // For admin UI compatibility
       createdAt: user.created_at,
       updatedAt: user.updated_at,

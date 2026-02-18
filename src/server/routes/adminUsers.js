@@ -10,6 +10,18 @@ const pdfParseModule = require('pdf-parse');
 const pdf = pdfParseModule.default || pdfParseModule;
 const router = express.Router();
 
+/** Application statuses that mean the user has submitted (past onboarding); show "Completed" not raw step e.g. bank_details */
+const POST_SUBMISSION_STATUSES = new Set([
+  'submitted', 'under_review', 'follow_up', 'disbursal', 'ready_for_disbursement',
+  'ready_to_repeat_disbursal', 'repeat_disbursal', 'account_manager', 'overdue',
+  'cleared', 'rejected', 'cancelled', 'qa_verification'
+]);
+
+function effectiveCurrentStep(dbStep, latestAppStatus) {
+  if (latestAppStatus && POST_SUBMISSION_STATUSES.has(latestAppStatus)) return 'steps';
+  return dbStep || null;
+}
+
 /**
  * Extract PAN number from PDF text
  * PAN format: 5 letters, 4 digits, 1 letter (e.g., FPFPM8829N)
@@ -125,7 +137,14 @@ router.get('/', authenticateAdmin, async (req, res) => {
           WHERE la2.user_id = u.id 
           ORDER BY la2.created_at DESC, la2.id DESC 
           LIMIT 1
-        ) as currentStep
+        ) as currentStep,
+        (
+          SELECT la2.status 
+          FROM loan_applications la2 
+          WHERE la2.user_id = u.id 
+          ORDER BY la2.created_at DESC, la2.id DESC 
+          LIMIT 1
+        ) as latestAppStatus
       FROM users u
       LEFT JOIN loan_applications la ON u.id = la.user_id
     `;
@@ -224,7 +243,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
       totalApplications: parseInt(user.totalApplications) || 0,
       approvedApplications: parseInt(user.approvedApplications) || 0,
       rejectedApplications: parseInt(user.rejectedApplications) || 0,
-      currentStep: user.currentStep || null
+      currentStep: effectiveCurrentStep(user.currentStep, user.latestAppStatus)
     }));
 
     res.json({
@@ -1139,18 +1158,29 @@ router.get('/registered/list', authenticateAdmin, async (req, res) => {
           WHERE la.user_id = u.id 
           ORDER BY la.created_at DESC, la.id DESC 
           LIMIT 1
-        ) as currentStep
+        ) as currentStep,
+        (
+          SELECT la.status 
+          FROM loan_applications la 
+          WHERE la.user_id = u.id 
+          ORDER BY la.created_at DESC, la.id DESC 
+          LIMIT 1
+        ) as latestAppStatus
       FROM users u
       ${whereClause}
       ORDER BY u.created_at DESC
       LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
     `;
     const users = await executeQuery(usersQuery, queryParams);
+    const usersWithEffectiveStep = (users || []).map(u => {
+      const { latestAppStatus, ...rest } = u;
+      return { ...rest, currentStep: effectiveCurrentStep(u.currentStep, latestAppStatus) };
+    });
 
     res.json({
       status: 'success',
       data: {
-        users: users || [],
+        users: usersWithEffectiveStep,
         total: total,
         page: page,
         limit: limit,
@@ -1225,18 +1255,29 @@ router.get('/approved/list', authenticateAdmin, async (req, res) => {
           WHERE la.user_id = u.id 
           ORDER BY la.created_at DESC, la.id DESC 
           LIMIT 1
-        ) as currentStep
+        ) as currentStep,
+        (
+          SELECT la.status 
+          FROM loan_applications la 
+          WHERE la.user_id = u.id 
+          ORDER BY la.created_at DESC, la.id DESC 
+          LIMIT 1
+        ) as latestAppStatus
       FROM users u
       ${whereClause}
       ORDER BY u.updated_at DESC
       LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
     `;
     const users = await executeQuery(usersQuery, queryParams);
+    const usersWithEffectiveStep = (users || []).map(u => {
+      const { latestAppStatus, ...rest } = u;
+      return { ...rest, currentStep: effectiveCurrentStep(u.currentStep, latestAppStatus) };
+    });
 
     res.json({
       status: 'success',
       data: {
-        users: users || [],
+        users: usersWithEffectiveStep,
         total: total,
         page: page,
         limit: limit,
