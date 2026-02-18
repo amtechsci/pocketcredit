@@ -36,10 +36,9 @@ interface User {
   currentStep?: string | null;
 }
 
-// Map backend step names to user-friendly display names
+// Map backend step names to actual onboarding step labels
 const getStepDisplayName = (step: string | null | undefined): string => {
   if (!step) return 'Not started';
-  
   const stepMap: Record<string, string> = {
     'application': 'Apply loan page',
     'kyc-verification': 'Digilocker page',
@@ -51,16 +50,14 @@ const getStepDisplayName = (step: string | null | undefined): string => {
     'bank-details': 'Bank details page',
     'references': 'References page',
     'upload-documents': 'Documents page',
-    'steps': 'Completed',
-    // Handle any other step names
-    'step-2': 'Step 2 page',
     'language': 'Language spoken page',
     'e-nach': 'E-nach page',
     'selfie': 'Selfie page',
     'kfs': 'KFS page',
-    'agreement': 'Agreement page'
+    'agreement': 'Agreement page',
+    'steps': 'Completed',
+    'step-2': 'Step 2 page'
   };
-  
   return stepMap[step] || step.charAt(0).toUpperCase() + step.slice(1).replace(/-/g, ' ');
 };
 

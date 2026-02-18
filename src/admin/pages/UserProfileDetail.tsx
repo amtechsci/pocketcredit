@@ -259,13 +259,13 @@ function UserProfileDetail() {
       'bank-details': 'Bank details page',
       'references': 'References page',
       'upload-documents': 'Documents page',
-      'steps': 'Completed',
-      'step-2': 'Step 2 page',
       'language': 'Language spoken page',
       'e-nach': 'E-nach page',
       'selfie': 'Selfie page',
       'kfs': 'KFS page',
-      'agreement': 'Agreement page'
+      'agreement': 'Agreement page',
+      'steps': 'Completed',
+      'step-2': 'Step 2 page'
     };
     return stepMap[step] || step.charAt(0).toUpperCase() + step.slice(1).replace(/-/g, ' ');
   };
