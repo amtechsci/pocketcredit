@@ -554,7 +554,7 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
         la.loan_amount as latestLoanAmount,
         DATE_FORMAT(la.created_at, '%Y-%m-%d') as latestLoanDate
       FROM users u
-      LEFT JOIN admins a ON u.moved_to_tvr_by = a.id
+      LEFT JOIN admins a ON u.moved_to_tvr_by COLLATE utf8mb4_unicode_ci = a.id
       LEFT JOIN loan_applications la ON u.id = la.user_id 
         AND la.id = (
           SELECT MAX(id) 
