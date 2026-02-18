@@ -527,10 +527,6 @@ router.get('/:applicationId', authenticateAdmin, async (req, res) => {
         ed.company_name,
         ed.designation,
         ed.work_experience_years,
-        fd.credit_score,
-        fd.monthly_income,
-        fd.monthly_expenses,
-        fd.existing_loans,
         a.address_line1,
         a.address_line2,
         a.city,
@@ -544,7 +540,6 @@ router.get('/:applicationId', authenticateAdmin, async (req, res) => {
       FROM loan_applications la
       LEFT JOIN users u ON la.user_id = u.id
       LEFT JOIN employment_details ed ON u.id = ed.user_id
-      LEFT JOIN financial_details fd ON u.id = fd.user_id
       LEFT JOIN addresses a ON u.id = a.user_id AND a.is_primary = 1
       LEFT JOIN bank_details bd ON u.id = bd.user_id AND bd.is_primary = 1
       WHERE la.id = ?
