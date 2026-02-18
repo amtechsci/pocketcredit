@@ -325,6 +325,7 @@ export function AdminTeamManagement() {
     { value: 'verify_user', label: 'Verify User' },
     { value: 'qa_user', label: 'QA User' },
     { value: 'account_manager', label: 'Account Manager' },
+    { value: 'follow_up_user', label: 'Follow-up User' },
     { value: 'recovery_officer', label: 'Recovery Officer' },
     { value: 'debt_agency', label: 'Debt Agency' }
   ];
@@ -372,6 +373,10 @@ export function AdminTeamManagement() {
       setError('Sub-admin category is required for Sub-admin role');
       return;
     }
+    if (newUser.role === 'sub_admin' && newUser.sub_admin_category === 'follow_up_user' && !newUser.phone) {
+      setError('Phone number is required for Follow-up User (mobile OTP login only)');
+      return;
+    }
 
     try {
       setSaving(true);
@@ -387,7 +392,12 @@ export function AdminTeamManagement() {
       };
       if (newUser.role === 'sub_admin') {
         payload.sub_admin_category = newUser.sub_admin_category || null;
-        payload.whitelisted_ip = newUser.sub_admin_category === 'debt_agency' ? (newUser.whitelisted_ip || null) : null;
+        // Whitelisted IP for debt_agency and follow_up_user
+        if (newUser.sub_admin_category === 'debt_agency' || newUser.sub_admin_category === 'follow_up_user') {
+          payload.whitelisted_ip = newUser.whitelisted_ip || null;
+        } else {
+          payload.whitelisted_ip = null;
+        }
       }
       const response = await adminApiService.createTeamMember(payload);
 
@@ -491,13 +501,24 @@ export function AdminTeamManagement() {
   const handleUpdateUser = async () => {
     if (!editingUser) return;
 
+    // Validate phone for follow_up_user
+    if (editFormData.role === 'sub_admin' && editFormData.sub_admin_category === 'follow_up_user' && !editFormData.phone) {
+      setError('Phone number is required for Follow-up User (mobile OTP login only)');
+      return;
+    }
+
     try {
       setSaving(true);
       setError(null);
       const payload: any = { ...editFormData };
       if (payload.role === 'sub_admin') {
         payload.sub_admin_category = payload.sub_admin_category || null;
-        payload.whitelisted_ip = payload.sub_admin_category === 'debt_agency' ? (payload.whitelisted_ip || null) : null;
+        // Whitelisted IP for debt_agency and follow_up_user
+        if (payload.sub_admin_category === 'debt_agency' || payload.sub_admin_category === 'follow_up_user') {
+          payload.whitelisted_ip = payload.whitelisted_ip || null;
+        } else {
+          payload.whitelisted_ip = null;
+        }
       } else {
         payload.sub_admin_category = null;
         payload.whitelisted_ip = null;
@@ -709,7 +730,6 @@ export function AdminTeamManagement() {
           >
             <option value="all">All Roles</option>
             <option value="superadmin">Super Admin</option>
-            <option value="super_admin">Super Admin (new)</option>
             <option value="master_admin">Master Admin</option>
             <option value="nbfc_admin">NBFC Admin</option>
             <option value="sub_admin">Sub-admin</option>
@@ -966,14 +986,23 @@ export function AdminTeamManagement() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Phone
+                    {newUser.role === 'sub_admin' && newUser.sub_admin_category === 'follow_up_user' && (
+                      <span className="text-red-500 ml-1">*</span>
+                    )}
+                  </label>
                   <input
                     type="tel"
                     value={newUser.phone}
                     onChange={(e) => setNewUser({ ...newUser, phone: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter phone number"
+                    placeholder="Enter phone number (required for Follow-up User)"
+                    required={newUser.role === 'sub_admin' && newUser.sub_admin_category === 'follow_up_user'}
                   />
+                  {newUser.role === 'sub_admin' && newUser.sub_admin_category === 'follow_up_user' && (
+                    <p className="text-xs text-gray-500 mt-1">Required: Follow-up user can only login via mobile OTP</p>
+                  )}
                 </div>
               </div>
 
@@ -1008,7 +1037,6 @@ export function AdminTeamManagement() {
                     <option value="officer">Officer</option>
                     <option value="manager">Manager</option>
                     <option value="superadmin">Super Admin</option>
-                    <option value="super_admin">Super Admin (new)</option>
                     <option value="master_admin">Master Admin</option>
                     <option value="nbfc_admin">NBFC Admin</option>
                     <option value="sub_admin">Sub-admin</option>
@@ -1032,16 +1060,19 @@ export function AdminTeamManagement() {
                       ))}
                     </select>
                   </div>
-                  {newUser.sub_admin_category === 'debt_agency' && (
+                  {(newUser.sub_admin_category === 'debt_agency' || newUser.sub_admin_category === 'follow_up_user') && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Whitelisted IP (comma-separated)</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Whitelisted IP (comma-separated, 2-3 IPs)</label>
                       <input
                         type="text"
                         value={newUser.whitelisted_ip}
                         onChange={(e) => setNewUser({ ...newUser, whitelisted_ip: e.target.value })}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="e.g. 192.168.1.1"
+                        placeholder="e.g. 192.168.1.1, 192.168.1.2"
                       />
+                      {newUser.sub_admin_category === 'follow_up_user' && (
+                        <p className="text-xs text-gray-500 mt-1">Follow-up user can only login from these IP addresses</p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1136,13 +1167,23 @@ export function AdminTeamManagement() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Phone
+                    {editFormData.role === 'sub_admin' && editFormData.sub_admin_category === 'follow_up_user' && (
+                      <span className="text-red-500 ml-1">*</span>
+                    )}
+                  </label>
                   <input
                     type="tel"
                     value={editFormData.phone}
                     onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter phone number (required for Follow-up User)"
+                    required={editFormData.role === 'sub_admin' && editFormData.sub_admin_category === 'follow_up_user'}
                   />
+                  {editFormData.role === 'sub_admin' && editFormData.sub_admin_category === 'follow_up_user' && (
+                    <p className="text-xs text-gray-500 mt-1">Required: Follow-up user can only login via mobile OTP</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
@@ -1177,7 +1218,6 @@ export function AdminTeamManagement() {
                     <option value="officer">Officer</option>
                     <option value="manager">Manager</option>
                     <option value="superadmin">Super Admin</option>
-                    <option value="super_admin">Super Admin (new)</option>
                     <option value="master_admin">Master Admin</option>
                     <option value="nbfc_admin">NBFC Admin</option>
                     <option value="sub_admin">Sub-admin</option>
@@ -1211,22 +1251,25 @@ export function AdminTeamManagement() {
                       ))}
                     </select>
                   </div>
-                  {editFormData.sub_admin_category === 'debt_agency' && (
+                  {(editFormData.sub_admin_category === 'debt_agency' || editFormData.sub_admin_category === 'follow_up_user') && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Whitelisted IP (comma-separated)</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Whitelisted IP (comma-separated, 2-3 IPs)</label>
                       <input
                         type="text"
                         value={editFormData.whitelisted_ip}
                         onChange={(e) => setEditFormData({ ...editFormData, whitelisted_ip: e.target.value })}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="e.g. 192.168.1.1"
+                        placeholder="e.g. 192.168.1.1, 192.168.1.2"
                       />
+                      {editFormData.sub_admin_category === 'follow_up_user' && (
+                        <p className="text-xs text-gray-500 mt-1">Follow-up user can only login from these IP addresses</p>
+                      )}
                     </div>
                   )}
                 </div>
               )}
 
-              {editFormData.role === 'sub_admin' && editFormData.sub_admin_category && editFormData.sub_admin_category !== 'debt_agency' && (
+              {editFormData.role === 'sub_admin' && editFormData.sub_admin_category && editFormData.sub_admin_category !== 'debt_agency' && editFormData.sub_admin_category !== 'follow_up_user' && (
                 <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-4">
                   <h5 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
                     <Calendar className="w-4 h-4" />
