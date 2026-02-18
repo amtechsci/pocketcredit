@@ -514,7 +514,9 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
       search = ''
     } = req.query;
 
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const numLimit = Number(limit) || 50;
+    const numPage = Number(page) || 1;
+    const offset = (numPage - 1) * numLimit;
 
     let whereConditions = ['u.moved_to_tvr = 1'];
     let queryParams = [];
@@ -554,7 +556,7 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
         la.loan_amount as latestLoanAmount,
         DATE_FORMAT(la.created_at, '%Y-%m-%d') as latestLoanDate
       FROM users u
-      LEFT JOIN admins a ON CONVERT(u.moved_to_tvr_by USING utf8mb4) = CONVERT(a.id USING utf8mb4)
+      LEFT JOIN admins a ON u.moved_to_tvr_by = a.id
       LEFT JOIN loan_applications la ON u.id = la.user_id 
         AND la.id = (
           SELECT MAX(id) 
@@ -565,7 +567,7 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
       ORDER BY u.moved_to_tvr_at DESC
       LIMIT ? OFFSET ?
     `;
-    queryParams.push(parseInt(limit), offset);
+    queryParams.push(numLimit, offset);
 
     const tvrUsers = await executeQuery(dataQuery, queryParams);
 
@@ -574,10 +576,10 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
       data: {
         users: tvrUsers || [],
         pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
+          page: numPage,
+          limit: numLimit,
           total,
-          totalPages: Math.ceil(total / parseInt(limit))
+          totalPages: Math.ceil(total / numLimit)
         }
       }
     });
