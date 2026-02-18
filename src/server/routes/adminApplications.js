@@ -503,6 +503,94 @@ router.get('/', authenticateAdmin, async (req, res) => {
   }
 });
 
+// Get TVR IDs (users moved to TVR) — must be before /:applicationId to avoid being swallowed
+router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+
+    const {
+      page = 1,
+      limit = 50,
+      search = ''
+    } = req.query;
+
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    let whereConditions = ['u.moved_to_tvr = 1'];
+    let queryParams = [];
+
+    if (search) {
+      whereConditions.push(`(
+        u.phone LIKE ? OR 
+        u.email LIKE ? OR 
+        CONCAT(u.first_name, ' ', u.last_name) LIKE ? OR
+        u.pan_number LIKE ?
+      )`);
+      const searchPattern = `%${search}%`;
+      queryParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
+    }
+
+    const countQuery = `
+      SELECT COUNT(DISTINCT u.id) as total
+      FROM users u
+      WHERE ${whereConditions.join(' AND ')}
+    `;
+    const countResult = await executeQuery(countQuery, queryParams);
+    const total = countResult[0]?.total || 0;
+
+    const dataQuery = `
+      SELECT DISTINCT
+        u.id as userId,
+        u.phone as mobile,
+        u.email,
+        CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as userName,
+        u.pan_number as panNumber,
+        DATE_FORMAT(u.moved_to_tvr_at, '%Y-%m-%d %H:%i:%s') as movedToTvrAt,
+        u.moved_to_tvr_by as movedToTvrBy,
+        a.name as movedByAdminName,
+        la.id as latestLoanId,
+        la.application_number as latestApplicationNumber,
+        la.status as latestLoanStatus,
+        la.loan_amount as latestLoanAmount,
+        DATE_FORMAT(la.created_at, '%Y-%m-%d') as latestLoanDate
+      FROM users u
+      LEFT JOIN admins a ON u.moved_to_tvr_by = a.id
+      LEFT JOIN loan_applications la ON u.id = la.user_id 
+        AND la.id = (
+          SELECT MAX(id) 
+          FROM loan_applications 
+          WHERE user_id = u.id
+        )
+      WHERE ${whereConditions.join(' AND ')}
+      ORDER BY u.moved_to_tvr_at DESC
+      LIMIT ? OFFSET ?
+    `;
+    queryParams.push(parseInt(limit), offset);
+
+    const tvrUsers = await executeQuery(dataQuery, queryParams);
+
+    res.json({
+      status: 'success',
+      data: {
+        users: tvrUsers || [],
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          totalPages: Math.ceil(total / parseInt(limit))
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching TVR IDs:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch TVR IDs'
+    });
+  }
+});
+
 // Get application details
 router.get('/:applicationId', authenticateAdmin, async (req, res) => {
   try {
@@ -2463,98 +2551,6 @@ router.post('/fix-disbursal-amounts', authenticateAdmin, async (req, res) => {
       status: 'error',
       message: 'Failed to fix disbursal amounts',
       error: error.message
-    });
-  }
-});
-
-// Get TVR IDs (users moved to TVR)
-router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
-  try {
-    await initializeDatabase();
-
-    const {
-      page = 1,
-      limit = 50,
-      search = ''
-    } = req.query;
-
-    const offset = (parseInt(page) - 1) * parseInt(limit);
-
-    // Build query for users moved to TVR
-    let whereConditions = ['u.moved_to_tvr = 1'];
-    let queryParams = [];
-
-    // Search filter
-    if (search) {
-      whereConditions.push(`(
-        u.phone LIKE ? OR 
-        u.email LIKE ? OR 
-        CONCAT(u.first_name, ' ', u.last_name) LIKE ? OR
-        u.pan_number LIKE ?
-      )`);
-      const searchPattern = `%${search}%`;
-      queryParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
-    }
-
-    // Get total count
-    const countQuery = `
-      SELECT COUNT(DISTINCT u.id) as total
-      FROM users u
-      WHERE ${whereConditions.join(' AND ')}
-    `;
-    const countResult = await executeQuery(countQuery, queryParams);
-    const total = countResult[0]?.total || 0;
-
-    // Get TVR users with their latest loan application
-    const dataQuery = `
-      SELECT DISTINCT
-        u.id as userId,
-        u.phone as mobile,
-        u.email,
-        CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as userName,
-        u.pan_number as panNumber,
-        DATE_FORMAT(u.moved_to_tvr_at, '%Y-%m-%d %H:%i:%s') as movedToTvrAt,
-        u.moved_to_tvr_by as movedToTvrBy,
-        a.name as movedByAdminName,
-        la.id as latestLoanId,
-        la.application_number as latestApplicationNumber,
-        la.status as latestLoanStatus,
-        la.loan_amount as latestLoanAmount,
-        DATE_FORMAT(la.created_at, '%Y-%m-%d') as latestLoanDate
-      FROM users u
-      LEFT JOIN admins a ON u.moved_to_tvr_by = a.id
-      LEFT JOIN loan_applications la ON u.id = la.user_id 
-        AND la.id = (
-          SELECT MAX(id) 
-          FROM loan_applications 
-          WHERE user_id = u.id
-        )
-      WHERE ${whereConditions.join(' AND ')}
-      ORDER BY u.moved_to_tvr_at DESC
-      LIMIT ? OFFSET ?
-    `;
-    queryParams.push(parseInt(limit), offset);
-
-    const tvrUsers = await executeQuery(dataQuery, queryParams);
-
-    res.json({
-      status: 'success',
-      data: {
-        users: tvrUsers || [],
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total,
-          totalPages: Math.ceil(total / parseInt(limit))
-        }
-      }
-    });
-
-  } catch (error) {
-    console.error('Error fetching TVR IDs:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch TVR IDs'
     });
   }
 });
