@@ -59,9 +59,10 @@ interface LoanApplication {
   pincode: string;
   /** For sub-admin: 'primary' = my assign, 'temp' = temp assign (covering for someone on leave) */
   assignmentType?: 'primary' | 'temp' | null;
-  /** Sub-admin assignments (names) for display: verify user, acc manager, recovery officer, agency */
+  /** Sub-admin assignments (names) for display: verify user, follow up user, acc manager, recovery officer, agency */
   subAdminAssignments?: {
     verifyUserName: string;
+    followUpUserName?: string;
     accManagerName: string;
     recoveryOfficerName: string;
     isOverdue: boolean;
@@ -83,6 +84,8 @@ interface ProfileComment {
 interface LoanApplicationsQueueProps {
   /** When provided (e.g. from Overdue page), force this status and do not read from URL */
   initialStatus?: string;
+  /** Force-hide all download buttons (e.g. when rendered inside FollowUpUserPage) */
+  hideDownloads?: boolean;
 }
 
 // Per spec: which status tabs each sub-admin can see on Applications
@@ -98,7 +101,7 @@ const SUB_ADMIN_ALLOWED_STATUSES: Record<string, string[]> = {
 // NBFC Admin: Over Due (when on /overdue), Ready for Disbursement, Repeat Loan Ready for Disbursal
 const NBFC_ADMIN_ALLOWED_STATUSES = ['overdue', 'ready_for_disbursement', 'ready_to_repeat_disbursal'];
 
-export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueueProps = {}) {
+export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownloadsProp }: LoanApplicationsQueueProps = {}) {
   const navigate = useNavigate();
   const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -116,6 +119,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
         : null;
   const canShowStatus = (status: string) => !allowedStatuses || allowedStatuses.includes(status);
   const maskMobileInQueue = isNbfcAdmin && shouldMaskMobile('ready_disbursement') && (statusFilter === 'ready_for_disbursement' || statusFilter === 'ready_to_repeat_disbursal');
+  const isFollowUpUser = hideDownloadsProp || (currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category === 'follow_up_user');
 
 
   // Real data state
@@ -728,6 +732,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 All <span className="ml-1 px-2 py-0.5 bg-gray-100 text-gray-800 rounded-full text-xs">{pagination?.totalApplications || 0}</span>
               </button>
+              {!isFollowUpUser && (
               <button
                 onClick={() => handleExportExcel('all')}
                 disabled={downloadingExcel === 'all'}
@@ -736,6 +741,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'all' ? 'animate-pulse' : ''}`} />
               </button>
+              )}
             </div>
             )}
             {canShowStatus('submitted') && (
@@ -750,6 +756,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 Submitted <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'submitted' ? 'bg-purple-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.submittedApplications || 0}</span>
               </button>
+              {!isFollowUpUser && (
               <button
                 onClick={() => handleExportExcel('submitted')}
                 disabled={downloadingExcel === 'submitted'}
@@ -758,6 +765,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'submitted' ? 'animate-pulse' : ''}`} />
               </button>
+              )}
             </div>
             )}
             {canShowStatus('under_review') && (
@@ -772,6 +780,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 Under Review <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'under_review' ? 'bg-orange-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.pendingApplications || 0}</span>
               </button>
+              {!isFollowUpUser && (
               <button
                 onClick={() => handleExportExcel('under_review')}
                 disabled={downloadingExcel === 'under_review'}
@@ -780,6 +789,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'under_review' ? 'animate-pulse' : ''}`} />
               </button>
+              )}
             </div>
             )}
             {canShowStatus('follow_up') && (
@@ -794,6 +804,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 Follow Up <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'follow_up' ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.followUpApplications || 0}</span>
               </button>
+              {!isFollowUpUser && (
               <button
                 onClick={() => handleExportExcel('follow_up')}
                 disabled={downloadingExcel === 'follow_up'}
@@ -802,6 +813,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'follow_up' ? 'animate-pulse' : ''}`} />
               </button>
+              )}
             </div>
             )}
             {canShowStatus('disbursal') && (
@@ -816,6 +828,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 Disbursal <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'disbursal' ? 'bg-teal-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.disbursalApplications || 0}</span>
               </button>
+              {!isFollowUpUser && (
               <button
                 onClick={() => handleExportExcel('disbursal')}
                 disabled={downloadingExcel === 'disbursal'}
@@ -824,6 +837,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'disbursal' ? 'animate-pulse' : ''}`} />
               </button>
+              )}
             </div>
             )}
             {/* NBFC on Over Due page: show Overdue tab first so it appears on top and is active */}
@@ -839,6 +853,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 Over Due <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'overdue' ? 'bg-red-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.overdueApplications || 0}</span>
               </button>
+              {!isFollowUpUser && (
               <button
                 onClick={() => handleExportExcel('overdue')}
                 disabled={downloadingExcel === 'overdue'}
@@ -847,6 +862,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'overdue' ? 'animate-pulse' : ''}`} />
               </button>
+              )}
             </div>
             )}
             {canShowStatus('ready_for_disbursement') && (
@@ -861,6 +877,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 Ready for Disbursement <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'ready_for_disbursement' ? 'bg-indigo-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.readyForDisbursementApplications || 0}</span>
               </button>
+              {!isFollowUpUser && (
               <button
                 onClick={() => handleDownloadBankCsv('ready_for_disbursement')}
                 disabled={downloadingBankCsv === 'ready_for_disbursement'}
@@ -869,6 +886,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 <Download className={`w-4 h-4 ${downloadingBankCsv === 'ready_for_disbursement' ? 'animate-pulse' : ''}`} />
               </button>
+              )}
             </div>
             )}
             {canShowStatus('repeat_disbursal') && (
@@ -883,6 +901,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 Repeat Loan Disbursal <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'repeat_disbursal' ? 'bg-cyan-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.repeatDisbursalApplications || 0}</span>
               </button>
+              {!isFollowUpUser && (
               <button
                 onClick={() => handleExportExcel('repeat_disbursal')}
                 disabled={downloadingExcel === 'repeat_disbursal'}
@@ -891,6 +910,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'repeat_disbursal' ? 'animate-pulse' : ''}`} />
               </button>
+              )}
             </div>
             )}
             {canShowStatus('ready_to_repeat_disbursal') && (
@@ -905,6 +925,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 Repeat Loan Ready for Disbursal <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'ready_to_repeat_disbursal' ? 'bg-blue-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.readyToRepeatDisbursalApplications || 0}</span>
               </button>
+              {!isFollowUpUser && (
               <button
                 onClick={() => handleDownloadBankCsv('ready_to_repeat_disbursal')}
                 disabled={downloadingBankCsv === 'ready_to_repeat_disbursal'}
@@ -913,6 +934,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 <Download className={`w-4 h-4 ${downloadingBankCsv === 'ready_to_repeat_disbursal' ? 'animate-pulse' : ''}`} />
               </button>
+              )}
             </div>
             )}
             {canShowStatus('account_manager') && (
@@ -927,6 +949,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 Account Manager <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'account_manager' ? 'bg-purple-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.accountManagerApplications || 0}</span>
               </button>
+              {!isFollowUpUser && (
               <button
                 onClick={() => handleExportExcel('account_manager')}
                 disabled={downloadingExcel === 'account_manager'}
@@ -935,6 +958,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'account_manager' ? 'animate-pulse' : ''}`} />
               </button>
+              )}
             </div>
             )}
             {canShowStatus('overdue') && !(isNbfcAdmin && initialStatus === 'overdue') && (
@@ -949,6 +973,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 Overdue <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'overdue' ? 'bg-red-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.overdueApplications || 0}</span>
               </button>
+              {!isFollowUpUser && (
               <button
                 onClick={() => handleExportExcel('overdue')}
                 disabled={downloadingExcel === 'overdue'}
@@ -957,6 +982,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'overdue' ? 'animate-pulse' : ''}`} />
               </button>
+              )}
             </div>
             )}
             {canShowStatus('cleared') && (
@@ -971,6 +997,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 Cleared <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'cleared' ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.clearedApplications || 0}</span>
               </button>
+              {!isFollowUpUser && (
               <button
                 onClick={() => handleExportExcel('cleared')}
                 disabled={downloadingExcel === 'cleared'}
@@ -979,6 +1006,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'cleared' ? 'animate-pulse' : ''}`} />
               </button>
+              )}
             </div>
             )}
             {canShowStatus('rejected') && (
@@ -993,6 +1021,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 Rejected <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'rejected' ? 'bg-red-700 text-white' : 'bg-gray-100 text-gray-800'}`}>{stats?.rejectedApplications || 0}</span>
               </button>
+              {!isFollowUpUser && (
               <button
                 onClick={() => handleExportExcel('rejected')}
                 disabled={downloadingExcel === 'rejected'}
@@ -1001,6 +1030,7 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
               >
                 <Download className={`w-4 h-4 ${downloadingExcel === 'rejected' ? 'animate-pulse' : ''}`} />
               </button>
+              )}
             </div>
             )}
           </div>
@@ -1352,12 +1382,14 @@ export function LoanApplicationsQueue({ initialStatus }: LoanApplicationsQueuePr
                       const afterDisbursal = status === 'account_manager';
                       const overdue = status === 'overdue';
                       const verifyUser = s?.verifyUserName ?? 'N/A';
+                      const followUpUser = s?.followUpUserName ?? 'N/A';
                       const accManager = (afterDisbursal || overdue) ? (s?.accManagerName ?? 'N/A') : 'N/A';
                       const recoveryOfficer = overdue ? (s?.recoveryOfficerName ?? 'N/A') : 'N/A';
                       const agency = overdue ? 'YES' : 'NO';
                       return (
                         <div className="text-xs text-gray-700 space-y-0.5 font-mono">
                           <div>Verify user: {verifyUser}</div>
+                          <div>Follow up user: {followUpUser}</div>
                           <div>ACC Manager: {accManager}</div>
                           <div>Recovery officer: {recoveryOfficer}</div>
                           <div>Agency: {agency}</div>

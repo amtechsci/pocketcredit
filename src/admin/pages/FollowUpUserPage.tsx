@@ -47,7 +47,7 @@ export function FollowUpUserPage() {
         {activeTab === 'tvr' ? (
           <TvrIdsPage />
         ) : (
-          <LoanApplicationsQueue initialStatus={tabs.find(t => t.id === activeTab)?.status as any} />
+          <LoanApplicationsQueue initialStatus={tabs.find(t => t.id === activeTab)?.status as any} hideDownloads />
         )}
       </div>
     </div>

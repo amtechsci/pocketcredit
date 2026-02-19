@@ -445,8 +445,9 @@ router.get('/', authenticateAdmin, async (req, res) => {
           const verifyName = (app.temp_verify_user_name || app.verify_user_name) || 'N/A';
           const accManagerName = (app.temp_acc_manager_name || app.acc_manager_name) || 'N/A';
           const recoveryName = (app.temp_recovery_officer_name || app.recovery_officer_name) || 'N/A';
+          const followUpName = (app.temp_follow_up_user_name || app.follow_up_user_name) || 'N/A';
           const isOverdue = app.status === 'overdue';
-          return { verifyUserName: verifyName, accManagerName, recoveryOfficerName: recoveryName, isOverdue };
+          return { verifyUserName: verifyName, accManagerName, recoveryOfficerName: recoveryName, followUpUserName: followUpName, isOverdue };
         })(),
         assignmentType: assignmentType,
         // Additional real data fields

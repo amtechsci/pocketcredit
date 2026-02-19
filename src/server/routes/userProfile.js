@@ -326,7 +326,9 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         am.name as acc_manager_name,
         amt.name as temp_acc_manager_name,
         ar.name as recovery_officer_name,
-        art.name as temp_recovery_officer_name
+        art.name as temp_recovery_officer_name,
+        af.name as follow_up_user_name,
+        aft.name as temp_follow_up_user_name
       FROM loan_applications la
       LEFT JOIN (
         SELECT es1.loan_application_id, es1.status
@@ -343,6 +345,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       LEFT JOIN admins amt ON la.temp_assigned_account_manager_id COLLATE utf8mb4_unicode_ci = amt.id
       LEFT JOIN admins ar ON la.assigned_recovery_officer_id COLLATE utf8mb4_unicode_ci = ar.id
       LEFT JOIN admins art ON la.temp_assigned_recovery_officer_id COLLATE utf8mb4_unicode_ci = art.id
+      LEFT JOIN admins af ON la.assigned_follow_up_admin_id COLLATE utf8mb4_unicode_ci = af.id
+      LEFT JOIN admins aft ON la.temp_assigned_follow_up_admin_id COLLATE utf8mb4_unicode_ci = aft.id
       WHERE la.user_id = ?
       ORDER BY la.created_at DESC
     `, [userId]);
@@ -1248,10 +1252,12 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
             const verifyName = (app.temp_verify_user_name || app.verify_user_name) || 'N/A';
             const accManagerName = (app.temp_acc_manager_name || app.acc_manager_name) || 'N/A';
             const recoveryName = (app.temp_recovery_officer_name || app.recovery_officer_name) || 'N/A';
+            const followUpName = (app.temp_follow_up_user_name || app.follow_up_user_name) || 'N/A';
             return {
               verifyUserName: verifyName,
               accManagerName: (afterDisbursal || overdue) ? accManagerName : 'N/A',
               recoveryOfficerName: overdue ? recoveryName : 'N/A',
+              followUpUserName: followUpName,
               isOverdue: !!overdue
             };
           })()
