@@ -1939,10 +1939,14 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         u.marital_status,
         u.income_range,
         u.pan_number,
+        u.monthly_net_income,
+        u.experian_score,
         COALESCE(ed.employment_type, '') as employment_type,
         COALESCE(ed.company_name, '') as company_name,
         COALESCE(ed.designation, '') as designation,
+        COALESCE(ed.department, '') as department,
         COALESCE(ed.work_experience_years, 0) as work_experience_years,
+        COALESCE(aed.education, '') as education,
         COALESCE(a.city, '') as city,
         COALESCE(a.state, '') as state,
         COALESCE(a.pincode, '') as pincode,
@@ -1950,6 +1954,7 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         COALESCE(a.address_line2, '') as address_line2,
         COALESCE(lp.plan_code, '') as plan_code,
         COALESCE(lp.plan_name, '') as plan_name,
+        COALESCE(p.name, '') as partner_name,
         la.extension_status,
         la.extension_count
       FROM loan_applications la
@@ -1958,7 +1963,8 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         SELECT ed1.user_id, 
                ed1.employment_type, 
                ed1.company_name, 
-               ed1.designation, 
+               ed1.designation,
+               ed1.department,
                ed1.work_experience_years
         FROM employment_details ed1
         WHERE ed1.id = (
@@ -1967,6 +1973,7 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
           WHERE ed2.user_id = ed1.user_id
         )
       ) ed ON u.id = ed.user_id
+      LEFT JOIN application_employment_details aed ON la.id = aed.application_id
       LEFT JOIN (
         SELECT a1.user_id,
                a1.city,
@@ -1983,6 +1990,8 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
           )
       ) a ON u.id = a.user_id
       LEFT JOIN loan_plans lp ON la.loan_plan_id = lp.id
+      LEFT JOIN partner_leads pl ON la.id = pl.loan_application_id
+      LEFT JOIN partners p ON pl.partner_id = p.id
     `;
 
     let whereConditions = [];
@@ -2130,6 +2139,11 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         'Company Name': app.company_name || '',
         'Designation': app.designation || '',
         'Work Experience (Years)': app.work_experience_years || 0,
+        'Education': app.education || '',
+        'Department': app.department || '',
+        'Income Entered by User': app.monthly_net_income ? parseFloat(app.monthly_net_income) : 0,
+        'Partner Name': app.partner_name || '',
+        'Experian Score': app.experian_score || '',
         'Address Line 1': app.address_line1 || '',
         'Address Line 2': app.address_line2 || '',
         'City': app.city || '',

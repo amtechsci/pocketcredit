@@ -66,12 +66,14 @@ const authenticateAdmin = async (req, res, next) => {
     const adminId = admin.id;
     
     // Check inactivity timeout using Redis
+    // Note: Multiple devices can login simultaneously - each gets its own JWT token
+    // The Redis activity key is shared but only tracks last activity, not session count
     const activityKey = `admin:activity:${adminId}`;
     const lastActivity = await get(activityKey);
     const now = Date.now();
     
     if (lastActivity) {
-      const timeSinceLastActivity = now - lastActivity;
+      const timeSinceLastActivity = now - parseInt(lastActivity, 10);
       
       // If inactive for more than INACTIVITY_TIMEOUT, reject the request
       if (timeSinceLastActivity > INACTIVITY_TIMEOUT) {
@@ -93,9 +95,14 @@ const authenticateAdmin = async (req, res, next) => {
         res.setHeader('X-Session-Time-Remaining', Math.ceil(timeUntilExpiry / 1000).toString()); // seconds
       }
     }
+    // If lastActivity doesn't exist (new login, Redis cleared, etc.), 
+    // still allow the request if JWT token is valid (checked above)
+    // This allows multiple simultaneous logins from different devices
     
     // Update last activity timestamp (extend TTL to 60 minutes)
-    await set(activityKey, now, 60 * 60); // 60 minutes TTL in seconds
+    // This is safe to do even if another device just updated it - 
+    // it just means this device is active now
+    await set(activityKey, now.toString(), 60 * 60); // 60 minutes TTL in seconds
     
     req.admin = {
       id: admin.id,
