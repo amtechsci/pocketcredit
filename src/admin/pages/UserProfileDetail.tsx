@@ -1299,6 +1299,54 @@ function UserProfileDetail() {
     }
   };
 
+  // Quick action: Move user to QA Verification (for follow-up users without Validation tab)
+  const handleMoveToQA = async () => {
+    if (!userData?.id) return;
+
+    try {
+      const adminId = currentUser?.id || 'unknown';
+
+      const loans = getArray('loans');
+      const activeStatuses = ['submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal', 'qa_verification'];
+      const appliedLoans = loans ? loans.filter((loan: any) => activeStatuses.includes(loan.status)) : [];
+      const latestLoan = appliedLoans && appliedLoans.length > 0 ? appliedLoans[0] : null;
+      const loanApplicationId = latestLoan?.id || latestLoan?.loanId || userData.current_loan_id || null;
+
+      const requestData = {
+        userId: userData.id,
+        loanApplicationId,
+        actionType: 'qa_verification' as const,
+        actionDetails: { message: 'Profile moved to QA Verification status (via Follow-up user)' },
+        adminId
+      };
+
+      const response = await adminApiService.submitValidationAction(requestData);
+
+      if (response.status === 'success') {
+        toast.success('Profile moved to QA Verification.');
+        // Refresh history (if available) and user data
+        try {
+          await fetchValidationHistory();
+        } catch {
+          // ignore if follow-up user cannot see validation history
+        }
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success' && profileResponse.data) {
+          setUserData(profileResponse.data);
+        }
+      } else {
+        toast.error(response.message || 'Failed to move profile to QA Verification.');
+      }
+    } catch (error: any) {
+      console.error('Error moving profile to QA Verification:', error);
+      const errorMessage =
+        error?.response?.data?.message ||
+        error?.message ||
+        'Failed to move profile to QA Verification.';
+      toast.error(errorMessage);
+    }
+  };
+
   // Loan Application Review Handlers
   const handleViewApplication = (loanId: string) => {
     // TODO: Implement detailed application view modal
@@ -11855,6 +11903,14 @@ function UserProfileDetail() {
             <ArrowLeft className="w-4 h-4" />
             <span className="hidden sm:inline">Back to Applications</span>
           </button>
+          {isFollowUpUserAdmin && (
+            <button
+              onClick={handleMoveToQA}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium bg-cyan-600 text-white hover:bg-cyan-700 shadow-sm"
+            >
+              Move to QA
+            </button>
+          )}
         </div>
       </div>
 
