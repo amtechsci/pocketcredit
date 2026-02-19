@@ -1946,7 +1946,7 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         COALESCE(ed.designation, '') as designation,
         COALESCE(ed.department, '') as department,
         COALESCE(ed.work_experience_years, 0) as work_experience_years,
-        '' as education,
+        COALESCE(ed.education, '') as education,
         COALESCE(a.city, '') as city,
         COALESCE(a.state, '') as state,
         COALESCE(a.pincode, '') as pincode,
@@ -1965,7 +1965,8 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
                ed1.company_name, 
                ed1.designation,
                ed1.department,
-               ed1.work_experience_years
+               ed1.work_experience_years,
+               ed1.education
         FROM employment_details ed1
         WHERE ed1.id = (
           SELECT MAX(ed2.id)
@@ -2142,7 +2143,7 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         'Department': app.department || '',
         'Income Entered by User': app.monthly_net_income ? parseFloat(app.monthly_net_income) : 0,
         'Partner Name': app.partner_name || '',
-        'Experian Score': app.experian_score || '',
+        'Experian Score': app.experian_score !== null && app.experian_score !== undefined ? String(app.experian_score) : '',
         'Address Line 1': app.address_line1 || '',
         'Address Line 2': app.address_line2 || '',
         'City': app.city || '',
