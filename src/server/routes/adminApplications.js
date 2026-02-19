@@ -1940,7 +1940,7 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         u.income_range,
         u.pan_number,
         u.monthly_net_income,
-        u.experian_score,
+        COALESCE(u.experian_score, cc.credit_score) as experian_score,
         COALESCE(ed.employment_type, '') as employment_type,
         COALESCE(ed.company_name, '') as company_name,
         COALESCE(ed.designation, '') as designation,
@@ -1992,6 +1992,16 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
       LEFT JOIN loan_plans lp ON la.loan_plan_id = lp.id
       LEFT JOIN partner_leads pl ON la.id = pl.loan_application_id
       LEFT JOIN partners p ON pl.partner_id = p.id
+      LEFT JOIN (
+        SELECT cc1.user_id,
+               cc1.credit_score
+        FROM credit_checks cc1
+        WHERE cc1.id = (
+          SELECT MAX(cc2.id)
+          FROM credit_checks cc2
+          WHERE cc2.user_id = cc1.user_id
+        )
+      ) cc ON u.id = cc.user_id
     `;
 
     let whereConditions = [];
