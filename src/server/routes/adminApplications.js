@@ -77,7 +77,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
         qa_user: ['disbursal', 'ready_for_disbursement'],
         account_manager: ['account_manager'],
         recovery_officer: ['overdue'],
-        debt_agency: ['overdue']
+        debt_agency: ['overdue'],
+        follow_up_user: ['submitted', 'follow_up', 'disbursal']
       };
       const allowed = allowedByCategory[subCategory];
       if (allowed && (!status || status === 'all' || !allowed.includes(status))) {
@@ -289,7 +290,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
         whereConditions.push('(la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)');
         queryParams.push(adminId, adminId);
         if (!effectiveStatus || effectiveStatus === 'all') {
-          whereConditions.push("la.status IN ('submitted','under_review','follow_up')");
+          whereConditions.push("la.status IN ('submitted','under_review','follow_up','disbursal')");
         }
       } else if (subCategory === 'debt_agency') {
         whereConditions.push("la.status = 'overdue'");
@@ -1691,7 +1692,7 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       qa_user: ['disbursal', 'ready_for_disbursement'],
       account_manager: ['account_manager'],
       recovery_officer: ['overdue'],
-      follow_up_user: ['submitted', 'under_review', 'follow_up'],
+      follow_up_user: ['submitted', 'under_review', 'follow_up', 'disbursal'],
       debt_agency: ['overdue']
     };
 
@@ -1843,13 +1844,14 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
     if (req.admin?.role === 'nbfc_admin') {
       const nbfcAllowed = ['overdue', 'ready_for_disbursement', 'ready_to_repeat_disbursal'];
       effectiveStatus = (status && nbfcAllowed.includes(status)) ? status : 'ready_for_disbursement';
-    } else if (req.admin?.role === 'sub_admin' && exportSubCategory) {
+    } else     if (req.admin?.role === 'sub_admin' && exportSubCategory) {
       const allowedByCategory = {
         verify_user: ['submitted', 'under_review', 'follow_up', 'disbursal', 'ready_for_disbursement'],
         qa_user: ['disbursal', 'ready_for_disbursement'],
         account_manager: ['account_manager'],
         recovery_officer: ['overdue'],
-        debt_agency: ['overdue']
+        debt_agency: ['overdue'],
+        follow_up_user: ['submitted', 'follow_up', 'disbursal']
       };
       const allowed = allowedByCategory[exportSubCategory];
       if (allowed && (!status || status === 'all' || !allowed.includes(status))) {

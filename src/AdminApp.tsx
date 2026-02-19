@@ -145,6 +145,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
       navByRole.push(
         { path: `${BASE_PATH}/follow-up?tab=submitted`, label: 'Submitted', color: 'blue' },
         { path: `${BASE_PATH}/follow-up?tab=follow_up`, label: 'Follow Up', color: 'orange' },
+        { path: `${BASE_PATH}/follow-up?tab=disbursal`, label: 'Disbursal', color: 'green' },
         { path: `${BASE_PATH}/follow-up?tab=tvr`, label: 'TVR IDs', color: 'purple' }
       );
     }

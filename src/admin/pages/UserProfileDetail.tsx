@@ -232,7 +232,6 @@ function UserProfileDetail() {
     { id: 'validation', label: 'Validation', icon: Shield },
     { id: 'credit-analytics', label: 'Credit Analytics', icon: TrendingUp },
     { id: 'follow-up', label: 'Follow Up', icon: MessageSquare },
-    { id: 'disbursal', label: 'Disbursal', icon: Wallet },
     { id: 'notes', label: 'Note', icon: FileText },
     { id: 'profile-comments', label: 'Profile Comments', icon: MessageSquare },
     { id: 'sms', label: 'SMS', icon: MessageSquare },
@@ -242,8 +241,8 @@ function UserProfileDetail() {
     { id: 'enach', label: 'E-NACH', icon: CreditCard },
   ];
   const debtAgencyHiddenTabIdsList = ['kyc', 'documents', 'bank', 'applied-loans', 'transactions', 'validation', 'credit-analytics', 'profile-comments', 'enach'];
-  // Follow-up user: only show documents, reference, follow-up, disbursal, and statement-verification tabs
-  const followUpUserAllowedTabIds = ['documents', 'reference', 'follow-up', 'disbursal', 'statement-verification'];
+  // Follow-up user: only show documents, reference, follow-up, and statement-verification tabs
+  const followUpUserAllowedTabIds = ['documents', 'reference', 'follow-up', 'statement-verification'];
 
   // Map backend step names to user-friendly display (for profile header)
   const getStepDisplayName = (step: string | null | undefined): string => {
@@ -12179,7 +12178,6 @@ function UserProfileDetail() {
         {effectiveActiveTab === 'validation' && renderValidationTab()}
         {effectiveActiveTab === 'credit-analytics' && renderCreditAnalyticsTab()}
         {effectiveActiveTab === 'follow-up' && renderFollowUpTab()}
-        {effectiveActiveTab === 'disbursal' && renderAppliedLoansTab()}
         {effectiveActiveTab === 'notes' && renderNotesTab()}
         {effectiveActiveTab === 'profile-comments' && renderProfileCommentsTab()}
         {effectiveActiveTab === 'sms' && renderSmsTab()}
