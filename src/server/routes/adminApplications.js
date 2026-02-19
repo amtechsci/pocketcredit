@@ -1946,7 +1946,7 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         COALESCE(ed.designation, '') as designation,
         COALESCE(ed.department, '') as department,
         COALESCE(ed.work_experience_years, 0) as work_experience_years,
-        COALESCE(aed.education, '') as education,
+        '' as education,
         COALESCE(a.city, '') as city,
         COALESCE(a.state, '') as state,
         COALESCE(a.pincode, '') as pincode,
@@ -1973,7 +1973,6 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
           WHERE ed2.user_id = ed1.user_id
         )
       ) ed ON u.id = ed.user_id
-      LEFT JOIN application_employment_details aed ON la.id = aed.application_id
       LEFT JOIN (
         SELECT a1.user_id,
                a1.city,
