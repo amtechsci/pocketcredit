@@ -12043,6 +12043,11 @@ function UserProfileDetail() {
               </div>
               <div className="flex overflow-x-auto scrollbar-hide items-center gap-2 sm:gap-4 text-xs sm:text-sm text-gray-600 pb-2 -mx-3 sm:mx-0 px-3 sm:px-0">
                 {getUserData('clid') && <span className="whitespace-nowrap flex-shrink-0">CLID: {getUserData('clid')}</span>}
+                {userData?.partnerName && (
+                  <span className="flex items-center gap-1 whitespace-nowrap flex-shrink-0">
+                    <span className="font-semibold">Partner:</span> {userData.partnerName}
+                  </span>
+                )}
                 <span className="flex items-center gap-1 whitespace-nowrap flex-shrink-0">
                   <Phone className="w-3 h-3" />
                   {shouldMaskMobile('profile') ? maskMobileLast4(getUserData('mobile')) : getUserData('mobile')}

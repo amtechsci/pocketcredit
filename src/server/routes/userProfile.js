@@ -1024,6 +1024,26 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     // Generate customer unique ID (CLID) - format: PC + user ID
     const clid = `PC${String(user.id).padStart(5, '0')}`;
 
+    // Fetch partner information (primary partner - the one user registered via)
+    let partnerName = null;
+    try {
+      const partnerLead = await executeQuery(`
+        SELECT p.name as partner_name, p.client_id
+        FROM partner_leads pl
+        INNER JOIN partners p ON pl.partner_id = p.id
+        WHERE pl.user_id = ? AND pl.user_registered_at IS NOT NULL
+        ORDER BY pl.user_registered_at ASC
+        LIMIT 1
+      `, [userId]);
+      
+      if (partnerLead && partnerLead.length > 0) {
+        partnerName = partnerLead[0].partner_name || partnerLead[0].client_id || null;
+      }
+    } catch (error) {
+      console.error('Error fetching partner information:', error);
+      // Non-critical, continue without partner name
+    }
+
     // Fetch follow-ups
     let followUps = [];
     try {
@@ -1114,6 +1134,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       employmentType: user.employment_type || null, // Employment type from users table (Step 2 selection)
       incomeRange: user.income_range || null, // Income range from users table (Step 2 selection)
       application_hold_reason: user.application_hold_reason || null, // Hold reason if user is on hold
+      partnerName: partnerName, // Partner name if user joined via partner
       personalInfo: {
         age: calculateAge(user.date_of_birth),
         gender: user.gender || 'N/A',
