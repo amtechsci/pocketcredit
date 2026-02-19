@@ -1202,6 +1202,19 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
 
     await executeQuery(updateQuery, updateParams);
 
+    // Any status change on a TVR user should clear TVR flag
+    try {
+      await executeQuery(
+        `UPDATE users 
+         SET moved_to_tvr = 0, moved_to_tvr_at = NULL, moved_to_tvr_by = NULL, updated_at = CURRENT_TIMESTAMP 
+         WHERE id = ? AND COALESCE(moved_to_tvr, 0) = 1`,
+        [loan.user_id]
+      );
+      console.log(`✅ Cleared TVR flag for user ${loan.user_id} after loan ${applicationId} status changed to ${status}`);
+    } catch (err) {
+      console.error(`❌ Failed to clear TVR flag for user ${loan.user_id} after loan ${applicationId} status changed to ${status}:`, err);
+    }
+
     // Assign account manager when status changes to account_manager (by PCID)
     if (status === 'account_manager') {
       try {

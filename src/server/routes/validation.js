@@ -307,6 +307,20 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
             const oldStatus = loanToUpdate?.status || 'unknown';
             loanUpdateMessage = `Loan ${targetLoanId} status updated from ${oldStatus} to ${newStatus}`;
             console.log(`✅ Successfully updated loan ${targetLoanId} status from ${oldStatus} to ${newStatus} (${affectedRows} row(s) affected)`);
+
+            // Any status change on a TVR user should clear TVR flag
+            try {
+              await executeQuery(
+                `UPDATE users 
+                 SET moved_to_tvr = 0, moved_to_tvr_at = NULL, moved_to_tvr_by = NULL, updated_at = CURRENT_TIMESTAMP 
+                 WHERE id = ? AND COALESCE(moved_to_tvr, 0) = 1`,
+                [userId]
+              );
+              console.log(`✅ Cleared TVR flag for user ${userId} after loan ${targetLoanId} status changed to ${newStatus}`);
+            } catch (clearErr) {
+              console.error(`❌ Failed to clear TVR flag for user ${userId} after loan ${targetLoanId} status changed to ${newStatus}:`, clearErr);
+            }
+
             if (newStatus === 'qa_verification') {
               try {
                 const { assignQAUserForLoan } = require('../services/adminAssignmentService');
