@@ -242,7 +242,7 @@ function UserProfileDetail() {
   ];
   const debtAgencyHiddenTabIdsList = ['kyc', 'documents', 'bank', 'applied-loans', 'transactions', 'validation', 'credit-analytics', 'profile-comments', 'enach'];
   // Follow-up user: only show documents, reference, follow-up, and statement-verification tabs
-  const followUpUserAllowedTabIds = ['documents', 'reference', 'follow-up', 'statement-verification'];
+  const followUpUserAllowedTabIds = ['documents', 'reference', 'follow-up', 'statement-verification', 'notes'];
 
   // Map backend step names to user-friendly display (for profile header)
   const getStepDisplayName = (step: string | null | undefined): string => {
@@ -2575,6 +2575,11 @@ function UserProfileDetail() {
               )}
             </div>
             <div className="text-sm font-semibold text-gray-900">{shouldMaskMobile('profile') ? maskMobileLast4(getUserData('mobile')) : getUserData('mobile')}</div>
+            {userData?.alternateMobile && userData.alternateMobile !== 'N/A' && (
+              <div className="text-xs text-gray-600 mt-1">
+                Alt: <span className="font-medium text-gray-800">{userData.alternateMobile}</span>
+              </div>
+            )}
           </div>
           <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
             <div className="text-xs font-medium text-gray-500 mb-1">Email</div>
