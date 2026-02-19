@@ -221,8 +221,23 @@ const linkLoanToLead = async (userId, loanApplicationId, utmSource) => {
   try {
     await initializeDatabase();
 
-    // Find lead by user_id and utm_source
-    const leads = await executeQuery(
+    // Get loan status first
+    const loan = await executeQuery(
+      `SELECT status, disbursed_at, loan_amount, disbursal_amount
+       FROM loan_applications
+       WHERE id = ?`,
+      [loanApplicationId]
+    );
+
+    if (!loan || loan.length === 0) {
+      return { success: false, reason: 'Loan not found' };
+    }
+
+    const loanStatus = loan[0].status;
+    const loanData = loan[0];
+
+    // Find the primary lead (from utm_source that triggered signup) for payout attribution
+    const primaryLead = await executeQuery(
       `SELECT id, partner_id, loan_application_id
        FROM partner_leads
        WHERE user_id = ? AND utm_source = ?
@@ -231,48 +246,42 @@ const linkLoanToLead = async (userId, loanApplicationId, utmSource) => {
       [userId, utmSource]
     );
 
-    if (leads && leads.length > 0 && !leads[0].loan_application_id) {
-      // Update lead with loan application
+    let primaryLeadId = null;
+    if (primaryLead && primaryLead.length > 0 && !primaryLead[0].loan_application_id) {
+      // Update primary lead with loan application (for payout attribution)
       await executeQuery(
         `UPDATE partner_leads
          SET loan_application_id = ?,
              user_registered_at = COALESCE(user_registered_at, NOW()),
              updated_at = NOW()
          WHERE id = ?`,
-        [loanApplicationId, leads[0].id]
+        [loanApplicationId, primaryLead[0].id]
       );
+      primaryLeadId = primaryLead[0].id;
 
-      // Get loan status
-      const loan = await executeQuery(
-        `SELECT status, disbursed_at, loan_amount, disbursal_amount
-         FROM loan_applications
-         WHERE id = ?`,
-        [loanApplicationId]
-      );
-
-      if (loan && loan.length > 0) {
-        await executeQuery(
-          `UPDATE partner_leads
-           SET loan_status = ?,
-               updated_at = NOW()
-           WHERE id = ?`,
-          [loan[0].status, leads[0].id]
+      // If loan is disbursed, update payout info for primary lead only
+      if (loanData.disbursed_at) {
+        await updateLeadPayout(
+          primaryLead[0].id,
+          loanData.disbursal_amount || loanData.loan_amount,
+          loanData.disbursed_at
         );
-
-        // If loan is disbursed, update payout info
-        if (loan[0].disbursed_at) {
-          await updateLeadPayout(
-            leads[0].id,
-            loan[0].disbursal_amount || loan[0].loan_amount,
-            loan[0].disbursed_at
-          );
-        }
       }
-
-      return { success: true, lead_id: leads[0].id };
     }
 
-    return { success: false, reason: 'Lead not found or already linked' };
+    // Update loan_status for ALL partner_leads entries for this user_id
+    // This ensures all partners who shared this lead can see the loan status
+    // BUT: Only the primary partner (utm_source) gets loan_application_id set
+    // Other partners will see loan_status but NOT have loan_application_id (indicating converted by another partner)
+    await executeQuery(
+      `UPDATE partner_leads
+       SET loan_status = ?,
+           updated_at = NOW()
+       WHERE user_id = ?`,
+      [loanStatus, userId]
+    );
+
+    return { success: true, lead_id: primaryLeadId || 'updated_all' };
   } catch (error) {
     console.error('Error linking loan to lead:', error);
     throw error;

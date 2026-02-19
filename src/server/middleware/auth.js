@@ -3,8 +3,8 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 const { get, set, del } = require('../config/redis');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'pocket-credit-secret-key-2025';
-const INACTIVITY_TIMEOUT = 20 * 60 * 1000; // 20 minutes in milliseconds
-const WARNING_THRESHOLD = 18 * 60 * 1000; // 18 minutes in milliseconds
+const INACTIVITY_TIMEOUT = 60 * 60 * 1000; // 60 minutes in milliseconds
+const WARNING_THRESHOLD = 58 * 60 * 1000; // 58 minutes in milliseconds
 
 // Authentication middleware
 const authenticateToken = (req, res, next) => {
@@ -73,7 +73,7 @@ const authenticateAdmin = async (req, res, next) => {
     if (lastActivity) {
       const timeSinceLastActivity = now - lastActivity;
       
-      // If inactive for more than 20 minutes, reject the request
+      // If inactive for more than INACTIVITY_TIMEOUT, reject the request
       if (timeSinceLastActivity > INACTIVITY_TIMEOUT) {
         // Clear the activity record
         await del(activityKey);
@@ -85,7 +85,7 @@ const authenticateAdmin = async (req, res, next) => {
         });
       }
       
-      // Check if we should send a warning (18 minutes of inactivity)
+      // Check if we should send a warning close to inactivity timeout
       const timeUntilExpiry = INACTIVITY_TIMEOUT - timeSinceLastActivity;
       if (timeSinceLastActivity > WARNING_THRESHOLD && timeUntilExpiry > 0) {
         // Add warning header to response
@@ -94,8 +94,8 @@ const authenticateAdmin = async (req, res, next) => {
       }
     }
     
-    // Update last activity timestamp (extend TTL to 20 minutes)
-    await set(activityKey, now, 20 * 60); // 20 minutes TTL in seconds
+    // Update last activity timestamp (extend TTL to 60 minutes)
+    await set(activityKey, now, 60 * 60); // 60 minutes TTL in seconds
     
     req.admin = {
       id: admin.id,

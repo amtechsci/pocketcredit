@@ -120,6 +120,33 @@ export function PartnerDashboardPage() {
     );
   };
 
+  // Combined user status badge for table – prefer loan status when user has applied
+  const getUserStatusBadge = (lead: PartnerLead) => {
+    // If user has an application, surface key loan states instead of generic "Active User"
+    if (lead.loan_status) {
+      const loanStatus = (lead.loan_status || '').toLowerCase();
+
+      if (loanStatus === 'qa_verification') {
+        return (
+          <span className="px-2 py-1 rounded-full text-xs font-medium bg-cyan-100 text-cyan-800">
+            QA Verification
+          </span>
+        );
+      }
+
+      if (['submitted', 'under_review', 'follow_up', 'approved', 'ready_for_disbursement', 'disbursal', 'account_manager'].includes(loanStatus)) {
+        return (
+          <span className="px-2 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+            Loan Applied
+          </span>
+        );
+      }
+    }
+
+    // Fallback to lead-level dedupe status (Fresh/Registered/Active)
+    return getStatusBadge(lead.dedupe_status);
+  };
+
   const filteredLeads = leads.filter((lead) => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
@@ -329,7 +356,7 @@ export function PartnerDashboardPage() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            {getStatusBadge(lead.dedupe_status)}
+                            {getUserStatusBadge(lead)}
                             {lead.user_status === 'on_hold' && (
                               <span className="px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800" title="User is on hold">
                                 Hold
@@ -341,7 +368,13 @@ export function PartnerDashboardPage() {
                           {formatDate(lead.lead_shared_at)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {formatLoanStatus(lead.loan_status)}
+                          {lead.loan_status && !lead.loan_application_id ? (
+                            <span className="text-gray-400 italic" title="User joined via another partner">
+                              Joined by another partner
+                            </span>
+                          ) : (
+                            formatLoanStatus(lead.loan_status)
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">

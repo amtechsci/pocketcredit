@@ -86,16 +86,16 @@ router.post('/login', validate(schemas.adminLogin), async (req, res) => {
       });
     }
 
-    // Generate token (20 minutes expiration for security)
+    // Generate token (60 minutes expiration for security)
     const token = generateToken({
       id: admin.id,
       email: admin.email,
       role: admin.role
-    }, '20m'); // Admin tokens expire in 20 minutes
+    }, '60m'); // Admin tokens expire in 60 minutes
 
-    // Set initial activity timestamp in Redis (20 minutes TTL)
+    // Set initial activity timestamp in Redis (60 minutes TTL)
     const activityKey = `admin:activity:${admin.id}`;
-    await set(activityKey, Date.now(), 20 * 60); // 20 minutes in seconds
+    await set(activityKey, Date.now(), 60 * 60); // 60 minutes in seconds
 
     // Log admin login in MySQL
     const loginId = uuidv4();

@@ -1202,6 +1202,23 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
 
     await executeQuery(updateQuery, updateParams);
 
+    // Update partner_leads loan_status for all leads for this user
+    // This ensures all partners who shared this lead see the updated loan status
+    // Note: Only the primary partner (who converted the lead) has loan_application_id set
+    // Other partners will see loan_status but NOT have loan_application_id (indicating converted by another partner)
+    try {
+      await executeQuery(
+        `UPDATE partner_leads
+         SET loan_status = ?,
+             updated_at = NOW()
+         WHERE user_id = ?`,
+        [status, loan.user_id]
+      );
+      console.log(`✅ Updated partner_leads loan_status to ${status} for user ${loan.user_id} / loan ${applicationId}`);
+    } catch (err) {
+      console.error(`❌ Failed to update partner_leads loan_status for user ${loan.user_id} / loan ${applicationId}:`, err);
+    }
+
     // Any status change on a TVR user should clear TVR flag
     try {
       await executeQuery(

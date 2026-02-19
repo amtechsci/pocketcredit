@@ -308,6 +308,23 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
             loanUpdateMessage = `Loan ${targetLoanId} status updated from ${oldStatus} to ${newStatus}`;
             console.log(`✅ Successfully updated loan ${targetLoanId} status from ${oldStatus} to ${newStatus} (${affectedRows} row(s) affected)`);
 
+            // Update partner_leads loan_status for all leads for this user
+            // This ensures all partners who shared this lead see the updated loan status
+            // Note: Only the primary partner (who converted the lead) has loan_application_id set
+            // Other partners will see loan_status but NOT have loan_application_id (indicating converted by another partner)
+            try {
+              await executeQuery(
+                `UPDATE partner_leads
+                 SET loan_status = ?,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE user_id = ?`,
+                [newStatus, userId]
+              );
+              console.log(`✅ Updated partner_leads loan_status to ${newStatus} for user ${userId} / loan ${targetLoanId}`);
+            } catch (partnerErr) {
+              console.error(`❌ Failed to update partner_leads loan_status for user ${userId} / loan ${targetLoanId}:`, partnerErr);
+            }
+
             // Any status change on a TVR user should clear TVR flag
             try {
               await executeQuery(
