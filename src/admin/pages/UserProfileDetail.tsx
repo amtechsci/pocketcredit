@@ -11990,6 +11990,9 @@ function UserProfileDetail() {
                 <span className="flex items-center gap-1 whitespace-nowrap flex-shrink-0">
                   <Phone className="w-3 h-3" />
                   {shouldMaskMobile('profile') ? maskMobileLast4(getUserData('mobile')) : getUserData('mobile')}
+                  {userData?.alternateMobile && userData.alternateMobile !== 'N/A' && (
+                    <span className="text-gray-500 ml-0.5"> / Alt: <span className="text-gray-700 font-medium">{userData.alternateMobile}</span></span>
+                  )}
                 </span>
                 <span className="flex items-center gap-1 whitespace-nowrap flex-shrink-0">
                   <Mail className="w-3 h-3 flex-shrink-0" />
