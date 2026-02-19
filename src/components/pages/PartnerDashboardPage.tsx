@@ -120,8 +120,18 @@ export function PartnerDashboardPage() {
     );
   };
 
-  // Combined user status badge for table – prefer loan status when user has applied
+  // Combined user status badge for table – prefer loan / attribution info
   const getUserStatusBadge = (lead: PartnerLead) => {
+    // If user is registered but not via this partner, show attribution info
+    // (user_id is linked, but user_registered_at is null for this partner_leads row)
+    if (lead.user_id && !lead.user_registered_at) {
+      return (
+        <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+          Joined by another partner
+        </span>
+      );
+    }
+
     // If user has an application, surface key loan states instead of generic "Active User"
     if (lead.loan_status) {
       const loanStatus = (lead.loan_status || '').toLowerCase();
@@ -368,7 +378,11 @@ export function PartnerDashboardPage() {
                           {formatDate(lead.lead_shared_at)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {lead.loan_status && !lead.loan_application_id ? (
+                          {lead.user_id && !lead.user_registered_at ? (
+                            <span className="text-gray-400 italic" title="User joined via another partner">
+                              Joined by another partner
+                            </span>
+                          ) : lead.loan_status && !lead.loan_application_id ? (
                             <span className="text-gray-400 italic" title="User joined via another partner">
                               Joined by another partner
                             </span>
