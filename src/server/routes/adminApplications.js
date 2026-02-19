@@ -287,8 +287,11 @@ router.get('/', authenticateAdmin, async (req, res) => {
         queryParams.push(adminId, adminId);
         whereConditions.push("la.status = 'overdue'");
       } else if (subCategory === 'follow_up_user') {
-        whereConditions.push('(la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)');
-        queryParams.push(adminId, adminId);
+        // For disbursal tab: show all disbursal loans (not assigned, as QA/verify move them)
+        if (effectiveStatus !== 'disbursal') {
+          whereConditions.push('(la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)');
+          queryParams.push(adminId, adminId);
+        }
         if (!effectiveStatus || effectiveStatus === 'all') {
           whereConditions.push("la.status IN ('submitted','under_review','follow_up','disbursal')");
         }
@@ -1734,18 +1737,30 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
         const tempCol = subCat === 'verify_user' ? 'temp_assigned_verify_admin_id' : subCat === 'qa_user' ? 'temp_assigned_qa_admin_id' : subCat === 'account_manager' ? 'temp_assigned_account_manager_id' : subCat === 'recovery_officer' ? 'temp_assigned_recovery_officer_id' : subCat === 'follow_up_user' ? 'temp_assigned_follow_up_admin_id' : null;
         const allowed = subAdminAllowedByCategory[subCat];
         if (assignedCol && tempCol && Array.isArray(allowed)) {
-          const placeholders = allowed.map(() => '?').join(',');
-          const statusResult = await executeQuery(
+          // Follow-up user: disbursal loans are not assigned; get submitted/follow_up only with assignment, then add all disbursal
+          const statusesForAssignment = subCat === 'follow_up_user' ? allowed.filter(s => s !== 'disbursal') : allowed;
+          const placeholders = statusesForAssignment.map(() => '?').join(',');
+          const statusResult = statusesForAssignment.length > 0 ? await executeQuery(
             `SELECT la.status, COUNT(*) as count FROM loan_applications la
              INNER JOIN users u ON la.user_id = u.id
              WHERE (la.${assignedCol} = ? OR la.${tempCol} = ?) AND la.status IN (${placeholders}) AND (COALESCE(u.moved_to_tvr, 0) = 0)
              GROUP BY la.status`,
-            [adminId, adminId, ...allowed]
-          );
+            [adminId, adminId, ...statusesForAssignment]
+          ) : [];
           statusResult.forEach(row => {
             statusCounts[row.status] = row.count;
             total += Number(row.count);
           });
+          if (subCat === 'follow_up_user' && allowed.includes('disbursal')) {
+            const [disbRows] = await executeQuery(
+              `SELECT COUNT(*) as c FROM loan_applications la
+               INNER JOIN users u ON la.user_id = u.id
+               WHERE la.status = 'disbursal' AND (COALESCE(u.moved_to_tvr, 0) = 0)`,
+              []
+            );
+            statusCounts['disbursal'] = disbRows?.[0]?.c || 0;
+            total += Number(statusCounts['disbursal']);
+          }
         }
       }
     } else {
@@ -2026,6 +2041,14 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         whereConditions.push('(la.assigned_recovery_officer_id = ? OR la.temp_assigned_recovery_officer_id = ?)');
         queryParams.push(adminId, adminId);
         whereConditions.push("la.status = 'overdue'");
+      } else if (exportSubCategory === 'follow_up_user') {
+        if (effectiveStatus !== 'disbursal') {
+          whereConditions.push('(la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)');
+          queryParams.push(adminId, adminId);
+        }
+        if (!effectiveStatus || effectiveStatus === 'all') {
+          whereConditions.push("la.status IN ('submitted','under_review','follow_up','disbursal')");
+        }
       } else if (exportSubCategory === 'debt_agency') {
         whereConditions.push("la.status = 'overdue'");
       }
