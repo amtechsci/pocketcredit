@@ -15,23 +15,6 @@ const router = express.Router();
 
 const PARTNERS_KEYS_DIR = path.join(__dirname, '..', 'partner_keys', 'partners');
 
-/** Ensure category, activities, and payout_percentage columns exist (migration) */
-async function ensurePartnersColumns() {
-  for (const col of [
-    { name: 'category', def: 'VARCHAR(255) DEFAULT NULL' },
-    { name: 'activities', def: 'TEXT DEFAULT NULL' },
-    { name: 'payout_percentage', def: 'DECIMAL(5,2) DEFAULT 2.00 NULL' }
-  ]) {
-    try {
-      await executeQuery(`ALTER TABLE partners ADD COLUMN ${col.name} ${col.def}`);
-    } catch (e) {
-      if (e.code !== 'ER_DUP_FIELDNAME' && !String(e.message || '').includes('Duplicate column')) {
-        console.warn('Partners migration:', e.message);
-      }
-    }
-  }
-}
-
 /**
  * Validate that a string looks like a PEM key (public key).
  * @param {string} pem - Raw PEM content
@@ -89,7 +72,6 @@ const requireSuperadmin = (req, res, next) => {
 router.get('/', authenticateAdmin, requireSuperadmin, async (req, res) => {
   try {
     await initializeDatabase();
-    await ensurePartnersColumns();
     const partners = await findAllPartners();
     res.json({ status: 'success', data: { partners } });
   } catch (error) {

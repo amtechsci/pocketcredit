@@ -7,21 +7,6 @@ const express = require('express');
 const router = express.Router();
 const { executeQuery, initializeDatabase } = require('../config/database');
 
-async function ensurePartnersColumns() {
-  for (const col of [
-    { name: 'category', def: 'VARCHAR(255) DEFAULT NULL' },
-    { name: 'activities', def: 'TEXT DEFAULT NULL' }
-  ]) {
-    try {
-      await executeQuery(`ALTER TABLE partners ADD COLUMN ${col.name} ${col.def}`);
-    } catch (e) {
-      if (e.code !== 'ER_DUP_FIELDNAME' && !String(e.message || '').includes('Duplicate column')) {
-        console.warn('Partners migration:', e.message);
-      }
-    }
-  }
-}
-
 /**
  * GET /api/partners-display
  * Public - List partners for Our Partners page (name, category, activities, status)
@@ -29,7 +14,6 @@ async function ensurePartnersColumns() {
 router.get('/', async (req, res) => {
   try {
     await initializeDatabase();
-    await ensurePartnersColumns();
 
     const partners = await executeQuery(
       `SELECT id, name, category, activities, is_active 
