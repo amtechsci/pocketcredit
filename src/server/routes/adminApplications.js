@@ -287,13 +287,13 @@ router.get('/', authenticateAdmin, async (req, res) => {
         queryParams.push(adminId, adminId);
         whereConditions.push("la.status = 'overdue'");
       } else if (subCategory === 'follow_up_user') {
-        // For disbursal tab: show all disbursal loans (not assigned, as QA/verify move them)
-        if (effectiveStatus !== 'disbursal') {
-          whereConditions.push('(la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)');
-          queryParams.push(adminId, adminId);
-        }
+        // Restrict to assigned applications for all tabs (including disbursal and TVR)
+        whereConditions.push('(la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)');
+        queryParams.push(adminId, adminId);
         if (!effectiveStatus || effectiveStatus === 'all') {
           whereConditions.push("la.status IN ('submitted','under_review','follow_up','disbursal')");
+        } else if (effectiveStatus === 'disbursal') {
+          whereConditions.push("la.status = 'disbursal'");
         }
       } else if (subCategory === 'debt_agency') {
         whereConditions.push("la.status = 'overdue'");
@@ -535,6 +535,17 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
       )`);
       const searchPattern = `%${search}%`;
       queryParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
+    }
+
+    // Sub-admin follow_up_user: only show TVR users whose loan is assigned to this admin
+    if (req.admin?.role === 'sub_admin' && req.admin?.sub_admin_category === 'follow_up_user') {
+      const adminId = req.admin.id;
+      whereConditions.push(`EXISTS (
+        SELECT 1 FROM loan_applications la2
+        WHERE la2.user_id = u.id
+        AND (la2.assigned_follow_up_admin_id = ? OR la2.temp_assigned_follow_up_admin_id = ?)
+      )`);
+      queryParams.push(adminId, adminId);
     }
 
     // Count total for pagination (same WHERE, no LIMIT)
@@ -1786,8 +1797,8 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
             const [disbRows] = await executeQuery(
               `SELECT COUNT(*) as c FROM loan_applications la
                INNER JOIN users u ON la.user_id = u.id
-               WHERE la.status = 'disbursal' AND (COALESCE(u.moved_to_tvr, 0) = 0)`,
-              []
+               WHERE (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?) AND la.status = 'disbursal' AND (COALESCE(u.moved_to_tvr, 0) = 0)`,
+              [adminId, adminId]
             );
             statusCounts['disbursal'] = disbRows?.[0]?.c || 0;
             total += Number(statusCounts['disbursal']);
@@ -2092,12 +2103,12 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         queryParams.push(adminId, adminId);
         whereConditions.push("la.status = 'overdue'");
       } else if (exportSubCategory === 'follow_up_user') {
-        if (effectiveStatus !== 'disbursal') {
-          whereConditions.push('(la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)');
-          queryParams.push(adminId, adminId);
-        }
+        whereConditions.push('(la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)');
+        queryParams.push(adminId, adminId);
         if (!effectiveStatus || effectiveStatus === 'all') {
           whereConditions.push("la.status IN ('submitted','under_review','follow_up','disbursal')");
+        } else if (effectiveStatus === 'disbursal') {
+          whereConditions.push("la.status = 'disbursal'");
         }
       } else if (exportSubCategory === 'debt_agency') {
         whereConditions.push("la.status = 'overdue'");
