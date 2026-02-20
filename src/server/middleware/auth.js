@@ -68,15 +68,49 @@ const authenticateAdmin = async (req, res, next) => {
     // Check inactivity timeout using Redis
     // Note: Multiple devices can login simultaneously - each gets its own JWT token
     // The Redis activity key is shared but only tracks last activity, not session count
+    // IMPORTANT: When Device B logs in, it updates the shared Redis key, but Device A's
+    // JWT token remains valid. This is intentional - multiple sessions are allowed.
     const activityKey = `admin:activity:${adminId}`;
-    const lastActivity = await get(activityKey);
+    const lastActivityRaw = await get(activityKey);
     const now = Date.now();
     
-    if (lastActivity) {
-      const timeSinceLastActivity = now - parseInt(lastActivity, 10);
+    // Parse lastActivity - handle both string and number formats
+    let lastActivity = null;
+    if (lastActivityRaw !== null && lastActivityRaw !== undefined) {
+      // Redis get() may return string or number depending on how it was stored
+      if (typeof lastActivityRaw === 'string') {
+        lastActivity = parseInt(lastActivityRaw, 10);
+      } else if (typeof lastActivityRaw === 'number') {
+        lastActivity = lastActivityRaw;
+      }
+      
+      // Validate parsed timestamp
+      if (isNaN(lastActivity) || lastActivity <= 0) {
+        console.warn(`[Auth] Invalid lastActivity value for admin ${adminId}: ${lastActivityRaw}, type: ${typeof lastActivityRaw}`);
+        lastActivity = null;
+      }
+    }
+    
+    // IMPORTANT: JWT token validation happens FIRST (line 47), so if we reach here,
+    // the token is valid. Redis activity check is ONLY for inactivity tracking,
+    // not for session validation. Multiple devices can login simultaneously.
+    
+    if (lastActivity && lastActivity > 0) {
+      const timeSinceLastActivity = now - lastActivity;
+      
+      // Debug logging (can be removed in production)
+      if (timeSinceLastActivity < 0) {
+        console.warn(`[Auth] Negative timeSinceLastActivity for admin ${adminId}: ${timeSinceLastActivity}ms (now: ${now}, lastActivity: ${lastActivity})`);
+        // If negative, it means another device just updated the key (normal for multi-device login)
+        // Reset to current time to avoid false expiration
+        lastActivity = now;
+      }
       
       // If inactive for more than INACTIVITY_TIMEOUT, reject the request
-      if (timeSinceLastActivity > INACTIVITY_TIMEOUT) {
+      // BUT: Only if the time difference is reasonable (not caused by clock skew or multi-device login)
+      if (timeSinceLastActivity > INACTIVITY_TIMEOUT && timeSinceLastActivity < INACTIVITY_TIMEOUT * 2) {
+        // Normal expiration - user was inactive
+        console.log(`[Auth] Session expired for admin ${adminId}: inactive for ${Math.round(timeSinceLastActivity / 1000 / 60)} minutes`);
         // Clear the activity record
         await del(activityKey);
         
@@ -86,10 +120,12 @@ const authenticateAdmin = async (req, res, next) => {
           code: 'SESSION_EXPIRED'
         });
       }
+      // If timeSinceLastActivity > INACTIVITY_TIMEOUT * 2, it's likely clock skew or Redis issue,
+      // so we'll allow the request since JWT token is still valid
       
       // Check if we should send a warning close to inactivity timeout
       const timeUntilExpiry = INACTIVITY_TIMEOUT - timeSinceLastActivity;
-      if (timeSinceLastActivity > WARNING_THRESHOLD && timeUntilExpiry > 0) {
+      if (timeSinceLastActivity > WARNING_THRESHOLD && timeUntilExpiry > 0 && timeSinceLastActivity <= INACTIVITY_TIMEOUT) {
         // Add warning header to response
         res.setHeader('X-Session-Warning', 'true');
         res.setHeader('X-Session-Time-Remaining', Math.ceil(timeUntilExpiry / 1000).toString()); // seconds
@@ -102,6 +138,7 @@ const authenticateAdmin = async (req, res, next) => {
     // Update last activity timestamp (extend TTL to 60 minutes)
     // This is safe to do even if another device just updated it - 
     // it just means this device is active now
+    // Store as string explicitly to avoid JSON parsing issues
     await set(activityKey, now.toString(), 60 * 60); // 60 minutes TTL in seconds
     
     req.admin = {

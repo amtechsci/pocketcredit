@@ -294,6 +294,23 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
         const targetLoanId = actualLoanId || loanApplicationId;
 
         if (targetLoanId) {
+          // Auto-assign follow_up_user when status changes to disbursal (if not already assigned)
+          if (newStatus === 'disbursal') {
+            try {
+              const currentLoan = await executeQuery(
+                'SELECT assigned_follow_up_admin_id FROM loan_applications WHERE id = ?',
+                [targetLoanId]
+              );
+              if (currentLoan && currentLoan.length > 0 && (!currentLoan[0].assigned_follow_up_admin_id || currentLoan[0].assigned_follow_up_admin_id === '')) {
+                const { assignFollowUpUserForLoan } = require('../services/adminAssignmentService');
+                await assignFollowUpUserForLoan(targetLoanId);
+              }
+            } catch (assignError) {
+              console.error('Error auto-assigning follow_up_user for disbursal:', assignError);
+              // Non-fatal: continue with status update
+            }
+          }
+
           // Update loan status
           const updateResult = await executeQuery(
             'UPDATE loan_applications SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',

@@ -2416,6 +2416,27 @@ class AdminApiService {
       throw error;
     }
   }
+
+  /**
+   * Assign follow-up user to existing loans (utility endpoint for super admins)
+   */
+  async assignFollowUpUser(status: string = 'disbursal', limit: number = 100): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.post('/api/admin/applications/assign-follow-up-user', {
+        status,
+        limit
+      }, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.data;
+    } catch (error: any) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
 }
 
 // Export singleton instance

@@ -803,6 +803,17 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
       updateParams.push(reason);
     }
 
+    // Auto-assign follow_up_user when status changes to disbursal (if not already assigned)
+    if (status === 'disbursal' && !loan.assigned_follow_up_admin_id) {
+      try {
+        const { assignFollowUpUserForLoan } = require('../services/adminAssignmentService');
+        await assignFollowUpUserForLoan(applicationId);
+      } catch (assignError) {
+        console.error('Error auto-assigning follow_up_user for disbursal:', assignError);
+        // Non-fatal: continue with status update even if assignment fails
+      }
+    }
+
     // Add status-specific timestamps
     if (status === 'approved') {
       updateQuery += ', approved_at = NOW()';
@@ -2644,6 +2655,70 @@ router.post('/fix-disbursal-amounts', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to fix disbursal amounts',
+      error: error.message
+    });
+  }
+});
+
+// Utility endpoint: Assign existing disbursal/TVR loans to follow_up_user (for backfilling assignments)
+router.post('/assign-follow-up-user', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+
+    // Only super admins can run this utility
+    if (req.admin?.role !== 'superadmin' && req.admin?.role !== 'super_admin' && req.admin?.role !== 'master_admin') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Only super admins can assign follow-up users'
+      });
+    }
+
+    const { status = 'disbursal', limit = 100 } = req.body;
+
+    // Get loans without follow_up_user assignment
+    const unassignedLoans = await executeQuery(
+      `SELECT id FROM loan_applications 
+       WHERE status = ? AND (assigned_follow_up_admin_id IS NULL OR assigned_follow_up_admin_id = '')
+       LIMIT ?`,
+      [status, parseInt(limit)]
+    );
+
+    if (unassignedLoans.length === 0) {
+      return res.json({
+        status: 'success',
+        message: 'No unassigned loans found',
+        data: { assigned: 0, total: 0 }
+      });
+    }
+
+    const { assignFollowUpUserForLoan } = require('../services/adminAssignmentService');
+    let assigned = 0;
+    const errors = [];
+
+    for (const loan of unassignedLoans) {
+      try {
+        await assignFollowUpUserForLoan(loan.id);
+        assigned++;
+      } catch (error) {
+        errors.push({ loanId: loan.id, error: error.message });
+      }
+    }
+
+    res.json({
+      status: 'success',
+      message: `Assigned ${assigned} out of ${unassignedLoans.length} loans`,
+      data: {
+        assigned,
+        total: unassignedLoans.length,
+        errors: errors.length > 0 ? errors : undefined
+      }
+    });
+
+  } catch (error) {
+    console.error('Assign follow-up user error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to assign follow-up users',
       error: error.message
     });
   }

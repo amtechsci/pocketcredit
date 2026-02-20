@@ -277,6 +277,9 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
       });
     }
 
+    // Check if this is a repeat loan (repeat_disbursal status)
+    const isRepeatLoan = application.status === 'repeat_disbursal';
+
     // Check if post-disbursal columns exist
     let existingColumns = [];
     try {
@@ -411,11 +414,14 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
       // If agreement is being signed, update status based on loan type
       // Repeat loans: repeat_disbursal -> ready_to_repeat_disbursal
       // Regular loans: disbursal -> ready_for_disbursement
-      if (agreement_signed) {
+      // Only update status if current status is disbursal or repeat_disbursal
+      if (agreement_signed && (application.status === 'disbursal' || application.status === 'repeat_disbursal')) {
         const newStatus = isRepeatLoan ? 'ready_to_repeat_disbursal' : 'ready_for_disbursement';
         updates.push('status = ?');
         params.push(newStatus);
         console.log(`[Post-Disbursal] Agreement signed - updating status from ${application.status} to ${newStatus}`);
+      } else if (agreement_signed) {
+        console.log(`[Post-Disbursal] Agreement signed but status is ${application.status} (not disbursal/repeat_disbursal), skipping status update`);
       }
     }
     if (bank_confirm_done !== undefined && existingColumns.includes('bank_confirm_done')) {

@@ -478,25 +478,41 @@ router.get('/callback', async (req, res) => {
     // Determine new status based on current status
     // Repeat loans: repeat_disbursal -> ready_to_repeat_disbursal
     // Regular loans: disbursal -> ready_for_disbursement
+    // Only update status if current status is disbursal or repeat_disbursal
     const isRepeatLoan = application.status === 'repeat_disbursal';
+    const shouldUpdateStatus = application.status === 'disbursal' || application.status === 'repeat_disbursal';
     const newStatus = isRepeatLoan ? 'ready_to_repeat_disbursal' : 'ready_for_disbursement';
 
     // Update database: mark as signed and store signed PDF S3 key
     // Save to BOTH clickwrap_signed_pdf_s3_key (tracks signed doc) AND loan_agreement_pdf_url (used in emails)
     console.log(`💾 Saving signed PDF S3 key to database: ${s3Key}`);
-    console.log(`📝 Updating status from ${application.status} to ${newStatus}`);
     
-    await executeQuery(
-      `UPDATE loan_applications 
-       SET agreement_signed = 1,
-           status = ?,
-           clickwrap_signed_at = NOW(),
-           clickwrap_signed_pdf_s3_key = ?,
-           loan_agreement_pdf_url = ?,
-           updated_at = NOW()
-       WHERE id = ?`,
-      [newStatus, s3Key, s3Key, applicationId]
-    );
+    if (shouldUpdateStatus) {
+      console.log(`📝 Updating status from ${application.status} to ${newStatus}`);
+      await executeQuery(
+        `UPDATE loan_applications 
+         SET agreement_signed = 1,
+             status = ?,
+             clickwrap_signed_at = NOW(),
+             clickwrap_signed_pdf_s3_key = ?,
+             loan_agreement_pdf_url = ?,
+             updated_at = NOW()
+         WHERE id = ?`,
+        [newStatus, s3Key, s3Key, applicationId]
+      );
+    } else {
+      console.log(`⚠️ Agreement signed but status is ${application.status} (not disbursal/repeat_disbursal), skipping status update`);
+      await executeQuery(
+        `UPDATE loan_applications 
+         SET agreement_signed = 1,
+             clickwrap_signed_at = NOW(),
+             clickwrap_signed_pdf_s3_key = ?,
+             loan_agreement_pdf_url = ?,
+             updated_at = NOW()
+         WHERE id = ?`,
+        [s3Key, s3Key, applicationId]
+      );
+    }
 
     console.log(`✅ Agreement marked as signed - status updated from ${application.status} to ${newStatus}`);
     console.log(`✅ Signed PDF path saved to loan_agreement_pdf_url: ${s3Key}`);

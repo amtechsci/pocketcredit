@@ -142,6 +142,7 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
   const [userComments, setUserComments] = useState<{ [userId: string]: ProfileComment[] }>({});
   const [loadingComments, setLoadingComments] = useState<{ [userId: string]: boolean }>({});
   const [expandedComments, setExpandedComments] = useState<{ [userId: string]: boolean }>({});
+  const [assigningFollowUp, setAssigningFollowUp] = useState(false);
 
   // Initialize status filter from URL parameters (ignore when initialStatus is set, e.g. Over Due page)
   useEffect(() => {
@@ -711,6 +712,47 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
     }
   };
 
+  const handleAssignFollowUpUser = async () => {
+    if (!confirm('Assign follow-up users to unassigned disbursal loans? This will assign up to 100 loans using round-robin.')) {
+      return;
+    }
+
+    setAssigningFollowUp(true);
+    try {
+      const response = await adminApiService.assignFollowUpUser('disbursal', 100);
+      if (response.status === 'success') {
+        toast.success(response.message || `Assigned ${response.data?.assigned || 0} loans`);
+        
+        // Refresh applications and stats
+        const refreshResponse = await adminApiService.getApplications({
+          page: currentPage,
+          limit: pageSize,
+          status: statusFilter,
+          search: searchTerm,
+          sortBy,
+          sortOrder
+        });
+        
+        if (refreshResponse.status === 'success') {
+          setApplications(refreshResponse.data.applications);
+          setPagination(refreshResponse.data.pagination);
+        }
+
+        const statsResponse = await adminApiService.getApplicationStats();
+        if (statsResponse.status === 'success') {
+          setStats(statsResponse.data);
+        }
+      } else {
+        toast.error(response.message || 'Failed to assign follow-up users');
+      }
+    } catch (error: any) {
+      console.error('Error assigning follow-up users:', error);
+      toast.error(error.response?.data?.message || error.message || 'Failed to assign follow-up users');
+    } finally {
+      setAssigningFollowUp(false);
+    }
+  };
+
 
   return (
     <div className="p-3 sm:p-4 lg:p-6 space-y-4 sm:space-y-6">
@@ -1036,7 +1078,7 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
           </div>
 
           {/* Search Bar - Second Row */}
-          <div className="flex items-center">
+          <div className="flex items-center gap-3">
             <div className="flex-1 max-w-md">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -1057,6 +1099,27 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
                 )}
               </div>
             </div>
+            {/* Super Admin Utility: Assign Follow-Up User */}
+            {(currentUser?.role === 'superadmin' || currentUser?.role === 'super_admin' || currentUser?.role === 'master_admin') && (
+              <button
+                onClick={handleAssignFollowUpUser}
+                disabled={assigningFollowUp}
+                className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium whitespace-nowrap"
+                title="Assign follow-up users to unassigned disbursal loans"
+              >
+                {assigningFollowUp ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Assigning...</span>
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="w-4 h-4" />
+                    <span>Assign Follow-Up User</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>
