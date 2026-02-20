@@ -4,11 +4,11 @@
  * Auto-triggered when user selects salary date on employment-details page
  * 
  * BRE CONDITIONS FOR REJECTION:
- * 1. More than 4 loans with "Amount Overdue" in last 6 months of date_reported
+ * 1. More than 3 loans with "Amount Overdue"
  * 2. Enquiry count > 6 in last 30 days
  * 3. More than 2 accounts with Written_off_Settled_Status (00-17) in last 6 months
  * 4. More than 2 accounts with SuitFiled_WilfulDefault (01, 02, 03) in last 6 months
- * 5. Experian score < 450
+ * 5. Experian score < 630
  */
 
 class BREEngineService {
@@ -91,8 +91,8 @@ class BREEngineService {
   }
 
   /**
-   * BRE RULE 1: Amount Overdue loans > 4 in last 6 months (by date_reported)
-   * Checks loans where Amount_Past_Due > 0 and Date_Reported is within last 6 months
+   * BRE RULE 1: Amount Overdue loans > 3
+   * Checks loans where Amount_Past_Due > 0 (any date)
    */
   checkAmountOverdue(creditReport) {
     try {
@@ -102,7 +102,7 @@ class BREEngineService {
         return {
           passed: true,
           count: 0,
-          threshold: 4,
+          threshold: 3,
           reasons: []
         };
       }
@@ -115,29 +115,24 @@ class BREEngineService {
         const amountPastDue = parseFloat(account.Amount_Past_Due) || 0;
 
         if (amountPastDue > 0) {
-          // Check if date_reported is within last 6 months
-          const reportedDate = this.parseExperianDate(account.Date_Reported);
-
-          if (this.isWithinLastMonths(reportedDate, 6)) {
-            overdueCount++;
-            overdueAccounts.push({
-              subscriber: account.Subscriber_Name,
-              accountNumber: account.Account_Number,
-              amountOverdue: amountPastDue,
-              reportedDate: account.Date_Reported
-            });
-          }
+          overdueCount++;
+          overdueAccounts.push({
+            subscriber: account.Subscriber_Name,
+            accountNumber: account.Account_Number,
+            amountOverdue: amountPastDue,
+            reportedDate: account.Date_Reported
+          });
         }
       });
 
-      // RULE: More than 4 overdue accounts = REJECT
-      const passed = overdueCount <= 4;
+      // RULE: More than 3 overdue accounts = REJECT
+      const passed = overdueCount <= 3;
 
       return {
         passed,
         count: overdueCount,
-        threshold: 4,
-        reasons: passed ? [] : [`Amount Overdue loans (${overdueCount}) exceed threshold (4) in last 6 months`],
+        threshold: 3,
+        reasons: passed ? [] : [`Amount Overdue loans (${overdueCount}) exceed threshold (3)`],
         details: overdueAccounts
       };
     } catch (error) {
@@ -145,7 +140,7 @@ class BREEngineService {
       return {
         passed: true, // Don't fail on error - allow manual review
         count: 0,
-        threshold: 4,
+        threshold: 3,
         reasons: [],
         error: error.message
       };
@@ -389,7 +384,7 @@ class BREEngineService {
   }
 
   /**
-   * BRE RULE 5: Experian score < 450 = REJECT
+   * BRE RULE 5: Experian score < 630 = REJECT
    */
   checkCreditScore(creditReport) {
     try {
@@ -401,19 +396,19 @@ class BREEngineService {
         return {
           passed: false,
           score: null,
-          threshold: 450,
+          threshold: 630,
           reasons: ['Credit score not available in report']
         };
       }
 
-      // RULE: Score < 450 = REJECT
-      const passed = score >= 450;
+      // RULE: Score < 630 = REJECT
+      const passed = score >= 630;
 
       return {
         passed,
         score,
-        threshold: 450,
-        reasons: passed ? [] : [`Credit score (${score}) is below minimum requirement (450)`]
+        threshold: 630,
+        reasons: passed ? [] : [`Credit score (${score}) is below minimum requirement (630)`]
       };
     } catch (error) {
       console.error('BRE: Error checking Credit Score:', error);

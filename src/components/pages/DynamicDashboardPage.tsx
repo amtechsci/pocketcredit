@@ -717,7 +717,8 @@ export function DynamicDashboardPage() {
                             loan.status === 'overdue' ? 'Overdue' :
                               loan.status === 'repeat_disbursal' ? 'Repeat Disbursal' :
                                 loan.status === 'ready_to_repeat_disbursal' ? 'Ready for Repeat Disbursal' :
-                                  loan.status.replace('_', ' ')}
+                                  loan.status === 'follow_up' ? 'Verification Pending' :
+                                    loan.status.replace('_', ' ')}
                         </Badge>
                       </div>
 
@@ -732,7 +733,7 @@ export function DynamicDashboardPage() {
                         <p className="text-[10px] text-gray-500">
                           {loan.status === 'submitted' && 'Application submitted'}
                           {loan.status === 'under_review' && 'Under review'}
-                          {loan.status === 'follow_up' && 'Info required'}
+                          {loan.status === 'follow_up' && 'Verification Pending'}
                           {loan.status === 'ready_for_disbursement' && 'Ready for disbursal'}
                           {loan.status === 'ready_to_repeat_disbursal' && 'Ready for repeat disbursal'}
                           {loan.status === 'repeat_disbursal' && 'Repeat disbursal in progress'}
@@ -914,7 +915,8 @@ export function DynamicDashboardPage() {
                       {loan.status === 'account_manager' ? 'Active' :
                         loan.status === 'repeat_disbursal' ? 'Repeat Disbursal' :
                           loan.status === 'ready_to_repeat_disbursal' ? 'Ready for Repeat Disbursal' :
-                            loan.status.replace('_', ' ')}
+                            loan.status === 'follow_up' ? 'Verification Pending' :
+                              loan.status.replace('_', ' ')}
                     </Badge>
                   </div>
 
@@ -929,7 +931,7 @@ export function DynamicDashboardPage() {
                     <p className="text-[10px] text-gray-500">
                       {loan.status === 'submitted' && 'Application submitted'}
                       {loan.status === 'under_review' && 'Under review'}
-                      {loan.status === 'follow_up' && 'Info required'}
+                      {loan.status === 'follow_up' && 'Verification Pending'}
                       {loan.status === 'ready_for_disbursement' && 'Ready for disbursal'}
                       {loan.status === 'ready_to_repeat_disbursal' && 'Ready for repeat disbursal'}
                       {loan.status === 'repeat_disbursal' && 'Repeat disbursal in progress'}

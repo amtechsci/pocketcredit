@@ -94,13 +94,17 @@ export const ApplicationUnderReviewPage = () => {
                 </div>
               </div>
 
-              {/* Main Message */}
+              {/* Main Message - show Verification Pending when in follow_up, Under Review otherwise */}
               <h1 className="text-xl md:text-3xl lg:text-4xl font-bold text-gray-900 mb-2 md:mb-4 leading-tight">
-                Your Loan application is under review
+                {applicationStatus === 'follow_up'
+                  ? 'Verification Pending'
+                  : 'Your Loan application is under review'}
               </h1>
               
               <p className="text-base md:text-lg text-gray-600 mb-6 md:mb-8">
-                & will update you shortly.
+                {applicationStatus === 'follow_up'
+                  ? 'We have received your documents and will verify them shortly.'
+                  : '& will update you shortly.'}
               </p>
 
               {/* Thank You Message */}
@@ -114,7 +118,11 @@ export const ApplicationUnderReviewPage = () => {
               <div className="space-y-3 md:space-y-4 mb-6 md:mb-8">
                 <div className="flex items-center justify-center gap-2 md:gap-3 text-sm md:text-base text-gray-600">
                   <Clock className="w-4 h-4 md:w-5 md:h-5 text-blue-600 flex-shrink-0" />
-                  <span className="break-words">Application Status: <strong className="text-gray-900">Under Review</strong></span>
+                  <span className="break-words">
+                    Application Status: <strong className="text-gray-900">
+                      {applicationStatus === 'follow_up' ? 'Verification Pending' : 'Under Review'}
+                    </strong>
+                  </span>
                 </div>
                 
                 <div className="flex items-center justify-center gap-2 md:gap-3 text-sm md:text-base text-gray-600">

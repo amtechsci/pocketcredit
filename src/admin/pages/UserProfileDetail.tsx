@@ -1299,6 +1299,31 @@ function UserProfileDetail() {
     }
   };
 
+  // Quick action: Move loan to Under Review (for follow-up users - follow_up -> under_review)
+  const handleMoveToUnderReview = async () => {
+    const loans = getArray('loans');
+    const followUpLoans = loans ? loans.filter((l: any) => l.status === 'follow_up') : [];
+    const latestFollowUp = followUpLoans?.[0];
+    const loanId = latestFollowUp?.id ?? latestFollowUp?.loanId;
+    if (!loanId) {
+      toast.error('No follow-up loan found to move.');
+      return;
+    }
+    if (!window.confirm('Move this profile to Under Review? Only confirm if you have verified the documents.')) return;
+    try {
+      const response = await adminApiService.updateApplicationStatus(loanId.toString(), 'under_review');
+      if (response.status === 'success') {
+        toast.success('Application moved to Under Review.');
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success' && profileResponse.data) setUserData(profileResponse.data);
+      } else {
+        toast.error(response.message || 'Failed to move to Under Review.');
+      }
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to move to Under Review.');
+    }
+  };
+
   // Quick action: Move user to QA Verification (for follow-up users without Validation tab)
   const handleMoveToQA = async () => {
     if (!userData?.id) return;
@@ -5877,6 +5902,20 @@ function UserProfileDetail() {
                             {/* Action Buttons */}
                             <td className="px-3 py-4 whitespace-nowrap text-sm font-medium">
                               <div className="flex flex-col gap-1">
+                                {/* Move to Under Review - only for follow_up */}
+                                {loan.status === 'follow_up' && (
+                                  <button
+                                    className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                                    onClick={() => {
+                                      if (window.confirm('Move this application to Under Review? The verification team will then review the documents.')) {
+                                        handleLoanStatusChange(loanId, 'under_review');
+                                      }
+                                    }}
+                                    title="Move to Under Review for verification"
+                                  >
+                                    Move to Under Review
+                                  </button>
+                                )}
                                 {/* Loan Agreement Button - Always visible */}
                                 <button
                                   className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
@@ -6020,6 +6059,17 @@ function UserProfileDetail() {
                               <p className="text-sm text-gray-600">Status: Follow Up - Ready for processing</p>
                             </div>
                             <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => {
+                                  if (window.confirm('Move this application to Under Review? The verification team will then review the documents.')) {
+                                    handleLoanStatusChange(loanId, 'under_review');
+                                  }
+                                }}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 font-medium"
+                                title="Move to Under Review for verification"
+                              >
+                                Move to Under Review
+                              </button>
                               <select
                                 defaultValue=""
                                 onChange={(e) => {
@@ -11904,12 +11954,22 @@ function UserProfileDetail() {
             <span className="hidden sm:inline">Back to Applications</span>
           </button>
           {isFollowUpUserAdmin && (
-            <button
-              onClick={handleMoveToQA}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium bg-cyan-600 text-white hover:bg-cyan-700 shadow-sm"
-            >
-              Move to QA
-            </button>
+            <div className="flex items-center gap-2">
+              {getArray('loans').some((l: any) => l.status === 'follow_up') && (
+                <button
+                  onClick={handleMoveToUnderReview}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 shadow-sm"
+                >
+                  Move to Under Review
+                </button>
+              )}
+              <button
+                onClick={handleMoveToQA}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium bg-cyan-600 text-white hover:bg-cyan-700 shadow-sm"
+              >
+                Move to QA
+              </button>
+            </div>
           )}
         </div>
       </div>
