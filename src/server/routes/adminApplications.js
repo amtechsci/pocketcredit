@@ -1805,13 +1805,13 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
             total += Number(row.count);
           });
           if (subCat === 'follow_up_user' && allowed.includes('disbursal')) {
-            const [disbRows] = await executeQuery(
+            const disbRows = await executeQuery(
               `SELECT COUNT(*) as c FROM loan_applications la
                INNER JOIN users u ON la.user_id = u.id
                WHERE (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?) AND la.status = 'disbursal' AND (COALESCE(u.moved_to_tvr, 0) = 0)`,
               [adminId, adminId]
             );
-            statusCounts['disbursal'] = disbRows?.[0]?.c || 0;
+            statusCounts['disbursal'] = disbRows?.[0]?.c ?? 0;
             total += Number(statusCounts['disbursal']);
           }
         }
