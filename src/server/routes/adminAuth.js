@@ -4,7 +4,7 @@ const otpGenerator = require('otp-generator');
 const { generateToken, verifyToken } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 const { executeQuery, initializeDatabase } = require('../config/database');
-const { getRedisClient, set, get, del } = require('../config/redis');
+const { set, get, del } = require('../config/redis');
 const { v4: uuidv4 } = require('uuid');
 const { smsService } = require('../utils/smsService');
 const router = express.Router();
@@ -91,12 +91,7 @@ router.post('/login', validate(schemas.adminLogin), async (req, res) => {
       id: admin.id,
       email: admin.email,
       role: admin.role
-    }, '60m'); // Admin tokens expire in 60 minutes
-
-    // Set initial activity timestamp in Redis (60 minutes TTL)
-    // Store as string for consistency - multiple devices can login simultaneously
-    const activityKey = `admin:activity:${admin.id}`;
-    await set(activityKey, Date.now().toString(), 60 * 60); // 60 minutes in seconds
+    }, '600m'); // Admin tokens expire in 600 minutes
 
     // Log admin login in MySQL
     const loginId = uuidv4();
@@ -146,24 +141,6 @@ router.post('/login', validate(schemas.adminLogin), async (req, res) => {
 // Admin Logout
 router.post('/logout', async (req, res) => {
   try {
-    // Get admin ID from token if available
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    
-    if (token) {
-      try {
-        const { verifyToken } = require('../middleware/auth');
-        const decoded = verifyToken(token);
-        
-        // Clear activity timestamp from Redis
-        const activityKey = `admin:activity:${decoded.id}`;
-        await del(activityKey);
-      } catch (error) {
-        // Token might be invalid, but we still want to respond successfully
-        console.log('Logout: Could not decode token, but proceeding with logout');
-      }
-    }
-    
     res.json({
       status: 'success',
       message: 'Admin logged out successfully'
@@ -420,12 +397,7 @@ router.post('/verify-otp', async (req, res) => {
       id: admin.id,
       email: admin.email,
       role: admin.role
-    }, '60m'); // Admin tokens expire in 60 minutes
-
-    // Set initial activity timestamp in Redis (60 minutes TTL)
-    // Store as string for consistency - multiple devices can login simultaneously
-    const activityKey = `admin:activity:${admin.id}`;
-    await set(activityKey, Date.now().toString(), 60 * 60); // 60 minutes in seconds
+    }, '600m'); // Admin tokens expire in 600 minutes
 
     // Log admin login in MySQL
     const loginId = uuidv4();

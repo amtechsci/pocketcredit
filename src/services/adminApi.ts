@@ -106,23 +106,7 @@ class AdminApiService {
 
     // Add response interceptor for auth handling
     this.api.interceptors.response.use(
-      (response: AxiosResponse) => {
-        // Check for session warning headers
-        const warningHeader = response.headers['x-session-warning'];
-        const timeRemaining = response.headers['x-session-time-remaining'];
-        
-        if (warningHeader === 'true' && timeRemaining) {
-          const secondsRemaining = parseInt(timeRemaining, 10);
-          const minutesRemaining = Math.ceil(secondsRemaining / 60);
-          
-          // Dispatch custom event for frontend to handle warning
-          window.dispatchEvent(new CustomEvent('admin-session-warning', {
-            detail: { secondsRemaining, minutesRemaining }
-          }));
-        }
-        
-        return response;
-      },
+      (response: AxiosResponse) => response,
       (error) => {
         // Handle authentication errors
         if (error.response) {
@@ -133,25 +117,6 @@ class AdminApiService {
           // Check if we're on the login page (don't redirect login errors)
           const isLoginPage = window.location.pathname === '/stpl/login';
           const hasToken = !!this.token;
-
-          // Check for session expired due to inactivity
-          if (code === 'SESSION_EXPIRED' || message.toLowerCase().includes('session expired due to inactivity')) {
-            // Clear authentication data
-            this.token = null;
-            this.clearAuthHeader();
-            localStorage.removeItem('adminToken');
-            localStorage.removeItem('adminUser');
-
-            // Show alert before redirecting
-            alert('Your session has expired due to inactivity. Please login again.');
-            
-            // Redirect to admin login page
-            setTimeout(() => {
-              window.location.href = '/stpl/login';
-            }, 100);
-            
-            return Promise.reject(error);
-          }
 
           // Check for login-related errors (OTP, IP whitelist, etc.) - don't redirect these
           const isLoginError = 

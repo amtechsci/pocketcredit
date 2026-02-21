@@ -31,7 +31,6 @@ import { TvrIdsPage } from './admin/pages/TvrIdsPage';
 import { FollowUpUserPage } from './admin/pages/FollowUpUserPage';
 import { AdminProvider, useAdmin } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
-import { useAdminAutoLogout } from './admin/hooks/useAdminAutoLogout';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './components/ui/sheet';
 import {
   DropdownMenu,
@@ -113,11 +112,6 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
     setCurrentUser(null);
     navigate(`${BASE_PATH}/login`);
   }, [navigate]);
-
-  // Listen for session warnings from backend (logout is handled by backend middleware)
-  useAdminAutoLogout({
-    enabled: !!currentUser
-  });
 
   const isActive = (path: string) => {
     const [pathname, search] = path.split('?');
