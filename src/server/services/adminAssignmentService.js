@@ -149,7 +149,9 @@ async function syncTempAssignmentsForCategory(category) {
       ? ` AND status = 'qa_verification'`
       : category === 'account_manager'
         ? ` AND status = 'account_manager'`
-        : ` AND status = 'overdue'`;
+        : category === 'follow_up_user'
+          ? ` AND status IN ('submitted','under_review','follow_up','disbursal')`
+          : ` AND status = 'overdue'`;
 
   const allAdmins = await getAllSubAdminsWithLeaveInfo(category);
   const activeToday = await getActiveSubAdmins(category);
@@ -315,7 +317,8 @@ async function getNextRecoveryOfficerId() {
 }
 
 /**
- * Assign next follow-up user (round-robin, same logic as verify user).
+ * Assign next follow-up user (round-robin). Includes disbursal status so disbursal loans
+ * are distributed evenly; follow-up admins see disbursal in their queue.
  */
 async function getNextFollowUpAdminId() {
   const admins = await getActiveSubAdmins('follow_up_user');
@@ -324,7 +327,7 @@ async function getNextFollowUpAdminId() {
 
   const counts = await executeQuery(
     `SELECT assigned_follow_up_admin_id, COUNT(*) as c FROM loan_applications
-     WHERE status IN ('submitted','under_review','follow_up') AND assigned_follow_up_admin_id IS NOT NULL
+     WHERE status IN ('submitted','under_review','follow_up','disbursal','ready_for_disbursement') AND assigned_follow_up_admin_id IS NOT NULL
      GROUP BY assigned_follow_up_admin_id`
   );
   const countByAdmin = {};

@@ -2674,13 +2674,14 @@ router.post('/assign-follow-up-user', authenticateAdmin, async (req, res) => {
     }
 
     const { status = 'disbursal', limit = 100 } = req.body;
+    const limitVal = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500);
 
     // Get loans without follow_up_user assignment
     const unassignedLoans = await executeQuery(
       `SELECT id FROM loan_applications 
        WHERE status = ? AND (assigned_follow_up_admin_id IS NULL OR assigned_follow_up_admin_id = '')
-       LIMIT ?`,
-      [status, parseInt(limit)]
+       LIMIT ${limitVal}`,
+      [status]
     );
 
     if (unassignedLoans.length === 0) {
