@@ -2,17 +2,27 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { LoanApplicationsQueue } from './LoanApplicationsQueue';
 import { TvrIdsPage } from './TvrIdsPage';
+import { adminApiService } from '../../services/adminApi';
 
 export function FollowUpUserPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const activeTab = searchParams.get('tab') || 'submitted';
+  const [tvrCount, setTvrCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    adminApiService.getApplicationStats().then((res) => {
+      if (res.status === 'success' && res.data?.tvrUserCount != null) {
+        setTvrCount(res.data.tvrUserCount);
+      }
+    }).catch(() => {});
+  }, []);
 
   const tabs = [
     { id: 'submitted', label: 'Submitted', status: 'submitted' },
     { id: 'follow_up', label: 'Follow Up', status: 'follow_up' },
     { id: 'disbursal', label: 'Disbursal', status: 'disbursal' },
-    { id: 'tvr', label: 'TVR IDs' }
+    { id: 'tvr', label: 'TVR IDs', count: tvrCount }
   ];
 
   const handleTabChange = (tabId: string) => {
@@ -36,6 +46,11 @@ export function FollowUpUserPage() {
                 }`}
               >
                 {tab.label}
+                {tab.id === 'tvr' && tab.count != null && (
+                  <span className="ml-1.5 px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-800 rounded-full">
+                    {tab.count}
+                  </span>
+                )}
               </button>
             ))}
           </div>

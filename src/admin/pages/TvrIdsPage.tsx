@@ -27,6 +27,7 @@ export function TvrIdsPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState<number>(0);
 
   useEffect(() => {
     fetchTvrUsers();
@@ -44,6 +45,7 @@ export function TvrIdsPage() {
       if (response.status === 'success' && response.data) {
         setTvrUsers(response.data.users || []);
         setTotalPages(response.data.pagination?.totalPages || 1);
+        setTotalCount(response.data.pagination?.total ?? 0);
       }
     } catch (error: any) {
       console.error('Error fetching TVR users:', error);
@@ -62,7 +64,12 @@ export function TvrIdsPage() {
   return (
     <div className="p-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">TVR IDs</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-gray-900">TVR IDs</h1>
+          <span className="px-3 py-1 text-sm font-medium bg-purple-100 text-purple-800 rounded-full">
+            {loading ? '...' : totalCount.toLocaleString()} users
+          </span>
+        </div>
         <p className="text-gray-600 mt-1">Users moved to TVR</p>
       </div>
 

@@ -1853,6 +1853,27 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       `);
     }
 
+    // TVR user count: full admin gets total, follow_up_user gets count of TVR users assigned to them
+    let tvrUserCount = 0;
+    if (isSubAdmin && subCat === 'follow_up_user') {
+      const tvrCountRows = await executeQuery(
+        `SELECT COUNT(DISTINCT u.id) as c FROM users u
+         WHERE u.moved_to_tvr = 1
+         AND EXISTS (
+           SELECT 1 FROM loan_applications la2
+           WHERE la2.user_id = u.id
+           AND (la2.assigned_follow_up_admin_id = ? OR la2.temp_assigned_follow_up_admin_id = ?)
+         )`,
+        [adminId, adminId]
+      );
+      tvrUserCount = tvrCountRows?.[0]?.c ?? 0;
+    } else if (!isNbfcAdmin) {
+      const tvrCountRows = await executeQuery(
+        'SELECT COUNT(*) as c FROM users WHERE moved_to_tvr = 1'
+      );
+      tvrUserCount = tvrCountRows?.[0]?.c ?? 0;
+    }
+
     const stats = {
       totalApplications: total,
       submittedApplications: statusCounts['submitted'] || 0,
@@ -1876,7 +1897,8 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       personalLoans: typeCounts['Personal'] || 0,
       businessLoans: typeCounts['Business'] || 0,
       totalAmount: parseFloat(amountResult[0]?.totalAmount) || 0,
-      averageAmount: parseFloat(amountResult[0]?.averageAmount) || 0
+      averageAmount: parseFloat(amountResult[0]?.averageAmount) || 0,
+      tvrUserCount
     };
 
     res.json({
