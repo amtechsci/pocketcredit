@@ -63,41 +63,65 @@ class CreditAnalyticsService {
     // Format date_of_birth to YYYY-MM-DD
     let formattedDob = date_of_birth;
     if (date_of_birth) {
-      // Check if already in YYYY-MM-DD format
-      if (/^\d{4}-\d{2}-\d{2}$/.test(date_of_birth)) {
-        formattedDob = date_of_birth;
-      } else if (/^\d{2}-\d{2}-\d{4}$/.test(date_of_birth)) {
-        // Convert from DD-MM-YYYY to YYYY-MM-DD
-        const [day, month, year] = date_of_birth.split('-');
-        formattedDob = `${year}-${month}-${day}`;
+      const dobStr = String(date_of_birth).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dobStr)) {
+        formattedDob = dobStr;
+      } else if (/^\d{2}-\d{2}-\d{4}$/.test(dobStr)) {
+        const [d, m, y] = dobStr.split('-');
+        formattedDob = `${y}-${m}-${d}`;
+      } else if (dobStr.includes('/')) {
+        const parts = dobStr.split('/');
+        if (parts.length === 3) {
+          const [d, m, y] = parts;
+          formattedDob = parts[2].length === 4 ? `${parts[2]}-${parts[1]}-${parts[0]}` : `${parts[0]}-${parts[1]}-${parts[2]}`;
+        }
       } else {
-        // Convert from ISO format to YYYY-MM-DD
         const dobDate = new Date(date_of_birth);
-        const dobYear = dobDate.getFullYear();
-        const dobMonth = String(dobDate.getMonth() + 1).padStart(2, '0');
-        const dobDay = String(dobDate.getDate()).padStart(2, '0');
-        formattedDob = `${dobYear}-${dobMonth}-${dobDay}`;
+        if (!isNaN(dobDate.getTime())) {
+          const dobYear = dobDate.getFullYear();
+          const dobMonth = String(dobDate.getMonth() + 1).padStart(2, '0');
+          const dobDay = String(dobDate.getDate()).padStart(2, '0');
+          formattedDob = `${dobYear}-${dobMonth}-${dobDay}`;
+        }
       }
     }
+    if (!formattedDob || !/^\d{4}-\d{2}-\d{2}$/.test(formattedDob)) {
+      throw new Error('Invalid date of birth format. Required: YYYY-MM-DD.');
+    }
 
-    // Ensure mobile number is 10 digits only (no country code)
-    const formattedMobile = mobile_no.toString().replace(/^\+?91/, '').replace(/\D/g, '').slice(-10);
+    // Normalize PAN: strip spaces/dashes, uppercase, only A-Z0-9. Indian PAN = 5 letters + 4 digits + 1 letter
+    const panStr = pan != null ? String(pan).replace(/[\s\-_]/g, '').replace(/[^A-Za-z0-9]/g, '').toUpperCase() : '';
+    const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+    if (!panStr || panStr.length !== 10 || !panRegex.test(panStr)) {
+      throw new Error('Invalid PAN format. PAN must be 10 characters: 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F).');
+    }
+
+    // Ensure mobile number is exactly 10 digits (no country code)
+    const rawMobile = mobile_no != null ? String(mobile_no) : '';
+    const formattedMobile = rawMobile.replace(/^\+?91/, '').replace(/\D/g, '').slice(-10);
+    if (formattedMobile.length !== 10) {
+      throw new Error('Invalid mobile number. Must be 10 digits. Current value has ' + (formattedMobile.length || 0) + ' digit(s).');
+    }
+
+    // Normalize names: trim, ensure string (API often expects letters/spaces only)
+    const firstName = (first_name != null ? String(first_name).trim() : '') || 'User';
+    const lastName = (last_name != null ? String(last_name).trim() : '') || '';
+    // Remove characters that can cause "key format" errors (keep letters, spaces, common accents)
+    const safeName = (s) => s.replace(/[^\p{L}\p{N}\s\-'.]/gu, '').slice(0, 100);
+    const safeFirstName = safeName(firstName) || 'User';
+    const safeLastName = safeName(lastName);
 
     // Normalize email - treat placeholder values and validate format
     let normalizedEmail = email;
     if (email) {
       const placeholderEmails = ['N/A', 'NA', 'n/a', 'na', 'NONE', 'none', 'NULL', 'null', ''];
-      if (placeholderEmails.includes(email.trim().toUpperCase())) {
+      if (placeholderEmails.includes(String(email).trim().toUpperCase())) {
         normalizedEmail = null;
       } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        // Invalid email format - use null instead
         console.warn(`⚠️ Invalid email format: ${email}, using default`);
         normalizedEmail = null;
       }
     }
-    
-    // Use a valid default email format if email is null/invalid
-    // Extract user ID from client_ref_num if possible (format: PC{userId}_{timestamp})
     const emailMatch = client_ref_num.match(/^PC(\d+)_/);
     const defaultEmail = emailMatch 
       ? `user${emailMatch[1]}@pocketcredit.in`
@@ -107,18 +131,18 @@ class CreditAnalyticsService {
       client_ref_num,
       mobile_no: formattedMobile,
       name_lookup: 0,
-      first_name,
-      last_name,
-      date_of_birth: formattedDob, // YYYY-MM-DD format
-      email: normalizedEmail || defaultEmail, // Use valid default email if null/invalid
-      pan: pan.toUpperCase(), // Ensure PAN is uppercase
+      first_name: safeFirstName,
+      last_name: safeLastName,
+      date_of_birth: formattedDob,
+      email: normalizedEmail || defaultEmail,
+      pan: panStr,
       consent_message: "I hereby authorize Experian to pull my credit report for loan application purpose",
       consent_acceptance: "yes",
       device_type: "web",
-      otp: "123456", // Demo OTP
+      otp: "123456",
       timestamp,
       device_ip,
-      report_type: "3" // Testing report_type 3
+      report_type: "3"
     };
 
     let lastError;
@@ -165,7 +189,6 @@ class CreditAnalyticsService {
         }
 
         // If it's not retryable or we've exhausted retries, throw the error
-        // Enhance error message for service unavailable
         if (statusCode === 503) {
           const enhancedError = new Error('Credit Analytics service is temporarily unavailable. Please try again later.');
           enhancedError.status = 503;
@@ -175,7 +198,29 @@ class CreditAnalyticsService {
           throw enhancedError;
         }
 
-        // For other errors, throw as-is
+        // 400 "key format wrong" – log redacted payload for debugging and return clear message
+        if (statusCode === 400 && error.response?.data) {
+          const apiMsg = error.response.data.message || '';
+          const isFormatError = /key format|invalid format|format is wrong/i.test(apiMsg);
+          if (isFormatError) {
+            console.error('❌ Credit check payload rejected (format error). Redacted diagnostic:', {
+              client_ref_num: requestBody.client_ref_num,
+              pan_length: requestBody.pan?.length,
+              pan_valid_format: /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(requestBody.pan),
+              mobile_length: requestBody.mobile_no?.length,
+              dob: requestBody.date_of_birth,
+              first_name_length: requestBody.first_name?.length,
+              last_name_length: requestBody.last_name?.length,
+              api_message: apiMsg
+            });
+            const err = new Error('Credit check failed: one or more user fields (PAN, mobile, date of birth, or name) have an invalid format. Please correct the user profile and try again.');
+            err.status = 400;
+            err.response = error.response;
+            err.originalError = error;
+            throw err;
+          }
+        }
+
         throw error;
       }
     }

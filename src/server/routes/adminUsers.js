@@ -798,12 +798,19 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
     } catch (apiError) {
       console.error('❌ Credit report API error:', apiError.message);
 
-      // Check if it's a service unavailable error
       if (apiError.isServiceUnavailable || apiError.status === 503 || apiError.response?.status === 503) {
         const serviceError = new Error('Credit Analytics service is temporarily unavailable. The external credit check service is down or overloaded. Please try again in a few minutes.');
         serviceError.status = 503;
         serviceError.isServiceUnavailable = true;
         throw serviceError;
+      }
+
+      // Preserve 400 format-error message from service (PAN/mobile/DOB/name invalid)
+      if (apiError.status === 400) {
+        const err = new Error(apiError.message || 'Credit check failed: invalid user data format.');
+        err.status = 400;
+        err.response = apiError.response;
+        throw err;
       }
 
       throw new Error(`Failed to request credit report: ${apiError.message}`);
@@ -974,8 +981,9 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
       isServiceUnavailable: error.isServiceUnavailable
     });
 
-    // Determine HTTP status code
-    const httpStatus = error.isServiceUnavailable || error.status === 503 ? 503 : 500;
+    // Determine HTTP status code (400 = invalid format, 503 = service unavailable, else 500)
+    const httpStatus = error.status === 400 ? 400
+      : (error.isServiceUnavailable || error.status === 503 ? 503 : 500);
 
     // Provide more detailed error message
     let errorMessage = 'Failed to perform credit check';
