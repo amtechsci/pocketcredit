@@ -109,7 +109,8 @@ class CreditAnalyticsService {
     // Remove characters that can cause "key format" errors (keep letters, spaces, common accents)
     const safeName = (s) => s.replace(/[^\p{L}\p{N}\s\-'.]/gu, '').slice(0, 100);
     const safeFirstName = safeName(firstName) || 'User';
-    const safeLastName = safeName(lastName);
+    // API rejects empty last_name; use placeholder when missing (e.g. user has single name)
+    const safeLastName = safeName(lastName) || '.';
 
     // Normalize email - treat placeholder values and validate format
     let normalizedEmail = email;
