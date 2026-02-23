@@ -1372,6 +1372,52 @@ function UserProfileDetail() {
     }
   };
 
+  // Quick action: Cancel loan (for follow-up users)
+  const handleCancelLoan = async (loanId?: string | number) => {
+    if (!userData?.id) return;
+
+    const loans = getArray('loans');
+    const cancellableStatuses = ['submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal', 'qa_verification'];
+    const appliedLoans = loans ? loans.filter((loan: any) => cancellableStatuses.includes(loan.status)) : [];
+    const lid = loanId != null ? String(loanId) : undefined;
+    const targetLoan = lid
+      ? appliedLoans.find((l: any) => (l.id || l.loanId)?.toString() === lid)
+      : appliedLoans?.[0];
+    const targetLoanId = targetLoan?.id ?? targetLoan?.loanId;
+
+    if (!targetLoanId) {
+      toast.error('No cancellable loan found.');
+      return;
+    }
+    if (targetLoan?.status === 'cancelled') {
+      toast.error('Loan is already cancelled.');
+      return;
+    }
+    if (!window.confirm('Cancel this loan? This action cannot be undone.')) return;
+
+    try {
+      const requestData = {
+        userId: userData.id,
+        loanApplicationId: typeof targetLoanId === 'number' ? targetLoanId : parseInt(targetLoanId, 10),
+        actionType: 'cancel' as const,
+        actionDetails: { message: 'Cancelled by follow-up user' },
+        adminId: currentUser?.id || 'unknown'
+      };
+      const response = await adminApiService.submitValidationAction(requestData);
+      if (response.status === 'success') {
+        toast.success('Loan cancelled successfully.');
+        try { await fetchValidationHistory(); } catch { /* ignore */ }
+        const profileResponse = await adminApiService.getUserProfile(params.userId!);
+        if (profileResponse.status === 'success' && profileResponse.data) setUserData(profileResponse.data);
+      } else {
+        toast.error(response.message || 'Failed to cancel loan.');
+      }
+    } catch (error: any) {
+      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to cancel loan.';
+      toast.error(errorMessage);
+    }
+  };
+
   // Loan Application Review Handlers
   const handleViewApplication = (loanId: string) => {
     // TODO: Implement detailed application view modal
@@ -5916,6 +5962,20 @@ function UserProfileDetail() {
                                     Move to Under Review
                                   </button>
                                 )}
+                                {/* Cancel Loan - follow-up user, cancellable statuses */}
+                                {isFollowUpUserAdmin && ['submitted', 'under_review', 'follow_up', 'disbursal', 'ready_for_disbursement', 'qa_verification'].includes(loan.status) && (
+                                  <button
+                                    className="px-3 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-700"
+                                    onClick={() => {
+                                      if (window.confirm('Cancel this loan? This action cannot be undone.')) {
+                                        handleCancelLoan(loanId);
+                                      }
+                                    }}
+                                    title="Cancel this loan"
+                                  >
+                                    Cancel
+                                  </button>
+                                )}
                                 {/* Loan Agreement Button - Always visible */}
                                 <button
                                   className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
@@ -7647,7 +7707,7 @@ function UserProfileDetail() {
           <h3 className="text-lg font-semibold text-gray-900 mb-2">No Credit Analytics Data</h3>
           <p className="text-gray-600 mb-4">This user has not completed a credit check yet.</p>
           <button
-            onClick={handlePerformCreditCheck}
+            onClick={() => handlePerformCreditCheck()}
             disabled={performingCreditCheck || !userData?.id}
             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
@@ -11969,6 +12029,17 @@ function UserProfileDetail() {
               >
                 Move to QA
               </button>
+              {(getArray('loans') || []).some((l: any) => {
+                const s = l.status;
+                return ['submitted', 'under_review', 'follow_up', 'disbursal', 'ready_for_disbursement', 'qa_verification'].includes(s);
+              }) && (
+                <button
+                  onClick={() => handleCancelLoan()}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium bg-red-600 text-white hover:bg-red-700 shadow-sm"
+                >
+                  Cancel Loan
+                </button>
+              )}
             </div>
           )}
         </div>
