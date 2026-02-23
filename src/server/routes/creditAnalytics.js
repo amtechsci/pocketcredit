@@ -565,10 +565,13 @@ router.post('/check', requireAuth, async (req, res) => {
 
   } catch (error) {
     console.error('Credit check error:', error);
-    res.status(500).json({
+    const isValidationError = error.status === 400 || /invalid (PAN|mobile|date of birth|format)/i.test(error.message || '');
+    const status = isValidationError ? 400 : 500;
+    const message = isValidationError ? (error.message || 'Invalid profile data for credit check. Please complete KYC with valid PAN, mobile and date of birth.')
+      : 'Failed to perform credit check';
+    res.status(status).json({
       status: 'error',
-      message: 'Failed to perform credit check',
-      error: error.message
+      message
     });
   }
 });
