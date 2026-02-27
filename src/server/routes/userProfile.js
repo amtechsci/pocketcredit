@@ -2763,8 +2763,8 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
 
                     // Check if duration is less than minimum days
-                    // For EMI loans, enforce minimum 30 days regardless of plan setting
-                    const minDuration = Math.max(planSnapshot.repayment_days || 0, 30);
+                    // Use plan repayment_days (default 7) for minimum days to first salary date
+                    const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
                     // Use calculateDaysBetween for accurate day calculation (inclusive)
                     const baseDateStr = formatDateToString(baseDate);
                     const nextSalaryDateStr = formatDateToString(nextSalaryDate);
@@ -2806,7 +2806,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     ? new Date(calculatedValues.interest.repayment_date)
                     : (() => {
                       const dueDate = new Date(baseDate);
-                      dueDate.setDate(dueDate.getDate() + (planSnapshot.repayment_days || 15));
+                      dueDate.setDate(dueDate.getDate() + (planSnapshot.repayment_days || 7));
                       dueDate.setHours(0, 0, 0, 0);
                       return dueDate;
                     })();
@@ -2981,7 +2981,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                   if (usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
                     // Salary-date-based calculation
                     const nextSalaryDate = getNextSalaryDate(baseDateStr, salaryDate);
-                    const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 15;
+                    const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
                     const nextSalaryDateStr = formatDateToString(nextSalaryDate);
                     const daysToSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
 
@@ -2994,7 +2994,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     console.log(`📅 Single payment loan ${loanId}: Due date = ${processedDueDate} (salary-date-based, base: ${baseDateStr}, salary date: ${salaryDate})`);
                   } else {
                     // Fixed days calculation
-                    const repaymentDays = planSnapshot.repayment_days || planSnapshot.total_duration_days || 15;
+                    const repaymentDays = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
                     const dueDate = new Date(baseDate);
                     dueDate.setDate(dueDate.getDate() + repaymentDays);
                     dueDate.setHours(0, 0, 0, 0);

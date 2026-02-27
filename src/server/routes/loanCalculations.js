@@ -203,7 +203,7 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
     if (!planSnapshot) {
       planSnapshot = {
         plan_type: 'single',
-        repayment_days: 15,
+        repayment_days: 7,
         interest_percent_per_day: parseFloat(loan.interest_percent_per_day || 0.001),
         calculate_by_salary_date: false,
         fees: feesBreakdown.map(fee => ({
@@ -603,8 +603,8 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           const salaryDate = parseInt(userData.salary_date);
           if (salaryDate >= 1 && salaryDate <= 31) {
             let nextSalaryDate = getNextSalaryDate(baseDateStr, salaryDate);
-            // For EMI loans, enforce minimum 30 days regardless of plan setting
-            const minDuration = Math.max(planData.repayment_days || 0, 30);
+            // Use plan repayment_days (default 7) for minimum days to first salary date
+            const minDuration = planData.repayment_days || planData.total_duration_days || 7;
             const nextSalaryDateStr = formatDateToString(nextSalaryDate);
             let daysToNextSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
             if (daysToNextSalary < minDuration) {
@@ -620,7 +620,7 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           // Non-salary-date EMI calculation
           // Calculate first due date
           let firstDueDate = new Date(baseDate);
-          firstDueDate.setDate(firstDueDate.getDate() + (planData.repayment_days || 15));
+          firstDueDate.setDate(firstDueDate.getDate() + (planData.repayment_days || 7));
           firstDueDate.setHours(0, 0, 0, 0);
           
           const daysPerEmi = {
@@ -660,8 +660,8 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           const salaryDate = parseInt(userData.salary_date);
           if (salaryDate >= 1 && salaryDate <= 31) {
             let nextSalaryDate = getNextSalaryDate(baseDateStr, salaryDate);
-            // For EMI loans, enforce minimum 30 days regardless of plan setting
-            const minDuration = Math.max(planData.repayment_days || 0, 30);
+            // Use plan repayment_days (default 7) for minimum days to first salary date
+            const minDuration = planData.repayment_days || planData.total_duration_days || 7;
             const nextSalaryDateStr = formatDateToString(nextSalaryDate);
             let daysToNextSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
             if (daysToNextSalary < minDuration) {
@@ -675,7 +675,7 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           }
         } else {
           let firstDueDate = new Date(baseDate);
-          firstDueDate.setDate(firstDueDate.getDate() + (planData.repayment_days || 15));
+          firstDueDate.setDate(firstDueDate.getDate() + (planData.repayment_days || 7));
           firstDueDate.setHours(0, 0, 0, 0);
           
           const daysPerEmi = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };

@@ -389,7 +389,7 @@ function calculateInterestDays(planData, userData, calculationDate = null) {
   }
   const today = new Date(todayComponents.year, todayComponents.month, todayComponents.day);
 
-  let days = planData.repayment_days || planData.total_duration_days || 15;
+  let days = planData.repayment_days || planData.total_duration_days || 7;
   let calculationMethod = 'fixed';
   let repaymentDate = null;
 
@@ -598,7 +598,7 @@ async function getLoanCalculation(loanIdOrDb, loanIdParam, customDays = null) {
             const planData = typeof loan.plan_snapshot === 'string'
               ? JSON.parse(loan.plan_snapshot)
               : loan.plan_snapshot;
-            days = planData.repayment_days || 15; // Default to 15 days
+            days = planData.repayment_days || 7; // Default to 7 days
           } catch (e) {
             days = 15; // Default fallback
           }
@@ -766,7 +766,7 @@ async function getFullLoanCalculation(loanId) {
     if (!planSnapshot) {
       planSnapshot = {
         plan_type: 'single',
-        repayment_days: 15,
+        repayment_days: 7,
         interest_percent_per_day: parseFloat(loan.interest_percent_per_day || 0.001),
         calculate_by_salary_date: false,
         fees: (feesBreakdown || []).map(f => ({

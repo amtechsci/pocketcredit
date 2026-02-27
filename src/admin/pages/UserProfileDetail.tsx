@@ -7730,7 +7730,24 @@ function UserProfileDetail() {
       );
     }
 
-    const { credit_score, previous_credit_score, is_eligible, rejection_reasons, full_report, pdf_url, checked_at, request_id, client_ref_num, result_code, api_message } = creditAnalyticsData;
+    const { credit_score, previous_credit_score, is_eligible, rejection_reasons, full_report, pdf_url, checked_at, created_at, request_id, client_ref_num, result_code, api_message } = creditAnalyticsData;
+
+    // Format fetch date for display in IST: "24 Jan, 2026"
+    const formatFetchDate = (d: string | null | undefined) => {
+      if (!d) return null;
+      const dt = new Date(d);
+      if (isNaN(dt.getTime())) return null;
+      const formatted = dt.toLocaleDateString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+      });
+      // Ensure "24 Jan, 2026" format (add comma before year if missing)
+      return formatted.replace(/\s+(\d{4})$/, ', $1');
+    };
+    const firstFetchDate = formatFetchDate(created_at ?? checked_at);
+    const secondFetchDate = previous_credit_score != null ? formatFetchDate(checked_at) : null;
 
     // Check if result_code is 102 (mobile number mismatch)
     // Check both from database field and from full_report
@@ -7784,7 +7801,7 @@ function UserProfileDetail() {
             <div className="mt-6 pt-4 border-t border-gray-200 text-xs text-gray-500">
               <p><strong>Request ID:</strong> {request_id}</p>
               {client_ref_num && <p><strong>Client Ref:</strong> {client_ref_num}</p>}
-              {checked_at && <p><strong>Report Date:</strong> {new Date(checked_at).toLocaleDateString('en-GB')}</p>}
+              {checked_at && <p><strong>Report Date:</strong> {formatFetchDate(checked_at)}</p>}
             </div>
           )}
         </div>
@@ -8183,6 +8200,9 @@ function UserProfileDetail() {
                     <span>300</span>
                     <span>900</span>
                   </div>
+                  {firstFetchDate && (
+                    <p className="text-xs text-gray-500 mt-1.5">{firstFetchDate}</p>
+                  )}
                 </div>
                 
                 {/* Arrow */}
@@ -8216,6 +8236,9 @@ function UserProfileDetail() {
                     <span>300</span>
                     <span>900</span>
                   </div>
+                  {secondFetchDate && (
+                    <p className="text-xs text-gray-500 mt-1.5">Second fetch {secondFetchDate}</p>
+                  )}
                 </div>
 
                 {/* Score Change Indicator */}
@@ -8273,6 +8296,9 @@ function UserProfileDetail() {
                   <span>300</span>
                   <span>900</span>
                 </div>
+                {firstFetchDate && (
+                  <p className="text-xs text-gray-500 mt-1.5">{firstFetchDate}</p>
+                )}
               </div>
             )}
 

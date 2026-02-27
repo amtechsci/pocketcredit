@@ -911,8 +911,8 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
                 let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
                 
                 // Check if duration is less than minimum days (must be at least this many days till first EMI)
-                // For EMI loans, enforce minimum 30 days regardless of plan setting
-                const minDuration = Math.max(planSnapshot.repayment_days || 0, 30);
+                // Use plan repayment_days (default 7) for minimum days to first salary date
+                const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
                 const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
                 
                 if (daysToNextSalary < minDuration) {
@@ -946,14 +946,14 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
                 ? new Date(calculatedValues.interest.repayment_date)
                 : (() => {
                     const dueDate = new Date(baseDate);
-                    dueDate.setDate(dueDate.getDate() + (planSnapshot.repayment_days || 30));
+                    dueDate.setDate(dueDate.getDate() + (planSnapshot.repayment_days || planSnapshot.total_duration_days || 7));
                     dueDate.setHours(0, 0, 0, 0);
                     return dueDate;
                   })();
               
               // Apply minimum duration check for fallback method too
-              // For EMI loans, enforce minimum 30 days regardless of plan setting
-              const minDuration = Math.max(planSnapshot.repayment_days || 0, 30);
+              // Use plan repayment_days (default 7) for minimum days to first salary date
+              const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
               const daysToFirstDue = Math.ceil((firstDueDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
               if (daysToFirstDue < minDuration) {
                 // Push to next month
@@ -978,7 +978,7 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
             // Fallback: If EMI dates weren't generated, use default calculation
             if (allEmiDates.length === 0 && emiCount > 1) {
               const fallbackDueDate = new Date(baseDate);
-              fallbackDueDate.setDate(fallbackDueDate.getDate() + (planSnapshot.repayment_days || 15));
+              fallbackDueDate.setDate(fallbackDueDate.getDate() + (planSnapshot.repayment_days || 7));
               fallbackDueDate.setHours(0, 0, 0, 0);
               const daysPerEmi = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
               const daysBetween = daysPerEmi[planSnapshot.emi_frequency] || 30;
@@ -1148,7 +1148,7 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
               if (usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
                 // Salary-date-based calculation
                 const nextSalaryDate = getNextSalaryDate(baseDateStr, salaryDate);
-                const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 15;
+                const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
                 const nextSalaryDateStr = formatDateToString(nextSalaryDate);
                 const daysToSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
                 
@@ -1160,7 +1160,7 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
                 }
               } else {
                 // Fixed days calculation
-                const repaymentDays = planSnapshot.repayment_days || planSnapshot.total_duration_days || 15;
+                const repaymentDays = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
                 const dueDate = new Date(baseDate);
                 dueDate.setDate(dueDate.getDate() + repaymentDays);
                 dueDate.setHours(0, 0, 0, 0);

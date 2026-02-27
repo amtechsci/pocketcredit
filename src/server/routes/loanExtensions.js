@@ -290,8 +290,8 @@ router.post('/request', requireAuth, async (req, res) => {
         if (isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
           // Multi-EMI with salary date: Calculate all EMI dates
           let firstDueDate = getNextSalaryDate(baseDate, salaryDate);
-          // For EMI loans, enforce minimum 30 days regardless of plan setting
-          const minDuration = Math.max(planSnapshot.repayment_days || 0, 30);
+          // Use plan repayment_days (default 7) for minimum days to first salary date
+          const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
           const firstDueDateStr = formatDateToString(firstDueDate);
           const daysToFirstSalary = calculateDaysBetween(processedAtStr, firstDueDateStr);
           
@@ -311,7 +311,7 @@ router.post('/request', requireAuth, async (req, res) => {
         } else if (!isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
           // Single payment with salary date
           const nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
-          const minDuration = planSnapshot.repayment_days || 15;
+          const minDuration = planSnapshot.repayment_days || 7;
           const nextSalaryDateStr = formatDateToString(nextSalaryDate);
           const daysToSalary = calculateDaysBetween(processedAtStr, nextSalaryDateStr);
           
@@ -324,7 +324,7 @@ router.post('/request', requireAuth, async (req, res) => {
           console.log(`📅 Calculated single payment due date from plan snapshot: ${originalDueDate}`);
         } else {
           // Fixed days plan
-          const repaymentDays = planSnapshot.repayment_days || planSnapshot.total_duration_days || 15;
+          const repaymentDays = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
           const dueDate = new Date(baseDate);
           dueDate.setDate(dueDate.getDate() + repaymentDays);
           dueDate.setHours(0, 0, 0, 0);
