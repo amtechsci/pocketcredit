@@ -13,7 +13,7 @@ const {
 
 const router = express.Router();
 
-const PARTNERS_KEYS_DIR = path.join(__dirname, '..', 'partner_keys', 'partners');
+const PARTNERS_KEYS_DIR = path.join(__dirname, '..', '..', 'partner_keys', 'partners');
 
 /**
  * Validate that a string looks like a PEM key (public key).
