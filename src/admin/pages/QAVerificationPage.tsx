@@ -45,6 +45,7 @@ export function QAVerificationPage() {
     const [users, setUsers] = useState<QAVerificationUser[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const [loanAmountFilter, setLoanAmountFilter] = useState<string>('');
     const [currentPage, setCurrentPage] = useState(1);
     const pageSize = 20;
     const [totalUsers, setTotalUsers] = useState(0);
@@ -56,7 +57,7 @@ export function QAVerificationPage() {
     const fetchUsers = useCallback(async () => {
         try {
             setLoading(true);
-            const response = await adminApiService.getQAVerificationUsers(currentPage, pageSize, searchTerm);
+            const response = await adminApiService.getQAVerificationUsers(currentPage, pageSize, searchTerm, loanAmountFilter);
 
             if (response.status === 'success' && response.data) {
                 setUsers(response.data.users || []);
@@ -74,11 +75,15 @@ export function QAVerificationPage() {
         } finally {
             setLoading(false);
         }
-    }, [currentPage, pageSize, searchTerm]);
+    }, [currentPage, pageSize, searchTerm, loanAmountFilter]);
 
     useEffect(() => {
         fetchUsers();
     }, [fetchUsers]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [loanAmountFilter]);
 
     // Fetch comments for all users
     useEffect(() => {
@@ -158,6 +163,35 @@ export function QAVerificationPage() {
                             <div className="text-sm text-gray-600">Total Applications</div>
                         </div>
                     </div>
+                </div>
+
+                {/* Loan Amount Filter */}
+                <div className="flex flex-wrap items-center gap-2 mb-4">
+                    <span className="text-sm font-medium text-gray-600">Filter by loan amount:</span>
+                    <button
+                        onClick={() => setLoanAmountFilter(prev => prev === 'below_3k' ? '' : 'below_3k')}
+                        className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                            loanAmountFilter === 'below_3k' ? 'bg-cyan-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                    >
+                        Below 3k
+                    </button>
+                    <button
+                        onClick={() => setLoanAmountFilter(prev => prev === '3k_8k' ? '' : '3k_8k')}
+                        className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                            loanAmountFilter === '3k_8k' ? 'bg-cyan-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                    >
+                        3k-8k
+                    </button>
+                    <button
+                        onClick={() => setLoanAmountFilter(prev => prev === '8k_above' ? '' : '8k_above')}
+                        className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                            loanAmountFilter === '8k_above' ? 'bg-cyan-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                    >
+                        8k above
+                    </button>
                 </div>
 
                 {/* Search Bar */}

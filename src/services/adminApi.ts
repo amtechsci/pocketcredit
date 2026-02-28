@@ -383,7 +383,7 @@ class AdminApiService {
     });
   }
 
-  async getTvrIds(params: { page?: number; limit?: number; search?: string }): Promise<ApiResponse<any>> {
+  async getTvrIds(params: { page?: number; limit?: number; search?: string; loanAmountFilter?: string }): Promise<ApiResponse<any>> {
     return this.request('GET', '/applications/tvr-ids', undefined, params);
   }
 
@@ -462,6 +462,10 @@ class AdminApiService {
 
   async updateReference(userId: string, referenceId: string, data: { name?: string; phone?: string; relation?: string }): Promise<ApiResponse<any>> {
     return this.request('PUT', `/user-profile/${userId}/references/${referenceId}`, data);
+  }
+
+  async deleteReference(userId: string, referenceId: string): Promise<ApiResponse<any>> {
+    return this.request('DELETE', `/user-profile/${userId}/references/${referenceId}`);
   }
 
   // Transactions Management
@@ -2311,11 +2315,11 @@ class AdminApiService {
   }
 
   // QA Verification Users (loans pending QA verification)
-  async getQAVerificationUsers(page: number = 1, limit: number = 20, search: string = ''): Promise<ApiResponse<any>> {
+  async getQAVerificationUsers(page: number = 1, limit: number = 20, search: string = '', loanAmountFilter: string = ''): Promise<ApiResponse<any>> {
     try {
       const token = localStorage.getItem('adminToken');
       const response = await axios.get('/api/admin/users/qa-verification/list', {
-        params: { page, limit, search },
+        params: { page, limit, search, loanAmountFilter: loanAmountFilter || undefined },
         headers: {
           'Authorization': `Bearer ${token}`
         }

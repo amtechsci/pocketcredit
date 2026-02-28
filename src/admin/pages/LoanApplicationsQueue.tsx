@@ -135,6 +135,7 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
   const [searchInput, setSearchInput] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchCountdown, setSearchCountdown] = useState(0);
+  const [loanAmountFilter, setLoanAmountFilter] = useState<string>('');
   const [processingPayouts, setProcessingPayouts] = useState<string[]>([]);
   const [payoutResults, setPayoutResults] = useState<{ success: string[]; failed: Array<{ id: string; error: string }> } | null>(null);
   const [downloadingExcel, setDownloadingExcel] = useState<string | null>(null);
@@ -191,7 +192,17 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
 
   const handleStatusFilter = useCallback((value: string) => {
     setStatusFilter(value);
-    setCurrentPage(1); // Reset to first page when filtering
+    setCurrentPage(1);
+    if (!['under_review', 'follow_up'].includes(value)) {
+      setLoanAmountFilter('');
+    }
+  }, []);
+
+  const showLoanAmountFilters = statusFilter === 'under_review' || statusFilter === 'follow_up';
+
+  const handleLoanAmountFilter = useCallback((filter: string) => {
+    setLoanAmountFilter(prev => prev === filter ? '' : filter);
+    setCurrentPage(1);
   }, []);
 
   const handlePageChange = useCallback((page: number) => {
@@ -253,7 +264,8 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
           status: statusFilter,
           search: searchTerm,
           sortBy,
-          sortOrder
+          sortOrder,
+          loanAmountFilter: loanAmountFilter || undefined
         });
         
         if (response.status === 'success') {
@@ -272,7 +284,7 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
     };
 
     fetchApplications();
-  }, [currentPage, pageSize, statusFilter, searchTerm, sortBy, sortOrder]);
+  }, [currentPage, pageSize, statusFilter, searchTerm, sortBy, sortOrder, loanAmountFilter]);
 
   // Debounced search effect with countdown
   useEffect(() => {
@@ -520,7 +532,8 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
           status: statusFilter,
           search: searchTerm,
           sortBy,
-          sortOrder
+          sortOrder,
+          loanAmountFilter: loanAmountFilter || undefined
         });
         
         if (refreshResponse.status === 'success') {
@@ -697,7 +710,8 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
       status: statusFilter,
       search: searchTerm,
       sortBy,
-      sortOrder
+      sortOrder,
+      loanAmountFilter: loanAmountFilter || undefined
     });
     
     if (refreshResponse.status === 'success') {
@@ -730,7 +744,8 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
           status: statusFilter,
           search: searchTerm,
           sortBy,
-          sortOrder
+          sortOrder,
+          loanAmountFilter: loanAmountFilter || undefined
         });
         
         if (refreshResponse.status === 'success') {
@@ -1076,6 +1091,43 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
             </div>
             )}
           </div>
+
+          {/* Loan Amount Filter - Below 3k / 3k-8k / 8k above (only for Under Review & Follow Up) */}
+          {showLoanAmountFilters && (
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100 mt-2">
+              <span className="text-xs font-medium text-gray-600">Filter by loan amount:</span>
+              <button
+                onClick={() => handleLoanAmountFilter('below_3k')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  loanAmountFilter === 'below_3k'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Below 3k
+              </button>
+              <button
+                onClick={() => handleLoanAmountFilter('3k_8k')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  loanAmountFilter === '3k_8k'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                3k-8k
+              </button>
+              <button
+                onClick={() => handleLoanAmountFilter('8k_above')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  loanAmountFilter === '8k_above'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                8k above
+              </button>
+            </div>
+          )}
 
           {/* Search Bar - Second Row */}
           <div className="flex items-center gap-3">

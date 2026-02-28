@@ -23,6 +23,7 @@ interface TvrUser {
 export function TvrIdsPage() {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
+  const [loanAmountFilter, setLoanAmountFilter] = useState<string>('');
   const [tvrUsers, setTvrUsers] = useState<TvrUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -31,7 +32,7 @@ export function TvrIdsPage() {
 
   useEffect(() => {
     fetchTvrUsers();
-  }, [page, searchTerm]);
+  }, [page, searchTerm, loanAmountFilter]);
 
   const fetchTvrUsers = async () => {
     try {
@@ -39,7 +40,8 @@ export function TvrIdsPage() {
       const response = await adminApiService.getTvrIds({
         page,
         limit: 50,
-        search: searchTerm
+        search: searchTerm,
+        loanAmountFilter: loanAmountFilter || undefined
       });
 
       if (response.status === 'success' && response.data) {
@@ -71,6 +73,35 @@ export function TvrIdsPage() {
           </span>
         </div>
         <p className="text-gray-600 mt-1">Users moved to TVR</p>
+      </div>
+
+      {/* Loan Amount Filter */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <span className="text-sm font-medium text-gray-600">Filter by loan amount:</span>
+        <button
+          onClick={() => setLoanAmountFilter(prev => prev === 'below_3k' ? '' : 'below_3k')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+            loanAmountFilter === 'below_3k' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          Below 3k
+        </button>
+        <button
+          onClick={() => setLoanAmountFilter(prev => prev === '3k_8k' ? '' : '3k_8k')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+            loanAmountFilter === '3k_8k' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          3k-8k
+        </button>
+        <button
+          onClick={() => setLoanAmountFilter(prev => prev === '8k_above' ? '' : '8k_above')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+            loanAmountFilter === '8k_above' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+        >
+          8k above
+        </button>
       </div>
 
       {/* Search */}

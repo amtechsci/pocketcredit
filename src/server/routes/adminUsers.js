@@ -1268,6 +1268,7 @@ router.get('/qa-verification/list', authenticateAdmin, async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const search = req.query.search || '';
+    const loanAmountFilter = req.query.loanAmountFilter || '';
     const offset = (page - 1) * limit;
 
     let whereConditions = [];
@@ -1275,6 +1276,15 @@ router.get('/qa-verification/list', authenticateAdmin, async (req, res) => {
 
     // QA Verification users: loan_applications.status = 'qa_verification'
     whereConditions.push(`la.status = 'qa_verification'`);
+
+    // Loan amount filter (below_3k, 3k_8k, 8k_above)
+    if (loanAmountFilter === 'below_3k') {
+      whereConditions.push('la.loan_amount < 3000');
+    } else if (loanAmountFilter === '3k_8k') {
+      whereConditions.push('la.loan_amount >= 3000 AND la.loan_amount <= 8000');
+    } else if (loanAmountFilter === '8k_above') {
+      whereConditions.push('la.loan_amount > 8000');
+    }
 
     // Search filter
     if (search) {

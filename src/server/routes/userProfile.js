@@ -2242,6 +2242,39 @@ router.post('/:userId/references', authenticateAdmin, async (req, res) => {
   }
 });
 
+// DELETE /api/admin/user-profile/:userId/references/:referenceId - Delete a reference (Admin only)
+router.delete('/:userId/references/:referenceId', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId, referenceId } = req.params;
+
+    const result = await executeQuery(
+      'DELETE FROM `references` WHERE id = ? AND user_id = ?',
+      [referenceId, userId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Reference not found or does not belong to this user'
+      });
+    }
+
+    console.log('✅ Reference deleted successfully');
+    res.json({
+      status: 'success',
+      message: 'Reference deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete reference error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to delete reference'
+    });
+  }
+});
+
 // Upload document (with file)
 const multer = require('multer');
 const upload = multer({

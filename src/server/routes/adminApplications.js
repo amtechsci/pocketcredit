@@ -62,7 +62,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
       sortOrder = 'desc',
       loanType = 'all',
       dateFrom = '',
-      dateTo = ''
+      dateTo = '',
+      loanAmountFilter = ''
     } = req.query;
 
     // Enforce status by role: sub-admins and NBFC only see allowed statuses (backend permission)
@@ -263,6 +264,15 @@ router.get('/', authenticateAdmin, async (req, res) => {
     if (dateTo) {
       whereConditions.push('DATE(la.created_at) <= ?');
       queryParams.push(dateTo);
+    }
+
+    // Loan amount filter (below_3k, 3k_8k, 8k_above)
+    if (loanAmountFilter === 'below_3k') {
+      whereConditions.push('la.loan_amount < 3000');
+    } else if (loanAmountFilter === '3k_8k') {
+      whereConditions.push('la.loan_amount >= 3000 AND la.loan_amount <= 8000');
+    } else if (loanAmountFilter === '8k_above') {
+      whereConditions.push('la.loan_amount > 8000');
     }
 
     // Sub-admin: restrict to assigned applications and allowed statuses
@@ -516,7 +526,8 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
     const {
       page = 1,
       limit = 50,
-      search = ''
+      search = '',
+      loanAmountFilter = ''
     } = req.query;
 
     const numLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500);
@@ -535,6 +546,15 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
       )`);
       const searchPattern = `%${search}%`;
       queryParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
+    }
+
+    // Loan amount filter - apply to latest loan (la in the main query)
+    if (loanAmountFilter === 'below_3k') {
+      whereConditions.push('la.loan_amount < 3000');
+    } else if (loanAmountFilter === '3k_8k') {
+      whereConditions.push('la.loan_amount >= 3000 AND la.loan_amount <= 8000');
+    } else if (loanAmountFilter === '8k_above') {
+      whereConditions.push('la.loan_amount > 8000');
     }
 
     // Sub-admin follow_up_user: only show TVR users whose loan is assigned to this admin
