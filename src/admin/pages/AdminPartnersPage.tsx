@@ -10,7 +10,10 @@ import {
   RefreshCw,
   AlertCircle,
   Link2,
-  Copy
+  Copy,
+  KeyRound,
+  CheckCircle2,
+  XCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminApiService } from '../../services/adminApi';
@@ -326,6 +329,7 @@ export function AdminPartnersPage() {
                     <TableHead>Client ID</TableHead>
                     <TableHead>Category / Activities</TableHead>
                     <TableHead>Email</TableHead>
+                    <TableHead>Enc. Key</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Payout %</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -343,6 +347,12 @@ export function AdminPartnersPage() {
                         {!p.category && !p.activities && '—'}
                       </TableCell>
                       <TableCell>{p.email || '—'}</TableCell>
+                      <TableCell>
+                        {p.public_key_path
+                          ? <span className="flex items-center gap-1 text-green-600 text-xs font-medium"><CheckCircle2 className="w-3.5 h-3.5" />Saved</span>
+                          : <span className="flex items-center gap-1 text-orange-500 text-xs font-medium"><XCircle className="w-3.5 h-3.5" />None</span>
+                        }
+                      </TableCell>
                       <TableCell>
                         <Badge variant={p.is_active ? 'default' : 'secondary'}>
                           {p.is_active ? 'Active' : 'Inactive'}
@@ -661,6 +671,30 @@ export function AdminPartnersPage() {
                 placeholder="contact@partner.com"
               />
             </div>
+            {/* Current key status */}
+            <div className={`flex items-start gap-2 rounded-lg border p-3 text-sm ${editingPartner?.public_key_path ? 'border-green-200 bg-green-50' : 'border-orange-200 bg-orange-50'}`}>
+              <div className="mt-0.5 shrink-0">
+                {editingPartner?.public_key_path
+                  ? <CheckCircle2 className="w-4 h-4 text-green-600" />
+                  : <XCircle className="w-4 h-4 text-orange-500" />
+                }
+              </div>
+              <div className="min-w-0">
+                <p className={`font-medium ${editingPartner?.public_key_path ? 'text-green-800' : 'text-orange-700'}`}>
+                  {editingPartner?.public_key_path ? 'Encryption key saved' : 'No encryption key configured'}
+                </p>
+                {editingPartner?.public_key_path && (
+                  <p className="mt-0.5 break-all font-mono text-xs text-green-700">
+                    {editingPartner.public_key_path}
+                  </p>
+                )}
+                {!editingPartner?.public_key_path && (
+                  <p className="mt-0.5 text-xs text-orange-600">Paste a PEM key below to enable encrypted API responses.</p>
+                )}
+              </div>
+              <KeyRound className={`ml-auto shrink-0 w-4 h-4 ${editingPartner?.public_key_path ? 'text-green-400' : 'text-orange-400'}`} />
+            </div>
+
             <div className="grid gap-2">
               <Label htmlFor="edit-public_key_pem">Public key (PEM) – paste to add or replace key</Label>
               <Textarea
