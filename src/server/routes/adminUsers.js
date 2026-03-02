@@ -1458,10 +1458,14 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
       LIMIT ${maxFetch}
     `;
     const allRows = await executeQuery(usersQuery, queryParams);
-    const rows = allRows ? allRows
-      .map(r => ({ ...r, _dpd: daysDiff(getFirstPendingEmiDueDate(r), todayStr) }))
-      .sort((a, b) => (b._dpd ?? -9999) - (a._dpd ?? -9999)) // null DPD sorts last
-      .slice(offset, offset + parseInt(limit));
+    const list = allRows || [];
+    const withDpd = list.map(r => ({ ...r, _dpd: daysDiff(getFirstPendingEmiDueDate(r), todayStr) }));
+    const sorted = withDpd.sort((a, b) => {
+      const ad = a._dpd != null ? a._dpd : -9999;
+      const bd = b._dpd != null ? b._dpd : -9999;
+      return bd - ad;
+    });
+    const rows = sorted.slice(offset, offset + parseInt(limit, 10));
     if (!rows || rows.length === 0) {
       return res.json({ status: 'success', data: { users: [], total: 0, page, limit, totalPages: 0 } });
     }
