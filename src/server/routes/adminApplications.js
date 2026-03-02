@@ -397,9 +397,14 @@ router.get('/', authenticateAdmin, async (req, res) => {
               try {
                 const schedule = typeof row.emi_schedule === 'string' ? JSON.parse(row.emi_schedule) : row.emi_schedule;
                 if (Array.isArray(schedule) && schedule.length > 0) {
-                  const pending = schedule.find(emi => (emi.status || '').toLowerCase() !== 'paid');
-                  if (pending) {
-                    const d = pending.due_date || pending.dueDate;
+                  const unpaid = schedule.filter(emi => (emi.status || '').toLowerCase() !== 'paid');
+                  if (unpaid.length > 0) {
+                    unpaid.sort((a, b) => {
+                      const da = String(a.due_date || a.dueDate || '');
+                      const db = String(b.due_date || b.dueDate || '');
+                      return da.localeCompare(db);
+                    });
+                    const d = unpaid[0].due_date || unpaid[0].dueDate;
                     return d ? String(d).split('T')[0].split(' ')[0] : null;
                   }
                 }
@@ -449,15 +454,20 @@ router.get('/', authenticateAdmin, async (req, res) => {
     const assignedCol = subCat === 'verify_user' ? 'assigned_verify_admin_id' : subCat === 'qa_user' ? 'assigned_qa_admin_id' : subCat === 'account_manager' ? 'assigned_account_manager_id' : subCat === 'recovery_officer' ? 'assigned_recovery_officer_id' : subCat === 'follow_up_user' ? 'assigned_follow_up_admin_id' : null;
     const tempCol = subCat === 'verify_user' ? 'temp_assigned_verify_admin_id' : subCat === 'qa_user' ? 'temp_assigned_qa_admin_id' : subCat === 'account_manager' ? 'temp_assigned_account_manager_id' : subCat === 'recovery_officer' ? 'temp_assigned_recovery_officer_id' : subCat === 'follow_up_user' ? 'temp_assigned_follow_up_admin_id' : null;
 
-    // DPD helper for account_manager/overdue: first PENDING EMI due date
+    // DPD helper for account_manager/overdue: earliest PENDING EMI due date
     const getFirstPendingEmiDueDate = (row) => {
       if (row.emi_schedule) {
         try {
           const schedule = typeof row.emi_schedule === 'string' ? JSON.parse(row.emi_schedule) : row.emi_schedule;
           if (Array.isArray(schedule) && schedule.length > 0) {
-            const pending = schedule.find(emi => (emi.status || '').toLowerCase() !== 'paid');
-            if (pending) {
-              const d = pending.due_date || pending.dueDate;
+            const unpaid = schedule.filter(emi => (emi.status || '').toLowerCase() !== 'paid');
+            if (unpaid.length > 0) {
+              unpaid.sort((a, b) => {
+                const da = String(a.due_date || a.dueDate || '');
+                const db = String(b.due_date || b.dueDate || '');
+                return da.localeCompare(db);
+              });
+              const d = unpaid[0].due_date || unpaid[0].dueDate;
               return d ? String(d).split('T')[0].split(' ')[0] : null;
             }
           }

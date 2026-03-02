@@ -1393,9 +1393,14 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
         try {
           const schedule = typeof row.emi_schedule === 'string' ? JSON.parse(row.emi_schedule) : row.emi_schedule;
           if (Array.isArray(schedule) && schedule.length > 0) {
-            const pending = schedule.find(emi => (emi.status || '').toLowerCase() !== 'paid');
-            if (pending) {
-              const d = pending.due_date || pending.dueDate;
+            const unpaid = schedule.filter(emi => (emi.status || '').toLowerCase() !== 'paid');
+            if (unpaid.length > 0) {
+              unpaid.sort((a, b) => {
+                const da = String(a.due_date || a.dueDate || '');
+                const db = String(b.due_date || b.dueDate || '');
+                return da.localeCompare(db);
+              });
+              const d = unpaid[0].due_date || unpaid[0].dueDate;
               return d ? String(d).split('T')[0].split(' ')[0] : null;
             }
           }
