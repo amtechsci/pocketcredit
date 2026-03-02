@@ -67,6 +67,7 @@ interface LoanApplication {
     recoveryOfficerName: string;
     isOverdue: boolean;
   };
+  dpd?: number; // Days Past Due (account_manager/overdue only)
 }
 
 interface ProfileComment {
@@ -193,12 +194,9 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
   const handleStatusFilter = useCallback((value: string) => {
     setStatusFilter(value);
     setCurrentPage(1);
-    if (!['under_review', 'follow_up'].includes(value)) {
-      setLoanAmountFilter('');
-    }
   }, []);
 
-  const showLoanAmountFilters = statusFilter === 'under_review' || statusFilter === 'follow_up';
+  const showLoanAmountFilters = true; // Available for all tabs (submitted, disbursal, etc.)
 
   const handleLoanAmountFilter = useCallback((filter: string) => {
     setLoanAmountFilter(prev => prev === filter ? '' : filter);
@@ -1092,7 +1090,7 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
             )}
           </div>
 
-          {/* Loan Amount Filter - Below 3k / 3k-8k / 8k above (only for Under Review & Follow Up) */}
+          {/* Loan Amount Filter - Below 3k / 3k-8k / 8k above (all tabs) */}
           {showLoanAmountFilters && (
             <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100 mt-2">
               <span className="text-xs font-medium text-gray-600">Filter by loan amount:</span>
@@ -1374,6 +1372,11 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Type
                 </th>
+                {(statusFilter === 'account_manager' || statusFilter === 'overdue') && (
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    DPD
+                  </th>
+                )}
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Status
                 </th>
@@ -1458,6 +1461,16 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900 capitalize">{application.loanType}</div>
                   </td>
+                  {(statusFilter === 'account_manager' || statusFilter === 'overdue') && (
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`text-sm font-medium ${
+                        (application.dpd ?? 0) > 0 ? 'text-orange-600' :
+                        (application.dpd ?? 0) < 0 ? 'text-green-600' : ''
+                      }`}>
+                        {application.dpd ?? '—'}
+                      </span>
+                    </td>
+                  )}
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex flex-col gap-1">
                       {application.assignmentType && (

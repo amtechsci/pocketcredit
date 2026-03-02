@@ -1387,6 +1387,45 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
     const countResult = await executeQuery(countQuery, queryParams);
     const total = countResult && countResult.length > 0 ? countResult[0].total : 0;
 
+    // Get first PENDING EMI due date (skip paid EMIs). DPD = today - that due_date.
+    const getFirstPendingEmiDueDate = (row) => {
+      if (row.emi_schedule) {
+        try {
+          const schedule = typeof row.emi_schedule === 'string' ? JSON.parse(row.emi_schedule) : row.emi_schedule;
+          if (Array.isArray(schedule) && schedule.length > 0) {
+            const pending = schedule.find(emi => (emi.status || '').toLowerCase() !== 'paid');
+            if (pending) {
+              const d = pending.due_date || pending.dueDate;
+              return d ? String(d).split('T')[0].split(' ')[0] : null;
+            }
+          }
+        } catch (e) { /* ignore */ }
+      }
+      if (row.processed_due_date) {
+        try {
+          const pd = typeof row.processed_due_date === 'string' ? JSON.parse(row.processed_due_date) : row.processed_due_date;
+          if (Array.isArray(pd) && pd.length > 0) return String(pd[0]).split('T')[0];
+          if (typeof pd === 'string') return pd.split('T')[0];
+        } catch (e) { return String(row.processed_due_date).split('T')[0]; }
+      }
+      if (row.processed_at) {
+        const d = new Date(row.processed_at);
+        d.setDate(d.getDate() + 30);
+        return d.toISOString().slice(0, 10);
+      }
+      return null;
+    };
+
+    const daysDiff = (dueStr, todayStr) => {
+      if (!dueStr) return null;
+      const due = new Date(dueStr);
+      const cur = new Date(todayStr || new Date().toISOString().slice(0, 10));
+      return Math.floor((cur - due) / (24 * 60 * 60 * 1000));
+    };
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const maxFetch = 5000;
+
     const usersQuery = `
       SELECT 
         u.id as user_id,
@@ -1408,6 +1447,7 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
         la.processed_post_service_fee,
         la.fees_breakdown,
         la.emi_schedule,
+        la.processed_due_date,
         la.status as loan_status,
         DATE_FORMAT(la.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
         DATE_FORMAT(la.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
@@ -1415,9 +1455,13 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
       INNER JOIN users u ON la.user_id = u.id
       ${whereClause}
       ORDER BY la.updated_at DESC
-      LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
+      LIMIT ${maxFetch}
     `;
-    const rows = await executeQuery(usersQuery, queryParams);
+    const allRows = await executeQuery(usersQuery, queryParams);
+    const rows = allRows ? allRows
+      .map(r => ({ ...r, _dpd: daysDiff(getFirstPendingEmiDueDate(r), todayStr) }))
+      .sort((a, b) => (b._dpd ?? -9999) - (a._dpd ?? -9999)) // null DPD sorts last
+      .slice(offset, offset + parseInt(limit));
     if (!rows || rows.length === 0) {
       return res.json({ status: 'success', data: { users: [], total: 0, page, limit, totalPages: 0 } });
     }
@@ -1465,16 +1509,8 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
         ? Math.max(0, Math.ceil((today - disbursedDate) / (1000 * 60 * 60 * 24)))
         : 0;
 
-      let loanDays = 30;
-      if (row.plan_snapshot) {
-        try {
-          const plan = typeof row.plan_snapshot === 'string' ? JSON.parse(row.plan_snapshot) : row.plan_snapshot;
-          loanDays = plan.loan_days || plan.tenure_days || plan.tenure || 30;
-        } catch (e) {
-          // keep 30
-        }
-      }
-      const dpd = Math.max(0, exhaustedDays - (loanDays || 30));
+      // DPD from first PENDING EMI due date: today - due_date. Can be negative (before due).
+      const dpd = row._dpd != null ? row._dpd : 0;
 
       // Use total from emi_schedule when available so it matches EMI Details modal (e.g. ₹13.09). Fallback to principal+fee+GST only when no schedule.
       let outstandingAmount = 0;

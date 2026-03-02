@@ -140,6 +140,9 @@ router.get('/', authenticateAdmin, async (req, res) => {
         COALESCE(lp.plan_name, '') as plan_name,
         la.extension_status,
         la.extension_count,
+        la.emi_schedule,
+        la.processed_due_date,
+        la.processed_at,
         la.assigned_verify_admin_id,
         la.temp_assigned_verify_admin_id,
         la.assigned_qa_admin_id,
@@ -391,6 +394,42 @@ router.get('/', authenticateAdmin, async (req, res) => {
     const assignedCol = subCat === 'verify_user' ? 'assigned_verify_admin_id' : subCat === 'qa_user' ? 'assigned_qa_admin_id' : subCat === 'account_manager' ? 'assigned_account_manager_id' : subCat === 'recovery_officer' ? 'assigned_recovery_officer_id' : subCat === 'follow_up_user' ? 'assigned_follow_up_admin_id' : null;
     const tempCol = subCat === 'verify_user' ? 'temp_assigned_verify_admin_id' : subCat === 'qa_user' ? 'temp_assigned_qa_admin_id' : subCat === 'account_manager' ? 'temp_assigned_account_manager_id' : subCat === 'recovery_officer' ? 'temp_assigned_recovery_officer_id' : subCat === 'follow_up_user' ? 'temp_assigned_follow_up_admin_id' : null;
 
+    // DPD helper for account_manager/overdue: first PENDING EMI due date
+    const getFirstPendingEmiDueDate = (row) => {
+      if (row.emi_schedule) {
+        try {
+          const schedule = typeof row.emi_schedule === 'string' ? JSON.parse(row.emi_schedule) : row.emi_schedule;
+          if (Array.isArray(schedule) && schedule.length > 0) {
+            const pending = schedule.find(emi => (emi.status || '').toLowerCase() !== 'paid');
+            if (pending) {
+              const d = pending.due_date || pending.dueDate;
+              return d ? String(d).split('T')[0].split(' ')[0] : null;
+            }
+          }
+        } catch (e) { /* ignore */ }
+      }
+      if (row.processed_due_date) {
+        try {
+          const pd = typeof row.processed_due_date === 'string' ? JSON.parse(row.processed_due_date) : row.processed_due_date;
+          if (Array.isArray(pd) && pd.length > 0) return String(pd[0]).split('T')[0];
+          if (typeof pd === 'string') return pd.split('T')[0];
+        } catch (e) { return String(row.processed_due_date).split('T')[0]; }
+      }
+      if (row.processed_at) {
+        const d = new Date(row.processed_at);
+        d.setDate(d.getDate() + 30);
+        return d.toISOString().slice(0, 10);
+      }
+      return null;
+    };
+    const daysDiff = (dueStr, todayStr) => {
+      if (!dueStr) return null;
+      const due = new Date(dueStr);
+      const cur = new Date(todayStr || new Date().toISOString().slice(0, 10));
+      return Math.floor((cur - due) / (24 * 60 * 60 * 1000));
+    };
+    const todayStr = new Date().toISOString().slice(0, 10);
+
     // Transform the data to match the expected format
     const applicationsWithUserData = applications.map(app => {
       // Parse fees_breakdown JSON if available
@@ -482,6 +521,10 @@ router.get('/', authenticateAdmin, async (req, res) => {
         loan_plan_id: app.loan_plan_id || null,
         plan_code: app.plan_code || null,
         plan_name: app.plan_name || null,
+        // DPD for account_manager/overdue (first pending EMI due date)
+        dpd: (app.status === 'account_manager' || app.status === 'overdue')
+          ? (daysDiff(getFirstPendingEmiDueDate(app), todayStr) ?? 0)
+          : undefined,
         plan_snapshot: app.plan_snapshot || null,
         // Extension information
         extension_status: app.extension_status || 'none',

@@ -14,7 +14,7 @@ interface AccountManagerUser {
   total_loans: number;
   principal_amount: number;
   exhausted_days: number;
-  dpd: number;
+  dpd: number; // Days Past Due: positive = overdue, negative = days until due, 0 = due today
   outstanding_amount: number;
   emi_breakdown?: { emi_number: number; due_date: string | null; amount: number; status: string }[];
   loan_application_id: number;
@@ -204,7 +204,10 @@ export function AccountManagerPage() {
                       <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{formatCurrency(row.principal_amount)}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">{row.exhausted_days}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-sm">
-                        <span className={row.dpd > 0 ? 'text-orange-600 font-medium' : ''}>{row.dpd}</span>
+                        <span className={
+                          row.dpd > 0 ? 'text-orange-600 font-medium' :
+                          row.dpd < 0 ? 'text-green-600' : ''
+                        }>{row.dpd}</span>
                       </td>
                       <td className="px-3 py-2 text-sm text-gray-900">
                         {row.emi_breakdown && row.emi_breakdown.length > 0 ? (
