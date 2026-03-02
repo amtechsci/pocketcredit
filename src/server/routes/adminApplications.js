@@ -375,14 +375,68 @@ router.get('/', authenticateAdmin, async (req, res) => {
     const countResult = await executeQuery(countQuery, queryParams);
     const totalApplications = countResult[0] ? countResult[0].total : 0;
 
-    // Add pagination
     const offset = (parseInt(page) - 1) * parseInt(limit);
-    baseQuery += ` LIMIT ${parseInt(limit)} OFFSET ${offset}`;
+    const limitNum = parseInt(limit) || 20;
 
-    // Execute the main query
+    // For account_manager/overdue: fetch all, add DPD, sort by DPD DESC, then paginate
+    const needsDpdSort = (effectiveStatus === 'account_manager' || effectiveStatus === 'overdue');
+    const maxFetch = 5000;
+
     let applications;
     try {
-      applications = await executeQuery(baseQuery, queryParams);
+      if (needsDpdSort) {
+        baseQuery += ` LIMIT ${maxFetch}`;
+        const allRows = await executeQuery(baseQuery, queryParams);
+        if (!allRows || allRows.length === 0) {
+          applications = [];
+        } else {
+          // Add _dpd, sort by DPD DESC, slice for page
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const getFirstPendingEmiDueDate = (row) => {
+            if (row.emi_schedule) {
+              try {
+                const schedule = typeof row.emi_schedule === 'string' ? JSON.parse(row.emi_schedule) : row.emi_schedule;
+                if (Array.isArray(schedule) && schedule.length > 0) {
+                  const pending = schedule.find(emi => (emi.status || '').toLowerCase() !== 'paid');
+                  if (pending) {
+                    const d = pending.due_date || pending.dueDate;
+                    return d ? String(d).split('T')[0].split(' ')[0] : null;
+                  }
+                }
+              } catch (e) { /* ignore */ }
+            }
+            if (row.processed_due_date) {
+              try {
+                const pd = typeof row.processed_due_date === 'string' ? JSON.parse(row.processed_due_date) : row.processed_due_date;
+                if (Array.isArray(pd) && pd.length > 0) return String(pd[0]).split('T')[0];
+                if (typeof pd === 'string') return pd.split('T')[0];
+              } catch (e) { return String(row.processed_due_date).split('T')[0]; }
+            }
+            if (row.processed_at) {
+              const d = new Date(row.processed_at);
+              d.setDate(d.getDate() + 30);
+              return d.toISOString().slice(0, 10);
+            }
+            return null;
+          };
+          const daysDiff = (dueStr, tStr) => {
+            if (!dueStr) return null;
+            const due = new Date(dueStr);
+            const cur = new Date(tStr || todayStr);
+            return Math.floor((cur - due) / (24 * 60 * 60 * 1000));
+          };
+          const withDpd = allRows.map(r => ({ ...r, _dpd: daysDiff(getFirstPendingEmiDueDate(r), todayStr) }));
+          const sorted = withDpd.sort((a, b) => {
+            const ad = a._dpd != null ? a._dpd : -9999;
+            const bd = b._dpd != null ? b._dpd : -9999;
+            return bd - ad; // DPD DESC
+          });
+          applications = sorted.slice(offset, offset + limitNum);
+        }
+      } else {
+        baseQuery += ` LIMIT ${limitNum} OFFSET ${offset}`;
+        applications = await executeQuery(baseQuery, queryParams);
+      }
     } catch (queryError) {
       console.error('❌ Query execution error:', queryError);
       throw queryError;
