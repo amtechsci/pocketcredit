@@ -1416,14 +1416,13 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
       return null;
     };
 
-    const daysDiff = (dueStr, todayStr) => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const daysDiff = (dueStr, tStr) => {
       if (!dueStr) return null;
       const due = new Date(dueStr);
-      const cur = new Date(todayStr || new Date().toISOString().slice(0, 10));
+      const cur = new Date(tStr || todayStr);
       return Math.floor((cur - due) / (24 * 60 * 60 * 1000));
     };
-
-    const todayStr = new Date().toISOString().slice(0, 10);
     const maxFetch = 5000;
 
     const usersQuery = `
@@ -1463,7 +1462,8 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
     const sorted = withDpd.sort((a, b) => {
       const ad = a._dpd != null ? a._dpd : -9999;
       const bd = b._dpd != null ? b._dpd : -9999;
-      return bd - ad;
+      if (bd !== ad) return bd - ad; // DPD DESC (highest/most overdue first)
+      return (b.updated_at || '').localeCompare(a.updated_at || ''); // secondary: recent first
     });
     const rows = sorted.slice(offset, offset + parseInt(limit, 10));
     if (!rows || rows.length === 0) {

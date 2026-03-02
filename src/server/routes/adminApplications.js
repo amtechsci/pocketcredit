@@ -429,7 +429,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
           const sorted = withDpd.sort((a, b) => {
             const ad = a._dpd != null ? a._dpd : -9999;
             const bd = b._dpd != null ? b._dpd : -9999;
-            return bd - ad; // DPD DESC
+            if (bd !== ad) return bd - ad; // DPD DESC (highest/most overdue first)
+            return (b.updated_at || b.updatedAt || '').localeCompare(a.updated_at || a.updatedAt || ''); // secondary: recent first
           });
           applications = sorted.slice(offset, offset + limitNum);
         }
