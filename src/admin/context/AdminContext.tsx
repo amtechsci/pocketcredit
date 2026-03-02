@@ -7,6 +7,8 @@ interface AdminContextType {
   canApproveLoans: boolean;
   canRejectLoans: boolean;
   canEditUsers: boolean;
+  /** Reference table: edit name/phone/relation, note, delete - available to all admins including sub-admins */
+  canEditReferences: boolean;
   canManageTeam: boolean;
   /** Hide Transaction sub-tab in profile for verify/QA/account manager/recovery/debt_agency */
   shouldHideTransactionTab: boolean;
@@ -36,6 +38,7 @@ export function AdminProvider({ children, currentUser }: AdminProviderProps) {
   const canApproveLoans = hasPermission('approve_loans') || ['superadmin', 'super_admin', 'manager', 'master_admin'].includes(currentUser?.role || '');
   const canRejectLoans = hasPermission('reject_loans') || ['superadmin', 'super_admin', 'manager', 'master_admin'].includes(currentUser?.role || '');
   const canEditUsers = hasPermission('edit_users') || currentUser?.role === 'superadmin' || currentUser?.role === 'super_admin';
+  const canEditReferences = !!currentUser; // All admins (including sub-admins) can edit references
   const canManageTeam = currentUser?.role === 'superadmin' || currentUser?.role === 'super_admin';
 
   const subCat = currentUser?.sub_admin_category;
@@ -59,6 +62,7 @@ export function AdminProvider({ children, currentUser }: AdminProviderProps) {
     canApproveLoans,
     canRejectLoans,
     canEditUsers,
+    canEditReferences,
     canManageTeam,
     shouldHideTransactionTab,
     isDebtAgency,
