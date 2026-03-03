@@ -1091,7 +1091,7 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
                WHERE id = ?`,
               updateValues
             );
-            
+
           } catch (updateError) {
             // Don't fail the request if update fails, just log the error
             console.error(`⚠️ [Loan Calculations] Failed to update stored values for loan #${loanId}:`, updateError);

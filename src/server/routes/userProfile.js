@@ -3087,6 +3087,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
               `disbursed_at = CURRENT_TIMESTAMP`,
               `processed_at = CURRENT_TIMESTAMP`,
               `processed_amount = ?`,
+              `disbursal_amount = ?`,
               `exhausted_period_days = ?`,
               `processed_p_fee = ?`,
               `processed_post_service_fee = ?`,
@@ -3097,6 +3098,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
             ];
 
             let updateParams = [
+              processedAmount,
               processedAmount,
               exhaustedPeriodDays,
               pFee,

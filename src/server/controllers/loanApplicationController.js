@@ -1,10 +1,11 @@
 const { findUserById } = require('../models/user');
-const { 
-  createApplication, 
-  findApplicationsByUserId, 
+const { executeQuery } = require('../config/database');
+const {
+  createApplication,
+  findApplicationsByUserId,
   getApplicationStats,
   hasPendingApplications,
-  getApplicationSummary 
+  getApplicationSummary
 } = require('../models/loanApplicationModel');
 
 /**
@@ -57,6 +58,34 @@ const applyForLoan = async (req, res) => {
           profile_completed: false
         }
       });
+    }
+
+    // For salaried users, require Step 2 employment details (income range + payment mode)
+    // so users cannot apply by skipping the employment quick check (e.g. via basic profile only)
+    const employmentType = user.employment_type || '';
+    if (employmentType === 'salaried') {
+      const hasIncomeRange = user.income_range && String(user.income_range).trim() !== '';
+      let hasPaymentMode = false;
+      try {
+        const employmentRows = await executeQuery(
+          'SELECT salary_payment_mode FROM employment_details WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1',
+          [userId]
+        );
+        const mode = employmentRows && employmentRows[0] && employmentRows[0].salary_payment_mode;
+        hasPaymentMode = !!(mode && String(mode).trim() !== '');
+      } catch (_) { /* ignore */ }
+      if (!hasIncomeRange || !hasPaymentMode) {
+        return res.status(403).json({
+          success: false,
+          status: 'error',
+          message: 'Please complete your employment details (Gross Monthly Income and Salary Payment Mode) before applying for a loan.',
+          data: {
+            missing_step2: true,
+            has_income_range: hasIncomeRange,
+            has_payment_mode: hasPaymentMode
+          }
+        });
+      }
     }
 
     // Check if user's loan limit has reached cooling period threshold (>= ₹45,600)

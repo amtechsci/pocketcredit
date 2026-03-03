@@ -243,6 +243,10 @@ const updateBasicProfile = async (req, res) => {
       profileCompleted = false;
       stepCompleted = 'basic_details';
       message = 'Basic information completed! Please provide your college details.';
+    } else if (employmentType === 'salaried') {
+      // Salaried users must complete employment quick check (income range + payment mode) before profile is complete
+      profileCompleted = false;
+      message = 'Basic information saved. Please complete your employment details (income range and payment mode) to apply for a loan.';
     }
 
     // Prepare update data with names, gender, location, and PAN
