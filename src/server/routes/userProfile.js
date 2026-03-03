@@ -34,6 +34,28 @@ function formatDateLocal(date) {
 }
 
 /**
+ * Compute onboarding current step from actual completion state (so admin shows correct step).
+ * Used when returning user profile and avoids stale loan_applications.current_step.
+ */
+function computeOnboardingCurrentStep(user, latestApplication, referencesCount) {
+  if (!latestApplication) return null;
+  const status = latestApplication.status || '';
+  const hasBank = !!(latestApplication.user_bank_id != null && latestApplication.user_bank_id !== '');
+  const hasRefs = referencesCount >= 3 && !!(user.alternate_mobile && String(user.alternate_mobile).trim() !== '');
+  const hasVerifiedEmail = !!(
+    (user.email && String(user.email).trim() !== '' && user.email_verified) ||
+    (user.personal_email && String(user.personal_email).trim() !== '' && user.personal_email_verified) ||
+    (user.official_email && String(user.official_email).trim() !== '' && user.official_email_verified)
+  );
+  const finalStatuses = ['under_review', 'submitted', 'approved', 'disbursal', 'ready_for_disbursement', 'account_manager', 'overdue', 'cleared', 'ready_to_repeat_disbursal', 'repeat_disbursal'];
+  if (finalStatuses.includes(status) && hasRefs) return 'complete';
+  if (hasRefs) return 'complete';
+  if (hasBank && !hasVerifiedEmail) return 'email-verification';
+  if (!hasBank) return 'bank-details';
+  return 'references';
+}
+
+/**
  * Helper function to get KFS data from internal API
  */
 async function getKFSData(loanId, baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`) {
@@ -270,7 +292,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         DATE_FORMAT(updated_at, '%Y-%m-%d') as updated_at, 
         DATE_FORMAT(last_login_at, '%Y-%m-%d') as last_login_at,
         pan_number, alternate_mobile, aadhar_linked_mobile, account_aggregator_mobile, company_name, company_email, salary_date,
-        personal_email, official_email, loan_limit, credit_score, experian_score,
+        personal_email, personal_email_verified, official_email, official_email_verified, loan_limit, credit_score, experian_score,
         monthly_net_income, work_experience_range, employment_type, income_range,
         application_hold_reason
       FROM users 
@@ -320,6 +342,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         DATE_FORMAT(la.closed_date, '%Y-%m-%d') as closed_date,
         la.closed_amount,
         la.current_step,
+        la.user_bank_id,
         es.status as enach_status,
         av.name as verify_user_name,
         avt.name as temp_verify_user_name,
@@ -364,6 +387,16 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       if (manager && manager.length > 0) {
         assignedManager = manager[0].name;
       }
+    }
+
+    // References count for onboarding current step computation (exclude credit-analytics refs: Self / Credit%)
+    let referencesCount = 0;
+    if (latestApplication && !['cleared', 'cancelled', 'rejected', 'account_manager', 'overdue'].includes(latestApplication.status)) {
+      const refRows = await executeQuery(
+        'SELECT COUNT(*) as c FROM `references` WHERE user_id = ? AND COALESCE(relation, ?) != ? AND (name NOT LIKE ? OR name IS NULL)',
+        [userId, '', 'Self', 'Credit%']
+      );
+      referencesCount = (refRows && refRows[0]) ? (refRows[0].c || 0) : 0;
     }
 
     // Calculate pocket credit score (default 640, increase by 6 if loan cleared on/before due date)
@@ -1111,7 +1144,9 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       status: user.status || 'active',
       profileStatus: profileStatus, // Latest loan application status
       assignedManager: assignedManager, // Assigned account manager name
-      currentStep: (applications && applications.length > 0) ? applications[0].current_step : null, // Actual onboarding step from DB
+      currentStep: (applications && applications.length > 0)
+        ? computeOnboardingCurrentStep(user, applications[0], referencesCount)
+        : null, // Computed from completion state so admin shows correct step
       registeredDate: user.created_at, // For admin UI compatibility
       createdAt: user.created_at,
       updatedAt: user.updated_at,

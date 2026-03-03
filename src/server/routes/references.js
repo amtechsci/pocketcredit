@@ -25,12 +25,29 @@ router.post('/', requireAuth, async (req, res) => {
       references: references 
     });
 
-    // Get user's registered phone number
-    const userData = await executeQuery('SELECT phone FROM users WHERE id = ?', [userId]);
-    const userPhone = userData.length > 0 ? userData[0].phone : null;
-
     if (!userId) {
       return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
+    // Fetch user row for email verification check and phone
+    const userRow = await executeQuery(
+      'SELECT phone, email, email_verified, personal_email, personal_email_verified, official_email, official_email_verified FROM users WHERE id = ?',
+      [userId]
+    );
+    const u = userRow && userRow[0];
+    const userPhone = u ? u.phone : null;
+
+    // Require user to have verified at least one email before adding references
+    const hasVerifiedEmail = u && (
+      (u.email && String(u.email).trim() !== '' && u.email_verified) ||
+      (u.personal_email && String(u.personal_email).trim() !== '' && u.personal_email_verified) ||
+      (u.official_email && String(u.official_email).trim() !== '' && u.official_email_verified)
+    );
+    if (!hasVerifiedEmail) {
+      return res.status(403).json({
+        success: false,
+        message: 'Please verify your email address before adding references. Complete the Email Verification step first.'
+      });
     }
 
     // Validate references - exactly 3 required

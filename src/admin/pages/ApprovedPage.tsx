@@ -34,7 +34,7 @@ interface ApprovedUser {
 // Map backend step names to user-friendly display names
 const getStepDisplayName = (step: string | null | undefined): string => {
   if (!step) return 'Not started';
-  
+
   const stepMap: Record<string, string> = {
     'application': 'Apply loan page',
     'kyc-verification': 'Digilocker page',
@@ -44,7 +44,9 @@ const getStepDisplayName = (step: string | null | undefined): string => {
     'employment-details': 'Employment details page',
     'bank-statement': 'Bank statement page',
     'bank-details': 'Bank details page',
+    'email-verification': 'Email verification page',
     'references': 'References page',
+    'complete': 'Under review / Complete',
     'upload-documents': 'Documents page',
     'language': 'Language spoken page',
     'e-nach': 'E-nach page',

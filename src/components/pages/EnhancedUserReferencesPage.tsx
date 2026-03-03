@@ -353,6 +353,9 @@ export function EnhancedUserReferencesPage({
       console.error('Error saving references:', error);
       const errorMsg = error.response?.data?.message || error.message || 'Failed to save references';
       toast.error(errorMsg);
+      if (error.response?.status === 403 && (errorMsg || '').toLowerCase().includes('email')) {
+        navigate('/email-verification', { replace: true });
+      }
     } finally {
       setSaving(false);
     }

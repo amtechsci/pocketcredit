@@ -22,6 +22,7 @@ function mapEngineStepToHookStep(engineStep: EngineStep): LoanApplicationStep {
     engineStep === 'employment-details' ||
     engineStep === 'bank-statement' ||
     engineStep === 'bank-details' ||
+    engineStep === 'email-verification' ||
     engineStep === 'references' ||
     engineStep === 'upload-documents' ||
     engineStep === 'steps') {
@@ -52,6 +53,7 @@ function mapEnginePrerequisitesToHook(enginePrereqs: EnginePrerequisites): StepP
     employmentCompleted: enginePrereqs.employmentCompleted,
     bankStatementCompleted: enginePrereqs.bankStatementCompleted && !enginePrereqs.bankStatementReset,
     bankDetailsCompleted: enginePrereqs.bankDetailsCompleted,
+    emailVerified: enginePrereqs.emailVerified,
     referencesCompleted: enginePrereqs.referencesCompleted,
     documentsNeeded: enginePrereqs.documentsNeeded
   };
@@ -64,6 +66,7 @@ export type LoanApplicationStep =
   | 'employment-details'    // Employment details
   | 'bank-statement'        // Bank statement upload
   | 'bank-details'          // Bank details
+  | 'email-verification'    // Email verification (before references)
   | 'references'            // References
   | 'aa-consent'            // Account Aggregator consent
   | 'upload-documents'      // Document upload
@@ -75,6 +78,7 @@ export interface StepPrerequisites {
   employmentCompleted: boolean;
   bankStatementCompleted: boolean;
   bankDetailsCompleted: boolean;
+  emailVerified: boolean;
   referencesCompleted: boolean;
   documentsNeeded: boolean;
 }
@@ -100,6 +104,7 @@ const STEP_ORDER: LoanApplicationStep[] = [
   'employment-details',     // Step 4: Enter company details, salary, etc. (REQUIRED after credit check)
   'bank-statement',         // Step 5: Upload bank statement
   'bank-details',           // Step 6: Link salary bank account
+  'email-verification',     // Step 6.5: Email verification (before references)
   'references',             // Step 7: Add references
   'aa-consent',             // Step 8: Account Aggregator consent
   'upload-documents',       // Step 9: Upload any additional documents
@@ -113,6 +118,7 @@ export const STEP_ROUTES: Record<LoanApplicationStep, string> = {
   'employment-details': '/loan-application/employment-details',
   'bank-statement': '/loan-application/bank-statement',
   'bank-details': '/link-salary-bank-account', // Onboarding flow uses link-salary-bank-account
+  'email-verification': '/email-verification',
   'references': '/user-references',
   'aa-consent': '/loan-application/aa-flow',
   'upload-documents': '/loan-application/upload-documents',
@@ -136,6 +142,7 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
       employmentCompleted: false,
       bankStatementCompleted: false,
       bankDetailsCompleted: false,
+      emailVerified: false,
       referencesCompleted: false,
       documentsNeeded: false
     },

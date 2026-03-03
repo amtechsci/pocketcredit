@@ -470,9 +470,15 @@ function AppContent() {
 
 
         <Route path="/user-references" element={
-          <DashboardLayout>
-            <EnhancedUserReferencesPage />
-          </DashboardLayout>
+          isAuthenticated ? (
+            <DashboardLayout>
+              <StepGuard step="references">
+                <EnhancedUserReferencesPage />
+              </StepGuard>
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
         } />
 
         <Route path="/loan-application/kyc-verification" element={
@@ -605,7 +611,9 @@ function AppContent() {
 
         <Route path="/email-verification" element={
           isAuthenticated ? (
-            <EmailVerificationPage />
+            <StepGuard step="email-verification">
+              <EmailVerificationPage />
+            </StepGuard>
           ) : (
             <Navigate to="/auth" replace />
           )

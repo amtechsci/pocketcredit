@@ -27,6 +27,7 @@ export type OnboardingStep =
   | 'employment-details'    // Step 5: Enter company details, salary, etc.
   | 'bank-statement'        // Step 6: Upload bank statement (via AA or manual)
   | 'bank-details'          // Step 7: Link salary bank account
+  | 'email-verification'    // Step 7.5: Verify email (required before references)
   | 'references'            // Step 8: Add references
   | 'upload-documents'      // Step 9: Upload any additional documents
   | 'steps';                // Step 10: Final completion
@@ -41,6 +42,7 @@ export interface OnboardingPrerequisites {
   bankStatementCompleted: boolean;
   bankStatementReset: boolean; // Admin reset bank statement
   bankDetailsCompleted: boolean;
+  emailVerified: boolean;
   referencesCompleted: boolean;
   documentsNeeded: boolean;
 }
@@ -62,6 +64,7 @@ export const STEP_ORDER: OnboardingStep[] = [
   'employment-details',    // Step 5: Employment details
   'bank-statement',        // Step 6: Bank statement upload
   'bank-details',          // Step 7: Bank account linking
+  'email-verification',    // Step 7.5: Email verification (before references)
   'references',           // Step 8: References
   'upload-documents',      // Step 9: Additional documents
   'steps'                  // Step 10: Final completion
@@ -76,6 +79,7 @@ export const STEP_ROUTES: Record<OnboardingStep, string> = {
   'employment-details': '/loan-application/employment-details',
   'bank-statement': '/loan-application/bank-statement',
   'bank-details': '/link-salary-bank-account', // Onboarding flow uses link-salary-bank-account
+  'email-verification': '/email-verification',
   'references': '/user-references',
   'upload-documents': '/loan-application/upload-documents',
   'steps': '/application-under-review'
@@ -102,6 +106,7 @@ export async function checkAllPrerequisites(
     bankStatementCompleted: false,
     bankStatementReset: false,
     bankDetailsCompleted: false,
+    emailVerified: false,
     referencesCompleted: false,
     documentsNeeded: false
   };
@@ -273,6 +278,22 @@ export async function checkAllPrerequisites(
       }
     }
 
+    // 7.5. Check email verification (at least one verified email required before references)
+    try {
+      const profileResponse = await apiService.getUserProfile();
+      if (profileResponse?.data?.user) {
+        const user = profileResponse.data.user as any;
+        const hasVerifiedEmail = !!(
+          (user.email && String(user.email).trim() !== '' && user.email_verified) ||
+          (user.personal_email && String(user.personal_email).trim() !== '' && user.personal_email_verified) ||
+          (user.official_email && String(user.official_email).trim() !== '' && user.official_email_verified)
+        );
+        prerequisites.emailVerified = hasVerifiedEmail;
+      }
+    } catch (error) {
+      console.error('[ProgressEngine] Error checking email verification:', error);
+    }
+
     // 8. Check references completion
     try {
       const refsResponse = await apiService.getUserReferences(cacheOptions);
@@ -393,6 +414,11 @@ export function determineCurrentStep(
     return 'bank-details';
   }
 
+  // Priority 8.5: Email verification (required before references)
+  if (!prerequisites.emailVerified) {
+    return 'email-verification';
+  }
+
   // Priority 9: References
   if (!prerequisites.referencesCompleted) {
     return 'references';
@@ -461,6 +487,7 @@ export async function getOnboardingProgress(
     apiService.clearCache('/bank-statement'); // Bank statement
     apiService.clearCache('/aa/status'); // Account Aggregator
     apiService.clearCache('/references'); // References
+    apiService.clearCache('/auth/profile'); // User profile (email verification)
     apiService.clearCache('/loan-documents'); // Documents
     apiService.clearCache('/validation'); // Validation history
     
@@ -530,6 +557,7 @@ export async function getOnboardingProgress(
       prerequisites.employmentCompleted &&
       prerequisites.bankStatementCompleted &&
       prerequisites.bankDetailsCompleted &&
+      prerequisites.emailVerified &&
       prerequisites.referencesCompleted &&
       !prerequisites.documentsNeeded;
     
@@ -562,6 +590,7 @@ export async function getOnboardingProgress(
         bankStatementCompleted: prerequisites.bankStatementCompleted,
         bankStatementReset: prerequisites.bankStatementReset,
         bankDetailsCompleted: prerequisites.bankDetailsCompleted,
+        emailVerified: prerequisites.emailVerified,
         referencesCompleted: prerequisites.referencesCompleted,
         documentsNeeded: prerequisites.documentsNeeded
       }
@@ -618,6 +647,7 @@ export async function getOnboardingProgress(
         bankStatementCompleted: false,
         bankStatementReset: false,
         bankDetailsCompleted: false,
+        emailVerified: false,
         referencesCompleted: false,
         documentsNeeded: false
       },
@@ -662,6 +692,8 @@ function getStepReason(prerequisites: OnboardingPrerequisites, step: OnboardingS
       return 'Bank statement not completed';
     case 'bank-details':
       return 'Bank details not linked';
+    case 'email-verification':
+      return 'Email not verified';
     case 'references':
       return 'References not completed';
     case 'steps':

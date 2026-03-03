@@ -221,6 +221,23 @@ router.post('/verify', requireAuth, async (req, res) => {
       [email, userId]
     );
 
+    // Update latest pending loan application's current_step to 'references' so admin shows correct step
+    try {
+      const { executeQuery: execQuery } = require('../config/database');
+      const apps = await execQuery(
+        `SELECT id FROM loan_applications 
+         WHERE user_id = ? AND status NOT IN ('cleared', 'cancelled', 'rejected', 'account_manager', 'overdue')
+         ORDER BY created_at DESC LIMIT 1`,
+        [userId]
+      );
+      if (apps && apps.length > 0) {
+        await execQuery(
+          `UPDATE loan_applications SET current_step = 'references', updated_at = NOW() WHERE id = ?`,
+          [apps[0].id]
+        );
+      }
+    } catch (e) { /* non-fatal */ }
+
     res.json({
       success: true,
       message: 'Email verified successfully'
