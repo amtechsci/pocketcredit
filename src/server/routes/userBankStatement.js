@@ -476,7 +476,7 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
   try {
     await initializeDatabase();
     const userId = req.userId;
-    const { bank_name } = req.body;
+    const { bank_name, pdf_password } = req.body;
 
     if (!req.file) {
       return res.status(400).json({
@@ -542,22 +542,26 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
 
     console.log(`✅ Bank statement uploaded: S3 Key: ${s3Key}`);
 
+    // Store optional PDF password in transaction_data for password-protected PDFs (admin/verification can use it)
+    const transactionData = (pdf_password && String(pdf_password).trim()) ? JSON.stringify({ pdf_password: String(pdf_password).trim() }) : null;
+
     // Store in database with status = 'completed' for manual uploads so step manager recognizes it as complete
     // No Digitap API calls - admin will trigger verification
     // Store S3 key in file_path (will be converted to presigned URL when needed)
     await executeQuery(
       `INSERT INTO user_bank_statements 
-       (user_id, client_ref_num, mobile_number, bank_name, status, file_path, file_name, file_size, upload_method, created_at) 
-       VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, 'manual', NOW())
+       (user_id, client_ref_num, mobile_number, bank_name, status, file_path, file_name, file_size, upload_method, transaction_data, created_at) 
+       VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, 'manual', ?, NOW())
        ON DUPLICATE KEY UPDATE 
        client_ref_num = VALUES(client_ref_num),
        file_path = VALUES(file_path), 
        file_name = VALUES(file_name), 
        file_size = VALUES(file_size), 
        upload_method = VALUES(upload_method),
+       transaction_data = VALUES(transaction_data),
        status = 'completed',
        updated_at = NOW()`,
-      [userId, clientRefNum, mobileNumber, bank_name || null, s3Key, req.file.originalname, req.file.size]
+      [userId, clientRefNum, mobileNumber, bank_name || null, s3Key, req.file.originalname, req.file.size, transactionData]
     );
 
     // Update loan application step to 'bank-details' if user has an active application

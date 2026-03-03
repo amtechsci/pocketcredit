@@ -482,13 +482,14 @@ export const LinkSalaryBankAccountPage = () => {
 
       if (response.success) {
         toast.success('Bank details verified successfully');
-        // Use progress engine to determine next step
-        try {
-          // Get active application ID
+
+        // Link this bank to the active loan application so progress engine sees bank-details as complete
+        const urlParams = new URLSearchParams(window.location.search);
+        const appIdParam = urlParams.get('applicationId');
+        let activeApplicationId: number | null = appIdParam ? parseInt(appIdParam) : null;
+        if (!activeApplicationId) {
           const applicationsResponse = await apiService.getLoanApplications();
           const isSuccess = applicationsResponse.success || applicationsResponse.status === 'success';
-          let activeApplicationId: number | null = null;
-
           if (isSuccess && applicationsResponse.data?.applications) {
             const applications = applicationsResponse.data.applications;
             const activeApplication = applications.find((app: any) =>
@@ -496,13 +497,27 @@ export const LinkSalaryBankAccountPage = () => {
             );
             activeApplicationId = activeApplication?.id || null;
           }
+        }
+        if (activeApplicationId && selectedBankId) {
+          try {
+            await apiService.chooseBankDetails({
+              application_id: activeApplicationId,
+              bank_details_id: selectedBankId
+            });
+            apiService.clearCache(`/loan-applications/${activeApplicationId}`);
+            apiService.clearCache('/loan-applications');
+          } catch (linkErr) {
+            console.warn('[LinkSalaryBankAccount] Link bank to application failed (non-blocking):', linkErr);
+          }
+        }
 
+        // Determine next step and redirect immediately (force refresh so backend sees linked bank)
+        try {
           const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
-          const progress = await getOnboardingProgress(activeApplicationId);
+          const progress = await getOnboardingProgress(activeApplicationId, true);
           const nextRoute = getStepRoute(progress.currentStep, activeApplicationId);
           console.log('[LinkSalaryBankAccount] After submission, next step from engine:', progress.currentStep, '->', nextRoute);
 
-          // Check if email verification is needed first
           if (user && !user.personal_email_verified) {
             navigate('/email-verification', { replace: true });
           } else {
@@ -510,7 +525,6 @@ export const LinkSalaryBankAccountPage = () => {
           }
         } catch (error) {
           console.error('[LinkSalaryBankAccount] Error getting next step, using fallback:', error);
-          // Fallback to email verification (old behavior)
           navigate('/email-verification', { replace: true });
         }
       } else {

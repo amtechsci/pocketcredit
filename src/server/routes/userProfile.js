@@ -34,25 +34,90 @@ function formatDateLocal(date) {
 }
 
 /**
- * Compute onboarding current step from actual completion state (so admin shows correct step).
- * Used when returning user profile and avoids stale loan_applications.current_step.
+ * Step order for onboarding (must match frontend onboardingProgressEngine STEP_ORDER).
+ * Used to compute first incomplete step for admin "Current step" display.
  */
-function computeOnboardingCurrentStep(user, latestApplication, referencesCount) {
+const ONBOARDING_STEP_ORDER = [
+  'application',
+  'kyc-verification',
+  'pan-verification',
+  'aa-consent',
+  'credit-analytics',
+  'employment-details',
+  'bank-statement',
+  'bank-details',
+  'email-verification',
+  'references',
+  'upload-documents',
+  'steps'
+];
+
+/**
+ * Compute onboarding current step from actual completion state (so admin shows correct step).
+ * Walks step order and returns the first incomplete step; early steps (KYC, employment, AA, etc.)
+ * no longer show as "bank-details".
+ * @param {object} user - User row (kyc_completed, employment_type, income_range, email flags, etc.)
+ * @param {object} latestApplication - Latest loan application (user_bank_id, id)
+ * @param {number} referencesCount - Count of references (excl. Self/Credit%)
+ * @param {object} opts - Optional: kycData, kycDocuments, employment, bankStatementRecords, creditCheck, aaOrBankStatement
+ */
+function computeOnboardingCurrentStep(user, latestApplication, referencesCount, opts = {}) {
   if (!latestApplication) return null;
-  const status = latestApplication.status || '';
-  const hasBank = !!(latestApplication.user_bank_id != null && latestApplication.user_bank_id !== '');
-  const hasRefs = referencesCount >= 3 && !!(user.alternate_mobile && String(user.alternate_mobile).trim() !== '');
+
   const hasVerifiedEmail = !!(
     (user.email && String(user.email).trim() !== '' && user.email_verified) ||
     (user.personal_email && String(user.personal_email).trim() !== '' && user.personal_email_verified) ||
     (user.official_email && String(user.official_email).trim() !== '' && user.official_email_verified)
   );
+  const hasRefs = referencesCount >= 3 && !!(user.alternate_mobile && String(user.alternate_mobile).trim() !== '');
+  const status = latestApplication.status || '';
   const finalStatuses = ['under_review', 'submitted', 'approved', 'disbursal', 'ready_for_disbursement', 'account_manager', 'overdue', 'cleared', 'ready_to_repeat_disbursal', 'repeat_disbursal'];
   if (finalStatuses.includes(status) && hasRefs) return 'complete';
   if (hasRefs) return 'complete';
-  if (hasBank && !hasVerifiedEmail) return 'email-verification';
-  if (!hasBank) return 'bank-details';
-  return 'references';
+
+  const kycData = opts.kycData || null;
+  const kycDocuments = opts.kycDocuments || [];
+  const employment = opts.employment || [];
+  const bankStatementRecords = opts.bankStatementRecords || [];
+  const creditCheck = opts.creditCheck || null;
+  const aaOrBankStatement = opts.aaOrBankStatement || false;
+
+  const rekycRequired = !!(kycData && kycData.verification_data && (typeof kycData.verification_data === 'string'
+    ? (() => { try { const v = JSON.parse(kycData.verification_data); return v && v.rekyc_required === true; } catch (e) { return false; } })()
+    : (kycData.verification_data.rekyc_required === true)));
+
+  const kycVerified = (user.kyc_completed || (kycData && kycData.status === 'verified')) && !rekycRequired;
+  const hasPanDocument = Array.isArray(kycDocuments) && kycDocuments.some(d => (d.document_type || '').toUpperCase().includes('PAN'));
+  const aaConsentGiven = aaOrBankStatement;
+  const creditAnalyticsCompleted = !!(creditCheck && creditCheck.credit_score != null && Number(creditCheck.credit_score) > 450);
+  const employmentCompleted = !!(
+    (user.employment_type && String(user.employment_type).trim() !== '') &&
+    (user.income_range != null && String(user.income_range).trim() !== '') &&
+    (employment.length === 0 || employment.some(e => (e.salary_payment_mode != null && e.salary_payment_mode !== '') || (e.monthly_salary_old != null && Number(e.monthly_salary_old) > 0)))
+  );
+  const bankStatementCompleted = bankStatementRecords.some(r => r.status === 'completed' || r.upload_method === 'manual');
+  const bankDetailsCompleted = !!(latestApplication.user_bank_id != null && latestApplication.user_bank_id !== '');
+
+  const checks = [
+    true, // application (we have an application)
+    kycVerified,
+    hasPanDocument,
+    aaConsentGiven,
+    creditAnalyticsCompleted,
+    employmentCompleted,
+    bankStatementCompleted,
+    bankDetailsCompleted,
+    hasVerifiedEmail,
+    hasRefs,
+    true, // upload-documents: treat as done if refs done
+    true  // steps
+  ];
+
+  const stepOrder = ONBOARDING_STEP_ORDER;
+  for (let i = 0; i < stepOrder.length; i++) {
+    if (!checks[i]) return stepOrder[i];
+  }
+  return 'complete';
 }
 
 /**
@@ -617,6 +682,30 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       console.error('Error fetching KYC documents:', e);
     }
 
+    // Credit check and AA/bank statement status for onboarding current step (early steps)
+    let creditCheck = null;
+    let aaOrBankStatement = false;
+    try {
+      const ccRows = await executeQuery(
+        'SELECT id, credit_score, is_eligible, checked_at FROM credit_checks WHERE user_id = ? ORDER BY checked_at DESC LIMIT 1',
+        [userId]
+      );
+      if (ccRows && ccRows.length > 0) creditCheck = ccRows[0];
+      // AA consent / bank statement: digitap for this app, or user_bank_statements completed
+      if (latestApplication && latestApplication.id) {
+        const digitapRows = await executeQuery(
+          'SELECT id, status FROM digitap_bank_statements WHERE user_id = ? AND application_id = ? ORDER BY created_at DESC LIMIT 1',
+          [userId, latestApplication.id]
+        );
+        const digitapOk = digitapRows && digitapRows.length > 0 && (digitapRows[0].status === 'completed' || digitapRows[0].status === 'ReportGenerated');
+        aaOrBankStatement = digitapOk || (bankStatementRecords && bankStatementRecords.length > 0 && bankStatementRecords.some(r => r.status === 'completed' || r.upload_method === 'manual'));
+      } else {
+        aaOrBankStatement = bankStatementRecords && bankStatementRecords.length > 0 && bankStatementRecords.some(r => r.status === 'completed' || r.upload_method === 'manual');
+      }
+    } catch (e) {
+      console.error('Error fetching credit/AA data for current step:', e);
+    }
+
     // Fetch Selfie Verification Data
     let selfieData = null;
     try {
@@ -1145,7 +1234,14 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       profileStatus: profileStatus, // Latest loan application status
       assignedManager: assignedManager, // Assigned account manager name
       currentStep: (applications && applications.length > 0)
-        ? computeOnboardingCurrentStep(user, applications[0], referencesCount)
+        ? computeOnboardingCurrentStep(user, applications[0], referencesCount, {
+            kycData,
+            kycDocuments,
+            employment,
+            bankStatementRecords,
+            creditCheck,
+            aaOrBankStatement
+          })
         : null, // Computed from completion state so admin shows correct step
       registeredDate: user.created_at, // For admin UI compatibility
       createdAt: user.created_at,

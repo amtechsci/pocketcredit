@@ -17,6 +17,7 @@ export const BankStatementUploadPage = () => {
   const [onlineMethod, setOnlineMethod] = useState<'netbanking' | 'accountaggregator'>('accountaggregator');
   const [mobileNumber, setMobileNumber] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [pdfPassword, setPdfPassword] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [checkingStatus, setCheckingStatus] = useState(true);
   const [uploadStatus, setUploadStatus] = useState<'none' | 'uploaded' | 'under_review' | 'verified' | 'rejected'>('none');
@@ -187,6 +188,9 @@ export const BankStatementUploadPage = () => {
     try {
       const formData = new FormData();
       formData.append('statement', selectedFile);
+      if (pdfPassword && pdfPassword.trim()) {
+        formData.append('pdf_password', pdfPassword.trim());
+      }
 
       const response = await apiService.uploadBankStatement(formData);
 
@@ -194,6 +198,7 @@ export const BankStatementUploadPage = () => {
         toast.success('Bank statement uploaded successfully! Redirecting...');
         setUploadStatus('uploaded');
         setSelectedFile(null);
+        setPdfPassword('');
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
@@ -528,6 +533,21 @@ export const BankStatementUploadPage = () => {
                     )}
                   </div>
 
+                  {/* Optional PDF password (for password-protected statements) */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      PDF password <span className="text-gray-400 font-normal">(optional)</span>
+                    </label>
+                    <input
+                      type="password"
+                      value={pdfPassword}
+                      onChange={(e) => setPdfPassword(e.target.value)}
+                      placeholder="If your PDF is password-protected, enter it here"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      autoComplete="off"
+                    />
+                  </div>
+
                   {/* Upload Button */}
                   <Button
                     onClick={handleManualUpload}
@@ -555,6 +575,7 @@ export const BankStatementUploadPage = () => {
                       <li>Statement should cover last 6 months</li>
                       <li>File must be in PDF format</li>
                       <li>Maximum file size: 10MB</li>
+                      <li>If your PDF is password-protected, enter the password in the optional field above</li>
                     </ul>
                   </div>
                 </Card>
