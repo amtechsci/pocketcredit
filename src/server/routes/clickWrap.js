@@ -127,27 +127,22 @@ router.post('/initiate', requireAuth, async (req, res) => {
       });
     }
 
-    // Get and validate names
-    // If first_name or last_name is missing, use fallback values
-    let fname = user.first_name;
-    let lname = user.last_name;
+    // Get and validate names (Digitap requires non-empty fname and lname)
+    let fname = (user.first_name != null && String(user.first_name).trim() !== '') ? String(user.first_name).trim() : null;
+    let lname = (user.last_name != null && String(user.last_name).trim() !== '') ? String(user.last_name).trim() : null;
 
-    // If either name is missing, provide defaults
     if (!fname && !lname) {
-      // Both names missing - use "User" as fallback
       fname = 'User';
-      lname = '';
+      lname = '.';
     } else if (!fname) {
-      // First name missing - use last name as first name
       fname = lname;
-      lname = '';
+      lname = '.';
     } else if (!lname) {
-      // Last name missing - keep first name, use empty string for last name
-      lname = '';
+      lname = '.';
     }
 
     // Clean and validate mobile number
-    const cleanMobile = mobile.replace(/\D/g, '').slice(-10);
+    const cleanMobile = String(mobile).replace(/\D/g, '').slice(-10);
     if (cleanMobile.length !== 10 || !/^[6-9]\d{9}$/.test(cleanMobile)) {
       return res.status(400).json({
         success: false,
@@ -155,11 +150,19 @@ router.post('/initiate', requireAuth, async (req, res) => {
       });
     }
 
-    // Initiate ClickWrap
+    const signerEmail = String(email).trim();
+    if (!signerEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'User email is required for e-signature. Please update your profile with an email address.'
+      });
+    }
+
+    // Initiate ClickWrap (fname, lname, email, mobile must all be non-empty for Digitap)
     const initiateResult = await initiateClickWrap({
-      fname: fname.trim(),
-      lname: lname.trim(),
-      email: email.trim(),
+      fname,
+      lname,
+      email: signerEmail,
       mobile: cleanMobile,
       reason: 'loan_agreement'
     });
