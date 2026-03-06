@@ -32,6 +32,9 @@ export function PartnerDashboardPage() {
     end_date: '',
   });
   const [searchQuery, setSearchQuery] = useState('');
+  const [exportStartDate, setExportStartDate] = useState('');
+  const [exportEndDate, setExportEndDate] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -80,6 +83,27 @@ export function PartnerDashboardPage() {
   const handleLogout = () => {
     logout();
     navigate('/partner/login');
+  };
+
+  const handleDownloadReport = async () => {
+    try {
+      setExporting(true);
+      const params: { start_date?: string; end_date?: string } = {};
+      if (exportStartDate) params.start_date = exportStartDate;
+      if (exportEndDate) params.end_date = exportEndDate;
+      const blob = await partnerApiService.exportLeadsExcel(params);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `partner_leads_${new Date().toISOString().split('T')[0]}.xlsx`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error('Export failed:', err);
+      alert(err?.message || 'Failed to download report');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const formatDate = (dateString: string | null) => {
@@ -308,6 +332,31 @@ export function PartnerDashboardPage() {
               placeholder="End Date"
               className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
+          </div>
+          <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-gray-200">
+            <span className="text-sm text-gray-600">Payout report (by disbursed date):</span>
+            <input
+              type="date"
+              value={exportStartDate}
+              onChange={(e) => setExportStartDate(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <span className="text-sm text-gray-500">to</span>
+            <input
+              type="date"
+              value={exportEndDate}
+              onChange={(e) => setExportEndDate(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <button
+              type="button"
+              onClick={handleDownloadReport}
+              disabled={exporting}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium"
+            >
+              {exporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              Download XLSX
+            </button>
           </div>
         </div>
 

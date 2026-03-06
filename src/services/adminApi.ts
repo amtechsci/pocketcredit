@@ -2013,6 +2013,28 @@ class AdminApiService {
   }
 
   /**
+   * Download partner leads report as XLSX (payout date filter on disbursed_at).
+   * Optional start_date, end_date (YYYY-MM-DD).
+   */
+  async exportPartnerLeadsExcel(partnerId: number, params?: { start_date?: string; end_date?: string }): Promise<Blob> {
+    const token = localStorage.getItem('adminToken');
+    const search = new URLSearchParams();
+    if (params?.start_date) search.set('start_date', params.start_date);
+    if (params?.end_date) search.set('end_date', params.end_date);
+    const qs = search.toString();
+    const url = `${this.api.defaults.baseURL}/partners/${partnerId}/leads/export/xlsx${qs ? `?${qs}` : ''}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ message: 'Failed to export leads' }));
+      throw new Error(err.message || 'Failed to export leads');
+    }
+    return response.blob();
+  }
+
+  /**
    * Create new team member
    */
   async createTeamMember(data: {

@@ -1,7 +1,48 @@
 const express = require('express');
 const router = express.Router();
+const XLSX = require('xlsx');
 const { authenticatePartnerToken } = require('../middleware/partnerAuth');
 const { executeQuery, initializeDatabase } = require('../config/database');
+const { getLeadExportData } = require('../services/partnerLeadExportService');
+
+/**
+ * GET /api/v1/partner/dashboard/leads/export/xlsx
+ * Download partner leads report as XLSX (date filter = payout period on disbursed_at)
+ * Query: start_date, end_date (YYYY-MM-DD, optional)
+ */
+router.get('/leads/export/xlsx', authenticatePartnerToken, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const partner = req.partner;
+    const { start_date, end_date } = req.query;
+    const exportData = await getLeadExportData(partner.id, { start_date, end_date });
+    if (!exportData.length) {
+      return res.status(404).json({
+        status: false,
+        code: 4040,
+        message: 'No leads found for the given date range. Use start_date and end_date (YYYY-MM-DD) to filter by payout (disbursed) date.'
+      });
+    }
+    const headers = Object.keys(exportData[0]);
+    const rows = exportData.map((row) => headers.map((h) => row[h]));
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Partner Leads');
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    const safeName = (partner.name || partner.client_id || 'partner').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `partner_leads_${safeName}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('Partner leads export error:', error);
+    res.status(500).json({
+      status: false,
+      code: 5000,
+      message: 'Internal Server Error'
+    });
+  }
+});
 
 /**
  * GET /api/v1/partner/dashboard/leads

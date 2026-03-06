@@ -13,7 +13,8 @@ import {
   Copy,
   KeyRound,
   CheckCircle2,
-  XCircle
+  XCircle,
+  Download
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminApiService } from '../../services/adminApi';
@@ -109,6 +110,9 @@ export function AdminPartnersPage() {
   const [leadsLoading, setLeadsLoading] = useState(false);
   const [leadsPage, setLeadsPage] = useState(1);
   const [leadsPagination, setLeadsPagination] = useState({ total: 0, total_pages: 1, limit: 20 });
+  const [leadsExportStartDate, setLeadsExportStartDate] = useState('');
+  const [leadsExportEndDate, setLeadsExportEndDate] = useState('');
+  const [leadsExporting, setLeadsExporting] = useState(false);
 
   const [addForm, setAddForm] = useState({
     client_id: '',
@@ -185,6 +189,28 @@ export function AdminPartnersPage() {
       setLeads([]);
     }
   }, [viewingLeadsPartner?.id]);
+
+  const handleDownloadLeadsReport = async () => {
+    if (!viewingLeadsPartner) return;
+    try {
+      setLeadsExporting(true);
+      const params: { start_date?: string; end_date?: string } = {};
+      if (leadsExportStartDate) params.start_date = leadsExportStartDate;
+      if (leadsExportEndDate) params.end_date = leadsExportEndDate;
+      const blob = await adminApiService.exportPartnerLeadsExcel(viewingLeadsPartner.id, params);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `partner_leads_${(viewingLeadsPartner.name || viewingLeadsPartner.client_id || 'partner').replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+      toast.success('Lead report downloaded');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to download report');
+    } finally {
+      setLeadsExporting(false);
+    }
+  };
 
   const handleOpenAdd = () => {
     setAddForm({
@@ -394,9 +420,38 @@ export function AdminPartnersPage() {
               <List className="w-5 h-5" />
               Leads: {viewingLeadsPartner.name}
             </CardTitle>
-            <Button variant="ghost" size="sm" onClick={() => setViewingLeadsPartner(null)}>
-              <X className="w-4 h-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 text-sm">
+                <Label htmlFor="leads-export-start" className="text-muted-foreground whitespace-nowrap">Payout from</Label>
+                <Input
+                  id="leads-export-start"
+                  type="date"
+                  value={leadsExportStartDate}
+                  onChange={(e) => setLeadsExportStartDate(e.target.value)}
+                  className="w-[130px] h-8"
+                />
+                <Label htmlFor="leads-export-end" className="text-muted-foreground whitespace-nowrap">to</Label>
+                <Input
+                  id="leads-export-end"
+                  type="date"
+                  value={leadsExportEndDate}
+                  onChange={(e) => setLeadsExportEndDate(e.target.value)}
+                  className="w-[130px] h-8"
+                />
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadLeadsReport}
+                disabled={leadsExporting}
+              >
+                {leadsExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                <span className="ml-1">Download XLSX</span>
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setViewingLeadsPartner(null)}>
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             {leadsLoading ? (

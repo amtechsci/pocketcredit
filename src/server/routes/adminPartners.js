@@ -10,6 +10,8 @@ const {
   createPartner,
   updatePartner
 } = require('../models/partner');
+const { getLeadExportData } = require('../services/partnerLeadExportService');
+const XLSX = require('xlsx');
 
 const router = express.Router();
 
@@ -194,6 +196,47 @@ router.put('/:id', authenticateAdmin, requireSuperadmin, async (req, res) => {
   } catch (error) {
     console.error('Admin update partner error:', error);
     res.status(500).json({ status: 'error', message: error.message || 'Failed to update partner' });
+  }
+});
+
+/**
+ * GET /api/admin/partners/:id/leads/export/xlsx
+ * Download partner leads report as XLSX (date filter = payout period on disbursed_at)
+ * Query: start_date, end_date (YYYY-MM-DD)
+ */
+router.get('/:id/leads/export/xlsx', authenticateAdmin, requireSuperadmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid partner id' });
+    }
+    const partner = await findPartnerById(id);
+    if (!partner) {
+      return res.status(404).json({ status: 'error', message: 'Partner not found' });
+    }
+    const { start_date, end_date } = req.query;
+    const exportData = await getLeadExportData(id, { start_date, end_date });
+    if (!exportData.length) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'No leads found for the given partner and date range. Use start_date and end_date (YYYY-MM-DD) to filter by payout (disbursed) date.'
+      });
+    }
+    const headers = Object.keys(exportData[0]);
+    const rows = exportData.map((row) => headers.map((h) => row[h]));
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Partner Leads');
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    const safeName = (partner.name || partner.client_id || 'partner').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `partner_leads_${safeName}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('Admin partner leads export error:', error);
+    res.status(500).json({ status: 'error', message: error.message || 'Failed to export leads' });
   }
 });
 
