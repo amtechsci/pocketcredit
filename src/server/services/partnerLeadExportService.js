@@ -1,7 +1,8 @@
 /**
  * Partner Lead Export Service
  * Fetches partner leads with user/loan/employment/address data for XLSX export.
- * Date filter is applied on disbursed_at (payout period).
+ * Includes all loan statuses (cancelled, submitted, disbursal, account_manager, etc.).
+ * Date filter is applied on lead_shared_at so partners get complete lead report for the period.
  */
 
 const { executeQuery } = require('../config/database');
@@ -20,9 +21,9 @@ function formatDateDDMMYYYY(date) {
 }
 
 /**
- * Build export rows for partner leads (payout date filter on disbursed_at).
+ * Build export rows for partner leads (all statuses). Optional date filter on lead_shared_at.
  * @param {number} partnerId - Partner ID
- * @param {Object} options - { start_date, end_date } (YYYY-MM-DD, filter on pl.disbursed_at)
+ * @param {Object} options - { start_date, end_date } (YYYY-MM-DD, filter on pl.lead_shared_at)
  * @returns {Promise<Array>} Array of row objects with export column keys
  */
 async function getLeadExportData(partnerId, options = {}) {
@@ -42,6 +43,7 @@ async function getLeadExportData(partnerId, options = {}) {
       COALESCE(la.status, pl.loan_status) as loan_status,
       la.id as loan_id,
       la.application_number,
+      la.loan_amount as la_loan_amount,
       la.created_at as loan_created_at,
       la.disbursed_at as la_disbursed_at,
       la.disbursal_amount as la_disbursal_amount,
@@ -89,13 +91,13 @@ async function getLeadExportData(partnerId, options = {}) {
   `;
   const params = [partnerId];
 
-  // Payout date filter: filter by disbursed_at (when payout is relevant)
+  // Date filter: by lead shared date so report includes all leads (all loan statuses) in the period
   if (start_date) {
-    query += ` AND DATE(pl.disbursed_at) >= ?`;
+    query += ` AND DATE(pl.lead_shared_at) >= ?`;
     params.push(start_date);
   }
   if (end_date) {
-    query += ` AND DATE(pl.disbursed_at) <= ?`;
+    query += ` AND DATE(pl.lead_shared_at) <= ?`;
     params.push(end_date);
   }
 
@@ -108,13 +110,15 @@ async function getLeadExportData(partnerId, options = {}) {
       .filter(Boolean)
       .join(' ')
       .trim() || '—';
-    const applicationId = row.application_number || (row.loan_id ? `PLL${row.loan_id}` : '');
+    // Application ID: short format PLL + id (e.g. PLL1802), not long PC...
+    const applicationId = row.loan_id ? `PLL${row.loan_id}` : '';
     const mobile = row.u_mobile || row.pl_mobile || '';
     const pan = row.u_pan || row.pl_pan || '';
     const dob = row.u_dob || row.pl_dob;
     const applicationDate = row.loan_created_at || row.lead_shared_at;
     const disbursedDate = row.la_disbursed_at || row.pl_disbursed_at;
-    const principalAmount = row.la_disbursal_amount != null ? row.la_disbursal_amount : (row.pl_disbursal_amount != null ? row.pl_disbursal_amount : '');
+    // Principal amount: applied loan amount, not disbursed amount
+    const principalAmount = row.la_loan_amount != null ? parseFloat(row.la_loan_amount) : (row.pl_disbursal_amount != null ? row.pl_disbursal_amount : '');
     const experianScore = row.u_experian_score != null ? String(row.u_experian_score) : (row.cc_experian_score != null ? String(row.cc_experian_score) : '');
 
     return {

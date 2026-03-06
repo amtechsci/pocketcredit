@@ -340,7 +340,7 @@ export function PartnerDashboardPage() {
           <div className="px-6 py-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-gray-900">Leads</h2>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-gray-600">Payout report:</span>
+              <span className="text-sm text-gray-600">Report period (lead shared):</span>
               <input
                 type="date"
                 value={exportStartDate}

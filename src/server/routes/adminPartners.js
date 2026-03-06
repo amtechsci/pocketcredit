@@ -201,8 +201,8 @@ router.put('/:id', authenticateAdmin, requireSuperadmin, async (req, res) => {
 
 /**
  * GET /api/admin/partners/:id/leads/export/xlsx
- * Download partner leads report as XLSX (date filter = payout period on disbursed_at)
- * Query: start_date, end_date (YYYY-MM-DD)
+ * Download partner leads report as XLSX (all loan statuses). Date filter = lead_shared_at.
+ * Query: start_date, end_date (YYYY-MM-DD, optional)
  */
 router.get('/:id/leads/export/xlsx', authenticateAdmin, requireSuperadmin, async (req, res) => {
   try {
@@ -220,7 +220,7 @@ router.get('/:id/leads/export/xlsx', authenticateAdmin, requireSuperadmin, async
     if (!exportData.length) {
       return res.status(404).json({
         status: 'error',
-        message: 'No leads found for the given partner and date range. Use start_date and end_date (YYYY-MM-DD) to filter by payout (disbursed) date.'
+        message: 'No leads found for the given partner and date range. Use start_date and end_date (YYYY-MM-DD) to filter by lead shared date.'
       });
     }
     const headers = Object.keys(exportData[0]);

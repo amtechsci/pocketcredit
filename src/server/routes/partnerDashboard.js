@@ -7,7 +7,7 @@ const { getLeadExportData } = require('../services/partnerLeadExportService');
 
 /**
  * GET /api/v1/partner/dashboard/leads/export/xlsx
- * Download partner leads report as XLSX (date filter = payout period on disbursed_at)
+ * Download partner leads report as XLSX (all loan statuses). Date filter = lead_shared_at.
  * Query: start_date, end_date (YYYY-MM-DD, optional)
  */
 router.get('/leads/export/xlsx', authenticatePartnerToken, async (req, res) => {
@@ -20,7 +20,7 @@ router.get('/leads/export/xlsx', authenticatePartnerToken, async (req, res) => {
       return res.status(404).json({
         status: false,
         code: 4040,
-        message: 'No leads found for the given date range. Use start_date and end_date (YYYY-MM-DD) to filter by payout (disbursed) date.'
+        message: 'No leads found for the given date range. Use start_date and end_date (YYYY-MM-DD) to filter by lead shared date.'
       });
     }
     const headers = Object.keys(exportData[0]);

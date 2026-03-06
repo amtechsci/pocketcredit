@@ -190,18 +190,19 @@ export function AdminPartnersPage() {
     }
   }, [viewingLeadsPartner?.id]);
 
-  const handleDownloadLeadsReport = async () => {
-    if (!viewingLeadsPartner) return;
+  const handleDownloadLeadsReport = async (partner?: Partner) => {
+    const target = partner ?? viewingLeadsPartner;
+    if (!target) return;
     try {
       setLeadsExporting(true);
       const params: { start_date?: string; end_date?: string } = {};
       if (leadsExportStartDate) params.start_date = leadsExportStartDate;
       if (leadsExportEndDate) params.end_date = leadsExportEndDate;
-      const blob = await adminApiService.exportPartnerLeadsExcel(viewingLeadsPartner.id, params);
+      const blob = await adminApiService.exportPartnerLeadsExcel(target.id, params);
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `partner_leads_${(viewingLeadsPartner.name || viewingLeadsPartner.client_id || 'partner').replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`;
+      link.download = `partner_leads_${(target.name || target.client_id || 'partner').replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`;
       link.click();
       window.URL.revokeObjectURL(url);
       toast.success('Lead report downloaded');
@@ -386,11 +387,12 @@ export function AdminPartnersPage() {
                       </TableCell>
                       <TableCell>{p.payout_percentage != null ? `${p.payout_percentage}%` : '2%'}</TableCell>
                       <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
+                        <div className="flex justify-end gap-1 flex-wrap">
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => handleOpenEdit(p)}
+                            title="Edit partner"
                           >
                             <Edit className="w-4 h-4" />
                           </Button>
@@ -398,9 +400,20 @@ export function AdminPartnersPage() {
                             variant="ghost"
                             size="sm"
                             onClick={() => setViewingLeadsPartner(viewingLeadsPartner?.id === p.id ? null : p)}
+                            title="View leads"
                           >
                             <Users className="w-4 h-4 mr-1" />
                             Leads
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDownloadLeadsReport(p)}
+                            disabled={leadsExporting}
+                            title="Download lead report (XLSX)"
+                          >
+                            {leadsExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                            <span className="ml-1 hidden sm:inline">Download</span>
                           </Button>
                         </div>
                       </TableCell>
@@ -415,14 +428,14 @@ export function AdminPartnersPage() {
 
       {viewingLeadsPartner && (
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-row items-center justify-between gap-4 flex-wrap">
             <CardTitle className="flex items-center gap-2 text-base">
               <List className="w-5 h-5" />
               Leads: {viewingLeadsPartner.name}
             </CardTitle>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1 text-sm">
-                <Label htmlFor="leads-export-start" className="text-muted-foreground whitespace-nowrap">Payout from</Label>
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2 text-sm">
+                <Label htmlFor="leads-export-start" className="text-muted-foreground whitespace-nowrap">From (lead shared)</Label>
                 <Input
                   id="leads-export-start"
                   type="date"
@@ -430,7 +443,7 @@ export function AdminPartnersPage() {
                   onChange={(e) => setLeadsExportStartDate(e.target.value)}
                   className="w-[130px] h-8"
                 />
-                <Label htmlFor="leads-export-end" className="text-muted-foreground whitespace-nowrap">to</Label>
+                <Label htmlFor="leads-export-end" className="text-muted-foreground whitespace-nowrap">to (lead shared)</Label>
                 <Input
                   id="leads-export-end"
                   type="date"
@@ -440,15 +453,16 @@ export function AdminPartnersPage() {
                 />
               </div>
               <Button
-                variant="outline"
+                variant="default"
                 size="sm"
-                onClick={handleDownloadLeadsReport}
+                onClick={() => handleDownloadLeadsReport()}
                 disabled={leadsExporting}
+                title="Download lead report as XLSX"
               >
                 {leadsExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                 <span className="ml-1">Download XLSX</span>
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => setViewingLeadsPartner(null)}>
+              <Button variant="ghost" size="sm" onClick={() => setViewingLeadsPartner(null)} title="Close">
                 <X className="w-4 h-4" />
               </Button>
             </div>
