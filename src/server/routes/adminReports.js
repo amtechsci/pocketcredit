@@ -53,6 +53,16 @@ const getStateCode = (stateName) => {
     return STATE_CODES[normalized] || '';
 };
 
+/** Use state_codes.id from DB for CIBIL state code (e.g. 29 for Karnataka); fallback to name→code map when id is null */
+const formatStateCodeForCibil = (loan) => {
+    const id = loan.state_id;
+    if (id != null && id !== '') {
+        const n = parseInt(String(id), 10);
+        if (!isNaN(n) && n >= 0) return String(n).padStart(2, '0');
+    }
+    return getStateCode(loan.state);
+};
+
 /**
  * CIBIL address: Aadhar (Digilocker) only for Address Line 1, State Code, PIN Code.
  * Pick the same address id for all columns so we don't mix fields from different rows.
@@ -62,6 +72,8 @@ const _CIBIL_CHOSEN_ADDRESS_ID = `(SELECT a2.id FROM addresses a2 WHERE a2.user_
 const CIBIL_ADDRESS_LINE1_SUBQUERY = `(SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
 const CIBIL_ADDRESS_LINE2_SUBQUERY = `(SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
 const CIBIL_STATE_NAME_SUBQUERY = `(SELECT COALESCE(sc.state_name, a.state) FROM addresses a LEFT JOIN state_codes sc ON sc.id = a.state WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
+/** State code for CIBIL: use state_codes.id from DB (e.g. 29 for Karnataka); fallback to name lookup if id missing */
+const CIBIL_STATE_ID_SUBQUERY = `(SELECT a.state FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
 const CIBIL_PINCODE_SUBQUERY = `(SELECT a.pincode FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
 const CIBIL_COUNTRY_SUBQUERY = `(SELECT COALESCE(a.country, 'India') FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
 const CIBIL_CITY_SUBQUERY = `(SELECT a.city FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
@@ -230,6 +242,7 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 ${CIBIL_CITY_SUBQUERY} as city,
                 ${CIBIL_STATE_NAME_SUBQUERY} as state,
+                ${CIBIL_STATE_ID_SUBQUERY} as state_id,
                 ${CIBIL_PINCODE_SUBQUERY} as pincode,
                 ${CIBIL_COUNTRY_SUBQUERY} as country
             FROM loan_applications la
@@ -250,7 +263,7 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
             const consumerName = `${loan.first_name} ${loan.last_name}`.trim();
             const dob = formatDateDDMMYYYY(loan.date_of_birth);
             const gender = getGenderCode(loan.gender);
-            const stateCode = getStateCode(loan.state);
+            const stateCode = formatStateCodeForCibil(loan);
             const dateOpened = formatDateDDMMYYYY(loan.disbursed_at || loan.processed_at);
             const now = new Date();
             const dateReported = formatDateDDMMYYYY(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
@@ -325,6 +338,7 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 ${CIBIL_CITY_SUBQUERY} as city,
                 ${CIBIL_STATE_NAME_SUBQUERY} as state,
+                ${CIBIL_STATE_ID_SUBQUERY} as state_id,
                 ${CIBIL_PINCODE_SUBQUERY} as pincode,
                 ${CIBIL_COUNTRY_SUBQUERY} as country
             FROM loan_applications la
@@ -350,7 +364,7 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
             const consumerName = `${loan.first_name} ${loan.last_name}`.trim();
             const dob = formatDateDDMMYYYY(loan.date_of_birth);
             const gender = getGenderCode(loan.gender);
-            const stateCode = getStateCode(loan.state);
+            const stateCode = formatStateCodeForCibil(loan);
             const dateOpened = formatDateDDMMYYYY(loan.disbursed_at || loan.processed_at);
             // Use closed_date (actual last payment/closure date); fallback to updated_at for legacy rows
             const dateLastPayment = formatDateDDMMYYYY(loan.closed_date || loan.cleared_at);
@@ -429,6 +443,7 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 ${CIBIL_CITY_SUBQUERY} as city,
                 ${CIBIL_STATE_NAME_SUBQUERY} as state,
+                ${CIBIL_STATE_ID_SUBQUERY} as state_id,
                 ${CIBIL_PINCODE_SUBQUERY} as pincode,
                 ${CIBIL_COUNTRY_SUBQUERY} as country
             FROM loan_applications la
@@ -450,7 +465,7 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
             const consumerName = `${loan.first_name} ${loan.last_name}`.trim();
             const dob = formatDateDDMMYYYY(loan.date_of_birth);
             const gender = getGenderCode(loan.gender);
-            const stateCode = getStateCode(loan.state);
+            const stateCode = formatStateCodeForCibil(loan);
             const dateOpened = formatDateDDMMYYYY(loan.disbursed_at || loan.processed_at);
             const dateCleared = formatDateDDMMYYYY(loan.cleared_at || loan.settlement_date);
             const now = new Date();
@@ -540,6 +555,7 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 ${CIBIL_CITY_SUBQUERY} as city,
                 ${CIBIL_STATE_NAME_SUBQUERY} as state,
+                ${CIBIL_STATE_ID_SUBQUERY} as state_id,
                 ${CIBIL_PINCODE_SUBQUERY} as pincode,
                 ${CIBIL_COUNTRY_SUBQUERY} as country
             FROM loan_applications la
@@ -572,7 +588,7 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
             const consumerName = `${loan.first_name} ${loan.last_name}`.trim();
             const dob = formatDateDDMMYYYY(loan.date_of_birth) || '01011970';
             const gender = getGenderCode(loan.gender);
-            const stateCode = getStateCode(loan.state);
+            const stateCode = formatStateCodeForCibil(loan);
             const dateOpened = formatDateDDMMYYYY(loan.disbursed_at || loan.processed_at) || '01011970';
             const now = new Date();
             const dateReported = formatDateDDMMYYYY(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
