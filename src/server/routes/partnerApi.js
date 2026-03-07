@@ -288,6 +288,7 @@ const extractUTMParams = (utmLink) => {
 const calculateAge = (dateOfBirth) => {
   if (!dateOfBirth) return null;
   const birthDate = new Date(dateOfBirth);
+  if (isNaN(birthDate.getTime())) return null;
   const today = new Date();
   let age = today.getFullYear() - birthDate.getFullYear();
   const monthDiff = today.getMonth() - birthDate.getMonth();
@@ -296,6 +297,46 @@ const calculateAge = (dateOfBirth) => {
   }
   return age;
 };
+
+/**
+ * Normalize partner date_of_birth to MySQL YYYY-MM-DD.
+ * Partners may send DD-MM-YYYY or YYYY-MM-DD; invalid values (e.g. month 20) cause INSERT to fail.
+ * Returns YYYY-MM-DD string or null if invalid/unparseable.
+ */
+function normalizePartnerDateOfBirth(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const s = String(value).trim();
+  const ymd = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;   // YYYY-MM-DD
+  const dmy = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/; // DD-MM-YYYY or DD/MM/YYYY
+  let y, m, d;
+  const ym = s.match(ymd);
+  if (ym) {
+    y = parseInt(ym[1], 10);
+    m = parseInt(ym[2], 10);
+    d = parseInt(ym[3], 10);
+    // Partner may send DD-MM-YYYY but we received as YYYY-DD-MM (e.g. 1991-20-04 = 20 Apr 1991)
+    if (m > 12 && d >= 1 && d <= 12) {
+      const swap = m;
+      m = d;
+      d = swap;
+    }
+  } else {
+    const dm = s.match(dmy);
+    if (dm) {
+      d = parseInt(dm[1], 10);
+      m = parseInt(dm[2], 10);
+      y = parseInt(dm[3], 10);
+    } else {
+      return null;
+    }
+  }
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const lastDay = new Date(y, m, 0).getDate();
+  if (d > lastDay) return null;
+  const mm = String(m).padStart(2, '0');
+  const dd = String(d).padStart(2, '0');
+  return `${y}-${mm}-${dd}`;
+}
 
 /**
  * Validate basic funnel checks
@@ -395,6 +436,9 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
       payment_mode
     } = requestData;
 
+    // Normalize date_of_birth to YYYY-MM-DD (partners may send DD-MM-YYYY; invalid values cause INSERT to fail)
+    const dateOfBirthNormalized = normalizePartnerDateOfBirth(date_of_birth);
+
     if (!first_name || !last_name || !mobile_number || !pan_number) {
       return res.status(400).json({
         status: false,
@@ -424,7 +468,7 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
     }
 
     // Validate basic funnel checks if provided
-    const funnelErrors = validateFunnelChecks(requestData);
+    const funnelErrors = validateFunnelChecks({ ...requestData, date_of_birth: dateOfBirthNormalized || date_of_birth });
     if (funnelErrors.length > 0) {
       return res.status(400).json({
         status: false,
@@ -526,7 +570,7 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
             first_name,
             last_name,
             pan_number.toUpperCase(),
-            date_of_birth || null,
+            dateOfBirthNormalized || null,
             employment_type || null,
             monthly_salary ? parseFloat(monthly_salary) : null,
             payment_mode || null,
@@ -554,7 +598,7 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
             last_name,
             String(mobile_number),
             pan_number.toUpperCase(),
-            date_of_birth || null,
+            dateOfBirthNormalized || null,
             employment_type || null,
             monthly_salary ? parseFloat(monthly_salary) : null,
             payment_mode || null,
