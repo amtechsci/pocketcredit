@@ -72,8 +72,8 @@ const _CIBIL_CHOSEN_ADDRESS_ID = `(SELECT a2.id FROM addresses a2 WHERE a2.user_
 const CIBIL_ADDRESS_LINE1_SUBQUERY = `(SELECT a.address_line1 FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
 const CIBIL_ADDRESS_LINE2_SUBQUERY = `(SELECT a.address_line2 FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
 const CIBIL_STATE_NAME_SUBQUERY = `(SELECT COALESCE(sc.state_name, a.state) FROM addresses a LEFT JOIN state_codes sc ON sc.id = a.state WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
-/** State code for CIBIL: resolve state_codes.id whether addresses.state is stored as id (e.g. 29) or as name (e.g. 'Karnataka') */
-const CIBIL_STATE_ID_SUBQUERY = `(SELECT sc.id FROM addresses a LEFT JOIN state_codes sc ON (sc.id = a.state OR sc.state_name = TRIM(CAST(a.state AS CHAR))) WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
+/** State code for CIBIL: resolve state_codes.id whether addresses.state is stored as id (e.g. 29) or as name (e.g. 'Karnataka'). Use COLLATE to avoid mix of collations (utf8mb4_0900_ai_ci vs utf8mb4_general_ci). */
+const CIBIL_STATE_ID_SUBQUERY = `(SELECT sc.id FROM addresses a LEFT JOIN state_codes sc ON (sc.id = a.state OR (sc.state_name COLLATE utf8mb4_unicode_ci = TRIM(CAST(a.state AS CHAR)) COLLATE utf8mb4_unicode_ci)) WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
 const CIBIL_PINCODE_SUBQUERY = `(SELECT a.pincode FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
 const CIBIL_COUNTRY_SUBQUERY = `(SELECT COALESCE(a.country, 'India') FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
 const CIBIL_CITY_SUBQUERY = `(SELECT a.city FROM addresses a WHERE a.user_id = u.id AND a.id = ${_CIBIL_CHOSEN_ADDRESS_ID} LIMIT 1)`;
