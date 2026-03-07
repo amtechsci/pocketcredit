@@ -558,6 +558,83 @@ async function processStatusBasedSMS(templates, currentTime) {
 }
 
 /**
+ * Process scheduled limit_increase SMS for all account manager users (daily).
+ * Sends Credit Limit Update SMS to every user who has at least one loan in account_manager or overdue.
+ * Template must have trigger_type = 'event', template_key = 'limit_increase', and scheduled_times set (e.g. ["09:00"]).
+ */
+async function processScheduledLimitIncreaseSMS(templates, currentTime) {
+  let totalSent = 0;
+
+  const limitIncreaseTemplates = templates.filter(
+    t => t.trigger_type === 'event' && t.template_key === 'limit_increase'
+  );
+
+  for (const template of limitIncreaseTemplates) {
+    if (!template.template_id) {
+      await cronLogger.info(`SMS notification: Skipping limit_increase - DLT Template ID not configured`);
+      continue;
+    }
+    if (!isScheduledTime(template.scheduled_times || [], currentTime)) {
+      continue;
+    }
+
+    try {
+      // All distinct users who have at least one loan in account_manager or overdue
+      const usersQuery = `
+        SELECT DISTINCT
+          u.id as user_id,
+          u.first_name,
+          u.last_name,
+          u.phone,
+          u.alternate_mobile,
+          u.loan_limit
+        FROM loan_applications la
+        INNER JOIN users u ON la.user_id = u.id
+        WHERE la.status IN ('account_manager', 'overdue')
+          AND u.phone IS NOT NULL
+        ORDER BY u.id
+        LIMIT 2000
+      `;
+      const users = await executeQuery(usersQuery);
+
+      if (!users || users.length === 0) {
+        continue;
+      }
+
+      for (const row of users) {
+        const newLimitFormatted = row.loan_limit != null && row.loan_limit !== ''
+          ? `₹${Number(row.loan_limit).toLocaleString('en-IN')}`
+          : '₹0';
+        const messageData = {
+          name: `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Customer',
+          url: 'http://pocketcredit.in',
+          email: 'support@pocketcredit.in',
+          new_limit: newLimitFormatted
+        };
+        const message = replaceTemplateVariables(template.message_template, messageData);
+        const user = {
+          id: row.user_id,
+          first_name: row.first_name,
+          last_name: row.last_name,
+          phone: row.phone,
+          alternate_mobile: row.alternate_mobile
+        };
+        const sent = await sendSMSToUser(user, null, template, message);
+        totalSent += sent;
+      }
+
+      if (users.length > 0) {
+        await cronLogger.info(`SMS notification: limit_increase scheduled run - ${totalSent} SMS sent to account manager users`);
+      }
+    } catch (error) {
+      await cronLogger.error('SMS notification: Error processing scheduled limit_increase', error);
+    }
+  }
+
+  return totalSent;
+}
+
+/**
  * Main SMS notification job function
  */
 async function runSMSNotificationJob() {
@@ -601,6 +678,10 @@ async function runSMSNotificationJob() {
     // Process status-based SMS
     const statusSent = await processStatusBasedSMS(templates, currentTime);
     totalSent += statusSent;
+
+    // Process scheduled limit_increase SMS (daily to all account manager users)
+    const limitIncSent = await processScheduledLimitIncreaseSMS(templates, currentTime);
+    totalSent += limitIncSent;
     
     const duration = Date.now() - startTime;
     

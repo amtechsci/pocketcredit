@@ -92,6 +92,8 @@ This document lists all event-based SMS templates and where they should automati
     - When admin recalculates credit limit and new limit is higher
   - `src/server/routes/userProfile.js` (line ~3097)
     - When loan is disbursed and credit limit increases
+  - **Daily scheduled (account manager users)**: `src/server/jobs/smsNotificationJob.js`
+    - At the template’s `scheduled_times` (e.g. `["09:00"]`), sends to **every user** who has at least one loan in `account_manager` or `overdue`, with their current `loan_limit`. Configure `scheduled_times` for the `limit_increase` template in Admin → SMS Templates to enable this.
 - **Variables Used**:
   - `new_limit`: New credit limit amount (formatted as ₹X,XXX)
 
