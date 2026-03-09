@@ -269,17 +269,29 @@ const linkLoanToLead = async (userId, loanApplicationId, utmSource) => {
       }
     }
 
-    // Update loan_status for ALL partner_leads entries for this user_id
-    // This ensures all partners who shared this lead can see the loan status
-    // BUT: Only the primary partner (utm_source) gets loan_application_id set
-    // Other partners will see loan_status but NOT have loan_application_id (indicating converted by another partner)
-    await executeQuery(
-      `UPDATE partner_leads
-       SET loan_status = ?,
-           updated_at = NOW()
-       WHERE user_id = ?`,
-      [loanStatus, userId]
-    );
+    // Update loan_status for ALL partner_leads entries for this user.
+    // Match by user_id OR by mobile_number (for leads where user_id was never linked,
+    // e.g. when a different partner submitted the same mobile via API).
+    const userRow = await executeQuery(`SELECT phone FROM users WHERE id = ? LIMIT 1`, [userId]);
+    const userMobile = userRow && userRow[0] ? userRow[0].phone : null;
+
+    if (userMobile) {
+      await executeQuery(
+        `UPDATE partner_leads
+         SET loan_status = ?,
+             updated_at = NOW()
+         WHERE user_id = ? OR (mobile_number = ? AND user_id IS NULL)`,
+        [loanStatus, userId, userMobile]
+      );
+    } else {
+      await executeQuery(
+        `UPDATE partner_leads
+         SET loan_status = ?,
+             updated_at = NOW()
+         WHERE user_id = ?`,
+        [loanStatus, userId]
+      );
+    }
 
     return { success: true, lead_id: primaryLeadId || 'updated_all' };
   } catch (error) {

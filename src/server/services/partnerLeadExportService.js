@@ -27,7 +27,7 @@ function formatDateDDMMYYYY(date) {
  * @returns {Promise<Array>} Array of row objects with export column keys
  */
 async function getLeadExportData(partnerId, options = {}) {
-  const { start_date, end_date } = options;
+  const { start_date, end_date, own_leads_only = true } = options;
 
   let query = `
     SELECT
@@ -90,6 +90,13 @@ async function getLeadExportData(partnerId, options = {}) {
     WHERE pl.partner_id = ?
   `;
   const params = [partnerId];
+
+  // Only include leads that actually belong to this partner (not existing-user leads
+  // from other partners). user_id IS NULL = fresh lead; user_registered_at IS NOT NULL = user
+  // registered through this partner.
+  if (own_leads_only) {
+    query += ` AND (pl.user_id IS NULL OR pl.user_registered_at IS NOT NULL)`;
+  }
 
   // Date filter: by lead shared date so report includes all leads (all loan statuses) in the period
   if (start_date) {

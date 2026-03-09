@@ -216,7 +216,7 @@ router.get('/:id/leads/export/xlsx', authenticateAdmin, requireSuperadmin, async
       return res.status(404).json({ status: 'error', message: 'Partner not found' });
     }
     const { start_date, end_date } = req.query;
-    const exportData = await getLeadExportData(id, { start_date, end_date });
+    const exportData = await getLeadExportData(id, { start_date, end_date, own_leads_only: false });
     if (!exportData.length) {
       return res.status(404).json({
         status: 'error',
@@ -273,7 +273,7 @@ router.get('/:id/leads', authenticateAdmin, requireSuperadmin, async (req, res) 
         pl.lead_shared_at,
         pl.user_registered_at,
         pl.loan_application_id,
-        pl.loan_status,
+        COALESCE(la.status, pl.loan_status) as loan_status,
         pl.disbursed_at,
         pl.disbursal_amount,
         pl.payout_eligible,
@@ -282,7 +282,8 @@ router.get('/:id/leads', authenticateAdmin, requireSuperadmin, async (req, res) 
         pl.payout_status,
         u.id as user_id,
         u.email,
-        la.application_number
+        la.application_number,
+        CASE WHEN pl.user_id IS NULL OR pl.user_registered_at IS NOT NULL THEN 1 ELSE 0 END as is_own_lead
       FROM partner_leads pl
       LEFT JOIN users u ON pl.user_id = u.id
       LEFT JOIN loan_applications la ON pl.loan_application_id = la.id

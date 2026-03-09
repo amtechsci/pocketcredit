@@ -35,16 +35,12 @@ export const LinkSalaryBankAccountPage = () => {
   const [hasCheckedBank, setHasCheckedBank] = useState(false); // Prevent multiple redirects
   const isLinkingInProgress = useRef(false); // Prevent duplicate auto-linking calls
 
-  // Log component mount - this should ALWAYS show if component renders
-  // This runs on EVERY render, so if we don't see this, component isn't rendering
-  console.log('🔵🔵🔵 LinkSalaryBankAccountPage COMPONENT RENDERED 🔵🔵🔵', {
-    pathname: window.location.pathname,
-    search: window.location.search,
-    userId: user?.id,
-    emailVerified: user?.personal_email_verified,
-    hasCheckedBank,
-    checkingEnach
-  });
+  // Debug log only on first render
+  const hasLoggedMount = useRef(false);
+  if (!hasLoggedMount.current) {
+    hasLoggedMount.current = true;
+    console.log('[LinkSalaryBankAccount] mounted', { userId: user?.id });
+  }
 
   // Form state for adding new bank
   const [newBankForm, setNewBankForm] = useState({
@@ -404,13 +400,12 @@ export const LinkSalaryBankAccountPage = () => {
   };
 
   const handleAddNewBank = async () => {
-    // Validate form
+    if (!user?.id) return;
     if (!newBankForm.account_number || !newBankForm.ifsc_code) {
       toast.error('Please fill in all required fields');
       return;
     }
 
-    // Validate IFSC code format
     const ifscRegex = /^[A-Z]{4}0[A-Z0-9]{6}$/;
     if (!ifscRegex.test(newBankForm.ifsc_code.toUpperCase())) {
       toast.error('Invalid IFSC code format');
@@ -420,7 +415,6 @@ export const LinkSalaryBankAccountPage = () => {
     try {
       setSubmitting(true);
 
-      // Call API to save bank details for user
       const response = await apiService.saveUserBankDetails({
         account_number: newBankForm.account_number,
         ifsc_code: newBankForm.ifsc_code.toUpperCase(),
@@ -431,8 +425,88 @@ export const LinkSalaryBankAccountPage = () => {
         toast.success('Bank account added successfully!');
         setShowAddNew(false);
         setNewBankForm({ account_number: '', ifsc_code: '', bank_name: '' });
-        // Refresh bank details list
-        await fetchBankDetails();
+
+        // Get the newly created bank's ID from response or re-fetch
+        let newBankId: number | null = (response.data as any)?.id || (response.data as any)?.bank_id || null;
+        const refreshed = await apiService.getUserBankDetails(user.id);
+        if (refreshed.success && refreshed.data && refreshed.data.length > 0) {
+          if (!newBankId) {
+            const sorted = [...refreshed.data].sort((a: any, b: any) => b.id - a.id);
+            newBankId = sorted[0].id;
+          }
+          setBankDetails(refreshed.data as BankDetail[]);
+        }
+
+        if (newBankId) {
+          // Mark as primary since user just manually added it
+          try {
+            await apiService.updateBankDetails(newBankId, {
+              account_number: newBankForm.account_number,
+              is_primary: true
+            });
+          } catch (e) {
+            console.warn('[LinkSalaryBankAccount] Failed to set bank as primary:', e);
+          }
+
+          // Link to active loan application
+          const urlParams = new URLSearchParams(window.location.search);
+          const appIdParam = urlParams.get('applicationId');
+          let activeApplicationId: number | null = appIdParam ? parseInt(appIdParam) : null;
+          if (!activeApplicationId) {
+            try {
+              const applicationsResponse = await apiService.getLoanApplications();
+              const isSuccess = applicationsResponse.success || applicationsResponse.status === 'success';
+              if (isSuccess && applicationsResponse.data?.applications) {
+                const activeApp = applicationsResponse.data.applications.find((app: any) =>
+                  ['submitted', 'under_review', 'follow_up', 'disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal', 'pending', 'in_progress', 'ready_for_disbursement'].includes(app.status)
+                );
+                activeApplicationId = activeApp?.id || null;
+              }
+            } catch (e) {
+              console.warn('[LinkSalaryBankAccount] Failed to fetch applications:', e);
+            }
+          }
+
+          if (activeApplicationId) {
+            try {
+              await apiService.chooseBankDetails({
+                application_id: activeApplicationId,
+                bank_details_id: newBankId
+              });
+              apiService.clearCache(`/loan-applications/${activeApplicationId}`);
+              apiService.clearCache('/loan-applications');
+            } catch (e) {
+              console.warn('[LinkSalaryBankAccount] Link bank to application failed:', e);
+            }
+          }
+
+          // Navigate to next step
+          try {
+            const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+            const progress = await getOnboardingProgress(activeApplicationId, true);
+            const nextRoute = getStepRoute(progress.currentStep, activeApplicationId);
+            console.log('[LinkSalaryBankAccount] After add-bank, next step:', progress.currentStep, '->', nextRoute);
+
+            if (user && !user.personal_email_verified) {
+              navigate('/email-verification', { replace: true });
+            } else if (progress.currentStep === 'bank-details') {
+              const refRoute = activeApplicationId
+                ? `/user-references?applicationId=${activeApplicationId}`
+                : '/user-references';
+              navigate(refRoute, { replace: true });
+            } else {
+              navigate(nextRoute, { replace: true });
+            }
+          } catch (navError) {
+            console.error('[LinkSalaryBankAccount] Error navigating after add-bank:', navError);
+            const fallback = activeApplicationId
+              ? `/user-references?applicationId=${activeApplicationId}`
+              : '/user-references';
+            navigate(fallback, { replace: true });
+          }
+        } else {
+          await fetchBankDetails();
+        }
       } else {
         toast.error(response.message || 'Failed to add bank account');
       }
@@ -546,7 +620,6 @@ export const LinkSalaryBankAccountPage = () => {
   // Always render something - even if checking, so component is visible
   // This ensures component mount logs will show
   if (checkingEnach) {
-    console.log('🔵 Rendering checking state...');
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <Card className="max-w-2xl w-full">

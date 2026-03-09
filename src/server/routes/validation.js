@@ -325,18 +325,30 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
             loanUpdateMessage = `Loan ${targetLoanId} status updated from ${oldStatus} to ${newStatus}`;
             console.log(`✅ Successfully updated loan ${targetLoanId} status from ${oldStatus} to ${newStatus} (${affectedRows} row(s) affected)`);
 
-            // Update partner_leads loan_status for all leads for this user
-            // This ensures all partners who shared this lead see the updated loan status
-            // Note: Only the primary partner (who converted the lead) has loan_application_id set
-            // Other partners will see loan_status but NOT have loan_application_id (indicating converted by another partner)
+            // Update partner_leads loan_status for all leads for this user.
+            // Match by user_id OR by mobile_number (for leads where user_id was never linked,
+            // e.g. when a different partner submitted the same mobile via API).
             try {
-              await executeQuery(
-                `UPDATE partner_leads
-                 SET loan_status = ?,
-                     updated_at = CURRENT_TIMESTAMP
-                 WHERE user_id = ?`,
-                [newStatus, userId]
-              );
+              const userRow = await executeQuery(`SELECT phone FROM users WHERE id = ? LIMIT 1`, [userId]);
+              const userMobile = userRow && userRow[0] ? userRow[0].phone : null;
+
+              if (userMobile) {
+                await executeQuery(
+                  `UPDATE partner_leads
+                   SET loan_status = ?,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE user_id = ? OR (mobile_number = ? AND user_id IS NULL)`,
+                  [newStatus, userId, userMobile]
+                );
+              } else {
+                await executeQuery(
+                  `UPDATE partner_leads
+                   SET loan_status = ?,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE user_id = ?`,
+                  [newStatus, userId]
+                );
+              }
               console.log(`✅ Updated partner_leads loan_status to ${newStatus} for user ${userId} / loan ${targetLoanId}`);
             } catch (partnerErr) {
               console.error(`❌ Failed to update partner_leads loan_status for user ${userId} / loan ${targetLoanId}:`, partnerErr);

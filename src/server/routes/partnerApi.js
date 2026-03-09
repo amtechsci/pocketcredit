@@ -556,10 +556,13 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
       );
 
       if (existingLeads && existingLeads.length > 0) {
-        // Update existing lead
+        // Lead already exists for this partner — update it (partner originally brought this user).
+        // Include user_id so leads created before the user registered get properly linked.
         await executeQuery(
           `UPDATE partner_leads 
            SET dedupe_status = ?, dedupe_code = ?, updated_at = NOW(),
+               user_id = COALESCE(?, user_id),
+               user_registered_at = CASE WHEN user_id IS NULL AND ? IS NOT NULL THEN NOW() ELSE user_registered_at END,
                first_name = ?, last_name = ?, pan_number = ?,
                date_of_birth = ?, employment_type = ?, monthly_salary = ?, payment_mode = ?,
                utm_link = ?, utm_source = ?, utm_medium = ?, utm_campaign = ?
@@ -567,6 +570,8 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
           [
             dedupeStatus,
             dedupeCode,
+            userId,
+            userId,
             first_name,
             last_name,
             pan_number.toUpperCase(),
@@ -582,7 +587,9 @@ router.post('/lead-dedupe-check', authenticatePartnerToken, async (req, res) => 
           ]
         );
       } else {
-        // Store new lead in partner_leads table
+        // Save new lead — all dedupe statuses are stored for tracking.
+        // Leads for existing users (2004/2006) are saved but won't be counted as this
+        // partner's leads in stats/exports (only fresh leads that convert through this partner count).
         await executeQuery(
           `INSERT INTO partner_leads (
             partner_id, partner_uuid, user_id, first_name, last_name, mobile_number, pan_number,

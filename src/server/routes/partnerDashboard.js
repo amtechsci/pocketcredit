@@ -56,6 +56,9 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
     const { page = 1, limit = 50, status, user_status, loan_status, start_date, end_date } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
+    // Only show leads that belong to this partner:
+    //   user_id IS NULL → fresh lead not yet registered
+    //   user_registered_at IS NOT NULL → user registered through this partner
     let query = `
       SELECT 
         pl.id,
@@ -85,6 +88,7 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
       LEFT JOIN users u ON pl.user_id = u.id
       LEFT JOIN loan_applications la ON pl.loan_application_id = la.id
       WHERE pl.partner_id = ?
+        AND (pl.user_id IS NULL OR pl.user_registered_at IS NOT NULL)
     `;
     const params = [partner.id];
 
@@ -140,13 +144,13 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
       return lead; // Keep UTM link for fresh leads (2005)
     });
 
-    // Get total count (same filters as main query, with joins for user_status/loan_status)
     let countQuery = `
       SELECT COUNT(*) as total
       FROM partner_leads pl
       LEFT JOIN users u ON pl.user_id = u.id
       LEFT JOIN loan_applications la ON pl.loan_application_id = la.id
       WHERE pl.partner_id = ?
+        AND (pl.user_id IS NULL OR pl.user_registered_at IS NOT NULL)
     `;
     const countParams = [partner.id];
 
@@ -218,7 +222,13 @@ router.get('/stats', authenticatePartnerToken, async (req, res) => {
     await initializeDatabase();
     const partner = req.partner;
 
-    // Get basic stats
+    // Only count leads that actually belong to this partner:
+    //   - user_id IS NULL  → fresh lead, user not yet registered (potential conversion)
+    //   - user_registered_at IS NOT NULL → user registered through THIS partner's link (converted)
+    // Leads where user_id IS NOT NULL but user_registered_at IS NULL = user already existed
+    // or registered via another partner → saved for tracking but NOT counted.
+    const OWN_LEAD_FILTER = `AND (user_id IS NULL OR user_registered_at IS NOT NULL)`;
+
     const basicStats = await executeQuery(
       `SELECT 
         COUNT(*) as total_leads,
@@ -230,14 +240,11 @@ router.get('/stats', authenticatePartnerToken, async (req, res) => {
         SUM(CASE WHEN payout_eligible = 1 THEN 1 ELSE 0 END) as payout_eligible_leads,
         SUM(COALESCE(payout_amount, 0)) as total_payout_amount
       FROM partner_leads
-      WHERE partner_id = ?`,
+      WHERE partner_id = ? ${OWN_LEAD_FILTER}`,
       [partner.id]
     );
 
-    // Get BRE-based approval/rejection stats
-    // Only count FRESH LEADS (2005) for credit checks - registered users are already Pocket Credit users
-    // Approved = users who passed BRE (is_eligible = 1 in credit_checks)
-    // Rejected = users who failed BRE (is_eligible = 0 OR status = 'on_hold' with Experian Hold reason)
+    // BRE-based approval/rejection stats (only for this partner's own fresh leads)
     const breStats = await executeQuery(
       `SELECT 
         COUNT(DISTINCT pl.id) as total_leads_with_credit_check,
@@ -248,7 +255,8 @@ router.get('/stats', authenticatePartnerToken, async (req, res) => {
       LEFT JOIN users u ON pl.user_id = u.id
       LEFT JOIN credit_checks cc ON u.id = cc.user_id
       WHERE pl.partner_id = ? 
-      AND pl.dedupe_status = 'fresh_lead'`,
+      AND pl.dedupe_status = 'fresh_lead'
+      ${OWN_LEAD_FILTER}`,
       [partner.id]
     );
 

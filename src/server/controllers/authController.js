@@ -23,33 +23,10 @@ try {
 async function linkOrCreatePartnerLead(userId, mobile, utmSource) {
   await initializeDatabase();
 
-  // 1) Find existing partner lead (created by API) for this mobile + utm_source not yet linked
-  const existingByMobile = await executeQuery(
-    `SELECT id, partner_id, user_id FROM partner_leads
-     WHERE mobile_number = ? AND utm_source = ? AND user_id IS NULL
-     ORDER BY lead_shared_at DESC LIMIT 1`,
-    [mobile, utmSource]
-  );
-  if (existingByMobile && existingByMobile.length > 0) {
-    await executeQuery(
-      `UPDATE partner_leads SET user_id = ?, user_registered_at = NOW(), updated_at = NOW() WHERE id = ?`,
-      [userId, existingByMobile[0].id]
-    );
-    console.log(`✅ Linked user ${userId} to partner lead ${existingByMobile[0].id} (utm_source: ${utmSource})`);
-    return;
-  }
-
-  // 2) Already attributed to this partner for this user?
-  const existingByUser = await executeQuery(
-    `SELECT id FROM partner_leads WHERE user_id = ? AND utm_source = ? LIMIT 1`,
-    [userId, utmSource]
-  );
-  if (existingByUser && existingByUser.length > 0) {
-    return;
-  }
-
-  // 3) Resolve utm_source to partner (partner_uuid or client_id) and create new lead (UTM-only, no API call)
   const { findPartnerByUuid, findPartnerByClientId } = require('../models/partner');
+
+  // Resolve utm_source to partner first so we can match by partner_id
+  // (utm_source may be partner_uuid OR client_id, so we need the canonical partner_id)
   let partner = await findPartnerByUuid(utmSource);
   if (!partner) {
     partner = await findPartnerByClientId(utmSource);
@@ -59,15 +36,61 @@ async function linkOrCreatePartnerLead(userId, mobile, utmSource) {
     return;
   }
 
-  await executeQuery(
-    `INSERT INTO partner_leads (
-      partner_id, partner_uuid, user_id, first_name, last_name, mobile_number, pan_number,
-      dedupe_status, dedupe_code, utm_source, utm_medium,
-      lead_shared_at, user_registered_at, created_at, updated_at
-    ) VALUES (?, ?, ?, '', '', ?, '', 'registered_user', 2004, ?, 'partner_api', NOW(), NOW(), NOW(), NOW())`,
-    [partner.id, partner.partner_uuid, userId, mobile, utmSource]
+  let linkedLeadId = null;
+
+  // 1) Find existing partner lead (created by API) for this mobile + partner not yet linked
+  //    Match by partner_id instead of utm_source to avoid mismatches when API uses
+  //    partner_uuid but UTM link uses client_id (or vice versa)
+  const existingByMobile = await executeQuery(
+    `SELECT id, partner_id, user_id FROM partner_leads
+     WHERE mobile_number = ? AND partner_id = ? AND user_id IS NULL
+     ORDER BY lead_shared_at DESC LIMIT 1`,
+    [mobile, partner.id]
   );
-  console.log(`✅ Created partner lead for user ${userId} via UTM link (utm_source: ${utmSource}, partner: ${partner.client_id})`);
+  if (existingByMobile && existingByMobile.length > 0) {
+    await executeQuery(
+      `UPDATE partner_leads SET user_id = ?, user_registered_at = NOW(), updated_at = NOW() WHERE id = ?`,
+      [userId, existingByMobile[0].id]
+    );
+    linkedLeadId = existingByMobile[0].id;
+    console.log(`✅ Linked user ${userId} to partner lead ${linkedLeadId} (partner: ${partner.client_id})`);
+  } else {
+    // 2) Already attributed to this partner for this user? (match by partner_id, not utm_source)
+    const existingByUser = await executeQuery(
+      `SELECT id FROM partner_leads WHERE user_id = ? AND partner_id = ? LIMIT 1`,
+      [userId, partner.id]
+    );
+    if (existingByUser && existingByUser.length > 0) {
+      linkedLeadId = existingByUser[0].id;
+    } else {
+      // 3) No existing lead for this partner+user — create new lead (UTM-only, no API call)
+      const insertResult = await executeQuery(
+        `INSERT INTO partner_leads (
+          partner_id, partner_uuid, user_id, first_name, last_name, mobile_number, pan_number,
+          dedupe_status, dedupe_code, utm_source, utm_medium,
+          lead_shared_at, user_registered_at, created_at, updated_at
+        ) VALUES (?, ?, ?, '', '', ?, '', 'registered_user', 2004, ?, 'partner_api', NOW(), NOW(), NOW(), NOW())`,
+        [partner.id, partner.partner_uuid, userId, mobile, utmSource]
+      );
+      linkedLeadId = insertResult?.insertId || null;
+      console.log(`✅ Created partner lead for user ${userId} via UTM link (utm_source: ${utmSource}, partner: ${partner.client_id})`);
+    }
+  }
+
+  // 4) Update OTHER partners' fresh leads for this same mobile number.
+  //    Set user_id and status to registered_user, but do NOT set user_registered_at
+  //    (user_registered_at = NULL means user didn't join through that partner).
+  //    This ensures those leads are saved for tracking but won't count in that partner's stats.
+  try {
+    await executeQuery(
+      `UPDATE partner_leads
+       SET user_id = ?, dedupe_status = 'registered_user', dedupe_code = 2004, updated_at = NOW()
+       WHERE mobile_number = ? AND user_id IS NULL AND partner_id != ?`,
+      [userId, mobile, partner.id]
+    );
+  } catch (err) {
+    console.error(`Failed to update other partners' leads for mobile ${mobile}:`, err);
+  }
 }
 
 /**

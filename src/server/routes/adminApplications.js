@@ -1352,18 +1352,30 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
 
     await executeQuery(updateQuery, updateParams);
 
-    // Update partner_leads loan_status for all leads for this user
-    // This ensures all partners who shared this lead see the updated loan status
-    // Note: Only the primary partner (who converted the lead) has loan_application_id set
-    // Other partners will see loan_status but NOT have loan_application_id (indicating converted by another partner)
+    // Update partner_leads loan_status for all leads for this user.
+    // Match by user_id OR by mobile_number (for leads where user_id was never linked,
+    // e.g. when a different partner submitted the same mobile via API).
     try {
-      await executeQuery(
-        `UPDATE partner_leads
-         SET loan_status = ?,
-             updated_at = NOW()
-         WHERE user_id = ?`,
-        [status, loan.user_id]
-      );
+      const userRow = await executeQuery(`SELECT phone FROM users WHERE id = ? LIMIT 1`, [loan.user_id]);
+      const userMobile = userRow && userRow[0] ? userRow[0].phone : null;
+
+      if (userMobile) {
+        await executeQuery(
+          `UPDATE partner_leads
+           SET loan_status = ?,
+               updated_at = NOW()
+           WHERE user_id = ? OR (mobile_number = ? AND user_id IS NULL)`,
+          [status, loan.user_id, userMobile]
+        );
+      } else {
+        await executeQuery(
+          `UPDATE partner_leads
+           SET loan_status = ?,
+               updated_at = NOW()
+           WHERE user_id = ?`,
+          [status, loan.user_id]
+        );
+      }
       console.log(`✅ Updated partner_leads loan_status to ${status} for user ${loan.user_id} / loan ${applicationId}`);
     } catch (err) {
       console.error(`❌ Failed to update partner_leads loan_status for user ${loan.user_id} / loan ${applicationId}:`, err);
