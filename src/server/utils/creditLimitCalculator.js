@@ -1,18 +1,18 @@
 /**
  * Credit Limit Calculator for 2 EMI Products
- * 
- * Logic:
- * - Max limit: ₹45,600
- * - Progressive limits based on number of 2 EMI loans disbursed:
- *   1st loan: 8% × salary
- *   2nd loan: 11% × salary
- *   3rd loan: 15.2% × salary
- *   4th loan: 20.9% × salary
- *   5th loan: 28% × salary
- *   6th loan: 32.1% × salary
+ *
+ * Logic can be hardcoded (fallback) or from credit_limit_rules (DB).
+ * When a rule exists for the user (assigned or default), percentage_tiers and caps come from the rule.
  */
 
 const { executeQuery } = require('../config/database');
+
+/** Fallback when no DB rule is available (backward compatibility) */
+const DEFAULT_PERCENTAGE_TIERS = [8, 11, 15.2, 20.9, 28, 32.1];
+const DEFAULT_MAX_REGULAR_CAP = 45600;
+const DEFAULT_PREMIUM_LIMIT = 150000;
+const DEFAULT_PREMIUM_TENURE = 24;
+const DEFAULT_FIRST_TIME_PERCENTAGE = 8;
 
 /**
  * Helper function to convert income_range to approximate monthly income
@@ -27,6 +27,84 @@ const getMonthlyIncomeFromRange = (range) => {
   };
   return rangeMap[range] || 0;
 };
+
+/**
+ * Get credit limit rule for user. If user has credit_limit_rule_id set and rule is active, use it; else use default rule.
+ * @param {number} userId - User ID
+ * @returns {Promise<object|null>} Rule row with parsed percentage_tiers array, or null (caller uses hardcoded defaults)
+ */
+async function getCreditLimitRuleForUser(userId) {
+  try {
+    let ruleId = null;
+    try {
+      const userRow = await executeQuery(
+        'SELECT credit_limit_rule_id FROM users WHERE id = ? LIMIT 1',
+        [userId]
+      );
+      if (userRow && userRow.length > 0 && userRow[0].credit_limit_rule_id != null) {
+        ruleId = parseInt(userRow[0].credit_limit_rule_id, 10);
+      }
+    } catch (e) {
+      // Column may not exist yet
+      return null;
+    }
+
+    let rule = null;
+    if (ruleId) {
+      const rows = await executeQuery(
+        'SELECT * FROM credit_limit_rules WHERE id = ? AND is_active = 1 LIMIT 1',
+        [ruleId]
+      );
+      rule = rows && rows.length > 0 ? rows[0] : null;
+    }
+    if (!rule) {
+      const rows = await executeQuery(
+        'SELECT * FROM credit_limit_rules WHERE is_default = 1 AND is_active = 1 LIMIT 1'
+      );
+      rule = rows && rows.length > 0 ? rows[0] : null;
+    }
+    if (!rule) return null;
+
+    const calculationMode = rule.calculation_mode || 'percentage';
+
+    let tiers = DEFAULT_PERCENTAGE_TIERS;
+    if (rule.percentage_tiers) {
+      const raw = rule.percentage_tiers;
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(n => typeof n === 'number')) {
+        tiers = parsed;
+      }
+    }
+
+    let fixedTiers = null;
+    if (rule.fixed_amount_tiers) {
+      const raw = rule.fixed_amount_tiers;
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(n => typeof n === 'number')) {
+        fixedTiers = parsed;
+      }
+    }
+
+    return {
+      ...rule,
+      calculation_mode: calculationMode,
+      percentage_tiers: tiers,
+      fixed_amount_tiers: fixedTiers,
+      max_regular_cap: parseFloat(rule.max_regular_cap) || DEFAULT_MAX_REGULAR_CAP,
+      premium_limit: rule.premium_limit != null ? parseFloat(rule.premium_limit) : DEFAULT_PREMIUM_LIMIT,
+      premium_tenure_months: rule.premium_tenure_months != null ? parseInt(rule.premium_tenure_months, 10) : DEFAULT_PREMIUM_TENURE,
+      first_time_percentage: parseFloat(rule.first_time_percentage) || DEFAULT_FIRST_TIME_PERCENTAGE,
+      triggers_cooling_period: rule.triggers_cooling_period === 1 || rule.triggers_cooling_period === true,
+      block_after_tier: rule.block_after_tier != null ? parseInt(rule.block_after_tier, 10) : null,
+      salary_min: rule.salary_min != null ? parseFloat(rule.salary_min) : null,
+      salary_max: rule.salary_max != null ? parseFloat(rule.salary_max) : null,
+      auto_assign: rule.auto_assign === 1 || rule.auto_assign === true
+    };
+  } catch (err) {
+    console.warn(`[CreditLimit] getCreditLimitRuleForUser(${userId}) failed, using defaults:`, err.message);
+    return null;
+  }
+}
 
 /**
  * Calculate credit limit based on number of 2 EMI loans disbursed
@@ -92,61 +170,95 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
       ? parseInt(loanCountResult[0].count) || 0
       : 0;
 
-    // Define percentage multipliers for each loan number
-    // After 1st loan: 11%, After 2nd loan: 15.2%, After 3rd loan: 20.9%, 
-    // After 4th loan: 28%, After 5th loan: 32.1%, After 6th loan: Premium (₹1,50,000)
-    const percentageMultipliers = [8, 11, 15.2, 20.9, 28, 32.1];
+    const rule = await getCreditLimitRuleForUser(userId);
+    const calculationMode = rule ? rule.calculation_mode : 'percentage';
+    const blockAfterTier = rule ? rule.block_after_tier : null;
 
-    // loanCount = number of 2 EMI loans already disbursed (including current one being disbursed)
-    // After 1st loan disbursed (loanCount = 1), next limit is 11% (index 1)
-    // After 2nd loan disbursed (loanCount = 2), next limit is 15.2% (index 2)
-    // etc.
-    // Next limit percentage index = loanCount (not loanCount - 1)
+    // If block_after_tier is set and user has completed that many loans, signal block
+    if (blockAfterTier != null && loanCount >= blockAfterTier) {
+      console.log(`[CreditLimit] User ${userId}: block_after_tier=${blockAfterTier}, loanCount=${loanCount} - profile should be blocked`);
+      return {
+        newLimit: 0,
+        loanCount,
+        percentage: 0,
+        salary,
+        currentLimit,
+        calculatedLimit: 0,
+        isMaxReached: true,
+        showPremiumLimit: false,
+        premiumLimit: null,
+        premiumTenure: null,
+        blocked: true,
+        blockAfterTier
+      };
+    }
+
+    // ----- Fixed-amount mode -----
+    if (calculationMode === 'fixed' && rule && rule.fixed_amount_tiers && rule.fixed_amount_tiers.length > 0) {
+      const fixedTiers = rule.fixed_amount_tiers;
+      const tierIndex = Math.min(loanCount, fixedTiers.length - 1);
+      const newLimit = fixedTiers[tierIndex];
+      const isLastTier = tierIndex >= fixedTiers.length - 1;
+
+      console.log(`[CreditLimit] User ${userId} [fixed]: Salary=₹${salary}, Disbursed=${loanCount}, TierIndex=${tierIndex}, Limit=₹${newLimit}, LastTier=${isLastTier}`);
+
+      return {
+        newLimit,
+        loanCount,
+        percentage: 0,
+        salary,
+        currentLimit,
+        calculatedLimit: newLimit,
+        isMaxReached: isLastTier,
+        showPremiumLimit: false,
+        premiumLimit: null,
+        premiumTenure: null,
+        blocked: false,
+        blockAfterTier
+      };
+    }
+
+    // ----- Percentage mode (default / existing logic) -----
+    const percentageMultipliers = rule ? rule.percentage_tiers : DEFAULT_PERCENTAGE_TIERS;
+    const maxRegularCap = rule ? rule.max_regular_cap : DEFAULT_MAX_REGULAR_CAP;
+    const premiumLimit = rule ? rule.premium_limit : DEFAULT_PREMIUM_LIMIT;
+    const premiumTenure = rule ? rule.premium_tenure_months : DEFAULT_PREMIUM_TENURE;
+    const lastTierPercentage = percentageMultipliers[percentageMultipliers.length - 1];
+
     const nextPercentageIndex = Math.min(loanCount, percentageMultipliers.length - 1);
     const nextPercentage = percentageMultipliers[nextPercentageIndex];
 
-    // Calculate next limit based on next percentage tier
-    // First calculate exact value to check premium eligibility
     const calculatedLimitByPercentageExact = Math.round((salary * nextPercentage) / 100);
-    // Round down to nearest 100 for display (e.g., 4950 -> 4900, 11555 -> 11500)
     const calculatedLimitByPercentage = Math.floor(calculatedLimitByPercentageExact / 100) * 100;
 
-    // Next limit should be based on current limit AND next percentage calculation
-    // Use whichever is higher: current limit or calculated next limit
     const calculatedLimit = Math.max(currentLimit, calculatedLimitByPercentage);
 
-    // Check if max percentage (32.1%) is reached for NEXT limit
-    const isMaxPercentageReached = nextPercentage >= 32.1;
-
-    // Check if next limit (based on percentage calculation) would cross ₹45,600
-    // This check should be based on the exact calculated percentage limit (before rounding down)
-    // because premium limit should trigger when the progression-based limit crosses ₹45,600
-    const wouldCrossMaxLimit = calculatedLimitByPercentageExact > 45600;
-
-    // If max percentage reached OR would cross ₹45,600, show premium limit of ₹1,50,000
-    const showPremiumLimit = isMaxPercentageReached || wouldCrossMaxLimit;
+    const isMaxPercentageReached = nextPercentage >= lastTierPercentage;
+    const wouldCrossMaxLimit = premiumLimit != null && calculatedLimitByPercentageExact > maxRegularCap;
+    const showPremiumLimit = premiumLimit != null && (isMaxPercentageReached || wouldCrossMaxLimit);
 
     let newLimit;
     if (showPremiumLimit) {
-      newLimit = 150000; // Premium limit
+      newLimit = premiumLimit;
     } else {
-      // Apply maximum cap of ₹45,600 for regular limits
-      newLimit = Math.min(calculatedLimit, 45600);
+      newLimit = Math.min(calculatedLimit, maxRegularCap);
     }
 
-    console.log(`[CreditLimit] User ${userId}: Salary=₹${salary}, Current Limit=₹${currentLimit}, Disbursed Loans=${loanCount}, Next Percentage=${nextPercentage}%, Calculated Exact=₹${calculatedLimitByPercentageExact}, Calculated Rounded=₹${calculatedLimitByPercentage}, Final Limit=₹${newLimit}, Premium=${showPremiumLimit}`);
+    console.log(`[CreditLimit] User ${userId} [pct]: Salary=₹${salary}, Current=₹${currentLimit}, Disbursed=${loanCount}, Pct=${nextPercentage}%, Exact=₹${calculatedLimitByPercentageExact}, Rounded=₹${calculatedLimitByPercentage}, Final=₹${newLimit}, Premium=${showPremiumLimit}`);
 
     return {
       newLimit,
       loanCount,
-      percentage: nextPercentage, // Next percentage tier
+      percentage: nextPercentage,
       salary,
       currentLimit,
       calculatedLimit: calculatedLimitByPercentage,
       isMaxReached: isMaxPercentageReached,
       showPremiumLimit: showPremiumLimit,
-      premiumLimit: showPremiumLimit ? 150000 : null,
-      premiumTenure: showPremiumLimit ? 24 : null
+      premiumLimit: showPremiumLimit ? premiumLimit : null,
+      premiumTenure: showPremiumLimit ? premiumTenure : null,
+      blocked: false,
+      blockAfterTier
     };
 
   } catch (error) {
@@ -393,6 +505,11 @@ async function adjustFirstTimeLoanAmount(userId, monthlySalary) {
       return { adjusted: false, loanId: null, oldAmount: null, newAmount: null };
     }
 
+    const rule = await getCreditLimitRuleForUser(userId);
+    const calculationMode = rule ? rule.calculation_mode : 'percentage';
+    const firstTimePct = rule ? rule.first_time_percentage : DEFAULT_FIRST_TIME_PERCENTAGE;
+    const maxRegularCap = rule ? rule.max_regular_cap : DEFAULT_MAX_REGULAR_CAP;
+
     // Check if user has any disbursed 2 EMI loans
     // If they have disbursed 2 EMI loans, this is not their first loan
     const disbursed2EMILoans = await executeQuery(`
@@ -436,15 +553,16 @@ async function adjustFirstTimeLoanAmount(userId, monthlySalary) {
     const pendingLoan = pendingLoans[0];
     const currentLoanAmount = parseFloat(pendingLoan.loan_amount) || 0;
 
-    // Calculate 8% of salary
-    const eightPercentOfSalary = Math.round((monthlySalary * 8) / 100);
+    let newLoanAmount;
+    if (calculationMode === 'fixed' && rule && rule.fixed_amount_tiers && rule.fixed_amount_tiers.length > 0) {
+      newLoanAmount = rule.fixed_amount_tiers[0];
+    } else {
+      const firstTimeAmount = Math.round((monthlySalary * firstTimePct) / 100);
+      newLoanAmount = Math.min(firstTimeAmount, maxRegularCap);
+    }
 
-    // Apply maximum cap of ₹45,600
-    const newLoanAmount = Math.min(eightPercentOfSalary, 45600);
-
-    // Only adjust if the new amount is different from current amount
     if (Math.abs(newLoanAmount - currentLoanAmount) < 0.01) {
-      console.log(`[CreditLimit] Loan amount already at 8% of salary (₹${newLoanAmount}) - no adjustment needed`);
+      console.log(`[CreditLimit] Loan amount already at target (₹${newLoanAmount}) - no adjustment needed`);
       return { adjusted: false, loanId: pendingLoan.id, oldAmount: currentLoanAmount, newAmount: newLoanAmount };
     }
 
@@ -531,7 +649,8 @@ async function adjustFirstTimeLoanAmount(userId, monthlySalary) {
       [newLoanAmount, userId]
     );
 
-    console.log(`[CreditLimit] Adjusted first-time loan amount for user ${userId}: ₹${currentLoanAmount} → ₹${newLoanAmount} (8% of ₹${monthlySalary} salary)`);
+    const modeDesc = calculationMode === 'fixed' ? `fixed tier[0]` : `${firstTimePct}% of ₹${monthlySalary} salary`;
+    console.log(`[CreditLimit] Adjusted first-time loan amount for user ${userId}: ₹${currentLoanAmount} → ₹${newLoanAmount} (${modeDesc})`);
     console.log(`[CreditLimit] Also updated user ${userId} loan_limit to ₹${newLoanAmount}`);
 
     return {
@@ -561,33 +680,56 @@ async function adjustFirstTimeLoanAmount(userId, monthlySalary) {
  */
 async function checkAndMarkCoolingPeriod(userId, loanId = null, creditLimitData = null) {
   try {
+    const rule = await getCreditLimitRuleForUser(userId);
+    if (rule && !rule.triggers_cooling_period) {
+      return false;
+    }
+    const premiumLimit = rule ? rule.premium_limit : DEFAULT_PREMIUM_LIMIT;
+    const maxRegularCap = rule ? rule.max_regular_cap : DEFAULT_MAX_REGULAR_CAP;
+    const blockAfterTier = rule ? rule.block_after_tier : null;
+
     let shouldMarkCoolingPeriod = false;
     let coolingPeriodReason = '';
-    
-    // Method 1: Check if credit limit data shows conditions for cooling period
-    if (creditLimitData) {
-      // Condition 1: Premium limit (6th loan) - ₹1,50,000 with 32.1%
-      if (creditLimitData.newLimit === 150000 && creditLimitData.percentage === 32.1) {
+
+    // block_after_tier takes priority: if the returned data says blocked, honour it
+    if (creditLimitData && creditLimitData.blocked) {
+      shouldMarkCoolingPeriod = true;
+      coolingPeriodReason = `completed ${creditLimitData.loanCount} loans (block_after_tier=${blockAfterTier})`;
+      console.log(`[CreditLimit] User ${userId} blocked by block_after_tier (${blockAfterTier}) - will mark in cooling period`);
+    }
+
+    // Also check block_after_tier directly via loan count when no creditLimitData
+    if (!shouldMarkCoolingPeriod && blockAfterTier != null) {
+      const countResult = await executeQuery(
+        `SELECT COUNT(*) as cnt FROM loan_applications WHERE user_id = ? AND status IN ('account_manager','cleared') AND disbursed_at IS NOT NULL`,
+        [userId]
+      );
+      const clearedCount = countResult && countResult.length > 0 ? parseInt(countResult[0].cnt) || 0 : 0;
+      if (clearedCount >= blockAfterTier) {
         shouldMarkCoolingPeriod = true;
-        coolingPeriodReason = 'reached premium limit (6th loan - 32.1% = ₹1,50,000)';
-        console.log(`[CreditLimit] User ${userId} reached premium limit (32.1%) - will mark in cooling period`);
+        coolingPeriodReason = `completed ${clearedCount} loans (block_after_tier=${blockAfterTier})`;
+        console.log(`[CreditLimit] User ${userId} loan count ${clearedCount} >= block_after_tier ${blockAfterTier} - will mark in cooling period`);
       }
-      // Condition 2: Limit reaches or exceeds ₹45,600 (max regular limit threshold)
-      else if (creditLimitData.newLimit >= 45600 && creditLimitData.newLimit < 150000) {
+    }
+
+    // Existing premium / max-cap checks (only for percentage mode without block_after_tier)
+    if (!shouldMarkCoolingPeriod && creditLimitData && blockAfterTier == null) {
+      if (premiumLimit != null && creditLimitData.newLimit === premiumLimit && creditLimitData.premiumLimit === premiumLimit) {
+        shouldMarkCoolingPeriod = true;
+        coolingPeriodReason = `reached premium limit (₹${premiumLimit.toLocaleString('en-IN')})`;
+        console.log(`[CreditLimit] User ${userId} reached premium limit - will mark in cooling period`);
+      } else if (premiumLimit != null && creditLimitData.newLimit >= maxRegularCap && creditLimitData.newLimit < premiumLimit) {
         shouldMarkCoolingPeriod = true;
         coolingPeriodReason = `reached maximum regular limit (₹${creditLimitData.newLimit.toLocaleString('en-IN')})`;
         console.log(`[CreditLimit] User ${userId} reached maximum regular limit (₹${creditLimitData.newLimit}) - will mark in cooling period`);
-      }
-      // Condition 3: Check if calculated limit would cross ₹45,600 threshold
-      else if (creditLimitData.calculatedLimit && creditLimitData.calculatedLimit >= 45600 && creditLimitData.newLimit < 150000) {
+      } else if (premiumLimit != null && creditLimitData.calculatedLimit != null && creditLimitData.calculatedLimit >= maxRegularCap && creditLimitData.newLimit < premiumLimit) {
         shouldMarkCoolingPeriod = true;
         coolingPeriodReason = `calculated limit crossed threshold (₹${creditLimitData.calculatedLimit.toLocaleString('en-IN')})`;
-        console.log(`[CreditLimit] User ${userId} calculated limit crossed ₹45,600 threshold (₹${creditLimitData.calculatedLimit}) - will mark in cooling period`);
+        console.log(`[CreditLimit] User ${userId} calculated limit crossed threshold (₹${creditLimitData.calculatedLimit}) - will mark in cooling period`);
       }
     }
-    
-    // Method 2: Fallback - check if cleared loan is premium (₹1,50,000 with 24 EMIs)
-    if (!shouldMarkCoolingPeriod && loanId) {
+
+    if (!shouldMarkCoolingPeriod && blockAfterTier == null && loanId) {
       const loanQuery = `
         SELECT id, user_id, loan_amount, status, plan_snapshot
         FROM loan_applications
@@ -599,23 +741,18 @@ async function checkAndMarkCoolingPeriod(userId, loanId = null, creditLimitData 
         const loan = loans[0];
         const loanAmount = parseFloat(loan.loan_amount) || 0;
 
-        // Check if this is a premium loan (₹1,50,000) with 24 EMIs
-        if (loanAmount === 150000) {
+        if (premiumLimit != null && loanAmount === premiumLimit) {
           try {
             const planSnapshot = typeof loan.plan_snapshot === 'string'
               ? JSON.parse(loan.plan_snapshot)
               : loan.plan_snapshot;
-
             const emiCount = planSnapshot?.emi_count || 0;
             const planType = planSnapshot?.plan_type || '';
-
-            // Premium loan: ₹1,50,000 with 24 EMIs
-            if (emiCount === 24 || (planType === 'multi_emi' && emiCount >= 24)) {
+            const premiumTenure = rule ? rule.premium_tenure_months : DEFAULT_PREMIUM_TENURE;
+            if (emiCount === premiumTenure || (planType === 'multi_emi' && emiCount >= premiumTenure)) {
               shouldMarkCoolingPeriod = true;
             }
           } catch (parseError) {
-            // If plan_snapshot parsing fails, check by amount only
-            // ₹1,50,000 loans are premium by default
             shouldMarkCoolingPeriod = true;
           }
         }
@@ -623,7 +760,6 @@ async function checkAndMarkCoolingPeriod(userId, loanId = null, creditLimitData 
     }
 
     if (shouldMarkCoolingPeriod) {
-      // Mark user in cooling period
       await executeQuery(
         `UPDATE users 
          SET status = 'on_hold', 
@@ -634,7 +770,7 @@ async function checkAndMarkCoolingPeriod(userId, loanId = null, creditLimitData 
         [userId]
       );
 
-      console.log(`[CreditLimit] User ${userId} marked in cooling period - ${coolingPeriodReason || 'reached premium limit (32.1% = ₹1,50,000)'}`);
+      console.log(`[CreditLimit] User ${userId} marked in cooling period - ${coolingPeriodReason || 'limit reached'}`);
       return true;
     }
 
@@ -645,6 +781,68 @@ async function checkAndMarkCoolingPeriod(userId, loanId = null, creditLimitData 
   }
 }
 
+/**
+ * Auto-assign a credit limit rule to a user based on salary.
+ * Only assigns if user does not already have a rule and a matching auto_assign rule exists.
+ * @param {number} userId
+ * @param {number} salary - Monthly salary (rupees)
+ * @returns {Promise<{assigned: boolean, ruleId: number|null, ruleName: string|null}>}
+ */
+async function autoAssignCreditLimitRule(userId, salary) {
+  try {
+    if (!userId || !salary || salary <= 0) {
+      return { assigned: false, ruleId: null, ruleName: null };
+    }
+
+    let currentRuleId = null;
+    try {
+      const userRow = await executeQuery(
+        'SELECT credit_limit_rule_id FROM users WHERE id = ? LIMIT 1',
+        [userId]
+      );
+      if (userRow && userRow.length > 0) {
+        currentRuleId = userRow[0].credit_limit_rule_id;
+      }
+    } catch (e) {
+      return { assigned: false, ruleId: null, ruleName: null };
+    }
+
+    if (currentRuleId != null) {
+      console.log(`[CreditLimit] User ${userId} already has credit_limit_rule_id=${currentRuleId}, skipping auto-assign`);
+      return { assigned: false, ruleId: currentRuleId, ruleName: null };
+    }
+
+    const matchingRules = await executeQuery(
+      `SELECT id, rule_name, rule_code
+       FROM credit_limit_rules
+       WHERE auto_assign = 1
+         AND is_active = 1
+         AND (salary_min IS NULL OR salary_min <= ?)
+         AND (salary_max IS NULL OR salary_max >= ?)
+       ORDER BY sort_order ASC
+       LIMIT 1`,
+      [salary, salary]
+    );
+
+    if (!matchingRules || matchingRules.length === 0) {
+      console.log(`[CreditLimit] No matching auto_assign rule for user ${userId} with salary ₹${salary}`);
+      return { assigned: false, ruleId: null, ruleName: null };
+    }
+
+    const matched = matchingRules[0];
+    await executeQuery(
+      'UPDATE users SET credit_limit_rule_id = ?, updated_at = NOW() WHERE id = ?',
+      [matched.id, userId]
+    );
+
+    console.log(`[CreditLimit] Auto-assigned rule "${matched.rule_name}" (id=${matched.id}) to user ${userId} (salary=₹${salary})`);
+    return { assigned: true, ruleId: matched.id, ruleName: matched.rule_name };
+  } catch (err) {
+    console.error(`[CreditLimit] autoAssignCreditLimitRule(${userId}) failed:`, err.message);
+    return { assigned: false, ruleId: null, ruleName: null };
+  }
+}
+
 module.exports = {
   calculateCreditLimitFor2EMI,
   updateUserCreditLimit,
@@ -652,9 +850,11 @@ module.exports = {
   getPendingCreditLimit,
   acceptPendingCreditLimit,
   rejectPendingCreditLimit,
+  getCreditLimitRuleForUser,
   getCreditLimitHistory,
   getMonthlyIncomeFromRange,
   adjustFirstTimeLoanAmount,
-  checkAndMarkCoolingPeriod
+  checkAndMarkCoolingPeriod,
+  autoAssignCreditLimitRule
 };
 

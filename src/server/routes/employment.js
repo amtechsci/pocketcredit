@@ -340,7 +340,15 @@ router.post('/details', requireAuth, async (req, res) => {
       [monthly_net_income, parseInt(salary_date), userId]
     );
 
-    // Adjust first-time loan amount to 8% of salary if applicable
+    // Auto-assign credit limit rule based on salary (only for new users without a rule)
+    try {
+      const { autoAssignCreditLimitRule } = require('../utils/creditLimitCalculator');
+      await autoAssignCreditLimitRule(userId, parseFloat(monthly_net_income));
+    } catch (e) {
+      console.error('⚠️ Auto-assign credit limit rule failed (non-critical):', e.message);
+    }
+
+    // Adjust first-time loan amount based on assigned rule
     try {
       const { adjustFirstTimeLoanAmount } = require('../utils/creditLimitCalculator');
       const adjustmentResult = await adjustFirstTimeLoanAmount(userId, parseFloat(monthly_net_income));
@@ -348,7 +356,6 @@ router.post('/details', requireAuth, async (req, res) => {
         console.log(`✅ First-time loan amount adjusted: Loan ${adjustmentResult.loanId} from ₹${adjustmentResult.oldAmount} to ₹${adjustmentResult.newAmount}`);
       }
     } catch (adjustmentError) {
-      // Don't fail the request if adjustment fails - log and continue
       console.error('⚠️ Error adjusting first-time loan amount (non-critical):', adjustmentError.message);
     }
 

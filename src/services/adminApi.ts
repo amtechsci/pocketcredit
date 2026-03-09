@@ -866,6 +866,10 @@ class AdminApiService {
     return this.request('PUT', `/user-profile/${userId}/loan-limit`, { loanLimit });
   }
 
+  async updateUserCreditLimitRule(userId: string, credit_limit_rule_id: number | null): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/user-profile/${userId}/credit-limit-rule`, { credit_limit_rule_id });
+  }
+
   async updateUserEmploymentInfo(userId: string, data: {
     company?: string;
     companyName?: string;
@@ -1147,6 +1151,95 @@ class AdminApiService {
    */
   async toggleLoanTier(id: string | number): Promise<any> {
     return this.request('PATCH', `/loan-tiers/${id}/toggle`);
+  }
+
+  // ==================== Credit Limit Rules APIs ====================
+
+  /**
+   * Get all credit limit rules
+   */
+  async getCreditLimitRules(): Promise<{ success: boolean; data: any[] }> {
+    return this.request('GET', '/credit-limit-rules');
+  }
+
+  /**
+   * Get single credit limit rule by ID
+   */
+  async getCreditLimitRule(id: string | number): Promise<{ success: boolean; data: any }> {
+    return this.request('GET', `/credit-limit-rules/${id}`);
+  }
+
+  /**
+   * Create new credit limit rule
+   */
+  async createCreditLimitRule(data: {
+    rule_name: string;
+    rule_code?: string | null;
+    description?: string | null;
+    calculation_mode?: 'percentage' | 'fixed';
+    percentage_tiers?: number[] | null;
+    fixed_amount_tiers?: number[] | null;
+    first_time_percentage?: number;
+    max_regular_cap?: number;
+    premium_limit?: number | null;
+    premium_tenure_months?: number | null;
+    triggers_cooling_period?: boolean | number;
+    block_after_tier?: number | null;
+    is_default?: boolean | number;
+    is_active?: boolean | number;
+    sort_order?: number;
+    salary_min?: number | null;
+    salary_max?: number | null;
+    auto_assign?: boolean | number;
+  }): Promise<any> {
+    return this.request('POST', '/credit-limit-rules', data);
+  }
+
+  /**
+   * Update existing credit limit rule
+   */
+  async updateCreditLimitRule(id: string | number, data: Partial<{
+    rule_name: string;
+    rule_code: string | null;
+    description: string | null;
+    calculation_mode: 'percentage' | 'fixed';
+    percentage_tiers: number[] | null;
+    fixed_amount_tiers: number[] | null;
+    first_time_percentage: number;
+    max_regular_cap: number;
+    premium_limit: number | null;
+    premium_tenure_months: number | null;
+    triggers_cooling_period: number;
+    block_after_tier: number | null;
+    is_default: number;
+    is_active: number;
+    sort_order: number;
+    salary_min: number | null;
+    salary_max: number | null;
+    auto_assign: number;
+  }>): Promise<any> {
+    return this.request('PUT', `/credit-limit-rules/${id}`, data);
+  }
+
+  /**
+   * Delete credit limit rule
+   */
+  async deleteCreditLimitRule(id: string | number): Promise<any> {
+    return this.request('DELETE', `/credit-limit-rules/${id}`);
+  }
+
+  /**
+   * Toggle credit limit rule active status
+   */
+  async toggleCreditLimitRule(id: string | number): Promise<any> {
+    return this.request('PATCH', `/credit-limit-rules/${id}/toggle`);
+  }
+
+  /**
+   * Set credit limit rule as default
+   */
+  async setDefaultCreditLimitRule(id: string | number): Promise<any> {
+    return this.request('PATCH', `/credit-limit-rules/${id}/set-default`);
   }
 
   // ==================== Loan Plans APIs ====================

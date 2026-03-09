@@ -216,6 +216,10 @@ function UserProfileDetail() {
   const [loadingChargeHistory, setLoadingChargeHistory] = useState(false);
   const [recheckingChargeStatus, setRecheckingChargeStatus] = useState<{ [key: string]: boolean }>({});
 
+  // Credit limit rule assignment (for admin dropdown)
+  const [creditLimitRulesList, setCreditLimitRulesList] = useState<Array<{ id: number; rule_name: string; rule_code: string | null }>>([]);
+  const [updatingCreditLimitRule, setUpdatingCreditLimitRule] = useState(false);
+
   const { canEditUsers, canEditReferences, currentUser, shouldHideTransactionTab, isDebtAgency, isNbfcAdmin, shouldMaskMobile } = useAdmin();
   const isFollowUpUserAdmin = currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category === 'follow_up_user';
   const isFollowUpUser = currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category === 'follow_up_user';
@@ -1140,6 +1144,19 @@ function UserProfileDetail() {
     }
   }, [activeTab, userData?.id]);
 
+  // Fetch credit limit rules for assignment dropdown (admin only)
+  useEffect(() => {
+    if (params.userId && canEditUsers) {
+      adminApiService.getCreditLimitRules()
+        .then((res) => {
+          if (res.success && Array.isArray(res.data)) {
+            setCreditLimitRulesList(res.data.map((r: any) => ({ id: r.id, rule_name: r.rule_name, rule_code: r.rule_code || null })));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [params.userId, canEditUsers]);
+
   // Fetch transactions when transactions tab is active
   useEffect(() => {
     if (effectiveActiveTab === 'transactions' && userData?.id) {
@@ -1538,6 +1555,28 @@ function UserProfileDetail() {
     } catch (error) {
       console.error('Error updating loan limit:', error);
       alert('Error updating loan limit');
+    }
+  };
+
+  const handleUpdateCreditLimitRule = async (credit_limit_rule_id: number | null) => {
+    if (!params.userId) return;
+    try {
+      setUpdatingCreditLimitRule(true);
+      const response = await adminApiService.updateUserCreditLimitRule(params.userId, credit_limit_rule_id);
+      if (response.status === 'success') {
+        toast.success('Credit limit rule updated');
+        const profileResponse = await adminApiService.getUserProfile(params.userId);
+        if (profileResponse.status === 'success' && profileResponse.data) {
+          setUserData(profileResponse.data);
+        }
+      } else {
+        toast.error(response.message || 'Failed to update credit limit rule');
+      }
+    } catch (error: any) {
+      console.error('Error updating credit limit rule:', error);
+      toast.error(error.response?.data?.message || 'Error updating credit limit rule');
+    } finally {
+      setUpdatingCreditLimitRule(false);
     }
   };
 
@@ -12326,6 +12365,32 @@ function UserProfileDetail() {
                   )}
                 </span>
               )}
+              <span className="ml-2">
+                | Credit limit rule:{' '}
+                {canEditUsers && creditLimitRulesList.length > 0 ? (
+                  <select
+                    value={getUserData('creditLimitRuleId') ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      handleUpdateCreditLimitRule(v === '' ? null : parseInt(v, 10));
+                    }}
+                    disabled={updatingCreditLimitRule}
+                    className="ml-1 text-gray-800 border border-gray-300 rounded px-2 py-0.5 text-sm bg-white focus:ring-1 focus:ring-blue-500"
+                    title="Assign credit limit rule"
+                  >
+                    <option value="">Default</option>
+                    {creditLimitRulesList.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.rule_name}{r.rule_code ? ` (${r.rule_code})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-gray-900">
+                    {getUserData('creditLimitRule')?.rule_name || 'Default'}
+                  </span>
+                )}
+              </span>
             </div>
           </div>
         </div>

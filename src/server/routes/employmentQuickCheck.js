@@ -271,6 +271,17 @@ router.post('/', requireAuth, async (req, res) => {
             updated_at = NOW()
         `, [userId, employment_type, income_range, payment_mode]);
 
+        // Auto-assign credit limit rule based on salary range (only for new users without a rule)
+        try {
+          const { autoAssignCreditLimitRule, getMonthlyIncomeFromRange } = require('../utils/creditLimitCalculator');
+          const approxSalary = getMonthlyIncomeFromRange(income_range);
+          if (approxSalary > 0) {
+            await autoAssignCreditLimitRule(userId, approxSalary);
+          }
+        } catch (e) {
+          console.error('⚠️ Auto-assign credit limit rule failed (non-critical):', e.message);
+        }
+
         return res.json({
           success: true,
           data: {

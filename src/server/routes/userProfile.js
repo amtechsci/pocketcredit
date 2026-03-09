@@ -357,7 +357,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         DATE_FORMAT(updated_at, '%Y-%m-%d') as updated_at, 
         DATE_FORMAT(last_login_at, '%Y-%m-%d') as last_login_at,
         pan_number, alternate_mobile, aadhar_linked_mobile, account_aggregator_mobile, company_name, company_email, salary_date,
-        personal_email, personal_email_verified, official_email, official_email_verified, loan_limit, credit_score, experian_score,
+        personal_email, personal_email_verified, official_email, official_email_verified, loan_limit, credit_limit_rule_id, credit_score, experian_score,
         monthly_net_income, work_experience_range, employment_type, income_range,
         application_hold_reason
       FROM users 
@@ -373,6 +373,20 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     }
 
     const user = users[0];
+
+    // Get user's credit limit rule if assigned
+    let creditLimitRule = null;
+    if (user.credit_limit_rule_id) {
+      try {
+        const ruleRows = await executeQuery(
+          'SELECT id, rule_name, rule_code FROM credit_limit_rules WHERE id = ? AND is_active = 1',
+          [user.credit_limit_rule_id]
+        );
+        if (ruleRows && ruleRows.length > 0) creditLimitRule = ruleRows[0];
+      } catch (e) {
+        // Table may not exist yet
+      }
+    }
 
     // Get user's selected loan plan if exists
     let selectedLoanPlan = null;
@@ -1262,6 +1276,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
       eligibilityRetryDate: user.eligibility_retry_date || 'N/A',
       selectedLoanPlanId: user.selected_loan_plan_id || null,
       selectedLoanPlan: selectedLoanPlan,
+      creditLimitRuleId: user.credit_limit_rule_id || null,
+      creditLimitRule: creditLimitRule ? { id: creditLimitRule.id, rule_name: creditLimitRule.rule_name, rule_code: creditLimitRule.rule_code } : null,
       employmentType: user.employment_type || null, // Employment type from users table (Step 2 selection)
       incomeRange: user.income_range || null, // Income range from users table (Step 2 selection)
       application_hold_reason: user.application_hold_reason || null, // Hold reason if user is on hold
@@ -1583,6 +1599,59 @@ router.put('/:userId/loan-limit', authenticateAdmin, async (req, res) => {
       status: 'error',
       message: 'Failed to update loan limit'
     });
+  }
+});
+
+// Update user's credit limit rule assignment (admin only)
+router.put('/:userId/credit-limit-rule', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+    const { credit_limit_rule_id } = req.body;
+
+    const userCheck = await executeQuery('SELECT id FROM users WHERE id = ?', [userId]);
+    if (!userCheck || userCheck.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'User not found' });
+    }
+
+    if (credit_limit_rule_id !== null && credit_limit_rule_id !== undefined) {
+      const ruleId = parseInt(credit_limit_rule_id, 10);
+      if (isNaN(ruleId)) {
+        return res.status(400).json({ status: 'error', message: 'credit_limit_rule_id must be a number or null' });
+      }
+      const ruleCheck = await executeQuery(
+        'SELECT id, rule_name, rule_code FROM credit_limit_rules WHERE id = ? AND is_active = 1',
+        [ruleId]
+      );
+      if (!ruleCheck || ruleCheck.length === 0) {
+        return res.status(400).json({ status: 'error', message: 'Credit limit rule not found or inactive' });
+      }
+      await executeQuery(
+        'UPDATE users SET credit_limit_rule_id = ?, updated_at = NOW() WHERE id = ?',
+        [ruleId, userId]
+      );
+      const rule = ruleCheck[0];
+      console.log(`✅ Credit limit rule updated for user ${userId}: ${rule.rule_name} (${rule.rule_code})`);
+      return res.json({
+        status: 'success',
+        message: 'Credit limit rule assigned successfully',
+        data: { userId, credit_limit_rule_id: ruleId, creditLimitRule: { id: rule.id, rule_name: rule.rule_name, rule_code: rule.rule_code } }
+      });
+    }
+
+    await executeQuery(
+      'UPDATE users SET credit_limit_rule_id = NULL, updated_at = NOW() WHERE id = ?',
+      [userId]
+    );
+    console.log(`✅ Credit limit rule cleared for user ${userId} (will use default rule)`);
+    res.json({
+      status: 'success',
+      message: 'Credit limit rule unassigned; user will use default rule',
+      data: { userId, credit_limit_rule_id: null, creditLimitRule: null }
+    });
+  } catch (error) {
+    console.error('Update credit limit rule error:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to update credit limit rule' });
   }
 });
 
@@ -2036,8 +2105,14 @@ router.put('/:userId/employment-info', authenticateAdmin, async (req, res) => {
         WHERE id = ?
       `, userValues);
 
-      // Adjust first-time loan amount to 8% of salary if salary was updated
+      // Auto-assign credit limit rule + adjust first-time loan amount if salary was updated
       if (finalIncome !== undefined && finalIncome !== null) {
+        try {
+          const { autoAssignCreditLimitRule } = require('../utils/creditLimitCalculator');
+          await autoAssignCreditLimitRule(userId, parseFloat(finalIncome));
+        } catch (e) {
+          console.error('⚠️ Auto-assign credit limit rule failed (non-critical):', e.message);
+        }
         try {
           const { adjustFirstTimeLoanAmount } = require('../utils/creditLimitCalculator');
           const adjustmentResult = await adjustFirstTimeLoanAmount(userId, parseFloat(finalIncome));
@@ -2045,7 +2120,6 @@ router.put('/:userId/employment-info', authenticateAdmin, async (req, res) => {
             console.log(`✅ First-time loan amount adjusted: Loan ${adjustmentResult.loanId} from ₹${adjustmentResult.oldAmount} to ₹${adjustmentResult.newAmount}`);
           }
         } catch (adjustmentError) {
-          // Don't fail the request if adjustment fails - log and continue
           console.error('⚠️ Error adjusting first-time loan amount (non-critical):', adjustmentError.message);
         }
       }

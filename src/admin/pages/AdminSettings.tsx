@@ -90,6 +90,30 @@ interface LoanTier {
   updated_at: string;
 }
 
+interface CreditLimitRule {
+  id: number;
+  rule_name: string;
+  rule_code: string | null;
+  description: string | null;
+  calculation_mode: 'percentage' | 'fixed';
+  percentage_tiers: number[] | null;
+  fixed_amount_tiers: number[] | null;
+  first_time_percentage: number;
+  max_regular_cap: number;
+  premium_limit: number | null;
+  premium_tenure_months: number | null;
+  triggers_cooling_period: number;
+  block_after_tier: number | null;
+  is_default: number;
+  is_active: number;
+  sort_order: number;
+  salary_min: number | null;
+  salary_max: number | null;
+  auto_assign: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
 interface LoanPlan {
   id: number;
   plan_name: string;
@@ -657,6 +681,31 @@ export function AdminSettings() {
     tier_order: ''
   });
 
+  // Credit Limit Rules state
+  const [creditLimitRules, setCreditLimitRules] = useState<CreditLimitRule[]>([]);
+  const [creditLimitRulesLoading, setCreditLimitRulesLoading] = useState(false);
+  const [editingCreditLimitRule, setEditingCreditLimitRule] = useState<CreditLimitRule | null>(null);
+  const [showCreditLimitRuleForm, setShowCreditLimitRuleForm] = useState(false);
+  const [creditLimitRuleForm, setCreditLimitRuleForm] = useState({
+    rule_name: '',
+    rule_code: '',
+    description: '',
+    calculation_mode: 'percentage' as 'percentage' | 'fixed',
+    percentage_tiers: '8, 11, 15.2, 20.9, 28, 32.1',
+    fixed_amount_tiers: '',
+    first_time_percentage: '8',
+    max_regular_cap: '45600',
+    premium_limit: '',
+    premium_tenure_months: '',
+    triggers_cooling_period: true,
+    block_after_tier: '',
+    is_default: false,
+    sort_order: '0',
+    salary_min: '',
+    salary_max: '',
+    auto_assign: false
+  });
+
   // Loan Plans state
   const [loanPlans, setLoanPlans] = useState<LoanPlan[]>([]);
   const [loanPlansLoading, setLoanPlansLoading] = useState(false);
@@ -892,6 +941,7 @@ export function AdminSettings() {
     { id: 'general', label: 'General', icon: Settings, count: 0 },
     { id: 'fee-types', label: 'Fee Types', icon: DollarSign, count: 0 },
     { id: 'loan-tiers', label: 'Loan Limits', icon: DollarSign, count: 0 },
+    { id: 'credit-limit-rules', label: 'Credit Limit Rules', icon: TrendingUp, count: 0 },
     { id: 'loan-plans', label: 'Loan Plans', icon: CreditCard, count: 0 },
     { id: 'user-config', label: 'User Config', icon: Settings, count: 0 },
     { id: 'eligibility', label: 'Eligibility Criteria', icon: CheckCircle, count: 0 },
@@ -1636,6 +1686,181 @@ export function AdminSettings() {
     setLoanTierForm({ tier_name: '', min_salary: '', max_salary: '', loan_limit: '', income_range: '', hold_permanent: false, tier_order: '' });
   };
 
+  // ==================== Credit Limit Rules Functions ====================
+
+  const loadCreditLimitRules = async () => {
+    try {
+      setCreditLimitRulesLoading(true);
+      const response = await adminApiService.getCreditLimitRules();
+      if (response.success && Array.isArray(response.data)) {
+        setCreditLimitRules(response.data);
+      }
+    } catch (error) {
+      console.error('Error loading credit limit rules:', error);
+    } finally {
+      setCreditLimitRulesLoading(false);
+    }
+  };
+
+  const parsePercentageTiers = (s: string): number[] => {
+    const trimmed = s.replace(/\s/g, '');
+    if (!trimmed) return [];
+    return trimmed.split(',').map((x: string) => parseFloat(x.trim())).filter((n: number) => !isNaN(n));
+  };
+
+  const defaultCreditLimitRuleForm = {
+    rule_name: '',
+    rule_code: '',
+    description: '',
+    calculation_mode: 'percentage' as 'percentage' | 'fixed',
+    percentage_tiers: '8, 11, 15.2, 20.9, 28, 32.1',
+    fixed_amount_tiers: '',
+    first_time_percentage: '8',
+    max_regular_cap: '45600',
+    premium_limit: '',
+    premium_tenure_months: '',
+    triggers_cooling_period: true,
+    block_after_tier: '',
+    is_default: false,
+    sort_order: '0',
+    salary_min: '',
+    salary_max: '',
+    auto_assign: false
+  };
+
+  const saveCreditLimitRule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const mode = creditLimitRuleForm.calculation_mode;
+    const pctTiers = parsePercentageTiers(creditLimitRuleForm.percentage_tiers);
+    const fixTiers = parsePercentageTiers(creditLimitRuleForm.fixed_amount_tiers);
+
+    if (mode === 'percentage' && pctTiers.length < 1) {
+      alert('Percentage tiers must be a comma-separated list of numbers (e.g. 15, 18, 21, 25, 30)');
+      return;
+    }
+    if (mode === 'fixed' && fixTiers.length < 1) {
+      alert('Fixed amount tiers must be a comma-separated list of numbers (e.g. 15000, 18000, 22000)');
+      return;
+    }
+    try {
+      const data: any = {
+        rule_name: creditLimitRuleForm.rule_name.trim(),
+        rule_code: creditLimitRuleForm.rule_code.trim() || null,
+        description: creditLimitRuleForm.description.trim() || null,
+        calculation_mode: mode,
+        percentage_tiers: mode === 'percentage' ? pctTiers : null,
+        fixed_amount_tiers: mode === 'fixed' ? fixTiers : null,
+        first_time_percentage: parseFloat(creditLimitRuleForm.first_time_percentage) || 8,
+        max_regular_cap: parseFloat(creditLimitRuleForm.max_regular_cap) || 999999,
+        premium_limit: creditLimitRuleForm.premium_limit ? parseFloat(creditLimitRuleForm.premium_limit) : null,
+        premium_tenure_months: creditLimitRuleForm.premium_tenure_months ? parseInt(creditLimitRuleForm.premium_tenure_months, 10) : null,
+        triggers_cooling_period: creditLimitRuleForm.triggers_cooling_period,
+        block_after_tier: creditLimitRuleForm.block_after_tier ? parseInt(creditLimitRuleForm.block_after_tier, 10) : null,
+        is_default: creditLimitRuleForm.is_default,
+        is_active: true,
+        sort_order: parseInt(creditLimitRuleForm.sort_order, 10) || 0,
+        salary_min: creditLimitRuleForm.salary_min ? parseFloat(creditLimitRuleForm.salary_min) : null,
+        salary_max: creditLimitRuleForm.salary_max ? parseFloat(creditLimitRuleForm.salary_max) : null,
+        auto_assign: creditLimitRuleForm.auto_assign
+      };
+      if (editingCreditLimitRule) {
+        await adminApiService.updateCreditLimitRule(editingCreditLimitRule.id, data);
+        alert('Credit limit rule updated successfully!');
+      } else {
+        await adminApiService.createCreditLimitRule(data);
+        alert('Credit limit rule created successfully!');
+      }
+      setShowCreditLimitRuleForm(false);
+      setEditingCreditLimitRule(null);
+      setCreditLimitRuleForm(defaultCreditLimitRuleForm);
+      loadCreditLimitRules();
+    } catch (error: any) {
+      console.error('Error saving credit limit rule:', error);
+      alert(error.response?.data?.message || 'Failed to save credit limit rule');
+    }
+  };
+
+  const editCreditLimitRule = (rule: CreditLimitRule) => {
+    const pctTiers = Array.isArray(rule.percentage_tiers)
+      ? rule.percentage_tiers.join(', ')
+      : (rule.percentage_tiers ? String(rule.percentage_tiers) : '');
+    const fixTiers = Array.isArray(rule.fixed_amount_tiers)
+      ? rule.fixed_amount_tiers.join(', ')
+      : (rule.fixed_amount_tiers ? String(rule.fixed_amount_tiers) : '');
+    setEditingCreditLimitRule(rule);
+    setCreditLimitRuleForm({
+      rule_name: rule.rule_name,
+      rule_code: rule.rule_code || '',
+      description: rule.description || '',
+      calculation_mode: rule.calculation_mode || 'percentage',
+      percentage_tiers: pctTiers,
+      fixed_amount_tiers: fixTiers,
+      first_time_percentage: String(rule.first_time_percentage ?? 8),
+      max_regular_cap: String(rule.max_regular_cap ?? 999999),
+      premium_limit: rule.premium_limit != null ? String(rule.premium_limit) : '',
+      premium_tenure_months: rule.premium_tenure_months != null ? String(rule.premium_tenure_months) : '',
+      triggers_cooling_period: rule.triggers_cooling_period === 1,
+      block_after_tier: rule.block_after_tier != null ? String(rule.block_after_tier) : '',
+      is_default: rule.is_default === 1,
+      sort_order: String(rule.sort_order ?? 0),
+      salary_min: rule.salary_min != null ? String(rule.salary_min) : '',
+      salary_max: rule.salary_max != null ? String(rule.salary_max) : '',
+      auto_assign: rule.auto_assign === 1
+    });
+    setShowCreditLimitRuleForm(true);
+  };
+
+  const deleteCreditLimitRule = async (id: number) => {
+    if (!confirm('Are you sure you want to delete this credit limit rule? Users assigned to it will fall back to the default rule.')) return;
+    try {
+      await adminApiService.deleteCreditLimitRule(id);
+      alert('Credit limit rule deleted successfully!');
+      loadCreditLimitRules();
+    } catch (error: any) {
+      console.error('Error deleting credit limit rule:', error);
+      alert(error.response?.data?.message || 'Failed to delete credit limit rule');
+    }
+  };
+
+  const toggleCreditLimitRuleStatus = async (id: number) => {
+    try {
+      await adminApiService.toggleCreditLimitRule(id);
+      loadCreditLimitRules();
+    } catch (error: any) {
+      console.error('Error toggling credit limit rule:', error);
+      alert(error.response?.data?.message || 'Failed to toggle rule');
+    }
+  };
+
+  const setDefaultCreditLimitRule = async (id: number) => {
+    try {
+      await adminApiService.setDefaultCreditLimitRule(id);
+      alert('Default credit limit rule updated!');
+      loadCreditLimitRules();
+    } catch (error: any) {
+      console.error('Error setting default rule:', error);
+      alert(error.response?.data?.message || 'Failed to set default rule');
+    }
+  };
+
+  const cancelEditCreditLimitRule = () => {
+    setShowCreditLimitRuleForm(false);
+    setEditingCreditLimitRule(null);
+    setCreditLimitRuleForm({
+      rule_name: '',
+      rule_code: '',
+      description: '',
+      percentage_tiers: '8, 11, 15.2, 20.9, 28, 32.1',
+      first_time_percentage: '8',
+      max_regular_cap: '45600',
+      premium_limit: '150000',
+      premium_tenure_months: '24',
+      triggers_cooling_period: true,
+      is_default: false,
+      sort_order: '0'
+    });
+  };
+
   // ==================== Loan Plans Functions ====================
 
   const loadLoanPlans = async () => {
@@ -2115,6 +2340,8 @@ export function AdminSettings() {
       fetchFeeTypes();
     } else if (activeTab === 'loan-tiers') {
       loadLoanTiers();
+    } else if (activeTab === 'credit-limit-rules') {
+      loadCreditLimitRules();
     } else if (activeTab === 'loan-plans') {
       loadLoanPlans();
     } else if (activeTab === 'user-config') {
@@ -3261,6 +3488,279 @@ export function AdminSettings() {
                           <li>Lower order numbers are checked first (Order 1, then 2, etc.)</li>
                           <li>Leave "Max Salary" empty for the highest tier (no upper limit)</li>
                           <li>Only active tiers are used for loan limit calculations</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Credit Limit Rules Tab */}
+        {activeTab === 'credit-limit-rules' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-blue-600" />
+                    Credit Limit Rules
+                  </h2>
+                  <p className="text-sm text-gray-600 mt-1">Define limit logic by loan count (percentage tiers, caps). Assign rules to users from their profile.</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setEditingCreditLimitRule(null);
+                    setCreditLimitRuleForm(defaultCreditLimitRuleForm);
+                    setShowCreditLimitRuleForm(true);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Create New Rule
+                </button>
+              </div>
+
+              {creditLimitRulesLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  <span className="ml-2 text-gray-600">Loading credit limit rules...</span>
+                </div>
+              ) : (
+                <>
+                  {showCreditLimitRuleForm && (
+                    <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <h3 className="text-md font-semibold text-gray-900 mb-4">
+                        {editingCreditLimitRule ? 'Edit Credit Limit Rule' : 'Create New Credit Limit Rule'}
+                      </h3>
+                      <form onSubmit={saveCreditLimitRule} className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Rule Name *</label>
+                            <input type="text" value={creditLimitRuleForm.rule_name} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, rule_name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. Default 2 EMI" required />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Rule Code (optional)</label>
+                            <input type="text" value={creditLimitRuleForm.rule_code} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, rule_code: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. new_sal_upto_1l" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Calculation Mode *</label>
+                            <select value={creditLimitRuleForm.calculation_mode} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, calculation_mode: e.target.value as 'percentage' | 'fixed' })} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                              <option value="percentage">Percentage of Salary</option>
+                              <option value="fixed">Fixed Amounts</option>
+                            </select>
+                          </div>
+                          <div className="md:col-span-2 lg:col-span-3">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Description (optional)</label>
+                            <input type="text" value={creditLimitRuleForm.description} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, description: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Admin notes" />
+                          </div>
+
+                          {creditLimitRuleForm.calculation_mode === 'percentage' && (
+                            <div className="md:col-span-2 lg:col-span-3">
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Percentage Tiers * (comma-separated, by loan count 0,1,2...)</label>
+                              <input type="text" value={creditLimitRuleForm.percentage_tiers} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, percentage_tiers: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="15, 18, 21, 25, 30" required />
+                              <p className="text-xs text-gray-500 mt-1">Each value = % of salary. Index 0 = first loan, index 1 = after 1st clears, etc.</p>
+                            </div>
+                          )}
+
+                          {creditLimitRuleForm.calculation_mode === 'fixed' && (
+                            <div className="md:col-span-2 lg:col-span-3">
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Fixed Amount Tiers * (comma-separated rupee amounts, by loan count)</label>
+                              <input type="text" value={creditLimitRuleForm.fixed_amount_tiers} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, fixed_amount_tiers: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="15000, 18000, 22000, 27000, 33000" required />
+                              <p className="text-xs text-gray-500 mt-1">Each value = fixed loan amount in rupees. Index 0 = first loan, etc.</p>
+                            </div>
+                          )}
+
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">First-time % (for percentage mode)</label>
+                            <input type="number" step="0.01" value={creditLimitRuleForm.first_time_percentage} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, first_time_percentage: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" min="0" max="100" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Max Regular Cap (₹)</label>
+                            <input type="number" value={creditLimitRuleForm.max_regular_cap} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, max_regular_cap: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" min="0" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Block After Tier (optional)</label>
+                            <input type="number" value={creditLimitRuleForm.block_after_tier} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, block_after_tier: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" min="1" placeholder="e.g. 5" />
+                            <p className="text-xs text-gray-500 mt-1">Block profile after N loans cleared. Leave empty for premium/max logic.</p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Premium Limit (₹, optional)</label>
+                            <input type="number" value={creditLimitRuleForm.premium_limit} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, premium_limit: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" min="0" placeholder="e.g. 150000" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Premium Tenure (months, optional)</label>
+                            <input type="number" value={creditLimitRuleForm.premium_tenure_months} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, premium_tenure_months: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" min="1" placeholder="e.g. 24" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Sort Order</label>
+                            <input type="number" value={creditLimitRuleForm.sort_order} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, sort_order: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" min="0" />
+                          </div>
+                        </div>
+
+                        <div className="border-t border-blue-200 pt-4 mt-4">
+                          <h4 className="text-sm font-semibold text-gray-800 mb-3">Auto-Assignment (for new users based on salary)</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Salary Min (₹, inclusive)</label>
+                              <input type="number" value={creditLimitRuleForm.salary_min} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, salary_min: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" min="0" placeholder="e.g. 0" />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Salary Max (₹, inclusive, blank = no limit)</label>
+                              <input type="number" value={creditLimitRuleForm.salary_max} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, salary_max: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" min="0" placeholder="e.g. 100000" />
+                            </div>
+                            <div className="flex items-end pb-1">
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" checked={creditLimitRuleForm.auto_assign} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, auto_assign: e.target.checked })} className="rounded border-gray-300" />
+                                <span className="text-sm text-gray-700">Enable auto-assign</span>
+                              </label>
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-2">When enabled, new users whose salary falls in this range will automatically get this rule assigned.</p>
+                        </div>
+
+                        <div className="flex items-center gap-4 border-t border-blue-200 pt-4">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" checked={creditLimitRuleForm.triggers_cooling_period} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, triggers_cooling_period: e.target.checked })} className="rounded border-gray-300" />
+                            <span className="text-sm text-gray-700">Triggers cooling period</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" checked={creditLimitRuleForm.is_default} onChange={(e) => setCreditLimitRuleForm({ ...creditLimitRuleForm, is_default: e.target.checked })} className="rounded border-gray-300" />
+                            <span className="text-sm text-gray-700">Default rule</span>
+                          </label>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                            <Save className="w-4 h-4 inline mr-1" />
+                            {editingCreditLimitRule ? 'Update Rule' : 'Create Rule'}
+                          </button>
+                          <button type="button" onClick={cancelEditCreditLimitRule} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  )}
+
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mode</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tiers</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Block / Cap</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Auto-Assign</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Default</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {creditLimitRules.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                              No credit limit rules. Run the database migration first, then click &quot;Create New Rule&quot;.
+                            </td>
+                          </tr>
+                        ) : (
+                          creditLimitRules.map((rule) => (
+                            <tr key={rule.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-4 text-sm font-medium text-gray-900">
+                                <div>{rule.rule_name}</div>
+                                <div className="text-xs text-gray-500">{rule.rule_code || ''}</div>
+                              </td>
+                              <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${rule.calculation_mode === 'fixed' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
+                                  {rule.calculation_mode === 'fixed' ? 'Fixed' : 'Pct%'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-4 text-sm text-gray-700 max-w-[200px]">
+                                {rule.calculation_mode === 'fixed'
+                                  ? (Array.isArray(rule.fixed_amount_tiers) ? rule.fixed_amount_tiers.map(v => `₹${v.toLocaleString('en-IN')}`).join(', ') : '-')
+                                  : (Array.isArray(rule.percentage_tiers) ? rule.percentage_tiers.map(v => `${v}%`).join(', ') : '-')
+                                }
+                              </td>
+                              <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-700">
+                                {rule.block_after_tier ? (
+                                  <span className="text-orange-700">Block after {rule.block_after_tier}</span>
+                                ) : rule.premium_limit ? (
+                                  <span>Cap ₹{Number(rule.max_regular_cap).toLocaleString('en-IN')} / Prem ₹{Number(rule.premium_limit).toLocaleString('en-IN')}</span>
+                                ) : (
+                                  <span>Cap ₹{Number(rule.max_regular_cap).toLocaleString('en-IN')}</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
+                                {rule.auto_assign ? (
+                                  <span className="text-green-700">
+                                    {rule.salary_min != null ? `₹${Number(rule.salary_min).toLocaleString('en-IN')}` : '0'}
+                                    {' - '}
+                                    {rule.salary_max != null ? `₹${Number(rule.salary_max).toLocaleString('en-IN')}` : '∞'}
+                                  </span>
+                                ) : <span className="text-gray-400">Off</span>}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                {rule.is_default === 1 ? (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Default</span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setDefaultCreditLimitRule(rule.id)}
+                                    className="text-xs text-blue-600 hover:underline"
+                                  >
+                                    Set default
+                                  </button>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleCreditLimitRuleStatus(rule.id)}
+                                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                    rule.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                                  }`}
+                                >
+                                  {rule.is_active ? 'Active' : 'Inactive'}
+                                </button>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                <div className="flex gap-2">
+                                  <button type="button" onClick={() => editCreditLimitRule(rule)} className="text-blue-600 hover:text-blue-900" title="Edit">
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteCreditLimitRule(rule.id)}
+                                    className="text-red-600 hover:text-red-900"
+                                    title="Delete"
+                                    disabled={rule.is_default === 1}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="flex items-start gap-3">
+                      <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                      <div className="text-sm text-blue-800">
+                        <p className="font-semibold mb-2">Credit Limit Rules:</p>
+                        <ul className="list-disc list-inside space-y-1">
+                          <li><strong>Percentage mode</strong>: each tier = % of salary. <strong>Fixed mode</strong>: each tier = fixed rupee amount.</li>
+                          <li>Tiers apply by number of disbursed loans (index 0 = first loan, 1 = second, etc.).</li>
+                          <li><strong>Block After Tier</strong>: blocks the profile after N loans cleared (no premium loan).</li>
+                          <li><strong>Auto-Assign</strong>: new users without a rule get automatically assigned based on their salary range.</li>
+                          <li>Assign a rule to a user manually from their profile page to override auto-assignment.</li>
+                          <li>Only one rule can be default; users with no assigned rule use the default.</li>
                         </ul>
                       </div>
                     </div>
