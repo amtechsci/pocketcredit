@@ -342,11 +342,26 @@ export function PartnerDashboardPage() {
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm text-gray-600">Report period (lead shared):</span>
               <input
+                type="month"
+                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                title="Pick a month to set From = 1st, To = 1st of next month (February only = no March 1)"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (!v) return;
+                  const [y, m] = v.split('-').map(Number);
+                  setExportStartDate(`${v}-01`);
+                  const nextMonth = m === 12 ? 1 : m + 1;
+                  const nextYear = m === 12 ? y + 1 : y;
+                  setExportEndDate(`${nextYear}-${String(nextMonth).padStart(2, '0')}-01`);
+                }}
+              />
+              <span className="text-sm text-gray-500">or</span>
+              <input
                 type="date"
                 value={exportStartDate}
                 onChange={(e) => setExportStartDate(e.target.value)}
                 className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                title="From date (disbursed)"
+                title="From date (inclusive)"
               />
               <span className="text-sm text-gray-500">to</span>
               <input
@@ -354,7 +369,7 @@ export function PartnerDashboardPage() {
                 value={exportEndDate}
                 onChange={(e) => setExportEndDate(e.target.value)}
                 className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                title="To date (disbursed)"
+                title="To date (exclusive – e.g. March 1 = through Feb 28)"
               />
               <button
                 type="button"

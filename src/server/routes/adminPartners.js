@@ -300,7 +300,7 @@ router.get('/:id/leads', authenticateAdmin, requireSuperadmin, async (req, res) 
       params.push(start_date);
     }
     if (end_date) {
-      query += ` AND DATE(pl.lead_shared_at) <= ?`;
+      query += ` AND DATE(pl.lead_shared_at) < ?`;
       params.push(end_date);
     }
 
@@ -308,7 +308,7 @@ router.get('/:id/leads', authenticateAdmin, requireSuperadmin, async (req, res) 
       SELECT COUNT(*) as total FROM partner_leads pl WHERE pl.partner_id = ?
       ${status ? ' AND pl.dedupe_status = ?' : ''}
       ${start_date ? ' AND DATE(pl.lead_shared_at) >= ?' : ''}
-      ${end_date ? ' AND DATE(pl.lead_shared_at) <= ?' : ''}
+      ${end_date ? ' AND DATE(pl.lead_shared_at) < ?' : ''}
     `;
     const countParams = [id];
     if (status) countParams.push(status);

@@ -24,6 +24,7 @@ function formatDateDDMMYYYY(date) {
  * Build export rows for partner leads (all statuses). Optional date filter on lead_shared_at.
  * @param {number} partnerId - Partner ID
  * @param {Object} options - { start_date, end_date } (YYYY-MM-DD, filter on pl.lead_shared_at)
+ *   end_date is EXCLUSIVE: for "February only" send end_date=YYYY-03-01 so 1st March is excluded.
  * @returns {Promise<Array>} Array of row objects with export column keys
  */
 async function getLeadExportData(partnerId, options = {}) {
@@ -38,6 +39,7 @@ async function getLeadExportData(partnerId, options = {}) {
       pl.pan_number as pl_pan,
       pl.date_of_birth as pl_dob,
       pl.lead_shared_at,
+      pl.utm_link,
       pl.disbursed_at as pl_disbursed_at,
       pl.disbursal_amount as pl_disbursal_amount,
       COALESCE(la.status, pl.loan_status) as loan_status,
@@ -98,13 +100,13 @@ async function getLeadExportData(partnerId, options = {}) {
     query += ` AND (pl.user_id IS NULL OR pl.user_registered_at IS NOT NULL)`;
   }
 
-  // Date filter: by lead shared date so report includes all leads (all loan statuses) in the period
+  // Date filter: by lead shared date. end_date is EXCLUSIVE so "Feb only" = start_date=Feb-01, end_date=Mar-01
   if (start_date) {
     query += ` AND DATE(pl.lead_shared_at) >= ?`;
     params.push(start_date);
   }
   if (end_date) {
-    query += ` AND DATE(pl.lead_shared_at) <= ?`;
+    query += ` AND DATE(pl.lead_shared_at) < ?`;
     params.push(end_date);
   }
 
@@ -128,6 +130,9 @@ async function getLeadExportData(partnerId, options = {}) {
     const principalAmount = row.la_loan_amount != null ? parseFloat(row.la_loan_amount) : (row.pl_disbursal_amount != null ? row.pl_disbursal_amount : '');
     const experianScore = row.u_experian_score != null ? String(row.u_experian_score) : (row.cc_experian_score != null ? String(row.cc_experian_score) : '');
 
+    // Lead through: API = lead created via partner API (has utm_link); UTM = user came via UTM link only
+    const leadThrough = (row.utm_link && String(row.utm_link).trim()) ? 'API' : 'UTM';
+
     return {
       'Application ID': applicationId,
       'Applicant Name': applicantName,
@@ -135,6 +140,7 @@ async function getLeadExportData(partnerId, options = {}) {
       'PAN Number': pan,
       'Date of Birth': dob ? formatDateDDMMYYYY(dob) : '',
       'Gender': row.gender || '',
+      'Lead through': leadThrough,
       'Application Date': applicationDate ? formatDateDDMMYYYY(applicationDate) : '',
       'Disbursed Date': disbursedDate ? formatDateDDMMYYYY(disbursedDate) : '',
       'principal amount': principalAmount,

@@ -121,7 +121,7 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
     }
 
     if (end_date) {
-      query += ` AND DATE(pl.lead_shared_at) <= ?`;
+      query += ` AND DATE(pl.lead_shared_at) < ?`;
       params.push(end_date);
     }
 
@@ -182,7 +182,7 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
     }
 
     if (end_date) {
-      countQuery += ` AND DATE(pl.lead_shared_at) <= ?`;
+      countQuery += ` AND DATE(pl.lead_shared_at) < ?`;
       countParams.push(end_date);
     }
 
