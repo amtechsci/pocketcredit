@@ -91,8 +91,8 @@ async function getCreditLimitRuleForUser(userId) {
       percentage_tiers: tiers,
       fixed_amount_tiers: fixedTiers,
       max_regular_cap: parseFloat(rule.max_regular_cap) || DEFAULT_MAX_REGULAR_CAP,
-      premium_limit: rule.premium_limit != null ? parseFloat(rule.premium_limit) : DEFAULT_PREMIUM_LIMIT,
-      premium_tenure_months: rule.premium_tenure_months != null ? parseInt(rule.premium_tenure_months, 10) : DEFAULT_PREMIUM_TENURE,
+      premium_limit: rule.premium_limit != null ? parseFloat(rule.premium_limit) : null,
+      premium_tenure_months: rule.premium_tenure_months != null ? parseInt(rule.premium_tenure_months, 10) : null,
       first_time_percentage: parseFloat(rule.first_time_percentage) || DEFAULT_FIRST_TIME_PERCENTAGE,
       triggers_cooling_period: rule.triggers_cooling_period === 1 || rule.triggers_cooling_period === true,
       block_after_tier: rule.block_after_tier != null ? parseInt(rule.block_after_tier, 10) : null,
@@ -174,8 +174,10 @@ async function calculateCreditLimitFor2EMI(userId, monthlySalary = null, current
     const calculationMode = rule ? rule.calculation_mode : 'percentage';
     const blockAfterTier = rule ? rule.block_after_tier : null;
 
-    // If block_after_tier is set and user has completed that many loans, signal block
-    if (blockAfterTier != null && loanCount >= blockAfterTier) {
+    // block_after_tier: block only AFTER the Nth loan, not AT the Nth loan.
+    // The Nth loan (loanCount == blockAfterTier) still gets a limit calculation.
+    // Cooling period is triggered separately when the Nth loan is CLEARED.
+    if (blockAfterTier != null && loanCount > blockAfterTier) {
       console.log(`[CreditLimit] User ${userId}: block_after_tier=${blockAfterTier}, loanCount=${loanCount} - profile should be blocked`);
       return {
         newLimit: 0,

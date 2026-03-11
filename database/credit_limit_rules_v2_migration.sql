@@ -5,14 +5,14 @@
 -- 1. Make percentage_tiers nullable (needed for fixed-amount-only rules)
 ALTER TABLE credit_limit_rules MODIFY COLUMN percentage_tiers JSON DEFAULT NULL COMMENT 'Array of % by loan count (used when calculation_mode=percentage)';
 
--- 2. Add new columns
+-- 2. Add new columns (IF NOT EXISTS: MySQL 8.0.29+, safe to re-run)
 ALTER TABLE credit_limit_rules
-  ADD COLUMN calculation_mode VARCHAR(20) NOT NULL DEFAULT 'percentage' COMMENT 'percentage or fixed' AFTER description,
-  ADD COLUMN fixed_amount_tiers JSON DEFAULT NULL COMMENT 'Array of fixed rupee amounts by loan count (used when calculation_mode=fixed)' AFTER percentage_tiers,
-  ADD COLUMN block_after_tier INT DEFAULT NULL COMMENT 'Block profile after this many loans cleared (NULL = use premium/max logic)' AFTER triggers_cooling_period,
-  ADD COLUMN salary_min DECIMAL(12,2) DEFAULT NULL COMMENT 'Auto-assign: minimum salary (inclusive)' AFTER sort_order,
-  ADD COLUMN salary_max DECIMAL(12,2) DEFAULT NULL COMMENT 'Auto-assign: maximum salary (inclusive, NULL = no upper bound)' AFTER salary_min,
-  ADD COLUMN auto_assign TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = participates in salary-based auto-assignment' AFTER salary_max;
+  ADD COLUMN IF NOT EXISTS calculation_mode VARCHAR(20) NOT NULL DEFAULT 'percentage' COMMENT 'percentage or fixed' AFTER description,
+  ADD COLUMN IF NOT EXISTS fixed_amount_tiers JSON DEFAULT NULL COMMENT 'Array of fixed rupee amounts by loan count (used when calculation_mode=fixed)' AFTER percentage_tiers,
+  ADD COLUMN IF NOT EXISTS block_after_tier INT DEFAULT NULL COMMENT 'Block profile after this many loans cleared (NULL = use premium/max logic)' AFTER triggers_cooling_period,
+  ADD COLUMN IF NOT EXISTS salary_min DECIMAL(12,2) DEFAULT NULL COMMENT 'Auto-assign: minimum salary (inclusive)' AFTER sort_order,
+  ADD COLUMN IF NOT EXISTS salary_max DECIMAL(12,2) DEFAULT NULL COMMENT 'Auto-assign: maximum salary (inclusive, NULL = no upper bound)' AFTER salary_min,
+  ADD COLUMN IF NOT EXISTS auto_assign TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = participates in salary-based auto-assignment' AFTER salary_max;
 
 -- 3. Mark existing default rule as NOT auto-assign (old users stay on this)
 UPDATE credit_limit_rules
@@ -31,9 +31,9 @@ INSERT INTO credit_limit_rules (
 SELECT
   'New User - Salary up to 1L',
   'new_sal_upto_1l',
-  'For new users with salary <= 1 lakh. Percentage-based: 15%, 18%, 21%, 25%, 30%. Block after 5th loan.',
+  'For new users with salary <= 1 lakh. Percentage-based: 15%, 18%, 21%, 25%, 30%, 50%. Block after 5th loan.',
   'percentage',
-  '[15, 18, 21, 25, 30]',
+  '[15, 18, 21, 25, 30, 50]',
   NULL,
   15,
   999999,
@@ -62,10 +62,10 @@ INSERT INTO credit_limit_rules (
 SELECT
   'New User - Salary above 1L',
   'new_sal_above_1l',
-  'For new users with salary > 1 lakh. Fixed amounts: 15000, 18000, 22000, 27000, 33000. Block after 5th loan.',
+  'For new users with salary > 1 lakh. Fixed amounts: 15000, 18000, 22000, 27000, 33000, 50000. Block after 5th loan.',
   'fixed',
   NULL,
-  '[15000, 18000, 22000, 27000, 33000]',
+  '[15000, 18000, 22000, 27000, 33000, 50000]',
   15,
   999999,
   NULL,

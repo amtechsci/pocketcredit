@@ -295,6 +295,20 @@ router.post('/disburse-loan', authenticateAdmin, async (req, res) => {
                         recipientName: recipientName,
                         newLimit: creditLimitData.newLimit
                     });
+
+                    // Trigger event-based SMS (limit_increase)
+                    try {
+                        const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+                        await triggerEventSMS('limit_increase', {
+                            userId: loan.user_id,
+                            variables: {
+                                new_limit: `₹${creditLimitData.newLimit.toLocaleString('en-IN')}`
+                            }
+                        });
+                        console.log(`[Payout] limit_increase SMS triggered for user ${loan.user_id}`);
+                    } catch (smsError) {
+                        console.error('[Payout] Error sending limit_increase SMS (non-fatal):', smsError);
+                    }
                     
                     console.log(`[Payout] Pending credit limit stored (₹${creditLimitData.newLimit}) and notifications sent for user ${loan.user_id}`);
                 } else {
