@@ -311,6 +311,17 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
             }
           }
 
+          // Redistribute follow-up user when status changes to follow_up (assigns to admin with fewest follow_up loans)
+          if (newStatus === 'follow_up') {
+            try {
+              const { reassignFollowUpUserWhenStatusBecomesFollowUp } = require('../services/adminAssignmentService');
+              await reassignFollowUpUserWhenStatusBecomesFollowUp(targetLoanId);
+            } catch (assignError) {
+              console.error('Error redistributing follow_up_user when status becomes follow_up:', assignError);
+              // Non-fatal: continue with status update
+            }
+          }
+
           // Update loan status
           const updateResult = await executeQuery(
             'UPDATE loan_applications SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',

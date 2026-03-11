@@ -942,6 +942,17 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
       }
     }
 
+    // Redistribute follow-up user when status changes to follow_up (assigns to admin with fewest follow_up loans)
+    if (status === 'follow_up') {
+      try {
+        const { reassignFollowUpUserWhenStatusBecomesFollowUp } = require('../services/adminAssignmentService');
+        await reassignFollowUpUserWhenStatusBecomesFollowUp(applicationId);
+      } catch (assignError) {
+        console.error('Error redistributing follow_up_user when status becomes follow_up:', assignError);
+        // Non-fatal: continue with status update even if assignment fails
+      }
+    }
+
     // Add status-specific timestamps
     if (status === 'approved') {
       updateQuery += ', approved_at = NOW()';

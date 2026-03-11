@@ -348,6 +348,52 @@ async function getNextFollowUpAdminId() {
 }
 
 /**
+ * Get next follow-up admin when loan moves to follow_up status. Counts only loans
+ * in status = 'follow_up' so admins with many submitted but few follow_up loans
+ * get a fair share of actual follow-up cases.
+ */
+async function getNextFollowUpAdminIdForFollowUpStatus() {
+  const admins = await getActiveSubAdmins('follow_up_user');
+  if (admins.length === 0) return null;
+  if (admins.length === 1) return admins[0].id;
+
+  const counts = await executeQuery(
+    `SELECT assigned_follow_up_admin_id, COUNT(*) as c FROM loan_applications
+     WHERE status = 'follow_up' AND assigned_follow_up_admin_id IS NOT NULL
+     GROUP BY assigned_follow_up_admin_id`
+  );
+  const countByAdmin = {};
+  admins.forEach(a => { countByAdmin[a.id] = 0; });
+  counts.forEach(r => { countByAdmin[r.assigned_follow_up_admin_id] = Number(r.c); });
+
+  let minId = admins[0].id;
+  let minCount = countByAdmin[minId] ?? 0;
+  for (let i = 1; i < admins.length; i++) {
+    const id = admins[i].id;
+    const c = countByAdmin[id] ?? 0;
+    if (c < minCount) {
+      minCount = c;
+      minId = id;
+    }
+  }
+  return minId;
+}
+
+/**
+ * Reassign follow-up user when loan status moves to follow_up. Distributes based
+ * on follow_up count so admins with fewer follow_up loans get the new case.
+ */
+async function reassignFollowUpUserWhenStatusBecomesFollowUp(loanId) {
+  const adminId = await getNextFollowUpAdminIdForFollowUpStatus();
+  if (!adminId) return;
+  await ensureDb();
+  await executeQuery(
+    'UPDATE loan_applications SET assigned_follow_up_admin_id = ? WHERE id = ?',
+    [adminId, loanId]
+  );
+}
+
+/**
  * Assign verify user when loan status becomes submitted (or when first submitted).
  */
 async function assignVerifyUserForLoan(loanId) {
@@ -580,6 +626,7 @@ module.exports = {
   getNextAccountManagerId,
   getNextRecoveryOfficerId,
   getNextFollowUpAdminId,
+  reassignFollowUpUserWhenStatusBecomesFollowUp,
   assignVerifyUserForLoan,
   assignQAUserForLoan,
   assignAccountManagerForLoan,
