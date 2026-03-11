@@ -201,7 +201,7 @@ router.put('/:id', authenticateAdmin, requireSuperadmin, async (req, res) => {
 
 /**
  * GET /api/admin/partners/:id/leads/export/xlsx
- * Download partner leads report as XLSX (same logic as partner portal: filter by first loan applied date, own leads only).
+ * Download partner leads report as XLSX. Same as partner portal: only leads where user registered through this partner; date = user_registered_at.
  * Query: start_date, end_date (YYYY-MM-DD, end_date exclusive)
  */
 router.get('/:id/leads/export/xlsx', authenticateAdmin, requireSuperadmin, async (req, res) => {
@@ -216,11 +216,11 @@ router.get('/:id/leads/export/xlsx', authenticateAdmin, requireSuperadmin, async
       return res.status(404).json({ status: 'error', message: 'Partner not found' });
     }
     const { start_date, end_date } = req.query;
-    const exportData = await getLeadExportData(id, { start_date, end_date, own_leads_only: true });
+    const exportData = await getLeadExportData(id, { start_date, end_date });
     if (!exportData.length) {
       return res.status(404).json({
         status: 'error',
-        message: 'No leads found for the given partner and date range. Use start_date and end_date (YYYY-MM-DD) to filter by first loan applied date (end_date exclusive).'
+        message: 'No leads found. Only leads where user registered through this partner. Use start_date and end_date (end_date exclusive, e.g. Mar 1 for Feb).'
       });
     }
     const headers = Object.keys(exportData[0]);
@@ -261,6 +261,7 @@ router.get('/:id/leads', authenticateAdmin, requireSuperadmin, async (req, res) 
     const limitVal = Math.min(parseInt(limit) || 50, 100);
     const offsetVal = parseInt(offset) || 0;
 
+    // Only leads where user registered through this partner (same as export).
     let query = `
       SELECT 
         pl.id,
@@ -283,11 +284,12 @@ router.get('/:id/leads', authenticateAdmin, requireSuperadmin, async (req, res) 
         u.id as user_id,
         u.email,
         la.application_number,
-        CASE WHEN pl.user_id IS NULL OR pl.user_registered_at IS NOT NULL THEN 1 ELSE 0 END as is_own_lead
+        1 as is_own_lead
       FROM partner_leads pl
       LEFT JOIN users u ON pl.user_id = u.id
       LEFT JOIN loan_applications la ON pl.loan_application_id = la.id
       WHERE pl.partner_id = ?
+        AND pl.user_registered_at IS NOT NULL
     `;
     const params = [id];
 
@@ -296,28 +298,27 @@ router.get('/:id/leads', authenticateAdmin, requireSuperadmin, async (req, res) 
       params.push(status);
     }
     if (start_date) {
-      query += ` AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) >= ?`;
+      query += ` AND DATE(pl.user_registered_at) >= ?`;
       params.push(start_date);
     }
     if (end_date) {
-      query += ` AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) < ?`;
+      query += ` AND DATE(pl.user_registered_at) < ?`;
       params.push(end_date);
     }
 
     const countQuery = `
-      SELECT COUNT(*) as total FROM partner_leads pl
-      LEFT JOIN loan_applications la ON pl.loan_application_id = la.id
-      WHERE pl.partner_id = ?
+      SELECT COUNT(*) as total FROM partner_leads pl WHERE pl.partner_id = ?
+        AND pl.user_registered_at IS NOT NULL
       ${status ? ' AND pl.dedupe_status = ?' : ''}
-      ${start_date ? ' AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) >= ?' : ''}
-      ${end_date ? ' AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) < ?' : ''}
+      ${start_date ? ' AND DATE(pl.user_registered_at) >= ?' : ''}
+      ${end_date ? ' AND DATE(pl.user_registered_at) < ?' : ''}
     `;
     const countParams = [id];
     if (status) countParams.push(status);
     if (start_date) countParams.push(start_date);
     if (end_date) countParams.push(end_date);
 
-    query += ` ORDER BY pl.lead_shared_at DESC LIMIT ${limitVal} OFFSET ${offsetVal}`;
+    query += ` ORDER BY pl.user_registered_at DESC LIMIT ${limitVal} OFFSET ${offsetVal}`;
 
     const [leads, countResult] = await Promise.all([
       executeQuery(query, params),

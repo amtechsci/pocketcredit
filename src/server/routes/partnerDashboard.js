@@ -7,8 +7,7 @@ const { getLeadExportData } = require('../services/partnerLeadExportService');
 
 /**
  * GET /api/v1/partner/dashboard/leads/export/xlsx
- * Download partner leads report as XLSX (all loan statuses). Date filter = first loan applied date (end_date exclusive).
- * Query: start_date, end_date (YYYY-MM-DD, optional). Same logic as admin export for same rows.
+ * Download partner leads report as XLSX. Only leads where user registered through this partner. Date = user_registered_at; end_date exclusive.
  */
 router.get('/leads/export/xlsx', authenticatePartnerToken, async (req, res) => {
   try {
@@ -20,7 +19,7 @@ router.get('/leads/export/xlsx', authenticatePartnerToken, async (req, res) => {
       return res.status(404).json({
         status: false,
         code: 4040,
-        message: 'No leads found for the given date range. Use start_date and end_date (YYYY-MM-DD) to filter by first loan applied date (end_date exclusive).'
+        message: 'No leads found for the given date range. Only leads where user registered through this partner. Use start_date and end_date (end_date exclusive, e.g. Mar 1 for Feb).'
       });
     }
     const headers = Object.keys(exportData[0]);
@@ -56,9 +55,7 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
     const { page = 1, limit = 50, status, user_status, loan_status, start_date, end_date } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    // Only show leads that belong to this partner:
-    //   user_id IS NULL → fresh lead not yet registered
-    //   user_registered_at IS NOT NULL → user registered through this partner
+    // Only leads where user REGISTERED through this partner. No fresh leads, no "shared here but registered elsewhere".
     let query = `
       SELECT 
         pl.id,
@@ -83,12 +80,12 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
         u.id as user_id,
         u.email,
         la.application_number,
-        DATEDIFF(COALESCE(pl.disbursed_at, NOW()), pl.lead_shared_at) as days_to_disbursal
+        DATEDIFF(COALESCE(pl.disbursed_at, NOW()), pl.user_registered_at) as days_to_disbursal
       FROM partner_leads pl
       LEFT JOIN users u ON pl.user_id = u.id
       LEFT JOIN loan_applications la ON pl.loan_application_id = la.id
       WHERE pl.partner_id = ?
-        AND (pl.user_id IS NULL OR pl.user_registered_at IS NOT NULL)
+        AND pl.user_registered_at IS NOT NULL
     `;
     const params = [partner.id];
 
@@ -100,7 +97,7 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
 
     if (user_status) {
       if (user_status === 'active') {
-        query += ` AND (u.status = 'active' OR pl.user_id IS NULL)`;
+        query += ` AND u.status = 'active'`;
       } else if (user_status === 'on_hold') {
         query += ` AND u.status = 'on_hold'`;
       }
@@ -116,19 +113,19 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
     }
 
     if (start_date) {
-      query += ` AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) >= ?`;
+      query += ` AND DATE(pl.user_registered_at) >= ?`;
       params.push(start_date);
     }
 
     if (end_date) {
-      query += ` AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) < ?`;
+      query += ` AND DATE(pl.user_registered_at) < ?`;
       params.push(end_date);
     }
 
     // Use string interpolation for LIMIT and OFFSET (MySQL doesn't accept them as parameters)
     const limitValue = parseInt(limit);
     const offsetValue = parseInt(offset);
-    query += ` ORDER BY pl.lead_shared_at DESC LIMIT ${limitValue} OFFSET ${offsetValue}`;
+    query += ` ORDER BY pl.user_registered_at DESC LIMIT ${limitValue} OFFSET ${offsetValue}`;
 
     const leads = await executeQuery(query, params);
 
@@ -150,7 +147,7 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
       LEFT JOIN users u ON pl.user_id = u.id
       LEFT JOIN loan_applications la ON pl.loan_application_id = la.id
       WHERE pl.partner_id = ?
-        AND (pl.user_id IS NULL OR pl.user_registered_at IS NOT NULL)
+        AND pl.user_registered_at IS NOT NULL
     `;
     const countParams = [partner.id];
 
@@ -161,7 +158,7 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
 
     if (user_status) {
       if (user_status === 'active') {
-        countQuery += ` AND (u.status = 'active' OR pl.user_id IS NULL)`;
+        countQuery += ` AND u.status = 'active'`;
       } else if (user_status === 'on_hold') {
         countQuery += ` AND u.status = 'on_hold'`;
       }
@@ -177,12 +174,12 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
     }
 
     if (start_date) {
-      countQuery += ` AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) >= ?`;
+      countQuery += ` AND DATE(pl.user_registered_at) >= ?`;
       countParams.push(start_date);
     }
 
     if (end_date) {
-      countQuery += ` AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) < ?`;
+      countQuery += ` AND DATE(pl.user_registered_at) < ?`;
       countParams.push(end_date);
     }
 

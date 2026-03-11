@@ -1,9 +1,9 @@
 /**
  * Partner Lead Export Service
- * Fetches partner leads with user/loan/employment/address data for XLSX export.
- * Includes all loan statuses (cancelled, submitted, disbursal, account_manager, etc.).
- * Date filter is by FIRST LOAN APPLIED DATE (la.created_at, or lead_shared_at if no loan yet).
- * Admin and partner Excel use this same service so both get the same rows for same partner + date range.
+ * Only leads where the user REGISTERED through this partner (user_registered_at IS NOT NULL).
+ * Partner shared a lead but user registered via another partner or directly = NOT this partner's lead, excluded.
+ * Date filter = user_registered_at only (when they registered). end_date exclusive.
+ * Admin and partner Excel use this same service so both get the same rows.
  */
 
 const { executeQuery } = require('../config/database');
@@ -22,18 +22,14 @@ function formatDateDDMMYYYY(date) {
 }
 
 /**
- * Build export rows for partner leads (all statuses). Date filter by first loan applied date.
+ * Build export rows for partner leads. Only leads where user registered through this partner.
  * @param {number} partnerId - Partner ID
- * @param {Object} options - { start_date, end_date, own_leads_only }
- *   start_date, end_date (YYYY-MM-DD): filter by first loan applied date (la.created_at, or lead_shared_at if no loan).
- *   end_date is EXCLUSIVE: for "February only" send end_date=YYYY-03-01.
+ * @param {Object} options - { start_date, end_date }
+ *   start_date, end_date (YYYY-MM-DD): filter by user_registered_at. end_date EXCLUSIVE (e.g. end_date=Mar-01 = through Feb).
  * @returns {Promise<Array>} Array of row objects with export column keys
  */
 async function getLeadExportData(partnerId, options = {}) {
-  const { start_date, end_date, own_leads_only = true } = options;
-
-  // Application date = when the linked loan was applied, or lead_shared_at if no loan yet
-  const applicationDateExpr = 'COALESCE(la.created_at, pl.lead_shared_at)';
+  const { start_date, end_date } = options;
 
   let query = `
     SELECT
@@ -95,27 +91,22 @@ async function getLeadExportData(partnerId, options = {}) {
       WHERE cc1.id = (SELECT MAX(cc2.id) FROM credit_checks cc2 WHERE cc2.user_id = cc1.user_id)
     ) cc ON u.id = cc.user_id
     WHERE pl.partner_id = ?
+      AND pl.user_registered_at IS NOT NULL
   `;
   const params = [partnerId];
 
-  // Only include leads that actually belong to this partner (not existing-user leads
-  // from other partners). user_id IS NULL = fresh lead; user_registered_at IS NOT NULL = user
-  // registered through this partner.
-  if (own_leads_only) {
-    query += ` AND (pl.user_id IS NULL OR pl.user_registered_at IS NOT NULL)`;
-  }
-
-  // Date filter: by first loan applied date (la.created_at) or lead_shared_at if no loan. end_date EXCLUSIVE.
+  // Only leads where user registered through THIS partner. No fresh leads, no "shared here but registered elsewhere".
+  // Date filter: user_registered_at only. end_date EXCLUSIVE (Feb = start 1 Feb, end 1 Mar).
   if (start_date) {
-    query += ` AND DATE(${applicationDateExpr}) >= ?`;
+    query += ` AND DATE(pl.user_registered_at) >= ?`;
     params.push(start_date);
   }
   if (end_date) {
-    query += ` AND DATE(${applicationDateExpr}) < ?`;
+    query += ` AND DATE(pl.user_registered_at) < ?`;
     params.push(end_date);
   }
 
-  query += ` ORDER BY ${applicationDateExpr} DESC`;
+  query += ` ORDER BY pl.user_registered_at DESC`;
 
   const rows = await executeQuery(query, params);
 
