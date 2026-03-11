@@ -195,6 +195,15 @@ router.post('/', requireAuth, async (req, res) => {
         // Only update if we have a valid status change and step is at references or later
         if (newStatus && (['pending', 'in_progress', 'submitted'].includes(application.status) || 
             ['bank-details', 'references'].includes(application.current_step))) {
+          // Redistribute follow-up user when moving to under_review (assigns to admin with fewest under_review loans)
+          if (newStatus === 'under_review') {
+            try {
+              const { reassignFollowUpUserWhenStatusBecomesUnderReview } = require('../services/adminAssignmentService');
+              await reassignFollowUpUserWhenStatusBecomesUnderReview(application.id);
+            } catch (assignError) {
+              console.warn('⚠️ Error redistributing follow_up_user when status becomes under_review:', assignError.message);
+            }
+          }
           await executeQuery(
             `UPDATE loan_applications 
              SET status = ?, current_step = 'complete', updated_at = NOW() 

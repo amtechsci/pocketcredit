@@ -2521,6 +2521,24 @@ class AdminApiService {
       throw error;
     }
   }
+
+  /**
+   * Redistribute submitted loans evenly across follow-up admins (utility for super admins)
+   */
+  async redistributeFollowUpSubmitted(): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.post('/api/admin/applications/redistribute-follow-up-submitted', {}, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.data;
+    } catch (error: any) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
 }
 
 // Export singleton instance

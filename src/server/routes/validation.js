@@ -311,6 +311,17 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
             }
           }
 
+          // Redistribute follow-up user when status changes to under_review (assigns to admin with fewest under_review loans)
+          if (newStatus === 'under_review') {
+            try {
+              const { reassignFollowUpUserWhenStatusBecomesUnderReview } = require('../services/adminAssignmentService');
+              await reassignFollowUpUserWhenStatusBecomesUnderReview(targetLoanId);
+            } catch (assignError) {
+              console.error('Error redistributing follow_up_user when status becomes under_review:', assignError);
+              // Non-fatal: continue with status update
+            }
+          }
+
           // Redistribute follow-up user when status changes to follow_up (assigns to admin with fewest follow_up loans)
           if (newStatus === 'follow_up') {
             try {

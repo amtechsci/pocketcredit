@@ -507,6 +507,12 @@ const saveResidenceAddress = async (req, res) => {
     let applicationId = null;
     if (existingApplications && existingApplications.length > 0) {
       applicationId = existingApplications[0].id;
+      try {
+        const { reassignFollowUpUserWhenStatusBecomesUnderReview } = require('../services/adminAssignmentService');
+        await reassignFollowUpUserWhenStatusBecomesUnderReview(applicationId);
+      } catch (assignError) {
+        console.warn('⚠️ Error redistributing follow_up_user when status becomes under_review:', assignError.message);
+      }
       await executeQuery(
         `UPDATE loan_applications 
          SET status = 'under_review', updated_at = NOW() 
@@ -525,6 +531,12 @@ const saveResidenceAddress = async (req, res) => {
         [userId, application_number]
       );
       applicationId = result.insertId;
+      try {
+        const { reassignFollowUpUserWhenStatusBecomesUnderReview } = require('../services/adminAssignmentService');
+        await reassignFollowUpUserWhenStatusBecomesUnderReview(applicationId);
+      } catch (assignError) {
+        console.warn('⚠️ Error assigning follow_up_user for new under_review loan:', assignError.message);
+      }
     }
 
     res.json({

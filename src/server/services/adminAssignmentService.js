@@ -348,6 +348,69 @@ async function getNextFollowUpAdminId() {
 }
 
 /**
+ * Get next follow-up admin for submitted status. Counts only loans in status = 'submitted'.
+ * Used when redistributing submitted loans to balance load.
+ */
+async function getNextFollowUpAdminIdForSubmittedStatus() {
+  const admins = await getActiveSubAdmins('follow_up_user');
+  if (admins.length === 0) return null;
+  if (admins.length === 1) return admins[0].id;
+
+  const counts = await executeQuery(
+    `SELECT assigned_follow_up_admin_id, COUNT(*) as c FROM loan_applications
+     WHERE status = 'submitted' AND assigned_follow_up_admin_id IS NOT NULL
+     GROUP BY assigned_follow_up_admin_id`
+  );
+  const countByAdmin = {};
+  admins.forEach(a => { countByAdmin[a.id] = 0; });
+  counts.forEach(r => { countByAdmin[r.assigned_follow_up_admin_id] = Number(r.c); });
+
+  let minId = admins[0].id;
+  let minCount = countByAdmin[minId] ?? 0;
+  for (let i = 1; i < admins.length; i++) {
+    const id = admins[i].id;
+    const c = countByAdmin[id] ?? 0;
+    if (c < minCount) {
+      minCount = c;
+      minId = id;
+    }
+  }
+  return minId;
+}
+
+/**
+ * Get next follow-up admin when loan moves to under_review status. Counts only loans
+ * in status = 'under_review' so admins with many submitted but few under_review loans
+ * get a fair share of active cases.
+ */
+async function getNextFollowUpAdminIdForUnderReviewStatus() {
+  const admins = await getActiveSubAdmins('follow_up_user');
+  if (admins.length === 0) return null;
+  if (admins.length === 1) return admins[0].id;
+
+  const counts = await executeQuery(
+    `SELECT assigned_follow_up_admin_id, COUNT(*) as c FROM loan_applications
+     WHERE status = 'under_review' AND assigned_follow_up_admin_id IS NOT NULL
+     GROUP BY assigned_follow_up_admin_id`
+  );
+  const countByAdmin = {};
+  admins.forEach(a => { countByAdmin[a.id] = 0; });
+  counts.forEach(r => { countByAdmin[r.assigned_follow_up_admin_id] = Number(r.c); });
+
+  let minId = admins[0].id;
+  let minCount = countByAdmin[minId] ?? 0;
+  for (let i = 1; i < admins.length; i++) {
+    const id = admins[i].id;
+    const c = countByAdmin[id] ?? 0;
+    if (c < minCount) {
+      minCount = c;
+      minId = id;
+    }
+  }
+  return minId;
+}
+
+/**
  * Get next follow-up admin when loan moves to follow_up status. Counts only loans
  * in status = 'follow_up' so admins with many submitted but few follow_up loans
  * get a fair share of actual follow-up cases.
@@ -380,6 +443,20 @@ async function getNextFollowUpAdminIdForFollowUpStatus() {
 }
 
 /**
+ * Reassign follow-up user when loan status moves to under_review. Distributes based
+ * on under_review count so admins with fewer under_review loans get the new case.
+ */
+async function reassignFollowUpUserWhenStatusBecomesUnderReview(loanId) {
+  const adminId = await getNextFollowUpAdminIdForUnderReviewStatus();
+  if (!adminId) return;
+  await ensureDb();
+  await executeQuery(
+    'UPDATE loan_applications SET assigned_follow_up_admin_id = ? WHERE id = ?',
+    [adminId, loanId]
+  );
+}
+
+/**
  * Reassign follow-up user when loan status moves to follow_up. Distributes based
  * on follow_up count so admins with fewer follow_up loans get the new case.
  */
@@ -391,6 +468,36 @@ async function reassignFollowUpUserWhenStatusBecomesFollowUp(loanId) {
     'UPDATE loan_applications SET assigned_follow_up_admin_id = ? WHERE id = ?',
     [adminId, loanId]
   );
+}
+
+/**
+ * Redistribute all submitted loans evenly across follow-up admins. Use when some
+ * admins have many submitted but others have few (e.g. after users moved to
+ * under_review/follow_up). Assigns by submitted count so each admin gets ~equal.
+ */
+async function redistributeFollowUpSubmittedLoans() {
+  await ensureDb();
+  const admins = await getActiveSubAdmins('follow_up_user');
+  if (admins.length === 0) return { redistributed: 0 };
+
+  const rows = await executeQuery(
+    `SELECT id FROM loan_applications 
+     WHERE status = 'submitted' 
+     ORDER BY id`
+  );
+  if (rows.length === 0) return { redistributed: 0 };
+
+  let redistributed = 0;
+  for (const row of rows) {
+    const adminId = await getNextFollowUpAdminIdForSubmittedStatus();
+    if (!adminId) continue;
+    await executeQuery(
+      'UPDATE loan_applications SET assigned_follow_up_admin_id = ? WHERE id = ?',
+      [adminId, row.id]
+    );
+    redistributed++;
+  }
+  return { redistributed };
 }
 
 /**
@@ -626,7 +733,9 @@ module.exports = {
   getNextAccountManagerId,
   getNextRecoveryOfficerId,
   getNextFollowUpAdminId,
+  reassignFollowUpUserWhenStatusBecomesUnderReview,
   reassignFollowUpUserWhenStatusBecomesFollowUp,
+  redistributeFollowUpSubmittedLoans,
   assignVerifyUserForLoan,
   assignQAUserForLoan,
   assignAccountManagerForLoan,

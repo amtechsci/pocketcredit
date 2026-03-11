@@ -15,7 +15,8 @@ import {
   ArrowUpDown,
   MoreHorizontal,
   UserPlus,
-  MessageSquare
+  MessageSquare,
+  RefreshCw
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import { maskMobileLast4 } from '../utils/mask';
@@ -145,6 +146,7 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
   const [loadingComments, setLoadingComments] = useState<{ [userId: string]: boolean }>({});
   const [expandedComments, setExpandedComments] = useState<{ [userId: string]: boolean }>({});
   const [assigningFollowUp, setAssigningFollowUp] = useState(false);
+  const [redistributingSubmitted, setRedistributingSubmitted] = useState(false);
 
   // Initialize status filter from URL parameters (ignore when initialStatus is set, e.g. Over Due page)
   useEffect(() => {
@@ -766,6 +768,47 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
     }
   };
 
+  const handleRedistributeFollowUpSubmitted = async () => {
+    if (!confirm('Redistribute all submitted loans evenly across follow-up admins? This will balance the load so each admin has ~equal submitted count.')) {
+      return;
+    }
+
+    setRedistributingSubmitted(true);
+    try {
+      const response = await adminApiService.redistributeFollowUpSubmitted();
+      if (response.status === 'success') {
+        toast.success(response.message || `Redistributed ${response.data?.redistributed || 0} submitted loans`);
+
+        const refreshResponse = await adminApiService.getApplications({
+          page: currentPage,
+          limit: pageSize,
+          status: statusFilter,
+          search: searchTerm,
+          sortBy,
+          sortOrder,
+          loanAmountFilter: loanAmountFilter || undefined
+        });
+
+        if (refreshResponse.status === 'success') {
+          setApplications(refreshResponse.data.applications);
+          setPagination(refreshResponse.data.pagination);
+        }
+
+        const statsResponse = await adminApiService.getApplicationStats();
+        if (statsResponse.status === 'success') {
+          setStats(statsResponse.data);
+        }
+      } else {
+        toast.error(response.message || 'Failed to redistribute');
+      }
+    } catch (error: any) {
+      console.error('Error redistributing submitted loans:', error);
+      toast.error(error.response?.data?.message || error.message || 'Failed to redistribute submitted loans');
+    } finally {
+      setRedistributingSubmitted(false);
+    }
+  };
+
 
   return (
     <div className="p-3 sm:p-4 lg:p-6 space-y-4 sm:space-y-6">
@@ -1149,26 +1192,46 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
                 )}
               </div>
             </div>
-            {/* Super Admin Utility: Assign Follow-Up User */}
+            {/* Super Admin Utilities */}
             {(currentUser?.role === 'superadmin' || currentUser?.role === 'super_admin' || currentUser?.role === 'master_admin') && (
-              <button
-                onClick={handleAssignFollowUpUser}
-                disabled={assigningFollowUp}
-                className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium whitespace-nowrap"
-                title="Assign follow-up users to unassigned disbursal loans"
-              >
-                {assigningFollowUp ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    <span>Assigning...</span>
-                  </>
-                ) : (
-                  <>
-                    <UserPlus className="w-4 h-4" />
-                    <span>Assign Follow-Up User</span>
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleAssignFollowUpUser}
+                  disabled={assigningFollowUp}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium whitespace-nowrap"
+                  title="Assign follow-up users to unassigned disbursal loans"
+                >
+                  {assigningFollowUp ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Assigning...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-4 h-4" />
+                      <span>Assign Follow-Up User</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={handleRedistributeFollowUpSubmitted}
+                  disabled={redistributingSubmitted}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium whitespace-nowrap"
+                  title="Redistribute submitted loans evenly across follow-up admins"
+                >
+                  {redistributingSubmitted ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Redistributing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4" />
+                      <span>Redistribute Submitted</span>
+                    </>
+                  )}
+                </button>
+              </div>
             )}
           </div>
         </div>

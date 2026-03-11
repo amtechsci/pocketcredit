@@ -942,6 +942,17 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
       }
     }
 
+    // Redistribute follow-up user when status changes to under_review (assigns to admin with fewest under_review loans)
+    if (status === 'under_review') {
+      try {
+        const { reassignFollowUpUserWhenStatusBecomesUnderReview } = require('../services/adminAssignmentService');
+        await reassignFollowUpUserWhenStatusBecomesUnderReview(applicationId);
+      } catch (assignError) {
+        console.error('Error redistributing follow_up_user when status becomes under_review:', assignError);
+        // Non-fatal: continue with status update even if assignment fails
+      }
+    }
+
     // Redistribute follow-up user when status changes to follow_up (assigns to admin with fewest follow_up loans)
     if (status === 'follow_up') {
       try {
@@ -2893,6 +2904,36 @@ router.post('/assign-follow-up-user', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to assign follow-up users',
+      error: error.message
+    });
+  }
+});
+
+// Redistribute submitted loans evenly across follow-up admins (fixes imbalance when some have many submitted, others few)
+router.post('/redistribute-follow-up-submitted', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+
+    if (req.admin?.role !== 'superadmin' && req.admin?.role !== 'super_admin' && req.admin?.role !== 'master_admin') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Only super admins can redistribute follow-up submitted loans'
+      });
+    }
+
+    const { redistributeFollowUpSubmittedLoans } = require('../services/adminAssignmentService');
+    const { redistributed } = await redistributeFollowUpSubmittedLoans();
+
+    res.json({
+      status: 'success',
+      message: `Redistributed ${redistributed} submitted loans evenly across follow-up admins (by submitted count)`,
+      data: { redistributed }
+    });
+  } catch (error) {
+    console.error('Redistribute follow-up submitted error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to redistribute follow-up submitted loans',
       error: error.message
     });
   }
