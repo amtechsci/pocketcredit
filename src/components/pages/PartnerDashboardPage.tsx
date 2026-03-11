@@ -340,7 +340,7 @@ export function PartnerDashboardPage() {
           <div className="px-6 py-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-gray-900">Leads</h2>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-gray-600">Report period (lead shared):</span>
+              <span className="text-sm text-gray-600">Report period (first loan applied date):</span>
               <input
                 type="month"
                 className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -369,7 +369,7 @@ export function PartnerDashboardPage() {
                 value={exportEndDate}
                 onChange={(e) => setExportEndDate(e.target.value)}
                 className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                title="To date (exclusive – e.g. March 1 = through Feb 28)"
+                title="To date (exclusive). For Feb only use 1 Mar."
               />
               <button
                 type="button"

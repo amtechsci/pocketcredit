@@ -7,8 +7,8 @@ const { getLeadExportData } = require('../services/partnerLeadExportService');
 
 /**
  * GET /api/v1/partner/dashboard/leads/export/xlsx
- * Download partner leads report as XLSX (all loan statuses). Date filter = lead_shared_at.
- * Query: start_date, end_date (YYYY-MM-DD, optional)
+ * Download partner leads report as XLSX (all loan statuses). Date filter = first loan applied date (end_date exclusive).
+ * Query: start_date, end_date (YYYY-MM-DD, optional). Same logic as admin export for same rows.
  */
 router.get('/leads/export/xlsx', authenticatePartnerToken, async (req, res) => {
   try {
@@ -20,7 +20,7 @@ router.get('/leads/export/xlsx', authenticatePartnerToken, async (req, res) => {
       return res.status(404).json({
         status: false,
         code: 4040,
-        message: 'No leads found for the given date range. Use start_date and end_date (YYYY-MM-DD) to filter by lead shared date.'
+        message: 'No leads found for the given date range. Use start_date and end_date (YYYY-MM-DD) to filter by first loan applied date (end_date exclusive).'
       });
     }
     const headers = Object.keys(exportData[0]);
@@ -116,12 +116,12 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
     }
 
     if (start_date) {
-      query += ` AND DATE(pl.lead_shared_at) >= ?`;
+      query += ` AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) >= ?`;
       params.push(start_date);
     }
 
     if (end_date) {
-      query += ` AND DATE(pl.lead_shared_at) < ?`;
+      query += ` AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) < ?`;
       params.push(end_date);
     }
 
@@ -177,12 +177,12 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
     }
 
     if (start_date) {
-      countQuery += ` AND DATE(pl.lead_shared_at) >= ?`;
+      countQuery += ` AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) >= ?`;
       countParams.push(start_date);
     }
 
     if (end_date) {
-      countQuery += ` AND DATE(pl.lead_shared_at) < ?`;
+      countQuery += ` AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) < ?`;
       countParams.push(end_date);
     }
 

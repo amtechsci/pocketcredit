@@ -201,8 +201,8 @@ router.put('/:id', authenticateAdmin, requireSuperadmin, async (req, res) => {
 
 /**
  * GET /api/admin/partners/:id/leads/export/xlsx
- * Download partner leads report as XLSX (all loan statuses). Date filter = lead_shared_at.
- * Query: start_date, end_date (YYYY-MM-DD, optional)
+ * Download partner leads report as XLSX (same logic as partner portal: filter by first loan applied date, own leads only).
+ * Query: start_date, end_date (YYYY-MM-DD, end_date exclusive)
  */
 router.get('/:id/leads/export/xlsx', authenticateAdmin, requireSuperadmin, async (req, res) => {
   try {
@@ -216,11 +216,11 @@ router.get('/:id/leads/export/xlsx', authenticateAdmin, requireSuperadmin, async
       return res.status(404).json({ status: 'error', message: 'Partner not found' });
     }
     const { start_date, end_date } = req.query;
-    const exportData = await getLeadExportData(id, { start_date, end_date, own_leads_only: false });
+    const exportData = await getLeadExportData(id, { start_date, end_date, own_leads_only: true });
     if (!exportData.length) {
       return res.status(404).json({
         status: 'error',
-        message: 'No leads found for the given partner and date range. Use start_date and end_date (YYYY-MM-DD) to filter by lead shared date.'
+        message: 'No leads found for the given partner and date range. Use start_date and end_date (YYYY-MM-DD) to filter by first loan applied date (end_date exclusive).'
       });
     }
     const headers = Object.keys(exportData[0]);
@@ -296,19 +296,21 @@ router.get('/:id/leads', authenticateAdmin, requireSuperadmin, async (req, res) 
       params.push(status);
     }
     if (start_date) {
-      query += ` AND DATE(pl.lead_shared_at) >= ?`;
+      query += ` AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) >= ?`;
       params.push(start_date);
     }
     if (end_date) {
-      query += ` AND DATE(pl.lead_shared_at) < ?`;
+      query += ` AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) < ?`;
       params.push(end_date);
     }
 
     const countQuery = `
-      SELECT COUNT(*) as total FROM partner_leads pl WHERE pl.partner_id = ?
+      SELECT COUNT(*) as total FROM partner_leads pl
+      LEFT JOIN loan_applications la ON pl.loan_application_id = la.id
+      WHERE pl.partner_id = ?
       ${status ? ' AND pl.dedupe_status = ?' : ''}
-      ${start_date ? ' AND DATE(pl.lead_shared_at) >= ?' : ''}
-      ${end_date ? ' AND DATE(pl.lead_shared_at) < ?' : ''}
+      ${start_date ? ' AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) >= ?' : ''}
+      ${end_date ? ' AND DATE(COALESCE(la.created_at, pl.lead_shared_at)) < ?' : ''}
     `;
     const countParams = [id];
     if (status) countParams.push(status);

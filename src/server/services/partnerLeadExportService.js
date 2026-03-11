@@ -2,7 +2,8 @@
  * Partner Lead Export Service
  * Fetches partner leads with user/loan/employment/address data for XLSX export.
  * Includes all loan statuses (cancelled, submitted, disbursal, account_manager, etc.).
- * Date filter is applied on lead_shared_at so partners get complete lead report for the period.
+ * Date filter is by FIRST LOAN APPLIED DATE (la.created_at, or lead_shared_at if no loan yet).
+ * Admin and partner Excel use this same service so both get the same rows for same partner + date range.
  */
 
 const { executeQuery } = require('../config/database');
@@ -21,14 +22,18 @@ function formatDateDDMMYYYY(date) {
 }
 
 /**
- * Build export rows for partner leads (all statuses). Optional date filter on lead_shared_at.
+ * Build export rows for partner leads (all statuses). Date filter by first loan applied date.
  * @param {number} partnerId - Partner ID
- * @param {Object} options - { start_date, end_date } (YYYY-MM-DD, filter on pl.lead_shared_at)
- *   end_date is EXCLUSIVE: for "February only" send end_date=YYYY-03-01 so 1st March is excluded.
+ * @param {Object} options - { start_date, end_date, own_leads_only }
+ *   start_date, end_date (YYYY-MM-DD): filter by first loan applied date (la.created_at, or lead_shared_at if no loan).
+ *   end_date is EXCLUSIVE: for "February only" send end_date=YYYY-03-01.
  * @returns {Promise<Array>} Array of row objects with export column keys
  */
 async function getLeadExportData(partnerId, options = {}) {
   const { start_date, end_date, own_leads_only = true } = options;
+
+  // Application date = when the linked loan was applied, or lead_shared_at if no loan yet
+  const applicationDateExpr = 'COALESCE(la.created_at, pl.lead_shared_at)';
 
   let query = `
     SELECT
@@ -100,17 +105,17 @@ async function getLeadExportData(partnerId, options = {}) {
     query += ` AND (pl.user_id IS NULL OR pl.user_registered_at IS NOT NULL)`;
   }
 
-  // Date filter: by lead shared date. end_date is EXCLUSIVE so "Feb only" = start_date=Feb-01, end_date=Mar-01
+  // Date filter: by first loan applied date (la.created_at) or lead_shared_at if no loan. end_date EXCLUSIVE.
   if (start_date) {
-    query += ` AND DATE(pl.lead_shared_at) >= ?`;
+    query += ` AND DATE(${applicationDateExpr}) >= ?`;
     params.push(start_date);
   }
   if (end_date) {
-    query += ` AND DATE(pl.lead_shared_at) < ?`;
+    query += ` AND DATE(${applicationDateExpr}) < ?`;
     params.push(end_date);
   }
 
-  query += ` ORDER BY pl.lead_shared_at DESC`;
+  query += ` ORDER BY ${applicationDateExpr} DESC`;
 
   const rows = await executeQuery(query, params);
 
@@ -130,8 +135,8 @@ async function getLeadExportData(partnerId, options = {}) {
     const principalAmount = row.la_loan_amount != null ? parseFloat(row.la_loan_amount) : (row.pl_disbursal_amount != null ? row.pl_disbursal_amount : '');
     const experianScore = row.u_experian_score != null ? String(row.u_experian_score) : (row.cc_experian_score != null ? String(row.cc_experian_score) : '');
 
-    // Lead through: API = lead created via partner API (has utm_link); UTM = user came via UTM link only
-    const leadThrough = (row.utm_link && String(row.utm_link).trim()) ? 'API' : 'UTM';
+    // lead_source: API = lead created via partner API (has utm_link); UTM = user came via UTM link only
+    const lead_source = (row.utm_link && String(row.utm_link).trim()) ? 'API' : 'UTM';
 
     return {
       'Application ID': applicationId,
@@ -140,7 +145,7 @@ async function getLeadExportData(partnerId, options = {}) {
       'PAN Number': pan,
       'Date of Birth': dob ? formatDateDDMMYYYY(dob) : '',
       'Gender': row.gender || '',
-      'Lead through': leadThrough,
+      'lead_source': lead_source,
       'Application Date': applicationDate ? formatDateDDMMYYYY(applicationDate) : '',
       'Disbursed Date': disbursedDate ? formatDateDDMMYYYY(disbursedDate) : '',
       'principal amount': principalAmount,
