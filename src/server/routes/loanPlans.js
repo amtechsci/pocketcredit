@@ -277,8 +277,8 @@ router.post('/calculate', requireAuth, async (req, res) => {
           let daysToNextSalary = calculateDaysBetween(startDateStr, nextSalaryDateStr);
           
           // If duration (repayment_days) is set and days to next salary is less than duration, extend to next month
-          // Use plan repayment_days (default 7) for minimum days to first salary date
-          const minDuration = plan.repayment_days || plan.total_duration_days || 7;
+          // Use plan repayment_days (default 7) - NEVER total_duration_days
+          const minDuration = plan.repayment_days ?? 7;
           console.log(`📅 [EMI Schedule] Next salary date: ${nextSalaryDate.toISOString()}, daysToNextSalary: ${daysToNextSalary}, minDuration: ${minDuration}`);
           
           if (daysToNextSalary < minDuration) {

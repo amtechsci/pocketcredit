@@ -290,8 +290,8 @@ router.post('/request', requireAuth, async (req, res) => {
         if (isMultiEmi && usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
           // Multi-EMI with salary date: Calculate all EMI dates
           let firstDueDate = getNextSalaryDate(baseDate, salaryDate);
-          // Use plan repayment_days (default 7) for minimum days to first salary date
-          const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
+          // Use plan repayment_days (default 7) - NEVER total_duration_days
+          const minDuration = planSnapshot.repayment_days ?? 7;
           const firstDueDateStr = formatDateToString(firstDueDate);
           const daysToFirstSalary = calculateDaysBetween(processedAtStr, firstDueDateStr);
           

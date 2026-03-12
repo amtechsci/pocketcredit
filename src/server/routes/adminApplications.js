@@ -1061,8 +1061,8 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
                 let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
                 
                 // Check if duration is less than minimum days (must be at least this many days till first EMI)
-                // Use plan repayment_days (default 7) for minimum days to first salary date
-                const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
+                // Use plan repayment_days (default 7) - NEVER total_duration_days (60 for 2 EMI) which would wrongly defer first EMI
+                const minDuration = planSnapshot.repayment_days ?? 7;
                 const daysToNextSalary = Math.ceil((nextSalaryDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
                 
                 if (daysToNextSalary < minDuration) {
@@ -1102,8 +1102,8 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
                   })();
               
               // Apply minimum duration check for fallback method too
-              // Use plan repayment_days (default 7) for minimum days to first salary date
-              const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
+              // Use plan repayment_days (default 7) - NEVER total_duration_days
+              const minDuration = planSnapshot.repayment_days ?? 7;
               const daysToFirstDue = Math.ceil((firstDueDate - baseDate) / (1000 * 60 * 60 * 24)) + 1;
               if (daysToFirstDue < minDuration) {
                 // Push to next month
@@ -1298,7 +1298,7 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
               if (usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
                 // Salary-date-based calculation
                 const nextSalaryDate = getNextSalaryDate(baseDateStr, salaryDate);
-                const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
+                const minDuration = planSnapshot.repayment_days ?? 7;
                 const nextSalaryDateStr = formatDateToString(nextSalaryDate);
                 const daysToSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
                 

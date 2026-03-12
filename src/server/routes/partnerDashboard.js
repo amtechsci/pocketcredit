@@ -213,6 +213,8 @@ router.get('/leads', authenticatePartnerToken, async (req, res) => {
 /**
  * GET /api/v1/partner/dashboard/stats
  * Get partner statistics
+ * Requires partner_leads (with dedupe_status, user_registered_at, loan_application_id, disbursed_at, payout_eligible, payout_amount),
+ * users (status, application_hold_reason), credit_checks (is_eligible).
  */
 router.get('/stats', authenticatePartnerToken, async (req, res) => {
   try {
@@ -293,11 +295,14 @@ router.get('/stats', authenticatePartnerToken, async (req, res) => {
       data: finalStats
     });
   } catch (error) {
-    console.error('Partner dashboard stats error:', error);
+    console.error('Partner dashboard stats error:', error.message);
+    console.error('Partner dashboard stats stack:', error.stack);
+    const isDev = process.env.NODE_ENV !== 'production';
     res.status(500).json({
       status: false,
       code: 5000,
-      message: 'Internal Server Error'
+      message: 'Internal Server Error',
+      ...(isDev && { debug: error.message })
     });
   }
 });

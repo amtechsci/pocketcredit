@@ -809,6 +809,8 @@ For monthly EMIs with salary date calculation:
    ```
    First EMI Date = getSalaryDateForMonth(disbursementDate, salaryDate, 1)
    ```
+   **IMPORTANT:** Minimum duration = plan repayment_days (default 7). NEVER use total_duration_days
+   (e.g. 60 for 2-EMI plan) - that would incorrectly defer the first EMI by a month.
 
 3. Generate subsequent EMI dates:
    ```

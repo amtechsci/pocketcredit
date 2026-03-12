@@ -3001,8 +3001,8 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     let nextSalaryDate = getNextSalaryDate(baseDate, salaryDate);
 
                     // Check if duration is less than minimum days
-                    // Use plan repayment_days (default 7) for minimum days to first salary date
-                    const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
+                    // Use plan repayment_days (default 7) - NEVER total_duration_days (60 for 2 EMI) which would wrongly defer first EMI
+                    const minDuration = planSnapshot.repayment_days ?? 7;
                     // Use calculateDaysBetween for accurate day calculation (inclusive)
                     const baseDateStr = formatDateToString(baseDate);
                     const nextSalaryDateStr = formatDateToString(nextSalaryDate);
@@ -3219,7 +3219,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                   if (usesSalaryDate && salaryDate && salaryDate >= 1 && salaryDate <= 31) {
                     // Salary-date-based calculation
                     const nextSalaryDate = getNextSalaryDate(baseDateStr, salaryDate);
-                    const minDuration = planSnapshot.repayment_days || planSnapshot.total_duration_days || 7;
+                    const minDuration = planSnapshot.repayment_days ?? 7;
                     const nextSalaryDateStr = formatDateToString(nextSalaryDate);
                     const daysToSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
 

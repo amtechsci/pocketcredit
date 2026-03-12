@@ -111,7 +111,9 @@ class PartnerApiService {
         localStorage.removeItem('partner_refresh_token');
         throw new Error('PARTNER_SESSION_EXPIRED');
       }
-      throw new Error(result?.message || `Request failed: ${response.statusText}`);
+      // In development, server may send result.debug with the actual error (e.g. SQL message)
+      const errMsg = result?.debug || result?.message || `Request failed: ${response.statusText}`;
+      throw new Error(errMsg);
     }
 
     return result as T;

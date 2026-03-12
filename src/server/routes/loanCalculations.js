@@ -603,8 +603,8 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           const salaryDate = parseInt(userData.salary_date);
           if (salaryDate >= 1 && salaryDate <= 31) {
             let nextSalaryDate = getNextSalaryDate(baseDateStr, salaryDate);
-            // Use plan repayment_days (default 7) for minimum days to first salary date
-            const minDuration = planData.repayment_days || planData.total_duration_days || 7;
+            // Use plan repayment_days (default 7) - NEVER total_duration_days (would wrongly defer first EMI)
+            const minDuration = planData.repayment_days ?? 7;
             const nextSalaryDateStr = formatDateToString(nextSalaryDate);
             let daysToNextSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
             if (daysToNextSalary < minDuration) {
@@ -660,8 +660,8 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           const salaryDate = parseInt(userData.salary_date);
           if (salaryDate >= 1 && salaryDate <= 31) {
             let nextSalaryDate = getNextSalaryDate(baseDateStr, salaryDate);
-            // Use plan repayment_days (default 7) for minimum days to first salary date
-            const minDuration = planData.repayment_days || planData.total_duration_days || 7;
+            // Use plan repayment_days (default 7) - NEVER total_duration_days (would wrongly defer first EMI)
+            const minDuration = planData.repayment_days ?? 7;
             const nextSalaryDateStr = formatDateToString(nextSalaryDate);
             let daysToNextSalary = calculateDaysBetween(baseDateStr, nextSalaryDateStr);
             if (daysToNextSalary < minDuration) {
