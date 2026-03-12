@@ -11128,13 +11128,20 @@ function UserProfileDetail() {
                 }
 
                 const responseValue = isOtherResponse ? followUpForm.responseOther.trim() : followUpForm.response;
+                // Get current user/loan status for subject (e.g. SUBMITTED, UNDER_REVIEW)
+                const loans = getArray('loans');
+                const activeStatuses = ['submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal', 'qa_verification', 'account_manager', 'overdue'];
+                const activeLoan = loans?.find((l: any) => activeStatuses.includes(l?.status));
+                const currentStatusRaw = activeLoan?.status || userData?.application_status || 'unknown';
+                const currentStatusLabel = String(currentStatusRaw).toUpperCase().replace(/-/g, '_');
+
                 setSubmittingFollowUp(true);
                 try {
                   const response = await adminApiService.addFollowUp(params.userId, {
                     type: followUpForm.type,
                     response: responseValue,
                     description: `Follow up: ${responseValue}`,
-                    subject: `Follow Up - ${followUpForm.type}`,
+                    subject: `Follow Up - ${followUpForm.type} - ${currentStatusLabel}`,
                     status: 'pending'
                   });
 
