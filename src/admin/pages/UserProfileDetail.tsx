@@ -176,7 +176,8 @@ function UserProfileDetail() {
   const [showAddFollowUpModal, setShowAddFollowUpModal] = useState(false);
   const [followUpForm, setFollowUpForm] = useState({
     type: '',
-    response: ''
+    response: '',
+    responseOther: ''
   });
   const [submittingFollowUp, setSubmittingFollowUp] = useState(false);
   const [showAddNoteModal, setShowAddNoteModal] = useState(false);
@@ -11111,8 +11112,13 @@ function UserProfileDetail() {
               className="space-y-4"
               onSubmit={async (e) => {
                 e.preventDefault();
+                const isOtherResponse = followUpForm.response === 'responded_other' || followUpForm.response === 'not_responded_other';
                 if (!followUpForm.type || !followUpForm.response) {
                   alert('Please fill in all required fields');
+                  return;
+                }
+                if (isOtherResponse && !followUpForm.responseOther?.trim()) {
+                  alert('Please enter your custom response');
                   return;
                 }
 
@@ -11121,12 +11127,13 @@ function UserProfileDetail() {
                   return;
                 }
 
+                const responseValue = isOtherResponse ? followUpForm.responseOther.trim() : followUpForm.response;
                 setSubmittingFollowUp(true);
                 try {
                   const response = await adminApiService.addFollowUp(params.userId, {
                     type: followUpForm.type,
-                    response: followUpForm.response,
-                    description: `Follow up: ${followUpForm.response}`,
+                    response: responseValue,
+                    description: `Follow up: ${responseValue}`,
                     subject: `Follow Up - ${followUpForm.type}`,
                     status: 'pending'
                   });
@@ -11134,7 +11141,7 @@ function UserProfileDetail() {
                   if (response.status === 'success') {
                     alert('Follow up added successfully!');
                     setShowAddFollowUpModal(false);
-                    setFollowUpForm({ type: '', response: '' });
+                    setFollowUpForm({ type: '', response: '', responseOther: '' });
                     // Refresh user data to show new follow-up
                     if (params.userId) {
                       const profileResponse = await adminApiService.getUserProfile(params.userId);
@@ -11176,7 +11183,14 @@ function UserProfileDetail() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Response *</label>
                 <select
                   value={followUpForm.response}
-                  onChange={(e) => setFollowUpForm({ ...followUpForm, response: e.target.value })}
+                  onChange={(e) => {
+                    const newResponse = e.target.value;
+                    setFollowUpForm({
+                      ...followUpForm,
+                      response: newResponse,
+                      responseOther: (newResponse === 'responded_other' || newResponse === 'not_responded_other') ? followUpForm.responseOther : ''
+                    });
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
                 >
@@ -11194,14 +11208,30 @@ function UserProfileDetail() {
                     <option value="responded_interest_rate_is_high">interest rate is high</option>
                     <option value="responded_dont_have_required_docs">don't have required docs</option>
                     <option value="responded_uploaded_all_docs_done">uploaded all docs. It's done</option>
+                    <option value="responded_other">Other</option>
                   </optgroup>
                   <optgroup label="Not responded">
                     <option value="not_responded_call_not_answering">Call not answering</option>
                     <option value="not_responded_switched_off">switched off</option>
                     <option value="not_responded_not_reachable">not reachable</option>
+                    <option value="not_responded_other">Other</option>
                   </optgroup>
                 </select>
               </div>
+
+              {/* Custom response input when "Other" is selected */}
+              {(followUpForm.response === 'responded_other' || followUpForm.response === 'not_responded_other') && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Enter your response *</label>
+                  <input
+                    type="text"
+                    value={followUpForm.responseOther}
+                    onChange={(e) => setFollowUpForm({ ...followUpForm, responseOther: e.target.value })}
+                    placeholder="Type your custom response..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              )}
 
               {/* Action Buttons */}
               <div className="flex gap-3 pt-4">
@@ -11216,7 +11246,7 @@ function UserProfileDetail() {
                   type="button"
                   onClick={() => {
                     setShowAddFollowUpModal(false);
-                    setFollowUpForm({ type: '', response: '' });
+                    setFollowUpForm({ type: '', response: '', responseOther: '' });
                   }}
                   className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
                 >
