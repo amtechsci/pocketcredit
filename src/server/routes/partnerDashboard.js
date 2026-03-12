@@ -222,24 +222,24 @@ router.get('/stats', authenticatePartnerToken, async (req, res) => {
     const partner = req.partner;
 
     // Only count leads that actually belong to this partner:
-    //   - user_id IS NULL  → fresh lead, user not yet registered (potential conversion)
-    //   - user_registered_at IS NOT NULL → user registered through THIS partner's link (converted)
-    // Leads where user_id IS NOT NULL but user_registered_at IS NULL = user already existed
+    //   - pl.user_id IS NULL  → fresh lead, user not yet registered (potential conversion)
+    //   - pl.user_registered_at IS NOT NULL → user registered through THIS partner's link (converted)
+    // Leads where pl.user_id IS NOT NULL but pl.user_registered_at IS NULL = user already existed
     // or registered via another partner → saved for tracking but NOT counted.
-    const OWN_LEAD_FILTER = `AND (user_id IS NULL OR user_registered_at IS NOT NULL)`;
+    const OWN_LEAD_FILTER = `AND (pl.user_id IS NULL OR pl.user_registered_at IS NOT NULL)`;
 
     const basicStats = await executeQuery(
       `SELECT 
         COUNT(*) as total_leads,
-        SUM(CASE WHEN dedupe_status = 'fresh_lead' THEN 1 ELSE 0 END) as fresh_leads,
-        SUM(CASE WHEN dedupe_status = 'registered_user' THEN 1 ELSE 0 END) as registered_users,
-        SUM(CASE WHEN dedupe_status = 'active_user' THEN 1 ELSE 0 END) as active_users,
-        SUM(CASE WHEN loan_application_id IS NOT NULL THEN 1 ELSE 0 END) as loan_applications,
-        SUM(CASE WHEN disbursed_at IS NOT NULL THEN 1 ELSE 0 END) as disbursed_loans,
-        SUM(CASE WHEN payout_eligible = 1 THEN 1 ELSE 0 END) as payout_eligible_leads,
-        SUM(COALESCE(payout_amount, 0)) as total_payout_amount
-      FROM partner_leads
-      WHERE partner_id = ? ${OWN_LEAD_FILTER}`,
+        SUM(CASE WHEN pl.dedupe_status = 'fresh_lead' THEN 1 ELSE 0 END) as fresh_leads,
+        SUM(CASE WHEN pl.dedupe_status = 'registered_user' THEN 1 ELSE 0 END) as registered_users,
+        SUM(CASE WHEN pl.dedupe_status = 'active_user' THEN 1 ELSE 0 END) as active_users,
+        SUM(CASE WHEN pl.loan_application_id IS NOT NULL THEN 1 ELSE 0 END) as loan_applications,
+        SUM(CASE WHEN pl.disbursed_at IS NOT NULL THEN 1 ELSE 0 END) as disbursed_loans,
+        SUM(CASE WHEN pl.payout_eligible = 1 THEN 1 ELSE 0 END) as payout_eligible_leads,
+        SUM(COALESCE(pl.payout_amount, 0)) as total_payout_amount
+      FROM partner_leads pl
+      WHERE pl.partner_id = ? ${OWN_LEAD_FILTER}`,
       [partner.id]
     );
 
