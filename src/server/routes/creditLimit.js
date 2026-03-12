@@ -459,7 +459,7 @@ router.post('/admin/:userId/recalculate', authenticateAdmin, async (req, res) =>
           await triggerEventSMS('limit_increase', {
             userId: userId,
             variables: {
-              new_limit: `₹${creditLimitData.newLimit.toLocaleString('en-IN')}`
+              new_limit: creditLimitData.newLimit.toLocaleString('en-IN')
             }
           });
         } catch (smsError) {

@@ -451,7 +451,7 @@ async function processDPDBasedSMS(templates, currentTime) {
         
         // Prepare message data
         const messageData = {
-          name: `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'Customer',
+          name: (loan.first_name || '').trim() || 'Customer',
           url: 'http://pocketcredit.in',
           email: 'support@pocketcredit.in',
           due_date: dueDate,
@@ -532,20 +532,20 @@ async function processStatusBasedSMS(templates, currentTime) {
         continue;
       }
       
-      for (const loan of loans) {
+for (const loan of loans) {
         const messageData = {
-          name: `${loan.first_name || ''} ${loan.last_name || ''}`.trim() || 'Customer',
+          name: (loan.first_name || '').trim() || 'Customer',
           url: 'http://pocketcredit.in'
         };
-        
+
         const message = replaceTemplateVariables(template.message_template, messageData);
-        
+
         const user = {
           id: loan.user_id,
           phone: loan.phone,
           alternate_mobile: loan.alternate_mobile
         };
-        
+
         const sent = await sendSMSToUser(user, loan, template, message);
         totalSent += sent;
       }
@@ -603,10 +603,10 @@ async function processScheduledLimitIncreaseSMS(templates, currentTime) {
 
       for (const row of users) {
         const newLimitFormatted = row.loan_limit != null && row.loan_limit !== ''
-          ? `₹${Number(row.loan_limit).toLocaleString('en-IN')}`
-          : '₹0';
+          ? Number(row.loan_limit).toLocaleString('en-IN')
+          : '0';
         const messageData = {
-          name: `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Customer',
+          name: (row.first_name || '').trim() || 'Customer',
           url: 'http://pocketcredit.in',
           email: 'support@pocketcredit.in',
           new_limit: newLimitFormatted

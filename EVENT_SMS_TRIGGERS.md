@@ -95,7 +95,7 @@ This document lists all event-based SMS templates and where they should automati
   - **Daily scheduled (account manager users)**: `src/server/jobs/smsNotificationJob.js`
     - At the template’s `scheduled_times` (e.g. `["09:00"]`), sends to **every user** who has at least one loan in `account_manager` or `overdue`, with their current `loan_limit`. Configure `scheduled_times` for the `limit_increase` template in Admin → SMS Templates to enable this.
 - **Variables Used**:
-  - `new_limit`: New credit limit amount (formatted as ₹X,XXX)
+  - `new_limit`: New credit limit amount (formatted as plain number with commas, e.g. `2,200`; template already has "Rs." so no ₹ symbol is used to avoid SMS encoding issues)
 
 ---
 

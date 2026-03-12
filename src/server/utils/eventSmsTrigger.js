@@ -97,7 +97,7 @@ async function triggerEventSMS(templateKey, options = {}) {
     }
 
     const user = users[0];
-    const userName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Customer';
+    const userName = (user.first_name || '').trim() || 'Customer';
 
     // Get loan details if loanId provided
     let loan = null;
@@ -166,7 +166,7 @@ async function triggerEventSMS(templateKey, options = {}) {
       acc_manager_name: 'Account Manager',
       acc_manager_phone: '',
       reference_name: 'Reference',
-      new_limit: '₹0',
+      new_limit: '0',
       ...variables // Override with provided variables
     };
 

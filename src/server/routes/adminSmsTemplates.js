@@ -496,7 +496,7 @@ router.post('/:templateKey/trigger', authenticateAdmin, async (req, res) => {
     }
 
     const user = users[0];
-    const userName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Customer';
+    const userName = (user.first_name || '').trim() || 'Customer';
 
     // Get loan details if loanId provided
     let loan = null;

@@ -3431,7 +3431,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
                     await triggerEventSMS('limit_increase', {
                       userId: loan.user_id,
                       variables: {
-                        new_limit: `₹${creditLimitData.newLimit.toLocaleString('en-IN')}`
+                        new_limit: creditLimitData.newLimit.toLocaleString('en-IN')
                       }
                     });
                     console.log(`[UserProfile] limit_increase SMS triggered for user ${loan.user_id}`);
