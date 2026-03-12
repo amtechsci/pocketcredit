@@ -36,10 +36,13 @@ function verifyWebhookSignature(payload, signature, secret) {
             .update(JSON.stringify(payload))
             .digest('hex');
 
-        return crypto.timingSafeEqual(
-            Buffer.from(signature),
-            Buffer.from(computed)
-        );
+        const sigBuf = Buffer.from(signature, 'utf8');
+        const compBuf = Buffer.from(computed, 'utf8');
+        // timingSafeEqual requires both buffers to have the same byte length
+        if (sigBuf.length !== compBuf.length) {
+            return false;
+        }
+        return crypto.timingSafeEqual(sigBuf, compBuf);
     } catch (error) {
         console.error('[Webhook] Signature verification error:', error);
         return false;
