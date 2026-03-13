@@ -142,6 +142,7 @@ export function PerformancePage() {
 
   const subCat = currentUser?.sub_admin_category;
   const isSuperAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'super_admin';
+  const showFollowUp = subCat === 'follow_up_user' || isSuperAdmin;
   const showFollowUpSection = (subCat === 'follow_up_user' && perf?.followUp) || (isSuperAdmin && !!followUpUserId && perf?.followUp);
   const showVerify = subCat === 'verify_user' || isSuperAdmin;
   const showQA = subCat === 'qa_user' || isSuperAdmin;
