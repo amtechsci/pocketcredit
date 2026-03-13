@@ -1,7 +1,7 @@
 const express = require('express');
 const { authenticateAdmin } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
-const { executeQuery, initializeDatabase } = require('../config/database');
+const { executeQuery, initializeDatabase, ensureLoanStatusHistoryTable } = require('../config/database');
 const router = express.Router();
 
 // Helper function to convert income_range to approximate monthly income
@@ -1375,6 +1375,17 @@ router.put('/:applicationId/status', authenticateAdmin, validate(schemas.updateA
     updateParams.push(applicationId);
 
     await executeQuery(updateQuery, updateParams);
+
+    // Log status transition for Performance tab
+    try {
+      await ensureLoanStatusHistoryTable();
+      await executeQuery(
+        `INSERT INTO loan_status_history (loan_application_id, from_status, to_status, admin_id, source) VALUES (?, ?, ?, ?, 'status_api')`,
+        [applicationId, loan.status || null, status, req.admin?.id || null]
+      );
+    } catch (historyErr) {
+      console.error('loan_status_history insert error:', historyErr.message);
+    }
 
     // Update partner_leads loan_status for all leads for this user.
     // Match by user_id OR by mobile_number (for leads where user_id was never linked,

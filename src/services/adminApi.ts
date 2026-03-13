@@ -701,6 +701,16 @@ class AdminApiService {
     return this.request('GET', `/reports/${type}`, undefined, filters);
   }
 
+  // Performance tab (ATUL)
+  async getPerformance(params: { from_date?: string; to_date?: string } = {}): Promise<ApiResponse<any>> {
+    return this.request('GET', '/performance', undefined, params);
+  }
+
+  // Disbursal statistics by account manager (synergi)
+  async getDisbursalStatistics(params: { from_date?: string; to_date?: string } = {}): Promise<ApiResponse<any>> {
+    return this.request('GET', '/reports/disbursal-statistics', undefined, params);
+  }
+
   // User Profile Update APIs
   async updateUserBasicInfo(userId: string, data: {
     firstName: string;

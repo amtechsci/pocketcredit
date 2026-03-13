@@ -275,6 +275,11 @@ app.use('/api/admin/search', searchRoutes);
 // Admin CIBIL Reports routes
 const adminReportsRoutes = require('./routes/adminReports');
 app.use('/api/admin/reports', adminReportsRoutes);
+
+// Admin Performance tab (ATUL)
+const adminPerformanceRoutes = require('./routes/adminPerformance');
+app.use('/api/admin/performance', adminPerformanceRoutes);
+
 app.use('/api/eligibility', eligibilityRoutes);
 app.use('/api/employment-quick-check', employmentQuickCheckRoutes);
 app.use('/api/loan-plans', loanPlansRoutes);

@@ -29,6 +29,7 @@ import { AccountManagerPage } from './admin/pages/AccountManagerPage';
 import { OverduePage } from './admin/pages/OverduePage';
 import { TvrIdsPage } from './admin/pages/TvrIdsPage';
 import { FollowUpUserPage } from './admin/pages/FollowUpUserPage';
+import { PerformancePage } from './admin/pages/PerformancePage';
 import { AdminProvider, useAdmin } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './components/ui/sheet';
@@ -128,19 +129,24 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
   if (currentUser?.role === 'sub_admin') {
     if (subCat === 'verify_user') {
       navByRole.push({ path: `${BASE_PATH}/applications`, label: 'Applications', color: 'blue' });
+      navByRole.push({ path: `${BASE_PATH}/performance`, label: 'Performance', color: 'blue' });
     } else if (subCat === 'qa_user') {
       navByRole.push({ path: `${BASE_PATH}/qa-verification`, label: 'QA Verification', color: 'cyan' });
+      navByRole.push({ path: `${BASE_PATH}/performance`, label: 'Performance', color: 'blue' });
     } else if (subCat === 'account_manager') {
       navByRole.push({ path: `${BASE_PATH}/account-manager`, label: 'Account Manager', color: 'purple' });
       navByRole.push({ path: `${BASE_PATH}/applications`, label: 'Applications', color: 'blue' });
+      navByRole.push({ path: `${BASE_PATH}/performance`, label: 'Performance', color: 'blue' });
     } else if (subCat === 'recovery_officer' || subCat === 'debt_agency') {
       navByRole.push({ path: `${BASE_PATH}/overdue`, label: 'Over Due', color: 'red' });
+      navByRole.push({ path: `${BASE_PATH}/performance`, label: 'Performance', color: 'blue' });
     } else if (subCat === 'follow_up_user') {
       navByRole.push(
         { path: `${BASE_PATH}/follow-up?tab=submitted`, label: 'Submitted', color: 'blue' },
         { path: `${BASE_PATH}/follow-up?tab=follow_up`, label: 'Follow Up', color: 'orange' },
         { path: `${BASE_PATH}/follow-up?tab=disbursal`, label: 'Disbursal', color: 'green' },
-        { path: `${BASE_PATH}/follow-up?tab=tvr`, label: 'TVR IDs', color: 'purple' }
+        { path: `${BASE_PATH}/follow-up?tab=tvr`, label: 'TVR IDs', color: 'purple' },
+        { path: `${BASE_PATH}/performance`, label: 'Performance', color: 'blue' }
       );
     }
   } else if (currentUser?.role === 'nbfc_admin') {
@@ -159,7 +165,8 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
       { path: `${BASE_PATH}/approved`, label: 'Approved', color: 'green' },
       { path: `${BASE_PATH}/cooling-period`, label: 'Cooling Period', color: 'orange' },
       { path: `${BASE_PATH}/qa-verification`, label: 'QA Verification', color: 'cyan' },
-      { path: `${BASE_PATH}/reports`, label: 'Reports', color: 'blue' }
+      { path: `${BASE_PATH}/reports`, label: 'Reports', color: 'blue' },
+      { path: `${BASE_PATH}/performance`, label: 'Performance', color: 'blue' }
     );
     if (isSuperAdmin) {
       navByRole.push(
@@ -509,6 +516,11 @@ export default function AdminApp() {
         <Route path="reports" element={
           <ProtectedRoute>
             <AdminReports />
+          </ProtectedRoute>
+        } />
+        <Route path="performance" element={
+          <ProtectedRoute>
+            <PerformancePage />
           </ProtectedRoute>
         } />
         <Route path="settings" element={

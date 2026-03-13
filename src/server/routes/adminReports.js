@@ -983,4 +983,46 @@ router.get('/summary', authenticateAdmin, async (req, res) => {
     }
 });
 
+/**
+ * GET /api/admin/reports/disbursal-statistics
+ * Disbursal statistics by account manager (synergi): count and total principal moved to account manager in date range.
+ * Query: from_date, to_date (YYYY-MM-DD).
+ */
+router.get('/disbursal-statistics', authenticateAdmin, async (req, res) => {
+    try {
+        await initializeDatabase();
+        const { from_date, to_date } = req.query;
+        const today = new Date().toISOString().slice(0, 10);
+        const fromDate = from_date || today;
+        const toDate = to_date || today;
+
+        const rows = await executeQuery(
+            `SELECT 
+                la.assigned_account_manager_id AS account_manager_id,
+                a.name AS account_manager_name,
+                COUNT(*) AS ids_moved,
+                COALESCE(SUM(la.loan_amount), 0) AS total_principal
+             FROM loan_applications la
+             LEFT JOIN admins a ON a.id = la.assigned_account_manager_id COLLATE utf8mb4_unicode_ci
+             WHERE la.status = 'account_manager'
+               AND DATE(la.processed_at) BETWEEN ? AND ?
+             GROUP BY la.assigned_account_manager_id, a.name
+             ORDER BY ids_moved DESC`,
+            [fromDate, toDate]
+        );
+
+        const data = (rows || []).map(r => ({
+            account_manager_id: r.account_manager_id,
+            account_manager_name: r.account_manager_name || 'Unassigned',
+            ids_moved: Number(r.ids_moved) || 0,
+            total_principal: Number(r.total_principal) || 0
+        }));
+
+        res.json({ status: 'success', data: { from_date: fromDate, to_date: toDate, synergi: data } });
+    } catch (error) {
+        console.error('Error getting disbursal statistics:', error);
+        res.status(500).json({ status: 'error', message: 'Failed to get disbursal statistics', error: error.message });
+    }
+});
+
 module.exports = router;

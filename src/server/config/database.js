@@ -213,6 +213,32 @@ const getConnection = async () => {
   }
 };
 
+/**
+ * Ensure loan_status_history table exists (for Performance tab status tracking).
+ * Safe to call multiple times; uses CREATE TABLE IF NOT EXISTS.
+ */
+const ensureLoanStatusHistoryTable = async () => {
+  try {
+    await executeQuery(`
+      CREATE TABLE IF NOT EXISTS loan_status_history (
+        id int NOT NULL AUTO_INCREMENT,
+        loan_application_id int NOT NULL,
+        from_status varchar(50) DEFAULT NULL,
+        to_status varchar(50) NOT NULL,
+        admin_id varchar(36) DEFAULT NULL,
+        source enum('status_api','validation_submit') DEFAULT 'status_api',
+        created_at timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY idx_loan_status_history_loan_id (loan_application_id),
+        KEY idx_loan_status_history_created_at (created_at),
+        KEY idx_loan_status_history_admin_id (admin_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+  } catch (err) {
+    console.error('ensureLoanStatusHistoryTable error:', err.message);
+  }
+};
+
 // Handle process termination
 process.on('SIGINT', async () => {
   await closeConnections();
@@ -232,5 +258,6 @@ module.exports = {
   executeQuery,
   getConnection,
   getValidatedConnection,
-  validateConnection
+  validateConnection,
+  ensureLoanStatusHistoryTable
 };

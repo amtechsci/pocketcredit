@@ -1,5 +1,5 @@
 const express = require('express');
-const { executeQuery, initializeDatabase } = require('../config/database');
+const { executeQuery, initializeDatabase, ensureLoanStatusHistoryTable } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
 const { checkHoldStatus } = require('../middleware/checkHoldStatus');
 const router = express.Router();
@@ -211,6 +211,18 @@ router.post('/', requireAuth, async (req, res) => {
             [newStatus, application.id]
           );
           console.log(`✅ Updated loan application ${application.id} from '${application.status}' to '${newStatus}' status after references update`);
+          // Log status transition for Performance tab (user completed form e.g. references -> under_review; admin_id NULL)
+          if (newStatus === 'under_review' || newStatus === 'submitted') {
+            try {
+              await ensureLoanStatusHistoryTable();
+              await executeQuery(
+                `INSERT INTO loan_status_history (loan_application_id, from_status, to_status, admin_id, source) VALUES (?, ?, ?, NULL, 'status_api')`,
+                [application.id, application.status, newStatus]
+              );
+            } catch (historyErr) {
+              console.warn('⚠️ loan_status_history insert after references:', historyErr.message);
+            }
+          }
         }
       }
     } catch (stepError) {
