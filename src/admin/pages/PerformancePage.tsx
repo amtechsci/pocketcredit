@@ -43,11 +43,25 @@ interface DisbursalRow {
   total_principal: number;
 }
 
+interface FollowUpUserRow {
+  admin_id: string;
+  name: string;
+  email: string;
+  submitted: number;
+  follow_up: number;
+  tvr: number;
+  movedToUnderReviewWithLog: number;
+  movedToUnderReviewWithoutLog: number;
+  movedFollowUpToUnderReview: number;
+  movedTvrToQa: number;
+}
+
 export function PerformancePage() {
   const { currentUser } = useAdmin();
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [perf, setPerf] = useState<PerformanceData | null>(null);
+  const [followUpUsersReport, setFollowUpUsersReport] = useState<{ from_date: string; to_date: string; users: FollowUpUserRow[] } | null>(null);
   const [disbursal, setDisbursal] = useState<{ from_date: string; to_date: string; synergi: DisbursalRow[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +98,17 @@ export function PerformancePage() {
     }
   }, [fromDate, toDate]);
 
+  const fetchFollowUpUsersReport = useCallback(async () => {
+    try {
+      const from = fromDate || defaultFrom;
+      const to = toDate || defaultTo;
+      const res = await adminApiService.getPerformanceFollowUpUsers({ from_date: from, to_date: to });
+      if (res.status === 'success' && res.data) setFollowUpUsersReport(res.data);
+    } catch (e: any) {
+      console.error('Follow-up users report:', e);
+    }
+  }, [fromDate, toDate]);
+
   useEffect(() => {
     fetchPerformance();
   }, [fetchPerformance]);
@@ -92,9 +117,18 @@ export function PerformancePage() {
     fetchDisbursal();
   }, [fetchDisbursal]);
 
+  useEffect(() => {
+    if (currentUser?.role === 'superadmin' || currentUser?.role === 'super_admin') {
+      fetchFollowUpUsersReport();
+    }
+  }, [currentUser?.role, fetchFollowUpUsersReport]);
+
   const handleRefresh = () => {
     fetchPerformance();
     fetchDisbursal();
+    if (currentUser?.role === 'superadmin' || currentUser?.role === 'super_admin') {
+      fetchFollowUpUsersReport();
+    }
   };
 
   const subCat = currentUser?.sub_admin_category;
@@ -158,6 +192,52 @@ export function PerformancePage() {
             <AlertCircle className="w-5 h-5 flex-shrink-0" />
             {error}
           </div>
+        )}
+
+        {/* User-wise report: one row per follow-up user (superadmin only) */}
+        {isSuperAdmin && followUpUsersReport && followUpUsersReport.users.length > 0 && (
+          <section className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center gap-2">
+              <Users className="w-5 h-5 text-indigo-600" />
+              <h2 className="text-lg font-semibold text-gray-900">Follow-up users (user-wise report)</h2>
+              <span className="text-sm text-gray-500 ml-2">
+                {followUpUsersReport.from_date} to {followUpUsersReport.to_date} · Current counts as of fetch
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-100">
+                    <th className="text-left py-3 px-3 font-semibold text-gray-700">Follow-up user</th>
+                    <th className="text-right py-3 px-3 font-semibold text-gray-700">Submitted</th>
+                    <th className="text-right py-3 px-3 font-semibold text-gray-700">Follow up</th>
+                    <th className="text-right py-3 px-3 font-semibold text-gray-700">TVR</th>
+                    <th className="text-right py-3 px-3 font-semibold text-gray-700">Moved to U/R with log</th>
+                    <th className="text-right py-3 px-3 font-semibold text-gray-700">Moved to U/R no log</th>
+                    <th className="text-right py-3 px-3 font-semibold text-gray-700">Follow up → U/R</th>
+                    <th className="text-right py-3 px-3 font-semibold text-gray-700">Moved to QA from TVR</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {followUpUsersReport.users.map((row) => (
+                    <tr key={row.admin_id} className="border-t border-gray-100 hover:bg-gray-50">
+                      <td className="py-2 px-3 font-medium text-gray-900">
+                        <div>{row.name}</div>
+                        <div className="text-xs text-gray-500">{row.email}</div>
+                      </td>
+                      <td className="py-2 px-3 text-right">{row.submitted}</td>
+                      <td className="py-2 px-3 text-right">{row.follow_up}</td>
+                      <td className="py-2 px-3 text-right">{row.tvr}</td>
+                      <td className="py-2 px-3 text-right">{row.movedToUnderReviewWithLog}</td>
+                      <td className="py-2 px-3 text-right">{row.movedToUnderReviewWithoutLog}</td>
+                      <td className="py-2 px-3 text-right">{row.movedFollowUpToUnderReview}</td>
+                      <td className="py-2 px-3 text-right">{row.movedTvrToQa}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
         )}
 
         {showFollowUp && perf?.followUp && (

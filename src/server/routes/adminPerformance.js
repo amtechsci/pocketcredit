@@ -354,4 +354,117 @@ router.get('/', authenticateAdmin, async (req, res) => {
   }
 });
 
+/**
+ * GET /api/admin/performance/follow-up-users
+ * User-wise report: one row per follow-up user (Synergi 1, 2, ...) with their assigned counts.
+ * Only for superadmin / super_admin.
+ * Query: from_date, to_date (YYYY-MM-DD).
+ */
+router.get('/follow-up-users', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    await ensureLoanStatusHistoryTable();
+
+    const role = req.admin?.role;
+    const isSuperAdmin = role === 'superadmin' || role === 'super_admin';
+    if (!isSuperAdmin) {
+      return res.status(403).json({ status: 'error', message: 'Only superadmin can view follow-up user-wise report' });
+    }
+
+    let fromDate = req.query.from_date;
+    let toDate = req.query.to_date;
+    const today = new Date().toISOString().slice(0, 10);
+    if (!toDate) toDate = today;
+    if (!fromDate) fromDate = toDate;
+
+    const followUpAdmins = await executeQuery(
+      `SELECT id, name, email FROM admins WHERE sub_admin_category = 'follow_up_user' AND is_active = 1 ORDER BY name ASC`
+    );
+    if (!followUpAdmins || followUpAdmins.length === 0) {
+      return res.json({ status: 'success', data: { from_date: fromDate, to_date: toDate, users: [] } });
+    }
+
+    const users = [];
+    for (const admin of followUpAdmins) {
+      const aid = admin.id;
+      const submittedRows = await executeQuery(
+        `SELECT COUNT(*) as c FROM loan_applications la WHERE la.status = 'submitted' AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)`,
+        [aid, aid]
+      ).catch(() => [{ c: 0 }]);
+      const followUpRows = await executeQuery(
+        `SELECT COUNT(*) as c FROM loan_applications la WHERE la.status = 'follow_up' AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)`,
+        [aid, aid]
+      ).catch(() => [{ c: 0 }]);
+      const tvrRows = await executeQuery(
+        `SELECT COUNT(DISTINCT u.id) as c FROM users u
+         INNER JOIN loan_applications la ON la.user_id = u.id AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)
+         WHERE u.moved_to_tvr = 1`,
+        [aid, aid]
+      ).catch(() => [{ c: 0 }]);
+
+      let withLog = 0, withoutLog = 0, movedFollowUpToUnderReview = 0, movedTvrToQa = 0;
+      try {
+        const historyRows = await executeQuery(
+          `SELECT lsh.loan_application_id, lsh.from_status, lsh.to_status, lsh.admin_id, lsh.created_at, la.user_id, la.assigned_follow_up_admin_id
+           FROM loan_status_history lsh
+           INNER JOIN loan_applications la ON la.id = lsh.loan_application_id
+           WHERE lsh.to_status = 'under_review' AND DATE(lsh.created_at) BETWEEN ? AND ?
+             AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)`,
+          [fromDate, toDate, aid, aid]
+        );
+        movedFollowUpToUnderReview = historyRows.filter(r => r.from_status === 'follow_up').length;
+        for (const row of historyRows.filter(r => r.from_status === 'submitted')) {
+          const adminToCheck = row.admin_id || row.assigned_follow_up_admin_id || null;
+          if (!adminToCheck) { withoutLog++; continue; }
+          const [noteSameDay] = await executeQuery(
+            `SELECT 1 FROM user_notes WHERE user_id = ? AND created_by = ? AND DATE(created_at) = DATE(?) LIMIT 1`,
+            [row.user_id, adminToCheck, row.created_at]
+          ).catch(() => []);
+          const [followUpSameDay] = await executeQuery(
+            `SELECT 1 FROM user_follow_ups WHERE user_id = ? AND admin_id = ? AND DATE(created_at) = DATE(?) LIMIT 1`,
+            [row.user_id, adminToCheck, row.created_at]
+          ).catch(() => []);
+          const hasLog = (noteSameDay && noteSameDay.length > 0) || (followUpSameDay && followUpSameDay.length > 0);
+          if (hasLog) withLog++; else withoutLog++;
+        }
+      } catch (e) {
+        console.error('follow-up-users history:', e.message);
+      }
+      try {
+        const qaRows = await executeQuery(
+          `SELECT uvh.id FROM user_validation_history uvh
+           INNER JOIN loan_applications la ON la.id = uvh.loan_application_id
+           WHERE uvh.action_type = 'qa_verification' AND DATE(uvh.created_at) BETWEEN ? AND ?
+             AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)`,
+          [fromDate, toDate, aid, aid]
+        );
+        movedTvrToQa = Array.isArray(qaRows) ? qaRows.length : 0;
+      } catch (e) {
+        console.error('follow-up-users TVR->QA:', e.message);
+      }
+
+      users.push({
+        admin_id: admin.id,
+        name: admin.name || admin.email || '—',
+        email: admin.email || '—',
+        submitted: Number(submittedRows && submittedRows[0] ? submittedRows[0].c : 0),
+        follow_up: Number(followUpRows && followUpRows[0] ? followUpRows[0].c : 0),
+        tvr: Number(tvrRows && tvrRows[0] ? tvrRows[0].c : 0),
+        movedToUnderReviewWithLog: withLog,
+        movedToUnderReviewWithoutLog: withoutLog,
+        movedFollowUpToUnderReview,
+        movedTvrToQa
+      });
+    }
+
+    res.json({
+      status: 'success',
+      data: { from_date: fromDate, to_date: toDate, users }
+    });
+  } catch (error) {
+    console.error('Performance follow-up-users error:', error);
+    res.status(500).json({ status: 'error', message: error.message || 'Failed to get follow-up user-wise report' });
+  }
+});
+
 module.exports = router;
