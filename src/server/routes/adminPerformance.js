@@ -20,6 +20,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
 
     let fromDate = req.query.from_date;
     let toDate = req.query.to_date;
+    const followUpUserId = req.query.follow_up_user || null;
     const today = new Date().toISOString().slice(0, 10);
     if (!toDate) toDate = today;
     if (!fromDate) fromDate = toDate;
@@ -28,6 +29,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
     const isFollowUp = subCat === 'follow_up_user' || isSuperAdmin;
     const isVerify = subCat === 'verify_user' || isSuperAdmin;
     const isQA = subCat === 'qa_user' || isSuperAdmin;
+    const effectiveFollowUpAdminId = (isSuperAdmin && followUpUserId) ? followUpUserId : adminId;
 
     const out = {
       from_date: fromDate,
@@ -35,28 +37,30 @@ router.get('/', authenticateAdmin, async (req, res) => {
       fetch_time: new Date().toISOString(),
       followUp: null,
       verify: null,
-      qa: null
+      qa: null,
+      follow_up_user: followUpUserId || null
     };
 
     const assignFollowUp = isSuperAdmin ? '' : `AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)`;
     const assignVerify = isSuperAdmin ? '' : `AND (la.assigned_verify_admin_id = ? OR la.temp_assigned_verify_admin_id = ?)`;
     const assignQA = isSuperAdmin ? '' : `AND (la.assigned_qa_admin_id = ? OR la.temp_assigned_qa_admin_id = ?)`;
     const params = (key) => (key === 'follow_up' || key === 'verify' || key === 'qa' ? (isSuperAdmin ? [] : [adminId, adminId]) : []);
+    const followUpParams = (key) => (key === 'follow_up' ? (effectiveFollowUpAdminId ? [effectiveFollowUpAdminId, effectiveFollowUpAdminId] : []) : (isSuperAdmin ? [] : [adminId, adminId]));
 
-    // ---- A) Follow-up user metrics ----
-    if (isFollowUp) {
-      const fp = params('follow_up');
-      const followUpWhere = assignFollowUp ? ` AND ${assignFollowUp.replace(/^AND\s+/, '')}` : '';
-      const followUpParams = (extra = []) => [...fp, ...extra];
+    // ---- A) Follow-up user metrics (for follow_up_user role, or superadmin viewing a specific user via ?follow_up_user=) ----
+    if (subCat === 'follow_up_user' || (isSuperAdmin && followUpUserId)) {
+      const fp = followUpParams('follow_up');
+      const followUpWhereClause = effectiveFollowUpAdminId ? ` AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)` : '';
+      const followUpParamsArr = (extra = []) => [...fp, ...extra];
 
       const submittedRes = await executeQuery(
-        `SELECT COUNT(*) as c FROM loan_applications la WHERE la.status = 'submitted'${followUpWhere}`,
-        followUpParams()
+        `SELECT COUNT(*) as c FROM loan_applications la WHERE la.status = 'submitted'${followUpWhereClause}`,
+        followUpParamsArr()
       ).catch(() => [{ c: 0 }]);
       const submittedCount = submittedRes && submittedRes[0] ? submittedRes[0] : { c: 0 };
       const followUpRes = await executeQuery(
-        `SELECT COUNT(*) as c FROM loan_applications la WHERE la.status = 'follow_up'${followUpWhere}`,
-        followUpParams()
+        `SELECT COUNT(*) as c FROM loan_applications la WHERE la.status = 'follow_up'${followUpWhereClause}`,
+        followUpParamsArr()
       ).catch(() => [{ c: 0 }]);
       const followUpCount = followUpRes && followUpRes[0] ? followUpRes[0] : { c: 0 };
 
@@ -66,7 +70,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
           `SELECT COUNT(DISTINCT u.id) as c FROM users u
            INNER JOIN loan_applications la ON la.user_id = u.id AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)
            WHERE u.moved_to_tvr = 1`,
-          [adminId, adminId]
+          [effectiveFollowUpAdminId, effectiveFollowUpAdminId]
         ).catch(() => [{ c: 0 }]);
         tvrCount = t && t[0] ? Number(t[0].c) : 0;
       } else {
@@ -91,7 +95,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
            WHERE lsh.to_status = 'under_review'
              AND DATE(lsh.created_at) BETWEEN ? AND ?
              ${fp.length ? 'AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)' : ''}`,
-          fp.length ? [fromDate, toDate, adminId, adminId] : [fromDate, toDate]
+          fp.length ? [fromDate, toDate, effectiveFollowUpAdminId, effectiveFollowUpAdminId] : [fromDate, toDate]
         );
         movedSubmittedToUnderReview = historyRows.filter(r => r.from_status === 'submitted').length;
         movedFollowUpToUnderReview = historyRows.filter(r => r.from_status === 'follow_up').length;
@@ -125,7 +129,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
            INNER JOIN loan_applications la ON la.id = uvh.loan_application_id
            WHERE uvh.action_type = 'qa_verification' AND DATE(uvh.created_at) BETWEEN ? AND ?
              ${fp.length ? 'AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)' : ''}`,
-          fp.length ? [fromDate, toDate, adminId, adminId] : [fromDate, toDate]
+          fp.length ? [fromDate, toDate, effectiveFollowUpAdminId, effectiveFollowUpAdminId] : [fromDate, toDate]
         );
         movedTvrToQa = Array.isArray(qaRows) ? qaRows.length : 0;
       } catch (e) {
@@ -140,7 +144,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
             `SELECT la.id, la.user_id FROM loan_applications la
              WHERE la.status = ?
              ${fp.length ? 'AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)' : ''}`,
-            fp.length ? [st, adminId, adminId] : [st]
+            fp.length ? [st, effectiveFollowUpAdminId, effectiveFollowUpAdminId] : [st]
           );
           for (const loan of loanList || []) {
             const hasNote = await executeQuery(
@@ -160,7 +164,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
            INNER JOIN users u ON u.id = la.user_id AND u.moved_to_tvr = 1
            WHERE la.status IN ('submitted','under_review','follow_up','disbursal','qa_verification')
              ${fp.length ? 'AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)' : ''}`,
-          fp.length ? [adminId, adminId] : []
+          fp.length ? [effectiveFollowUpAdminId, effectiveFollowUpAdminId] : []
         );
         for (const loan of tvrLoans || []) {
           const hasNote = await executeQuery(
@@ -186,14 +190,14 @@ router.get('/', authenticateAdmin, async (req, res) => {
            WHERE DATE(un.created_at) BETWEEN ? AND ?
              ${fp.length ? 'AND un.created_by = ?' : ''}
            GROUP BY HOUR(un.created_at)`,
-          fp.length ? [fromDate, toDate, adminId] : [fromDate, toDate]
+          fp.length ? [fromDate, toDate, effectiveFollowUpAdminId] : [fromDate, toDate]
         );
         const followUpCounts = await executeQuery(
           `SELECT HOUR(uf.created_at) as h, COUNT(*) as c FROM user_follow_ups uf
            WHERE DATE(uf.created_at) BETWEEN ? AND ?
              ${fp.length ? 'AND uf.admin_id = ?' : ''}
            GROUP BY HOUR(uf.created_at)`,
-          fp.length ? [fromDate, toDate, adminId] : [fromDate, toDate]
+          fp.length ? [fromDate, toDate, effectiveFollowUpAdminId] : [fromDate, toDate]
         );
         const refCounts = await executeQuery(
           `SELECT HOUR(r.updated_at) as h, COUNT(*) as c FROM references r
@@ -401,6 +405,12 @@ router.get('/follow-up-users', authenticateAdmin, async (req, res) => {
          WHERE u.moved_to_tvr = 1`,
         [aid, aid]
       ).catch(() => [{ c: 0 }]);
+      const totalAssignedRows = await executeQuery(
+        `SELECT COUNT(*) as c FROM loan_applications la
+         WHERE (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)
+           AND la.status IN ('submitted','under_review','follow_up','disbursal')`,
+        [aid, aid]
+      ).catch(() => [{ c: 0 }]);
 
       let withLog = 0, withoutLog = 0, movedFollowUpToUnderReview = 0, movedTvrToQa = 0;
       try {
@@ -447,6 +457,7 @@ router.get('/follow-up-users', authenticateAdmin, async (req, res) => {
         admin_id: admin.id,
         name: admin.name || admin.email || '—',
         email: admin.email || '—',
+        totalAssigned: Number(totalAssignedRows && totalAssignedRows[0] ? totalAssignedRows[0].c : 0),
         submitted: Number(submittedRows && submittedRows[0] ? submittedRows[0].c : 0),
         follow_up: Number(followUpRows && followUpRows[0] ? followUpRows[0].c : 0),
         tvr: Number(tvrRows && tvrRows[0] ? tvrRows[0].c : 0),

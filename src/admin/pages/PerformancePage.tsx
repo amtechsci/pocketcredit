@@ -1,14 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   RefreshCw,
   BarChart3,
   Users,
   FileCheck,
   ClipboardCheck,
-  AlertCircle
+  AlertCircle,
+  ArrowLeft
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import { adminApiService } from '../../services/adminApi';
+
+const PERFORMANCE_BASE = '/stpl/performance';
 
 interface PerformanceData {
   from_date: string;
@@ -47,6 +51,7 @@ interface FollowUpUserRow {
   admin_id: string;
   name: string;
   email: string;
+  totalAssigned: number;
   submitted: number;
   follow_up: number;
   tvr: number;
@@ -58,6 +63,8 @@ interface FollowUpUserRow {
 
 export function PerformancePage() {
   const { currentUser } = useAdmin();
+  const [searchParams] = useSearchParams();
+  const followUpUserId = searchParams.get('follow_up_user') || undefined;
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [perf, setPerf] = useState<PerformanceData | null>(null);
@@ -76,7 +83,9 @@ export function PerformancePage() {
     try {
       const from = fromDate || defaultFrom;
       const to = toDate || defaultTo;
-      const res = await adminApiService.getPerformance({ from_date: from, to_date: to });
+      const params: { from_date: string; to_date: string; follow_up_user?: string } = { from_date: from, to_date: to };
+      if (followUpUserId) params.follow_up_user = followUpUserId;
+      const res = await adminApiService.getPerformance(params);
       if (res.status === 'success' && res.data) setPerf(res.data as PerformanceData);
       else setError(res.message || 'Failed to load performance');
     } catch (e: any) {
@@ -84,7 +93,7 @@ export function PerformancePage() {
     } finally {
       setLoading(false);
     }
-  }, [fromDate, toDate]);
+  }, [fromDate, toDate, followUpUserId]);
 
   const fetchDisbursal = useCallback(async () => {
     setError(null);
@@ -133,9 +142,10 @@ export function PerformancePage() {
 
   const subCat = currentUser?.sub_admin_category;
   const isSuperAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'super_admin';
-  const showFollowUp = subCat === 'follow_up_user' || isSuperAdmin;
+  const showFollowUpSection = (subCat === 'follow_up_user' && perf?.followUp) || (isSuperAdmin && !!followUpUserId && perf?.followUp);
   const showVerify = subCat === 'verify_user' || isSuperAdmin;
   const showQA = subCat === 'qa_user' || isSuperAdmin;
+  const viewingFollowUpUserName = isSuperAdmin && followUpUserId && followUpUsersReport?.users?.find((u) => u.admin_id === followUpUserId)?.name;
 
   const formatCurrency = (amount: number) => {
     if (amount >= 1000000) return `₹${(amount / 1000000).toFixed(2)}L`;
@@ -209,6 +219,7 @@ export function PerformancePage() {
                 <thead>
                   <tr className="bg-gray-100">
                     <th className="text-left py-3 px-3 font-semibold text-gray-700">Follow-up user</th>
+                    <th className="text-right py-3 px-3 font-semibold text-gray-700">Total assigned</th>
                     <th className="text-right py-3 px-3 font-semibold text-gray-700">Submitted</th>
                     <th className="text-right py-3 px-3 font-semibold text-gray-700">Follow up</th>
                     <th className="text-right py-3 px-3 font-semibold text-gray-700">TVR</th>
@@ -219,12 +230,19 @@ export function PerformancePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {followUpUsersReport.users.map((row) => (
+                  {followUpUsersReport.users.map((row) => {
+                    const q = new URLSearchParams({ follow_up_user: row.admin_id });
+                    if (fromDate) q.set('from_date', fromDate);
+                    if (toDate) q.set('to_date', toDate);
+                    return (
                     <tr key={row.admin_id} className="border-t border-gray-100 hover:bg-gray-50">
                       <td className="py-2 px-3 font-medium text-gray-900">
-                        <div>{row.name}</div>
-                        <div className="text-xs text-gray-500">{row.email}</div>
+                        <Link to={`${PERFORMANCE_BASE}?${q.toString()}`} className="text-blue-600 hover:text-blue-800 hover:underline">
+                          <div>{row.name}</div>
+                          <div className="text-xs text-gray-500">{row.email}</div>
+                        </Link>
                       </td>
+                      <td className="py-2 px-3 text-right font-medium">{row.totalAssigned}</td>
                       <td className="py-2 px-3 text-right">{row.submitted}</td>
                       <td className="py-2 px-3 text-right">{row.follow_up}</td>
                       <td className="py-2 px-3 text-right">{row.tvr}</td>
@@ -233,18 +251,29 @@ export function PerformancePage() {
                       <td className="py-2 px-3 text-right">{row.movedFollowUpToUnderReview}</td>
                       <td className="py-2 px-3 text-right">{row.movedTvrToQa}</td>
                     </tr>
-                  ))}
+                  ); })}
                 </tbody>
               </table>
             </div>
           </section>
         )}
 
-        {showFollowUp && perf?.followUp && (
+        {showFollowUpSection && (
           <section className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200 flex items-center gap-2">
+            <div className="px-6 py-4 border-b border-gray-200 flex flex-wrap items-center gap-2">
               <Users className="w-5 h-5 text-blue-600" />
-              <h2 className="text-lg font-semibold text-gray-900">Follow-up user</h2>
+              <h2 className="text-lg font-semibold text-gray-900">
+                Follow-up user{viewingFollowUpUserName ? `: ${viewingFollowUpUserName}` : ''}
+              </h2>
+              {isSuperAdmin && followUpUserId && (
+                <Link
+                  to={PERFORMANCE_BASE}
+                  className="inline-flex items-center gap-1 ml-2 text-sm text-gray-600 hover:text-gray-900"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Back to user-wise report
+                </Link>
+              )}
             </div>
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">

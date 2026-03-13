@@ -702,12 +702,12 @@ class AdminApiService {
   }
 
   // Performance tab (ATUL)
-  async getPerformance(params: { from_date?: string; to_date?: string } = {}): Promise<ApiResponse<any>> {
+  async getPerformance(params: { from_date?: string; to_date?: string; follow_up_user?: string } = {}): Promise<ApiResponse<any>> {
     return this.request('GET', '/performance', undefined, params);
   }
 
   // Follow-up users user-wise report (superadmin only)
-  async getPerformanceFollowUpUsers(params: { from_date?: string; to_date?: string } = {}): Promise<ApiResponse<{ from_date: string; to_date: string; users: Array<{ admin_id: string; name: string; email: string; submitted: number; follow_up: number; tvr: number; movedToUnderReviewWithLog: number; movedToUnderReviewWithoutLog: number; movedFollowUpToUnderReview: number; movedTvrToQa: number }> }>> {
+  async getPerformanceFollowUpUsers(params: { from_date?: string; to_date?: string } = {}): Promise<ApiResponse<{ from_date: string; to_date: string; users: Array<{ admin_id: string; name: string; email: string; totalAssigned: number; submitted: number; follow_up: number; tvr: number; movedToUnderReviewWithLog: number; movedToUnderReviewWithoutLog: number; movedFollowUpToUnderReview: number; movedTvrToQa: number }> }>> {
     return this.request('GET', '/performance/follow-up-users', undefined, params);
   }
 
