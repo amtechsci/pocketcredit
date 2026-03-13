@@ -3,7 +3,7 @@ const router = express.Router();
 const XLSX = require('xlsx');
 const { authenticatePartnerToken } = require('../middleware/partnerAuth');
 const { executeQuery, initializeDatabase } = require('../config/database');
-const { getLeadExportData } = require('../services/partnerLeadExportService');
+const { getLeadExportData, getFreshLeadsExportData } = require('../services/partnerLeadExportService');
 
 /**
  * GET /api/v1/partner/dashboard/leads/export/xlsx
@@ -35,6 +35,44 @@ router.get('/leads/export/xlsx', authenticatePartnerToken, async (req, res) => {
     res.send(buffer);
   } catch (error) {
     console.error('Partner leads export error:', error);
+    res.status(500).json({
+      status: false,
+      code: 5000,
+      message: 'Internal Server Error'
+    });
+  }
+});
+
+/**
+ * GET /api/v1/partner/dashboard/leads/export/fresh-leads/xlsx
+ * Download fresh leads only (no active user – for calling/marketing). Date filter = lead_shared_at; end_date exclusive.
+ */
+router.get('/leads/export/fresh-leads/xlsx', authenticatePartnerToken, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const partner = req.partner;
+    const { start_date, end_date } = req.query;
+    const exportData = await getFreshLeadsExportData(partner.id, { start_date, end_date });
+    if (!exportData.length) {
+      return res.status(404).json({
+        status: false,
+        code: 4040,
+        message: 'No fresh leads found. Fresh leads are leads not yet registered. Use start_date and end_date (end_date exclusive) to filter by lead shared date.'
+      });
+    }
+    const headers = Object.keys(exportData[0]);
+    const rows = exportData.map((row) => headers.map((h) => row[h]));
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Fresh Leads');
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    const safeName = (partner.name || partner.client_id || 'partner').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `partner_fresh_leads_${safeName}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('Partner fresh leads export error:', error);
     res.status(500).json({
       status: false,
       code: 5000,

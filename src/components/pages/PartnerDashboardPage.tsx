@@ -35,6 +35,7 @@ export function PartnerDashboardPage() {
   const [exportStartDate, setExportStartDate] = useState('');
   const [exportEndDate, setExportEndDate] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [exportingFreshLeads, setExportingFreshLeads] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -103,6 +104,27 @@ export function PartnerDashboardPage() {
       alert(err?.message || 'Failed to download report');
     } finally {
       setExporting(false);
+    }
+  };
+
+  const handleDownloadFreshLeads = async () => {
+    try {
+      setExportingFreshLeads(true);
+      const params: { start_date?: string; end_date?: string } = {};
+      if (exportStartDate) params.start_date = exportStartDate;
+      if (exportEndDate) params.end_date = exportEndDate;
+      const blob = await partnerApiService.exportFreshLeadsExcel(params);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `partner_fresh_leads_${new Date().toISOString().split('T')[0]}.xlsx`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error('Fresh leads export failed:', err);
+      alert(err?.message || 'Failed to download fresh leads');
+    } finally {
+      setExportingFreshLeads(false);
     }
   };
 
@@ -379,6 +401,16 @@ export function PartnerDashboardPage() {
               >
                 {exporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                 Download XLSX
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadFreshLeads}
+                disabled={exportingFreshLeads}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
+                title="Download leads that have not registered yet (for calling or marketing)"
+              >
+                {exportingFreshLeads ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                Download Fresh Leads
               </button>
             </div>
           </div>

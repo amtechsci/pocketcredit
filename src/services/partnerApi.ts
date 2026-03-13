@@ -247,8 +247,8 @@ class PartnerApiService {
   }
 
   /**
-   * Download partner leads report as XLSX (payout date filter on disbursed_at).
-   * Optional start_date, end_date (YYYY-MM-DD).
+   * Download partner leads report as XLSX (only leads where user registered through this partner).
+   * Optional start_date, end_date (YYYY-MM-DD) on user_registered_at.
    */
   async exportLeadsExcel(params?: { start_date?: string; end_date?: string }): Promise<Blob> {
     const search = new URLSearchParams();
@@ -261,6 +261,25 @@ class PartnerApiService {
     if (!response.ok) {
       const err = await response.json().catch(() => ({ message: 'Failed to export leads' }));
       throw new Error(err?.message || 'Failed to export leads');
+    }
+    return response.blob();
+  }
+
+  /**
+   * Download fresh leads only (no active user) as XLSX for calling/marketing.
+   * Optional start_date, end_date (YYYY-MM-DD) on lead_shared_at.
+   */
+  async exportFreshLeadsExcel(params?: { start_date?: string; end_date?: string }): Promise<Blob> {
+    const search = new URLSearchParams();
+    if (params?.start_date) search.set('start_date', params.start_date);
+    if (params?.end_date) search.set('end_date', params.end_date);
+    const qs = search.toString();
+    const url = `${this.baseURL}/dashboard/leads/export/fresh-leads/xlsx${qs ? `?${qs}` : ''}`;
+    const headers: HeadersInit = { 'Authorization': this.getAuthHeader() };
+    const response = await fetch(url, { method: 'GET', headers });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ message: 'Failed to export fresh leads' }));
+      throw new Error(err?.message || 'Failed to export fresh leads');
     }
     return response.blob();
   }

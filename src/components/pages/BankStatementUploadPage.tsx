@@ -183,14 +183,18 @@ export const BankStatementUploadPage = () => {
       return;
     }
 
+    const passwordValue = pdfPassword.trim();
+    if (!passwordValue) {
+      toast.error('Please enter your PDF password, or NA if your document has no password');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
       const formData = new FormData();
       formData.append('statement', selectedFile);
-      if (pdfPassword && pdfPassword.trim()) {
-        formData.append('pdf_password', pdfPassword.trim());
-      }
+      formData.append('pdf_password', passwordValue);
 
       const response = await apiService.uploadBankStatement(formData);
 
@@ -533,25 +537,28 @@ export const BankStatementUploadPage = () => {
                     )}
                   </div>
 
-                  {/* Optional PDF password (for password-protected statements) */}
+                  {/* Required PDF password (or NA if no password) */}
                   <div className="space-y-2">
                     <label className="block text-sm font-medium text-gray-700">
-                      PDF password <span className="text-gray-400 font-normal">(optional)</span>
+                      PDF password <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="password"
                       value={pdfPassword}
                       onChange={(e) => setPdfPassword(e.target.value)}
-                      placeholder="If your PDF is password-protected, enter it here"
+                      placeholder="Enter your PDF password, or NA if your document has no password"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       autoComplete="off"
                     />
+                    <p className="text-xs text-gray-500">
+                      Required. If your PDF is not password-protected, type NA.
+                    </p>
                   </div>
 
                   {/* Upload Button */}
                   <Button
                     onClick={handleManualUpload}
-                    disabled={!selectedFile || isLoading}
+                    disabled={!selectedFile || !pdfPassword.trim() || isLoading}
                     className="w-full h-12 text-base font-semibold bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300"
                   >
                     {isLoading ? (
@@ -575,7 +582,7 @@ export const BankStatementUploadPage = () => {
                       <li>Statement should cover last 6 months</li>
                       <li>File must be in PDF format</li>
                       <li>Maximum file size: 10MB</li>
-                      <li>If your PDF is password-protected, enter the password in the optional field above</li>
+                      <li>Enter your PDF password above; if the document has no password, type NA</li>
                     </ul>
                   </div>
                 </Card>

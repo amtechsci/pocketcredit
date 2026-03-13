@@ -158,7 +158,61 @@ async function getLeadExportData(partnerId, options = {}) {
   return exportRows;
 }
 
+/**
+ * Build export rows for fresh leads only (no active user – user_id IS NULL).
+ * For partners to download for calling/marketing. Date filter = lead_shared_at; end_date exclusive.
+ * @param {number} partnerId - Partner ID
+ * @param {Object} options - { start_date, end_date } (YYYY-MM-DD, end_date exclusive)
+ * @returns {Promise<Array>} Array of row objects for Excel
+ */
+async function getFreshLeadsExportData(partnerId, options = {}) {
+  const { start_date, end_date } = options;
+
+  let query = `
+    SELECT
+      pl.id as lead_id,
+      pl.first_name,
+      pl.last_name,
+      pl.mobile_number,
+      pl.pan_number,
+      pl.date_of_birth,
+      pl.lead_shared_at,
+      pl.utm_link
+    FROM partner_leads pl
+    WHERE pl.partner_id = ?
+      AND pl.user_id IS NULL
+  `;
+  const params = [partnerId];
+
+  if (start_date) {
+    query += ` AND DATE(pl.lead_shared_at) >= ?`;
+    params.push(start_date);
+  }
+  if (end_date) {
+    query += ` AND DATE(pl.lead_shared_at) < ?`;
+    params.push(end_date);
+  }
+
+  query += ` ORDER BY pl.lead_shared_at DESC`;
+
+  const rows = await executeQuery(query, params);
+
+  return (rows || []).map((row) => {
+    return {
+      'Lead ID': row.lead_id,
+      'First Name': row.first_name || '',
+      'Last Name': row.last_name || '',
+      'Mobile': row.mobile_number || '',
+      'PAN Number': row.pan_number || '',
+      'Date of Birth': row.date_of_birth ? formatDateDDMMYYYY(row.date_of_birth) : '',
+      'Lead Shared Date': row.lead_shared_at ? formatDateDDMMYYYY(row.lead_shared_at) : '',
+      'UTM Link': row.utm_link || ''
+    };
+  });
+}
+
 module.exports = {
   getLeadExportData,
+  getFreshLeadsExportData,
   formatDateDDMMYYYY
 };

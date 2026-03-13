@@ -485,6 +485,15 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
       });
     }
 
+    // PDF password is required: user must enter actual password or "NA" if document has no password
+    const passwordValue = (pdf_password != null && typeof pdf_password === 'string') ? pdf_password.trim() : '';
+    if (!passwordValue) {
+      return res.status(400).json({
+        success: false,
+        message: 'PDF password is required. Enter your PDF password, or NA if your document has no password.'
+      });
+    }
+
     // Check if user already has an uploaded bank statement
     const existing = await executeQuery(
       'SELECT id, status FROM user_bank_statements WHERE user_id = ?',
@@ -542,8 +551,10 @@ router.post('/upload-bank-statement', requireAuth, upload.single('statement'), a
 
     console.log(`✅ Bank statement uploaded: S3 Key: ${s3Key}`);
 
-    // Store optional PDF password in transaction_data for password-protected PDFs (admin/verification can use it)
-    const transactionData = (pdf_password && String(pdf_password).trim()) ? JSON.stringify({ pdf_password: String(pdf_password).trim() }) : null;
+    // Store PDF password in transaction_data for password-protected PDFs (admin/verification can use it).
+    // If user entered "NA" (no password on document), store null so it is not used as a real password.
+    const isNa = passwordValue.toUpperCase() === 'NA';
+    const transactionData = !isNa ? JSON.stringify({ pdf_password: passwordValue }) : null;
 
     // Store in database with status = 'completed' for manual uploads so step manager recognizes it as complete
     // No Digitap API calls - admin will trigger verification
