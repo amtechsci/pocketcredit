@@ -205,8 +205,10 @@ router.get('/', authenticateAdmin, async (req, res) => {
     let whereConditions = [];
     let queryParams = [];
 
-    // Exclude users moved to TVR from all status tabs (Submitted, Under Review, etc.)
-    whereConditions.push('(COALESCE(u.moved_to_tvr, 0) = 0)');
+    // Exclude users moved to TVR from status-specific tabs only; when status is 'all', show every loan so they are visible and searchable
+    if (effectiveStatus && effectiveStatus !== 'all') {
+      whereConditions.push('(COALESCE(u.moved_to_tvr, 0) = 0)');
+    }
 
     // Status filter (use effectiveStatus so sub_admin/nbfc_admin cannot see disallowed statuses)
     if (effectiveStatus && effectiveStatus !== 'all') {
@@ -1979,9 +1981,9 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
         }
       }
     } else {
-      // Full admin: global counts, exclude TVR users
+      // Full admin: global count for "All" tab includes every loan (including TVR users) so list and export match
       const totalResult = await executeQuery(
-        `SELECT COUNT(*) as total FROM loan_applications la INNER JOIN users u ON la.user_id = u.id WHERE (COALESCE(u.moved_to_tvr, 0) = 0)`
+        `SELECT COUNT(*) as total FROM loan_applications la`
       );
       total = totalResult[0].total;
 
@@ -2213,8 +2215,10 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
     let whereConditions = [];
     let queryParams = [];
 
-    // Exclude users moved to TVR from export
-    whereConditions.push('(COALESCE(u.moved_to_tvr, 0) = 0)');
+    // Exclude users moved to TVR from status-specific export only; when exporting 'all', include every loan
+    if (effectiveStatus && effectiveStatus !== 'all') {
+      whereConditions.push('(COALESCE(u.moved_to_tvr, 0) = 0)');
+    }
 
     // Status filter (use effectiveStatus for permission enforcement)
     if (effectiveStatus && effectiveStatus !== 'all') {
