@@ -500,8 +500,10 @@ async function processStatusBasedSMS(templates, currentTime) {
       if (!statuses || !Array.isArray(statuses) || statuses.length === 0) {
         continue;
       }
-      
-      const statusList = statuses.map(s => `'${s}'`).join(',');
+      // Map legacy/UI status values to DB values (loan_applications.status)
+      const STATUS_TO_DB = { ready_to_disburse: 'ready_for_disbursement' };
+      const normalizedStatuses = [...new Set(statuses.map(s => STATUS_TO_DB[s] || s))];
+      const statusList = normalizedStatuses.map(s => `'${s.replace(/'/g, "''")}'`).join(',');
       
       const query = `
         SELECT 

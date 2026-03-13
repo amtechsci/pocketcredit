@@ -63,8 +63,9 @@ const CATEGORIES = [
   { value: 'notification', label: 'Notification' }
 ];
 
+// Status values must match loan_applications.status in DB (disbursal = IDs in Disbursal queue)
 const STATUS_OPTIONS = [
-  'submitted', 'follow_up', 'ready_to_disburse', 'repeat_disbursal',
+  'submitted', 'follow_up', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal',
   'account_manager', 'overdue', 'cleared', 'rejected', 'hold'
 ];
 
