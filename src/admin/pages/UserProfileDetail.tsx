@@ -6193,11 +6193,12 @@ function UserProfileDetail() {
 
 
   // Helper function to calculate DPD (Days Past Due) - no timezone conversion
+  // Returns: positive = overdue, 0 = due today, negative = days until due (matches Account Manager page)
   const calculateDPD = (disbursedDate: string, dueDate: string | null, currentDate?: string) => {
     if (!dueDate) return 0;
     const current = currentDate || getCurrentDateString();
     const diff = daysDifference(dueDate, current);
-    return diff > 0 ? diff : 0;
+    return diff;
   };
 
   // Helper function to calculate penalty charges
@@ -6229,16 +6230,16 @@ function UserProfileDetail() {
     return principal * ratePerDay * days;
   };
 
-  // Helper function to calculate DPD for EMI loans - uses first EMI due date
+  // Helper function to calculate DPD for EMI loans - uses earliest EMI due date (by date)
+  // Use earliest due date in schedule so DPD is always based on first EMI (not first "unpaid" which can be wrong if first EMI is incorrectly marked paid)
   const calculateDPDForEmiLoan = (loan: any) => {
     // Try to get calculation from loanCalculations state
     const loanId = loan.id || loan.loanId;
     const calculation = loanCalculations[loanId];
     
-    // Get first PENDING EMI due date (skip paid EMIs - if first EMI paid, use second, etc.)
     let firstDueDate: string | null = null;
     
-    // Priority 1: emi_schedule - find first pending EMI
+    // Priority 1: emi_schedule - use earliest due date (by date) in schedule
     if (loan.emi_schedule) {
       try {
         const parsedSchedule = typeof loan.emi_schedule === 'string' 
@@ -6246,9 +6247,13 @@ function UserProfileDetail() {
           : loan.emi_schedule;
         
         if (Array.isArray(parsedSchedule) && parsedSchedule.length > 0) {
-          const pendingEmi = parsedSchedule.find((emi: any) => (emi.status || '').toLowerCase() !== 'paid');
-          if (pendingEmi) {
-            firstDueDate = pendingEmi.due_date || pendingEmi.dueDate || null;
+          const withDate = parsedSchedule
+            .map((emi: any) => emi.due_date || emi.dueDate)
+            .filter(Boolean);
+          if (withDate.length > 0) {
+            withDate.sort((a: string, b: string) => String(a).localeCompare(String(b)));
+            const d = withDate[0];
+            firstDueDate = d ? String(d).split('T')[0].split(' ')[0] : null;
           }
         }
       } catch (e) {
@@ -6256,17 +6261,18 @@ function UserProfileDetail() {
       }
     }
     
-    // Priority 2: calculation repayment schedule - find first pending
+    // Priority 2: calculation repayment schedule - use earliest due date
     if (!firstDueDate && calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 0) {
-      const pendingEmi = calculation.repayment.schedule.find((emi: any) => (emi.status || '').toLowerCase() !== 'paid');
-      if (pendingEmi) {
-        firstDueDate = pendingEmi.due_date || pendingEmi.dueDate || null;
-      } else {
-        firstDueDate = calculation.repayment.schedule[0]?.due_date || calculation.repayment.schedule[0]?.dueDate || null;
+      const withDate = calculation.repayment.schedule
+        .map((emi: any) => emi.due_date || emi.dueDate)
+        .filter(Boolean);
+      if (withDate.length > 0) {
+        withDate.sort((a: string, b: string) => String(a).localeCompare(String(b)));
+        firstDueDate = withDate[0] ? String(withDate[0]).split('T')[0].split(' ')[0] : null;
       }
     }
     
-    // Priority 3: processed_due_date (no status - use first or by paid count from emi_schedule)
+    // Priority 3: processed_due_date - use first (earliest) due date
     if (!firstDueDate && loan.processed_due_date) {
       try {
         const parsedDueDate = typeof loan.processed_due_date === 'string' 
@@ -6274,20 +6280,12 @@ function UserProfileDetail() {
           : loan.processed_due_date;
         
         if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
-          let idx = 0;
-          if (loan.emi_schedule) {
-            try {
-              const s = typeof loan.emi_schedule === 'string' ? JSON.parse(loan.emi_schedule) : loan.emi_schedule;
-              const paidCount = Array.isArray(s) ? s.filter((e: any) => (e.status || '').toLowerCase() === 'paid').length : 0;
-              idx = Math.min(paidCount, parsedDueDate.length - 1);
-            } catch { /* ignore */ }
-          }
-          firstDueDate = parsedDueDate[idx];
+          firstDueDate = String(parsedDueDate[0]).split('T')[0].split(' ')[0];
         } else if (typeof parsedDueDate === 'string') {
-          firstDueDate = parsedDueDate;
+          firstDueDate = String(parsedDueDate).split('T')[0].split(' ')[0];
         }
       } catch (e) {
-        firstDueDate = loan.processed_due_date;
+        firstDueDate = loan.processed_due_date ? String(loan.processed_due_date).split('T')[0].split(' ')[0] : null;
       }
     }
     
