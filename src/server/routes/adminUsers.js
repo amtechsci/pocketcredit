@@ -1399,19 +1399,21 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
     const countResult = await executeQuery(countQuery, queryParams);
     const total = countResult && countResult.length > 0 ? countResult[0].total : 0;
 
-    // Earliest EMI due date in schedule (by date). DPD = today - that due_date.
-    // Use earliest due date so DPD is always based on the first EMI, not the first "unpaid" (which can be wrong if first EMI is incorrectly marked paid).
-    const getEarliestEmiDueDate = (row) => {
+    // First PENDING (unpaid) EMI due date. DPD = today - that due_date.
+    // When first EMI is paid, use next EMI due date (e.g. DPD -31 = 31 days until next due).
+    const getFirstPendingEmiDueDate = (row) => {
       if (row.emi_schedule) {
         try {
           const schedule = typeof row.emi_schedule === 'string' ? JSON.parse(row.emi_schedule) : row.emi_schedule;
           if (Array.isArray(schedule) && schedule.length > 0) {
-            const withDate = schedule
-              .map(emi => ({ due: emi.due_date || emi.dueDate }))
-              .filter(x => x.due);
-            if (withDate.length > 0) {
-              withDate.sort((a, b) => String(a.due).localeCompare(String(b.due)));
-              const d = withDate[0].due;
+            const unpaid = schedule.filter(emi => (emi.status || '').toLowerCase() !== 'paid');
+            if (unpaid.length > 0) {
+              unpaid.sort((a, b) => {
+                const da = String(a.due_date || a.dueDate || '');
+                const db = String(b.due_date || b.dueDate || '');
+                return da.localeCompare(db);
+              });
+              const d = unpaid[0].due_date || unpaid[0].dueDate;
               return d ? String(d).split('T')[0].split(' ')[0] : null;
             }
           }
@@ -1474,7 +1476,7 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
     `;
     const allRows = await executeQuery(usersQuery, queryParams);
     const list = allRows || [];
-    const withDpd = list.map(r => ({ ...r, _dpd: daysDiff(getEarliestEmiDueDate(r), todayStr) }));
+    const withDpd = list.map(r => ({ ...r, _dpd: daysDiff(getFirstPendingEmiDueDate(r), todayStr) }));
     const sorted = withDpd.sort((a, b) => {
       const ad = a._dpd != null ? a._dpd : -9999;
       const bd = b._dpd != null ? b._dpd : -9999;
