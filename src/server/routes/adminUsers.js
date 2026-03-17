@@ -1371,12 +1371,24 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
     whereConditions.push(`la.status IN ('account_manager', 'overdue')`);
 
     if (search) {
-      whereConditions.push(`(
-        u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR u.phone LIKE ? OR u.alternate_mobile LIKE ? OR
-        la.application_number LIKE ?
-      )`);
-      const searchTerm = `%${search}%`;
-      queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+      const trimmed = String(search).trim();
+      const pllMatch = trimmed.match(/^pll(\d+)$/i);
+      const loanIdBySearch = pllMatch ? parseInt(pllMatch[1], 10) : (/^\d+$/.test(trimmed) ? parseInt(trimmed, 10) : null);
+      if (loanIdBySearch != null) {
+        whereConditions.push(`(
+          u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR u.phone LIKE ? OR u.alternate_mobile LIKE ? OR
+          la.application_number LIKE ? OR la.id = ?
+        )`);
+        const searchTerm = `%${trimmed}%`;
+        queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, loanIdBySearch);
+      } else {
+        whereConditions.push(`(
+          u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR u.phone LIKE ? OR u.alternate_mobile LIKE ? OR
+          la.application_number LIKE ?
+        )`);
+        const searchTerm = `%${trimmed}%`;
+        queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+      }
     }
 
     const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
@@ -1387,20 +1399,19 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
     const countResult = await executeQuery(countQuery, queryParams);
     const total = countResult && countResult.length > 0 ? countResult[0].total : 0;
 
-    // Get first PENDING EMI due date (skip paid EMIs). DPD = today - that due_date.
-    const getFirstPendingEmiDueDate = (row) => {
+    // Earliest EMI due date in schedule (by date). DPD = today - that due_date.
+    // Use earliest due date so DPD is always based on the first EMI, not the first "unpaid" (which can be wrong if first EMI is incorrectly marked paid).
+    const getEarliestEmiDueDate = (row) => {
       if (row.emi_schedule) {
         try {
           const schedule = typeof row.emi_schedule === 'string' ? JSON.parse(row.emi_schedule) : row.emi_schedule;
           if (Array.isArray(schedule) && schedule.length > 0) {
-            const unpaid = schedule.filter(emi => (emi.status || '').toLowerCase() !== 'paid');
-            if (unpaid.length > 0) {
-              unpaid.sort((a, b) => {
-                const da = String(a.due_date || a.dueDate || '');
-                const db = String(b.due_date || b.dueDate || '');
-                return da.localeCompare(db);
-              });
-              const d = unpaid[0].due_date || unpaid[0].dueDate;
+            const withDate = schedule
+              .map(emi => ({ due: emi.due_date || emi.dueDate }))
+              .filter(x => x.due);
+            if (withDate.length > 0) {
+              withDate.sort((a, b) => String(a.due).localeCompare(String(b.due)));
+              const d = withDate[0].due;
               return d ? String(d).split('T')[0].split(' ')[0] : null;
             }
           }
@@ -1463,7 +1474,7 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
     `;
     const allRows = await executeQuery(usersQuery, queryParams);
     const list = allRows || [];
-    const withDpd = list.map(r => ({ ...r, _dpd: daysDiff(getFirstPendingEmiDueDate(r), todayStr) }));
+    const withDpd = list.map(r => ({ ...r, _dpd: daysDiff(getEarliestEmiDueDate(r), todayStr) }));
     const sorted = withDpd.sort((a, b) => {
       const ad = a._dpd != null ? a._dpd : -9999;
       const bd = b._dpd != null ? b._dpd : -9999;

@@ -406,21 +406,19 @@ router.get('/', authenticateAdmin, async (req, res) => {
         if (!allRows || allRows.length === 0) {
           applications = [];
         } else {
-          // Add _dpd, sort by DPD DESC, slice for page
+          // Add _dpd, sort by DPD DESC, slice for page. Use earliest EMI due date (by date) so DPD is based on first EMI.
           const todayStr = new Date().toISOString().slice(0, 10);
-          const getFirstPendingEmiDueDate = (row) => {
+          const getEarliestEmiDueDate = (row) => {
             if (row.emi_schedule) {
               try {
                 const schedule = typeof row.emi_schedule === 'string' ? JSON.parse(row.emi_schedule) : row.emi_schedule;
                 if (Array.isArray(schedule) && schedule.length > 0) {
-                  const unpaid = schedule.filter(emi => (emi.status || '').toLowerCase() !== 'paid');
-                  if (unpaid.length > 0) {
-                    unpaid.sort((a, b) => {
-                      const da = String(a.due_date || a.dueDate || '');
-                      const db = String(b.due_date || b.dueDate || '');
-                      return da.localeCompare(db);
-                    });
-                    const d = unpaid[0].due_date || unpaid[0].dueDate;
+                  const withDate = schedule
+                    .map(emi => ({ due: emi.due_date || emi.dueDate }))
+                    .filter(x => x.due);
+                  if (withDate.length > 0) {
+                    withDate.sort((a, b) => String(a.due).localeCompare(String(b.due)));
+                    const d = withDate[0].due;
                     return d ? String(d).split('T')[0].split(' ')[0] : null;
                   }
                 }
@@ -446,7 +444,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
             const cur = new Date(tStr || todayStr);
             return Math.floor((cur - due) / (24 * 60 * 60 * 1000));
           };
-          const withDpd = allRows.map(r => ({ ...r, _dpd: daysDiff(getFirstPendingEmiDueDate(r), todayStr) }));
+          const withDpd = allRows.map(r => ({ ...r, _dpd: daysDiff(getEarliestEmiDueDate(r), todayStr) }));
           const sorted = withDpd.sort((a, b) => {
             const ad = a._dpd != null ? a._dpd : -9999;
             const bd = b._dpd != null ? b._dpd : -9999;
@@ -470,20 +468,18 @@ router.get('/', authenticateAdmin, async (req, res) => {
     const assignedCol = subCat === 'verify_user' ? 'assigned_verify_admin_id' : subCat === 'qa_user' ? 'assigned_qa_admin_id' : subCat === 'account_manager' ? 'assigned_account_manager_id' : subCat === 'recovery_officer' ? 'assigned_recovery_officer_id' : subCat === 'follow_up_user' ? 'assigned_follow_up_admin_id' : null;
     const tempCol = subCat === 'verify_user' ? 'temp_assigned_verify_admin_id' : subCat === 'qa_user' ? 'temp_assigned_qa_admin_id' : subCat === 'account_manager' ? 'temp_assigned_account_manager_id' : subCat === 'recovery_officer' ? 'temp_assigned_recovery_officer_id' : subCat === 'follow_up_user' ? 'temp_assigned_follow_up_admin_id' : null;
 
-    // DPD helper for account_manager/overdue: earliest PENDING EMI due date
-    const getFirstPendingEmiDueDate = (row) => {
+    // DPD helper for account_manager/overdue: earliest EMI due date (by date) so DPD is based on first EMI
+    const getEarliestEmiDueDate = (row) => {
       if (row.emi_schedule) {
         try {
           const schedule = typeof row.emi_schedule === 'string' ? JSON.parse(row.emi_schedule) : row.emi_schedule;
           if (Array.isArray(schedule) && schedule.length > 0) {
-            const unpaid = schedule.filter(emi => (emi.status || '').toLowerCase() !== 'paid');
-            if (unpaid.length > 0) {
-              unpaid.sort((a, b) => {
-                const da = String(a.due_date || a.dueDate || '');
-                const db = String(b.due_date || b.dueDate || '');
-                return da.localeCompare(db);
-              });
-              const d = unpaid[0].due_date || unpaid[0].dueDate;
+            const withDate = schedule
+              .map(emi => ({ due: emi.due_date || emi.dueDate }))
+              .filter(x => x.due);
+            if (withDate.length > 0) {
+              withDate.sort((a, b) => String(a.due).localeCompare(String(b.due)));
+              const d = withDate[0].due;
               return d ? String(d).split('T')[0].split(' ')[0] : null;
             }
           }
@@ -604,7 +600,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
         plan_name: app.plan_name || null,
         // DPD for account_manager/overdue (first pending EMI due date)
         dpd: (app.status === 'account_manager' || app.status === 'overdue')
-          ? (daysDiff(getFirstPendingEmiDueDate(app), todayStr) ?? 0)
+          ? (daysDiff(getEarliestEmiDueDate(app), todayStr) ?? 0)
           : undefined,
         plan_snapshot: app.plan_snapshot || null,
         // Extension information

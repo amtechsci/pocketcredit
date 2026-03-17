@@ -147,7 +147,7 @@ export function AccountManagerPage() {
             type="text"
             value={searchTerm}
             onChange={(e) => handleSearch(e.target.value)}
-            placeholder="Search by name, email, phone, alt number, application number..."
+            placeholder="Search by name, email, phone, alt number, application number, or loan ID (e.g. PLL790)"
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
           />
         </div>
