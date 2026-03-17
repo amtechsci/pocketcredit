@@ -87,6 +87,18 @@ router.get('/', authenticateAdmin, async (req, res) => {
       }
     }
 
+    // Ensure all account_manager loans have an assigned account manager (backfill any that don't).
+    // Run when an account_manager sub_admin loads their list OR when main admin loads with status=account_manager.
+    const isAccountManagerView = subCategory === 'account_manager' || status === 'account_manager';
+    if (isAccountManagerView) {
+      try {
+        const { assignUnassignedAccountManagerLoans } = require('../services/adminAssignmentService');
+        await assignUnassignedAccountManagerLoans();
+      } catch (backfillErr) {
+        console.error('Backfill unassigned account_manager loans (non-fatal):', backfillErr.message);
+      }
+    }
+
     // Build the base query with basic JOINs to get essential user data
     let baseQuery = `
       SELECT DISTINCT
@@ -280,8 +292,10 @@ router.get('/', authenticateAdmin, async (req, res) => {
       whereConditions.push('la.loan_amount > 8000');
     }
 
-    // Sub-admin: restrict to assigned applications and allowed statuses
-    if (req.admin?.role === 'sub_admin' && subCategory) {
+    // Sub-admin only: restrict to assigned applications. Main admin (admin/super_admin) always sees all
+    // loans for the selected status (e.g. all account_manager loans when status=account_manager).
+    const isSubAdmin = req.admin?.role === 'sub_admin';
+    if (isSubAdmin && subCategory) {
       const adminId = req.admin.id;
       if (subCategory === 'verify_user') {
         whereConditions.push('(la.assigned_verify_admin_id = ? OR la.temp_assigned_verify_admin_id = ?)');
@@ -380,14 +394,14 @@ router.get('/', authenticateAdmin, async (req, res) => {
     const offset = (parseInt(page) - 1) * parseInt(limit);
     const limitNum = parseInt(limit) || 20;
 
-    // For account_manager/overdue: fetch all, add DPD, sort by DPD DESC, then paginate
+    // For account_manager/overdue: fetch all matching rows, add DPD, sort by DPD DESC, then paginate.
+    // Do not apply a row limit here so every assigned loan is included (otherwise loans outside
+    // the limit would never appear in the list).
     const needsDpdSort = (effectiveStatus === 'account_manager' || effectiveStatus === 'overdue');
-    const maxFetch = 5000;
 
     let applications;
     try {
       if (needsDpdSort) {
-        baseQuery += ` LIMIT ${maxFetch}`;
         const allRows = await executeQuery(baseQuery, queryParams);
         if (!allRows || allRows.length === 0) {
           applications = [];

@@ -566,6 +566,25 @@ async function assignAccountManagerForLoan(loanId, userId) {
 }
 
 /**
+ * Assign account managers to any loans in status 'account_manager' that have
+ * assigned_account_manager_id (and temp) NULL. Ensures all account_manager loans
+ * appear in some account manager's list.
+ */
+async function assignUnassignedAccountManagerLoans() {
+  await ensureDb();
+  const rows = await executeQuery(
+    `SELECT id, user_id FROM loan_applications
+     WHERE status = 'account_manager'
+       AND assigned_account_manager_id IS NULL
+       AND (temp_assigned_account_manager_id IS NULL OR temp_assigned_account_manager_id = '')`
+  );
+  if (!rows || rows.length === 0) return;
+  for (const row of rows) {
+    await assignAccountManagerForLoan(row.id, row.user_id);
+  }
+}
+
+/**
  * Assign QA user when loan status becomes qa_verification.
  */
 async function assignQAUserForLoan(loanId) {
@@ -739,6 +758,7 @@ module.exports = {
   assignVerifyUserForLoan,
   assignQAUserForLoan,
   assignAccountManagerForLoan,
+  assignUnassignedAccountManagerLoans,
   assignRecoveryOfficerForLoan,
   assignFollowUpUserForLoan,
   redistributeOnDeactivate,
