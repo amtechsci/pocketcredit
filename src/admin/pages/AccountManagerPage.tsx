@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminApiService } from '../../services/adminApi';
-import { Search, Eye, ArrowLeft, Briefcase } from 'lucide-react';
+import { Search, Eye, ArrowLeft, Briefcase, Download } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface AccountManagerUser {
@@ -13,6 +13,7 @@ interface AccountManagerUser {
   alternate_mobile?: string | null;
   total_loans: number;
   principal_amount: number;
+  processed_amount?: number;
   exhausted_days: number;
   dpd: number; // Days Past Due: positive = overdue, negative = days until due, 0 = due today
   outstanding_amount: number;
@@ -29,6 +30,9 @@ interface AccountManagerUser {
   loan_status: string;
   disbursed_at?: string;
   updated_at: string;
+  email?: string | null;
+  personal_email?: string | null;
+  official_email?: string | null;
 }
 
 export function AccountManagerPage() {
@@ -96,6 +100,103 @@ export function AccountManagerPage() {
     }).format(amount);
   };
 
+  const csvEscape = (value: unknown) => {
+    const text = value == null ? '' : String(value);
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+
+  const formatCsvNumber = (value: number | string | null | undefined, decimals = 2) => {
+    if (value == null || value === '') return '';
+    const num = typeof value === 'number' ? value : Number(value);
+    if (Number.isNaN(num)) return String(value);
+    return num.toFixed(decimals);
+  };
+
+  const getEmiAmount = (emi?: { amount?: number; status?: string } | null) => {
+    if (!emi) return '';
+    return formatCsvNumber(emi.amount, 2);
+  };
+
+  const getEmiDpd = (loan: AccountManagerUser, emiIndex: number) => {
+    if (!loan.emi_breakdown || loan.emi_breakdown.length <= emiIndex) return '';
+    const targetDueDate = loan.emi_breakdown[emiIndex]?.due_date;
+    if (!targetDueDate) return '';
+    const today = new Date();
+    const due = new Date(targetDueDate);
+    return Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+  };
+
+  const handleDownloadCsv = async () => {
+    try {
+      setLoading(true);
+      const response = await adminApiService.getAccountManagerUsers(1, 5000, searchTerm);
+      if (response.status !== 'success' || !response.data?.users) {
+        toast.error(response.message || 'Failed to download CSV');
+        return;
+      }
+
+      const rows: AccountManagerUser[] = response.data.users || [];
+      const headers = [
+        'Name',
+        'primary number',
+        'alt number',
+        'primary mail',
+        'alt mail',
+        'principal loan',
+        'processed amount',
+        'exhausted days',
+        'EMI 1',
+        'EMI 1 : DPD',
+        'EMI 2',
+        'EMI 2 : DPD',
+        'total loans',
+        'loan id'
+      ];
+
+      const csvRows = rows.map((row) => {
+        const name = [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || '—';
+        const primaryMail = row.email || '';
+        const altMail = row.personal_email || row.official_email || '';
+        const emi1 = row.emi_breakdown?.[0];
+        const emi2 = row.emi_breakdown?.[1];
+
+        return [
+          csvEscape(name),
+          csvEscape(row.phone || ''),
+          csvEscape(row.alternate_mobile || ''),
+          csvEscape(primaryMail),
+          csvEscape(altMail),
+          csvEscape(formatCsvNumber(row.principal_amount, 0)),
+          csvEscape(formatCsvNumber(row.processed_amount ?? row.principal_amount, 2)),
+          csvEscape(formatCsvNumber(row.exhausted_days, 0)),
+          csvEscape(getEmiAmount(emi1)),
+          csvEscape(getEmiDpd(row, 0)),
+          csvEscape(getEmiAmount(emi2)),
+          csvEscape(getEmiDpd(row, 1)),
+          csvEscape(formatCsvNumber(row.total_loans, 0)),
+          csvEscape(`PLL${row.loan_application_id}`)
+        ].join(',');
+      });
+
+      const csv = [headers.map(csvEscape).join(','), ...csvRows].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `account_manager_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success('CSV downloaded successfully');
+    } catch (error) {
+      console.error('CSV download failed:', error);
+      toast.error('Failed to download CSV');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const totalPages = Math.ceil(totalUsers / pageSize);
 
   const getLoanStatusBadge = (loanStatus: string) => {
@@ -127,16 +228,25 @@ export function AccountManagerPage() {
             <ArrowLeft className="w-4 h-4" />
             Back
           </button>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
               <h1 className="text-2xl font-bold text-gray-900 mb-2">Account Manager</h1>
               <p className="text-gray-600">
                 Disbursed loans in Account Manager or Overdue status
               </p>
             </div>
-            <div className="text-right">
-              <div className="text-3xl font-bold text-purple-600">{totalUsers}</div>
-              <div className="text-sm text-gray-600">Total Loans</div>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={handleDownloadCsv}
+                className="inline-flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-medium text-purple-700 hover:bg-purple-100"
+              >
+                <Download className="w-4 h-4" />
+                Download CSV
+              </button>
+              <div className="text-right">
+                <div className="text-3xl font-bold text-purple-600">{totalUsers}</div>
+                <div className="text-sm text-gray-600">Total Loans</div>
+              </div>
             </div>
           </div>
         </div>
