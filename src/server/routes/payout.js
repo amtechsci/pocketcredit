@@ -47,7 +47,8 @@ router.post('/disburse-loan', authenticateAdmin, async (req, res) => {
                 u.email,
                 u.phone,
                 u.personal_email,
-                u.official_email
+                u.official_email,
+                COALESCE(u.repeat_qa, 0) as user_repeat_qa
             FROM loan_applications la
             JOIN users u ON la.user_id = u.id
             WHERE la.id = ?
@@ -69,6 +70,12 @@ router.post('/disburse-loan', authenticateAdmin, async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: `Loan must be in 'ready_for_disbursement' or 'ready_to_repeat_disbursal' status. Current status: ${loan.status}`
+            });
+        }
+        if (loan.status === 'ready_to_repeat_disbursal' && Number(loan.user_repeat_qa) === 1) {
+            return res.status(400).json({
+                success: false,
+                message: 'Repeat loan is pending Repeat QA verification. Main admin must mark QA verified before disbursement.'
             });
         }
 
@@ -483,7 +490,8 @@ router.get('/ready-for-disbursement', authenticateAdmin, async (req, res) => {
             FROM loan_applications la
             JOIN users u ON la.user_id = u.id
             LEFT JOIN bank_details bd ON u.id = bd.user_id AND bd.is_primary = 1
-            WHERE la.status = 'ready_for_disbursement' OR la.status = 'ready_to_repeat_disbursal'
+            WHERE la.status = 'ready_for_disbursement'
+               OR (la.status = 'ready_to_repeat_disbursal' AND COALESCE(u.repeat_qa, 0) = 0)
             ORDER BY la.created_at DESC
         `;
 

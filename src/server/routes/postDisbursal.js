@@ -448,6 +448,18 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
       params
     );
 
+    if (
+      agreement_signed &&
+      application.status === 'repeat_disbursal' &&
+      application.user_id
+    ) {
+      try {
+        await executeQuery('UPDATE users SET repeat_qa = 1 WHERE id = ?', [application.user_id]);
+      } catch (e) {
+        console.warn('repeat_qa update (postDisbursal progress):', e.message);
+      }
+    }
+
     res.json({
       success: true,
       message: 'Progress updated successfully'
@@ -858,6 +870,14 @@ router.post('/complete/:applicationId', requireAuth, async (req, res) => {
        WHERE id = ?`,
       [newStatus, applicationId]
     );
+
+    if (isRepeatLoan && userId) {
+      try {
+        await executeQuery('UPDATE users SET repeat_qa = 1 WHERE id = ?', [userId]);
+      } catch (e) {
+        console.warn('repeat_qa update (postDisbursal complete):', e.message);
+      }
+    }
 
     console.log(`[Post-Disbursal] Flow completed - status updated from ${application.status} to ${newStatus}`);
 

@@ -26,14 +26,14 @@ router.post('/webhook', async (req, res) => {
 
     // Find loan application by transaction ID
     const transactionId = entTransactionId || docTransactionId;
-    const [applications] = await executeQuery(
+    const applicationRows = await executeQuery(
       `SELECT id, user_id, status 
        FROM loan_applications 
        WHERE clickwrap_ent_transaction_id = ? OR clickwrap_doc_transaction_id = ?`,
       [transactionId, transactionId]
     );
 
-    if (!applications || applications.length === 0) {
+    if (!applicationRows || applicationRows.length === 0) {
       console.warn('⚠️ No loan application found for transaction:', transactionId);
       return res.status(404).json({
         success: false,
@@ -41,7 +41,7 @@ router.post('/webhook', async (req, res) => {
       });
     }
 
-    const application = applications[0];
+    const application = applicationRows[0];
 
     // Check if all signers have signed
     const allSigned = signersInfo && signersInfo.every((signer) => signer.status === 'SIGNED');
@@ -70,6 +70,13 @@ router.post('/webhook', async (req, res) => {
         );
         console.log(`✅ Loan agreement marked as signed for application: ${application.id}`);
         console.log(`✅ Loan status updated from ${application.status} to ${newStatus}`);
+        if (isRepeatLoan && application.user_id) {
+          try {
+            await executeQuery('UPDATE users SET repeat_qa = 1 WHERE id = ?', [application.user_id]);
+          } catch (e) {
+            console.warn('repeat_qa update (webhook):', e.message);
+          }
+        }
       } else {
         await executeQuery(
           `UPDATE loan_applications 

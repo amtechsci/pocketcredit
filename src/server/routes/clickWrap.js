@@ -503,6 +503,13 @@ router.get('/callback', async (req, res) => {
          WHERE id = ?`,
         [newStatus, s3Key, s3Key, applicationId]
       );
+      if (isRepeatLoan && application.user_id) {
+        try {
+          await executeQuery('UPDATE users SET repeat_qa = 1 WHERE id = ?', [application.user_id]);
+        } catch (e) {
+          console.warn('repeat_qa update (clickWrap):', e.message);
+        }
+      }
     } else {
       console.log(`⚠️ Agreement signed but status is ${application.status} (not disbursal/repeat_disbursal), skipping status update`);
       await executeQuery(

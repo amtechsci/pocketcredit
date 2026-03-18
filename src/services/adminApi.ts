@@ -550,6 +550,11 @@ class AdminApiService {
     return this.request('GET', '/applications', undefined, filters);
   }
 
+  /** Main admin: clear repeat_qa for users (loans then appear in Repeat Ready for Disbursal / payout) */
+  async verifyRepeatQa(userIds: string[]): Promise<ApiResponse<any>> {
+    return this.request('POST', '/applications/repeat-qa-verified', { userIds });
+  }
+
   async getApplicationDetails(applicationId: string): Promise<ApiResponse<any>> {
     return this.request('GET', `/applications/${applicationId}`);
   }

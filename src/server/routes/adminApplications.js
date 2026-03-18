@@ -63,7 +63,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
       loanType = 'all',
       dateFrom = '',
       dateTo = '',
-      loanAmountFilter = ''
+      loanAmountFilter = '',
+      repeatQaPending = ''
     } = req.query;
 
     // Enforce status by role: sub-admins and NBFC only see allowed statuses (backend permission)
@@ -86,6 +87,12 @@ router.get('/', authenticateAdmin, async (req, res) => {
         effectiveStatus = 'all';
       }
     }
+
+    const isMainAdmin = req.admin?.role !== 'nbfc_admin' && req.admin?.role !== 'sub_admin';
+    const showRepeatQaQueue =
+      isMainAdmin &&
+      String(repeatQaPending) === '1' &&
+      effectiveStatus === 'ready_to_repeat_disbursal';
 
     // Ensure all account_manager loans have an assigned account manager (backfill any that don't).
     // Run when an account_manager sub_admin loads their list OR when main admin loads with status=account_manager.
@@ -236,6 +243,13 @@ router.get('/', authenticateAdmin, async (req, res) => {
             AND la2.id != la.id
             AND la2.status NOT IN ('cleared', 'rejected', 'cancelled')
         )`);
+      }
+      if (effectiveStatus === 'ready_to_repeat_disbursal') {
+        if (showRepeatQaQueue) {
+          whereConditions.push('COALESCE(u.repeat_qa, 0) = 1');
+        } else {
+          whereConditions.push('COALESCE(u.repeat_qa, 0) = 0');
+        }
       }
     }
 
@@ -751,6 +765,48 @@ router.get('/tvr-ids', authenticateAdmin, async (req, res) => {
       status: 'error',
       message: 'Failed to fetch TVR IDs'
     });
+  }
+});
+
+/** Main admin only: clear users.repeat_qa so repeat loans appear in Ready for Repeat Disbursal / payout */
+router.post('/repeat-qa-verified', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    if (req.admin?.role === 'nbfc_admin' || req.admin?.role === 'sub_admin') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Only main admin can mark repeat QA verified'
+      });
+    }
+    const { userIds } = req.body || {};
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'userIds (non-empty array) is required'
+      });
+    }
+    const unique = [...new Set(userIds.map((id) => String(id)))];
+    const placeholders = unique.map(() => '?').join(',');
+    const result = await executeQuery(
+      `UPDATE users u
+       SET u.repeat_qa = 0
+       WHERE u.id IN (${placeholders})
+         AND COALESCE(u.repeat_qa, 0) = 1
+         AND EXISTS (
+           SELECT 1 FROM loan_applications la
+           WHERE la.user_id = u.id AND la.status = 'ready_to_repeat_disbursal'
+         )`,
+      unique
+    );
+    const affected = result?.affectedRows ?? result?.changedRows ?? unique.length;
+    res.json({
+      status: 'success',
+      message: 'Repeat QA verified for selected user(s)',
+      data: { updated: affected }
+    });
+  } catch (error) {
+    console.error('repeat-qa-verified error:', error);
+    res.status(500).json({ status: 'error', message: error.message || 'Failed to update' });
   }
 });
 
@@ -1947,13 +2003,16 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
     let amountResult = [{ totalAmount: 0, averageAmount: 0 }];
 
     if (isNbfcAdmin) {
-      // NBFC: only counts for allowed statuses (no assignment filter), exclude TVR users
+      // NBFC: repeat ready only after main admin clears repeat_qa
       const statusResult = await executeQuery(
         `SELECT la.status, COUNT(*) as count FROM loan_applications la
          INNER JOIN users u ON la.user_id = u.id
-         WHERE la.status IN (?, ?, ?) AND (COALESCE(u.moved_to_tvr, 0) = 0)
-         GROUP BY la.status`,
-        ['overdue', 'ready_for_disbursement', 'ready_to_repeat_disbursal']
+         WHERE (COALESCE(u.moved_to_tvr, 0) = 0)
+         AND (
+           la.status IN ('overdue', 'ready_for_disbursement')
+           OR (la.status = 'ready_to_repeat_disbursal' AND COALESCE(u.repeat_qa, 0) = 0)
+         )
+         GROUP BY la.status`
       );
       statusResult.forEach(row => {
         statusCounts[row.status] = row.count;
@@ -1962,8 +2021,11 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       const amountRows = await executeQuery(
         `SELECT SUM(la.loan_amount) as totalAmount, AVG(la.loan_amount) as averageAmount
          FROM loan_applications la INNER JOIN users u ON la.user_id = u.id
-         WHERE la.status IN (?, ?, ?) AND (COALESCE(u.moved_to_tvr, 0) = 0)`,
-        ['overdue', 'ready_for_disbursement', 'ready_to_repeat_disbursal']
+         WHERE (COALESCE(u.moved_to_tvr, 0) = 0)
+         AND (
+           la.status IN ('overdue', 'ready_for_disbursement')
+           OR (la.status = 'ready_to_repeat_disbursal' AND COALESCE(u.repeat_qa, 0) = 0)
+         )`
       );
       amountResult = amountRows.length ? amountRows : [{ totalAmount: 0, averageAmount: 0 }];
     } else if (isSubAdmin && subCat && adminId) {
@@ -2040,6 +2102,18 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
         INNER JOIN users u ON la.user_id = u.id
         WHERE (COALESCE(u.moved_to_tvr, 0) = 0)
       `);
+
+      const repeatSplitRows = await executeQuery(`
+        SELECT 
+          SUM(CASE WHEN COALESCE(u.repeat_qa, 0) = 0 THEN 1 ELSE 0 END) AS ready_repeat_cleared,
+          SUM(CASE WHEN COALESCE(u.repeat_qa, 0) = 1 THEN 1 ELSE 0 END) AS repeat_qa_pending
+        FROM loan_applications la
+        INNER JOIN users u ON la.user_id = u.id
+        WHERE la.status = 'ready_to_repeat_disbursal' AND (COALESCE(u.moved_to_tvr, 0) = 0)
+      `);
+      const rs = repeatSplitRows[0] || {};
+      statusCounts['ready_to_repeat_disbursal_cleared'] = Number(rs.ready_repeat_cleared) || 0;
+      statusCounts['ready_to_repeat_disbursal_qa_pending'] = Number(rs.repeat_qa_pending) || 0;
     }
 
     // TVR user count: full admin gets total, follow_up_user gets count of TVR users assigned to them
@@ -2072,7 +2146,14 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       disbursalApplications: statusCounts['disbursal'] || 0,
       readyForDisbursementApplications: statusCounts['ready_for_disbursement'] || 0,
       repeatDisbursalApplications: statusCounts['repeat_disbursal'] || 0,
-      readyToRepeatDisbursalApplications: statusCounts['ready_to_repeat_disbursal'] || 0,
+      readyToRepeatDisbursalApplications:
+        isNbfcAdmin
+          ? statusCounts['ready_to_repeat_disbursal'] || 0
+          : statusCounts['ready_to_repeat_disbursal_cleared'] ??
+            statusCounts['ready_to_repeat_disbursal'] ??
+            0,
+      repeatQaPendingApplications:
+        isNbfcAdmin ? 0 : Number(statusCounts['ready_to_repeat_disbursal_qa_pending']) || 0,
       accountManagerApplications: statusCounts['account_manager'] || 0,
       overdueApplications: statusCounts['overdue'] || 0,
       clearedApplications: statusCounts['cleared'] || 0,
@@ -2114,7 +2195,8 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
       loanType = 'all',
       search = '',
       dateFrom = '',
-      dateTo = ''
+      dateTo = '',
+      repeatQaPending = ''
     } = req.query;
 
     // Enforce status by role (same as list endpoint)
@@ -2137,6 +2219,12 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         effectiveStatus = 'all';
       }
     }
+
+    const isMainAdminExport = req.admin?.role !== 'nbfc_admin' && req.admin?.role !== 'sub_admin';
+    const showRepeatQaQueueExport =
+      isMainAdminExport &&
+      String(repeatQaPending) === '1' &&
+      effectiveStatus === 'ready_to_repeat_disbursal';
 
     // Build the same query as the main GET endpoint but without pagination
     let baseQuery = `
@@ -2258,6 +2346,13 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
             AND la2.id != la.id
             AND la2.status NOT IN ('cleared', 'rejected', 'cancelled')
         )`);
+      }
+      if (effectiveStatus === 'ready_to_repeat_disbursal') {
+        if (showRepeatQaQueueExport) {
+          whereConditions.push('COALESCE(u.repeat_qa, 0) = 1');
+        } else {
+          whereConditions.push('COALESCE(u.repeat_qa, 0) = 0');
+        }
       }
     }
 
@@ -2517,6 +2612,7 @@ router.get('/export/idfc-bank-csv', authenticateAdmin, async (req, res) => {
       INNER JOIN users u ON la.user_id = u.id
       LEFT JOIN bank_details ub ON u.id = ub.user_id AND ub.is_primary = 1
       WHERE la.status = ? AND (COALESCE(u.moved_to_tvr, 0) = 0)
+        ${effectiveStatus === 'ready_to_repeat_disbursal' ? 'AND COALESCE(u.repeat_qa, 0) = 0' : ''}
       ORDER BY la.id ASC
     `;
 

@@ -52,11 +52,23 @@ const initializeDatabase = async () => {
         // Don't exit the process on pool errors, let the retry logic handle it
       });
       
-      // Test the connection with validation
+      // Test the connection with validation + ensure users.repeat_qa for repeat-loan QA gate
       const connection = await getValidatedConnection();
+      try {
+        const [cols] = await connection.execute(
+          "SELECT COUNT(*) AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'repeat_qa'"
+        );
+        if (Number(cols[0]?.c) === 0) {
+          await connection.execute(
+            'ALTER TABLE users ADD COLUMN repeat_qa TINYINT(1) NOT NULL DEFAULT 0 COMMENT \'1=pending repeat QA until main admin clears\''
+          );
+          console.log('✅ Added users.repeat_qa column');
+        }
+      } catch (e) {
+        console.warn('users.repeat_qa migration (non-fatal):', e.message);
+      }
       connection.release();
-      
-      
+
       return pool;
     }
     return pool;

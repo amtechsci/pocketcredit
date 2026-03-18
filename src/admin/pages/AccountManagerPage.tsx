@@ -112,17 +112,10 @@ export function AccountManagerPage() {
     return num.toFixed(decimals);
   };
 
-  const getEmiAmount = (emi?: { amount?: number; status?: string } | null) => {
-    if (!emi) return '';
-    return formatCsvNumber(emi.amount, 2);
-  };
-
-  const getEmiDpd = (loan: AccountManagerUser, emiIndex: number) => {
-    if (!loan.emi_breakdown || loan.emi_breakdown.length <= emiIndex) return '';
-    const targetDueDate = loan.emi_breakdown[emiIndex]?.due_date;
-    if (!targetDueDate) return '';
+  const dpdFromDueDate = (dueDate: string | null | undefined) => {
+    if (!dueDate) return '';
     const today = new Date();
-    const due = new Date(targetDueDate);
+    const due = new Date(dueDate);
     return Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
   };
 
@@ -145,22 +138,18 @@ export function AccountManagerPage() {
         'principal loan',
         'processed amount',
         'exhausted days',
-        'EMI 1',
-        'EMI 1 : DPD',
-        'EMI 2',
-        'EMI 2 : DPD',
-        'total loans',
+        'EMI number',
+        'EMI amount',
+        'EMI DPD',
         'loan id'
       ];
 
-      const csvRows = rows.map((row) => {
+      const csvRows: string[] = [];
+      for (const row of rows) {
         const name = [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || '—';
         const primaryMail = row.email || '';
         const altMail = row.personal_email || row.official_email || '';
-        const emi1 = row.emi_breakdown?.[0];
-        const emi2 = row.emi_breakdown?.[1];
-
-        return [
+        const basePrefix = [
           csvEscape(name),
           csvEscape(row.phone || ''),
           csvEscape(row.alternate_mobile || ''),
@@ -168,15 +157,32 @@ export function AccountManagerPage() {
           csvEscape(altMail),
           csvEscape(formatCsvNumber(row.principal_amount, 0)),
           csvEscape(formatCsvNumber(row.processed_amount ?? row.principal_amount, 2)),
-          csvEscape(formatCsvNumber(row.exhausted_days, 0)),
-          csvEscape(getEmiAmount(emi1)),
-          csvEscape(getEmiDpd(row, 0)),
-          csvEscape(getEmiAmount(emi2)),
-          csvEscape(getEmiDpd(row, 1)),
-          csvEscape(formatCsvNumber(row.total_loans, 0)),
-          csvEscape(`PLL${row.loan_application_id}`)
-        ].join(',');
-      });
+          csvEscape(formatCsvNumber(row.exhausted_days, 0))
+        ];
+
+        const breakdown = Array.isArray(row.emi_breakdown) ? [...row.emi_breakdown] : [];
+        breakdown.sort((a, b) => (a.emi_number ?? 0) - (b.emi_number ?? 0));
+        const emiList = breakdown.length > 0 ? breakdown : [null];
+
+        for (let i = 0; i < emiList.length; i++) {
+          const emi = emiList[i];
+          const emiNumber =
+            emi?.emi_number != null ? emi.emi_number : emi ? i + 1 : '';
+          const emiAmount =
+            emi?.amount != null ? formatCsvNumber(emi.amount, 2) : '';
+          const emiDpd = emi ? dpdFromDueDate(emi.due_date) : '';
+
+          csvRows.push(
+            [
+              ...basePrefix,
+              csvEscape(emiNumber === '' ? '' : emiNumber),
+              csvEscape(emiAmount),
+              csvEscape(emiDpd === '' ? '' : emiDpd),
+              csvEscape(`PLL${row.loan_application_id}`)
+            ].join(',')
+          );
+        }
+      }
 
       const csv = [headers.map(csvEscape).join(','), ...csvRows].join('\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });

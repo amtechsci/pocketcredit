@@ -112,6 +112,7 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
   const [sortBy, setSortBy] = useState('applicationDate');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const { canApproveLoans, canRejectLoans, currentUser, isNbfcAdmin, shouldMaskMobile } = useAdmin();
+  const isMainAdmin = currentUser?.role !== 'nbfc_admin' && currentUser?.role !== 'sub_admin';
 
   const allowedStatuses: string[] | null =
     currentUser?.role === 'nbfc_admin'
@@ -147,13 +148,18 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
   const [expandedComments, setExpandedComments] = useState<{ [userId: string]: boolean }>({});
   const [assigningFollowUp, setAssigningFollowUp] = useState(false);
   const [redistributingSubmitted, setRedistributingSubmitted] = useState(false);
+  const [verifyingRepeatQa, setVerifyingRepeatQa] = useState(false);
 
   // Initialize status filter from URL parameters (ignore when initialStatus is set, e.g. Over Due page)
   useEffect(() => {
     if (initialStatus) return;
     const statusFromUrl = searchParams.get('status');
-    const validStatuses = ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'overdue', 'cleared', 'rejected', 'ready_for_disbursement', 'repeat_disbursal', 'ready_to_repeat_disbursal'];
+    const validStatuses = ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'overdue', 'cleared', 'rejected', 'ready_for_disbursement', 'repeat_disbursal', 'ready_to_repeat_disbursal', 'repeat_qa_pending'];
     if (statusFromUrl && validStatuses.includes(statusFromUrl)) {
+      if (statusFromUrl === 'repeat_qa_pending' && !isMainAdmin) {
+        setStatusFilter('ready_to_repeat_disbursal');
+        return;
+      }
       const allowed = currentUser?.role === 'nbfc_admin'
         ? NBFC_ADMIN_ALLOWED_STATUSES
         : currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category
@@ -165,17 +171,22 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
         setStatusFilter(allowed[0] || 'all');
       }
     }
-  }, [searchParams, initialStatus, currentUser?.role, currentUser?.sub_admin_category]);
+  }, [searchParams, initialStatus, currentUser?.role, currentUser?.sub_admin_category, isMainAdmin]);
 
   // Enforce allowed status for sub-admins: if current filter is not allowed, reset (unless we're on initialStatus page e.g. Over Due)
   useEffect(() => {
-    if (!allowedStatuses) return;
+    if (!allowedStatuses) {
+      if (statusFilter === 'repeat_qa_pending' && !isMainAdmin) {
+        setStatusFilter('ready_to_repeat_disbursal');
+      }
+      return;
+    }
     if (initialStatus && statusFilter === initialStatus) return; // keep e.g. overdue when on Over Due page
     if (!allowedStatuses.includes(statusFilter)) {
       const defaultStatus = isNbfcAdmin ? 'ready_for_disbursement' : (allowedStatuses[0] || 'all');
       setStatusFilter(defaultStatus);
     }
-  }, [allowedStatuses, statusFilter, initialStatus, isNbfcAdmin]);
+  }, [allowedStatuses, statusFilter, initialStatus, isNbfcAdmin, isMainAdmin]);
 
   // Memoized callbacks to prevent re-renders
   const handleSort = useCallback((field: string) => {
@@ -193,10 +204,23 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
     setCurrentPage(1); // Reset to first page when searching
   }, []);
 
-  const handleStatusFilter = useCallback((value: string) => {
-    setStatusFilter(value);
-    setCurrentPage(1);
-  }, []);
+  const handleStatusFilter = useCallback(
+    (value: string) => {
+      setStatusFilter(value);
+      setCurrentPage(1);
+      if (!initialStatus) {
+        setSearchParams(
+          (prev) => {
+            const n = new URLSearchParams(prev);
+            n.set('status', value);
+            return n;
+          },
+          { replace: true }
+        );
+      }
+    },
+    [initialStatus, setSearchParams]
+  );
 
   const showLoanAmountFilters = true; // Available for all tabs (submitted, disbursal, etc.)
 
@@ -229,8 +253,13 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
 
   const handleSelectAll = useCallback(() => {
     const apps = applications.length > 0 ? applications : mockApplications;
-    // Select ready_for_disbursement and ready_to_repeat_disbursal loans
-    const readyLoans = apps.filter(app => app.status === 'ready_for_disbursement' || app.status === 'ready_to_repeat_disbursal');
+    const readyLoans =
+      statusFilter === 'repeat_qa_pending'
+        ? apps
+        : apps.filter(
+            (app) =>
+              app.status === 'ready_for_disbursement' || app.status === 'ready_to_repeat_disbursal'
+          );
     const readyLoanIds = readyLoans.map(app => app.id);
     
     // Check if all ready loans are selected
@@ -251,17 +280,19 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
         return newSelection;
       });
     }
-  }, [selectedApplications, applications]);
+  }, [selectedApplications, applications, statusFilter]);
 
   // Fetch applications data
   useEffect(() => {
     const fetchApplications = async () => {
       try {
         setLoading(true);
+        const isRepeatQaTab = statusFilter === 'repeat_qa_pending';
         const response = await adminApiService.getApplications({
           page: currentPage,
           limit: pageSize,
-          status: statusFilter,
+          status: isRepeatQaTab ? 'ready_to_repeat_disbursal' : statusFilter,
+          ...(isRepeatQaTab ? { repeatQaPending: '1' } : {}),
           search: searchTerm,
           sortBy,
           sortOrder,
@@ -285,6 +316,58 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
 
     fetchApplications();
   }, [currentPage, pageSize, statusFilter, searchTerm, sortBy, sortOrder, loanAmountFilter]);
+
+  const refreshStats = useCallback(async () => {
+    try {
+      const response = await adminApiService.getApplicationStats();
+      if (response.status === 'success') setStats(response.data);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const handleRepeatQaVerified = async () => {
+    const userIds = [
+      ...new Set(
+        selectedApplications
+          .map((id) => applications.find((a) => a.id === id)?.userId)
+          .filter(Boolean) as string[]
+      ),
+    ];
+    if (userIds.length === 0) {
+      toast.error('Select at least one loan to mark Repeat QA verified');
+      return;
+    }
+    setVerifyingRepeatQa(true);
+    try {
+      const res = await adminApiService.verifyRepeatQa(userIds);
+      if (res.status === 'success') {
+        toast.success(res.message || 'Repeat QA verified');
+        setSelectedApplications([]);
+        await refreshStats();
+        const response = await adminApiService.getApplications({
+          page: currentPage,
+          limit: pageSize,
+          status: 'ready_to_repeat_disbursal',
+          repeatQaPending: '1',
+          search: searchTerm,
+          sortBy,
+          sortOrder,
+          loanAmountFilter: loanAmountFilter || undefined,
+        });
+        if (response.status === 'success') {
+          setApplications(response.data.applications);
+          setPagination(response.data.pagination);
+        }
+      } else {
+        toast.error(res.message || 'Failed');
+      }
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || e?.message || 'Failed to verify');
+    } finally {
+      setVerifyingRepeatQa(false);
+    }
+  };
 
   // Debounced search effect with countdown
   useEffect(() => {
@@ -1035,6 +1118,34 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
               )}
             </div>
             )}
+            {isMainAdmin && (
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => handleStatusFilter('repeat_qa_pending')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
+                  statusFilter === 'repeat_qa_pending'
+                    ? 'bg-amber-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'
+                }`}
+              >
+                Repeat QA{' '}
+                <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${statusFilter === 'repeat_qa_pending' ? 'bg-amber-700 text-white' : 'bg-gray-100 text-gray-800'}`}>
+                  {stats?.repeatQaPendingApplications ?? 0}
+                </span>
+              </button>
+              {statusFilter === 'repeat_qa_pending' && (
+                <button
+                  type="button"
+                  onClick={() => handleRepeatQaVerified()}
+                  disabled={verifyingRepeatQa || selectedApplications.length === 0}
+                  className="px-3 py-2 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  {verifyingRepeatQa ? 'Saving…' : `QA verified${selectedApplications.length ? ` (${selectedApplications.length})` : ''}`}
+                </button>
+              )}
+            </div>
+            )}
             {canShowStatus('account_manager') && (
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
@@ -1302,8 +1413,38 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
       </div>
       )}
 
+      {/* Repeat QA verified bar */}
+      {selectedApplications.length > 0 && statusFilter === 'repeat_qa_pending' && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <span className="text-sm font-medium text-amber-900">
+              {selectedApplications.length} loan(s) selected — mark Repeat QA verified to move them to Repeat Loan Ready for Disbursal
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedApplications([])}
+                className="px-4 py-2 text-sm font-medium text-amber-800 border border-amber-300 rounded-md hover:bg-amber-100"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => handleRepeatQaVerified()}
+                disabled={verifyingRepeatQa}
+                className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md disabled:opacity-50"
+              >
+                {verifyingRepeatQa ? 'Saving…' : 'QA verified'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Bulk Payout Action Bar */}
-      {selectedApplications.length > 0 && (
+      {selectedApplications.length > 0 &&
+        statusFilter !== 'repeat_qa_pending' &&
+        (statusFilter === 'ready_for_disbursement' || statusFilter === 'ready_to_repeat_disbursal') && (
         <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -1386,7 +1527,14 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
                   {(() => {
-                    const readyLoans = currentApplications.filter(app => app.status === 'ready_for_disbursement' || app.status === 'ready_to_repeat_disbursal');
+                    const readyLoans =
+                      statusFilter === 'repeat_qa_pending'
+                        ? currentApplications
+                        : currentApplications.filter(
+                            (app) =>
+                              app.status === 'ready_for_disbursement' ||
+                              app.status === 'ready_to_repeat_disbursal'
+                          );
                     const readyLoanIds = readyLoans.map(app => app.id);
                     const allReadySelected = readyLoanIds.length > 0 && readyLoanIds.every(id => selectedApplications.includes(id));
                     
@@ -1396,7 +1544,13 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
                         checked={allReadySelected}
                         onChange={handleSelectAll}
                         disabled={readyLoans.length === 0}
-                        title={readyLoans.length === 0 ? 'No loans ready for disbursement' : 'Select all ready for disbursement'}
+                        title={
+                          readyLoans.length === 0
+                            ? 'No loans in this list'
+                            : statusFilter === 'repeat_qa_pending'
+                              ? 'Select all (Repeat QA queue)'
+                              : 'Select all ready for disbursement'
+                        }
                         className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                     );
@@ -1455,7 +1609,9 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Sub-Admins
                 </th>
-                {(statusFilter === 'ready_for_disbursement' || statusFilter === 'ready_to_repeat_disbursal') && (
+                {(statusFilter === 'ready_for_disbursement' ||
+                  statusFilter === 'ready_to_repeat_disbursal' ||
+                  statusFilter === 'repeat_qa_pending') && (
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Comments
                   </th>
@@ -1464,7 +1620,10 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredApplications.map((application) => {
-                const isReadyForDisbursement = application.status === 'ready_for_disbursement' || application.status === 'ready_to_repeat_disbursal';
+                const isReadyForDisbursement =
+                  application.status === 'ready_for_disbursement' ||
+                  application.status === 'ready_to_repeat_disbursal';
+                const canSelectRow = isReadyForDisbursement;
                 const isSelected = selectedApplications.includes(application.id);
                 const isProcessing = processingPayouts.includes(application.id);
                 
@@ -1475,8 +1634,14 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => handleSelectApplication(application.id, application.status)}
-                      disabled={!isReadyForDisbursement || isProcessing}
-                      title={!isReadyForDisbursement ? 'Only loans with "Ready for Disbursement" or "Repeat Ready for Disbursal" status can be selected' : 'Select for payout'}
+                      disabled={!canSelectRow || isProcessing}
+                      title={
+                        !canSelectRow
+                          ? 'Cannot select this row'
+                          : statusFilter === 'repeat_qa_pending'
+                            ? 'Select for Repeat QA verification'
+                            : 'Select for payout'
+                      }
                       className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                   </td>
@@ -1588,7 +1753,10 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
                       );
                     })()}
                   </td>
-                  {(statusFilter === 'ready_for_disbursement' || statusFilter === 'ready_to_repeat_disbursal') && application.userId && (
+                  {(statusFilter === 'ready_for_disbursement' ||
+                    statusFilter === 'ready_to_repeat_disbursal' ||
+                    statusFilter === 'repeat_qa_pending') &&
+                    application.userId && (
                     <td className="px-6 py-4">
                       <div className="text-sm">
                         {loadingComments[application.userId] ? (
