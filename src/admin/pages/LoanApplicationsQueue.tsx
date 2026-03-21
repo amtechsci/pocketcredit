@@ -282,6 +282,22 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
     }
   }, [selectedApplications, applications, statusFilter]);
 
+  const handleSelectAllRepeatQaPage = useCallback(() => {
+    const repeatQaIds = applications.map((app) => app.id);
+    if (repeatQaIds.length === 0) return;
+    setSelectedApplications((prev) => {
+      const allSelected = repeatQaIds.every((id) => prev.includes(id));
+      if (allSelected) {
+        return prev.filter((id) => !repeatQaIds.includes(id));
+      }
+      const merged = [...prev];
+      repeatQaIds.forEach((id) => {
+        if (!merged.includes(id)) merged.push(id);
+      });
+      return merged;
+    });
+  }, [applications]);
+
   // Fetch applications data
   useEffect(() => {
     const fetchApplications = async () => {
@@ -1135,14 +1151,32 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
                 </span>
               </button>
               {statusFilter === 'repeat_qa_pending' && (
-                <button
-                  type="button"
-                  onClick={() => handleRepeatQaVerified()}
-                  disabled={verifyingRepeatQa || selectedApplications.length === 0}
-                  className="px-3 py-2 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                >
-                  {verifyingRepeatQa ? 'Saving…' : `QA verified${selectedApplications.length ? ` (${selectedApplications.length})` : ''}`}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={handleSelectAllRepeatQaPage}
+                    disabled={applications.length === 0}
+                    className="px-3 py-2 text-sm font-medium rounded-lg border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                  >
+                    Select all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedApplications([])}
+                    disabled={selectedApplications.length === 0}
+                    className="px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRepeatQaVerified()}
+                    disabled={verifyingRepeatQa || selectedApplications.length === 0}
+                    className="px-3 py-2 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                  >
+                    {verifyingRepeatQa ? 'Saving…' : `QA verified${selectedApplications.length ? ` (${selectedApplications.length})` : ''}`}
+                  </button>
+                </>
               )}
             </div>
             )}

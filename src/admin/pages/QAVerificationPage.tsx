@@ -52,6 +52,8 @@ export function QAVerificationPage() {
     const [userComments, setUserComments] = useState<{ [userId: number]: ProfileComment[] }>({});
     const [loadingComments, setLoadingComments] = useState<{ [userId: number]: boolean }>({});
     const [expandedComments, setExpandedComments] = useState<{ [userId: number]: boolean }>({});
+    const [selectedLoanIds, setSelectedLoanIds] = useState<number[]>([]);
+    const [movingToDisbursal, setMovingToDisbursal] = useState(false);
 
     // Fetch users in QA Verification status
     const fetchUsers = useCallback(async () => {
@@ -62,16 +64,20 @@ export function QAVerificationPage() {
             if (response.status === 'success' && response.data) {
                 setUsers(response.data.users || []);
                 setTotalUsers(response.data.total || 0);
+                const currentIds = new Set((response.data.users || []).map((u: QAVerificationUser) => u.loan_application_id));
+                setSelectedLoanIds(prev => prev.filter(id => currentIds.has(id)));
             } else {
                 toast.error(response.message || 'Failed to fetch QA Verification users');
                 setUsers([]);
                 setTotalUsers(0);
+                setSelectedLoanIds([]);
             }
         } catch (error: any) {
             console.error('Error fetching QA Verification users:', error);
             toast.error('Failed to fetch QA Verification users');
             setUsers([]);
             setTotalUsers(0);
+            setSelectedLoanIds([]);
         } finally {
             setLoading(false);
         }
@@ -135,6 +141,55 @@ export function QAVerificationPage() {
             currency: 'INR',
             maximumFractionDigits: 0
         }).format(amount);
+    };
+
+    const toggleSelectLoan = (loanApplicationId: number) => {
+        setSelectedLoanIds(prev =>
+            prev.includes(loanApplicationId)
+                ? prev.filter(id => id !== loanApplicationId)
+                : [...prev, loanApplicationId]
+        );
+    };
+
+    const toggleSelectAllOnPage = () => {
+        const pageIds = users.map(u => u.loan_application_id);
+        const allSelected = pageIds.length > 0 && pageIds.every(id => selectedLoanIds.includes(id));
+        if (allSelected) {
+            setSelectedLoanIds(prev => prev.filter(id => !pageIds.includes(id)));
+        } else {
+            setSelectedLoanIds(prev => {
+                const merged = [...prev];
+                pageIds.forEach(id => {
+                    if (!merged.includes(id)) merged.push(id);
+                });
+                return merged;
+            });
+        }
+    };
+
+    const moveSelectedToDisbursal = async () => {
+        if (selectedLoanIds.length === 0) {
+            toast.error('Select at least one loan');
+            return;
+        }
+        setMovingToDisbursal(true);
+        let success = 0;
+        let failed = 0;
+        for (const loanId of selectedLoanIds) {
+            try {
+                const res = await adminApiService.updateApplicationStatus(String(loanId), 'disbursal');
+                if (res.status === 'success') success += 1;
+                else failed += 1;
+            } catch {
+                failed += 1;
+            }
+        }
+        if (success > 0 && failed === 0) toast.success(`Moved ${success} loan(s) to disbursal`);
+        else if (success > 0) toast.warning(`Moved ${success} loan(s), ${failed} failed`);
+        else toast.error(`Failed to move ${failed} loan(s)`);
+        setSelectedLoanIds([]);
+        await fetchUsers();
+        setMovingToDisbursal(false);
     };
 
     const totalPages = Math.ceil(totalUsers / pageSize);
@@ -208,6 +263,33 @@ export function QAVerificationPage() {
                     </div>
                 </div>
 
+                {selectedLoanIds.length > 0 && (
+                    <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-4 mb-4">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                            <span className="text-sm font-medium text-cyan-900">
+                                {selectedLoanIds.length} selected
+                            </span>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedLoanIds([])}
+                                    className="px-3 py-2 text-sm rounded-md border border-cyan-300 text-cyan-800 hover:bg-cyan-100"
+                                >
+                                    Clear
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={moveSelectedToDisbursal}
+                                    disabled={movingToDisbursal}
+                                    className="px-3 py-2 text-sm rounded-md bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50"
+                                >
+                                    {movingToDisbursal ? 'Moving...' : `Move to disbursal (${selectedLoanIds.length})`}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Users Table */}
                 {loading ? (
                     <div className="flex items-center justify-center py-12">
@@ -222,6 +304,14 @@ export function QAVerificationPage() {
                             <table className="min-w-full divide-y divide-gray-200">
                                 <thead className="bg-gray-50">
                                     <tr>
+                                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            <input
+                                                type="checkbox"
+                                                checked={users.length > 0 && users.every(u => selectedLoanIds.includes(u.loan_application_id))}
+                                                onChange={toggleSelectAllOnPage}
+                                                className="rounded border-gray-300 text-cyan-600 focus:ring-cyan-500"
+                                            />
+                                        </th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             User
                                         </th>
@@ -251,6 +341,14 @@ export function QAVerificationPage() {
                                 <tbody className="bg-white divide-y divide-gray-200">
                                     {users.map((user) => (
                                         <tr key={user.id} className="hover:bg-gray-50">
+                                            <td className="px-4 py-4 whitespace-nowrap">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedLoanIds.includes(user.loan_application_id)}
+                                                    onChange={() => toggleSelectLoan(user.loan_application_id)}
+                                                    className="rounded border-gray-300 text-cyan-600 focus:ring-cyan-500"
+                                                />
+                                            </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <div className="flex items-center">
                                                     <div className="flex-shrink-0 h-10 w-10 rounded-full bg-cyan-100 flex items-center justify-center">
