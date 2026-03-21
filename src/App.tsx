@@ -294,7 +294,8 @@ function AppContent() {
       '/account-aggregator',
       '/account-aggregator-flow',
       '/user-references',
-      '/application-under-review'
+      '/application-under-review',
+      '/post-disbursal'
     ];
 
     const path = location.pathname || '';

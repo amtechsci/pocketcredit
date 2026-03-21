@@ -780,10 +780,10 @@ export function DynamicDashboardPage() {
                                 const progress = await getOnboardingProgress(loan.id);
                                 console.log(`📊 [View Status] Progress for ${loan.status}:`, progress.currentStep);
 
-                                // All steps complete - go to under review page
+                                // All steps complete - eNACH/selfie (post-disbursal) before under review
                                 if (progress.currentStep === 'steps') {
-                                  console.log('✅ [View Status] All steps complete, showing status page');
-                                  navigate('/application-under-review');
+                                  console.log('✅ [View Status] All steps complete, next: mandate / post-disbursal');
+                                  navigate(`/post-disbursal?applicationId=${loan.id}`);
                                   return;
                                 }
 
@@ -793,8 +793,7 @@ export function DynamicDashboardPage() {
                                 navigate(route, { replace: true });
                               } catch (progressError) {
                                 console.error('❌ [View Status] Error checking progress:', progressError);
-                                // Fallback: try to guess or go to status page
-                                navigate('/application-under-review');
+                                navigate(`/post-disbursal?applicationId=${loan.id}`);
                               }
                             } else {
                               // Catch-all for other statuses
@@ -989,9 +988,9 @@ export function DynamicDashboardPage() {
                               return;
                             }
 
-                            // All steps complete - go to under review page
-                            console.log('✅ [View Status] All steps complete, showing under review page');
-                            navigate('/application-under-review');
+                            // All steps complete - post-disbursal (eNACH/selfie) before under review
+                            console.log('✅ [View Status] All steps complete, next: post-disbursal');
+                            navigate(`/post-disbursal?applicationId=${loan.id}`);
                           } catch (progressError) {
                             console.error('❌ [View Status] Error checking progress, falling back to references check:', progressError);
                             // Fallback: Check references only
@@ -1010,8 +1009,7 @@ export function DynamicDashboardPage() {
                             } catch (refError) {
                               console.error('Error checking references:', refError);
                             }
-                            // References complete - go to under review page
-                            navigate('/application-under-review');
+                            navigate(`/post-disbursal?applicationId=${loan.id}`);
                           }
                         } else if (loan.status === 'ready_for_disbursement') {
                           // Check progress engine first - ReKYC might be required
@@ -1317,7 +1315,7 @@ export function DynamicDashboardPage() {
                                 )}
                                 {isApplied && (
                                   <Button
-                                    onClick={() => navigate('/application-under-review')}
+                                    onClick={() => navigate(`/post-disbursal?applicationId=${loan.id}`)}
                                     size="sm"
                                     variant="outline"
                                     className="flex-1 text-xs"
@@ -1696,7 +1694,7 @@ export function DynamicDashboardPage() {
                     <div>
                       <p className="text-sm font-semibold text-yellow-900 mb-1">Application Pending</p>
                       <p className="text-xs text-yellow-700">
-                        Your application is under review. We'll notify you once it's processed.
+                        Complete any remaining steps (eNACH and selfie if shown). After that, your application is reviewed and we will notify you.
                       </p>
                     </div>
                   </div>

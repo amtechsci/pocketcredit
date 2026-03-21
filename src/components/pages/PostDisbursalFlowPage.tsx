@@ -41,6 +41,18 @@ interface PostDisbursalProgress {
 
 const TOTAL_STEPS = 6;
 
+/** Pre-disbursal: user completes eNACH + selfie before under-review; KFS/agreement only after disbursal */
+const EARLY_MANDATE_STATUSES = ['submitted', 'under_review', 'follow_up', 'qa_verification'] as const;
+const DISBURSAL_POST_FLOW_STATUSES = ['disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal'] as const;
+
+function isEarlyMandateStatus(status: string | undefined): boolean {
+  return !!status && (EARLY_MANDATE_STATUSES as readonly string[]).includes(status);
+}
+
+function isDisbursalPostFlowStatus(status: string | undefined): boolean {
+  return !!status && (DISBURSAL_POST_FLOW_STATUSES as readonly string[]).includes(status);
+}
+
 export const PostDisbursalFlowPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -53,6 +65,7 @@ export const PostDisbursalFlowPage = () => {
   const [isWaitingForDisbursement, setIsWaitingForDisbursement] = useState(false); // Track if loan is ready_for_disbursement
   const isWaitingForDisbursementRef = useRef(false); // Ref to track waiting state synchronously
   const isProcessingEnachCallbackRef = useRef(false); // Track if we're processing eNACH callback
+  const [applicationStatus, setApplicationStatus] = useState<string | null>(null);
   const [progress, setProgress] = useState<PostDisbursalProgress>({
     enach_done: false,
     selfie_captured: false,
@@ -317,8 +330,7 @@ export const PostDisbursalFlowPage = () => {
           // Continue with normal flow if check fails
         }
         
-        // STRICT GUARD: Verify loan status before allowing access
-        // Only 'disbursal' status loans can access this post-disbursal flow
+        // STRICT GUARD: disbursal-phase OR early mandate (eNACH + selfie before under review)
         const response = await apiService.getLoanApplications();
         // Check both response.status === 'success' and response.success for compatibility
         const isSuccess = response.status === 'success' || response.success === true;
@@ -332,14 +344,14 @@ export const PostDisbursalFlowPage = () => {
             return;
           }
 
-          console.log(`🔒 Status guard check for App ${appId}: status='${app.status}'`);
-
-          // Allowed statuses: 'disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal'
-          // ready_to_repeat_disbursal is allowed because user should see post-disbursal completion message
-          const allowedStatuses = ['disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal'];
           const appStatus = app.status as string;
-          if (!allowedStatuses.includes(appStatus)) {
-            console.warn(`⛔ Unauthorized access attempt: App ${appId} has status '${appStatus}', not one of: ${allowedStatuses.join(', ')}`);
+          console.log(`🔒 Status guard check for App ${appId}: status='${appStatus}'`);
+
+          const allowedDisbursalPhase = isDisbursalPostFlowStatus(appStatus);
+          const allowedEarlyMandate = isEarlyMandateStatus(appStatus);
+
+          if (!allowedDisbursalPhase && !allowedEarlyMandate) {
+            console.warn(`⛔ Unauthorized access attempt: App ${appId} has status '${appStatus}'`);
             
             // Redirect based on actual status
             if (appStatus === 'account_manager') {
@@ -352,6 +364,7 @@ export const PostDisbursalFlowPage = () => {
               // Regular ready_for_disbursement - show "loan will disburse shortly" page
               console.log('✅ Loan is ready for disbursement - showing waiting page');
               setApplicationId(appId);
+              setApplicationStatus(appStatus);
               setCurrentStep(0); // Special step 0 = waiting for disbursement
               setIsWaitingForDisbursement(true); // Set flag to prevent fetchProgress from overwriting
               isWaitingForDisbursementRef.current = true; // Set ref for synchronous check
@@ -366,8 +379,9 @@ export const PostDisbursalFlowPage = () => {
           }
 
           // Status is valid - proceed
-          console.log(`✅ Access granted: App ${appId} is in '${app.status}' status`);
+          console.log(`✅ Access granted: App ${appId} is in '${appStatus}'`);
           setApplicationId(appId);
+          setApplicationStatus(appStatus);
           setIsWaitingForDisbursement(false); // Reset flag for valid post-disbursal statuses
           isWaitingForDisbursementRef.current = false; // Reset ref
         } else {
@@ -384,7 +398,7 @@ export const PostDisbursalFlowPage = () => {
         }
 
       } else {
-        // No applicationId in URL - fetch latest disbursal application
+        // No applicationId in URL - prefer disbursal, then early mandate (eNACH/selfie)
         const response = await apiService.getLoanApplications();
         // Check both response.status === 'success' and response.success for compatibility
         const isSuccess = response.status === 'success' || response.success === true;
@@ -402,16 +416,22 @@ export const PostDisbursalFlowPage = () => {
           }
 
           const disbursalApp = response.data.applications.find(
-            (app: any) => app.status === 'disbursal' || app.status === 'repeat_disbursal'
+            (app: any) => app.status === 'disbursal' || app.status === 'repeat_disbursal' || app.status === 'ready_to_repeat_disbursal'
           );
-          if (disbursalApp) {
-            console.log(`✅ Found disbursal loan ${disbursalApp.id}`);
-            appId = disbursalApp.id;
+          const earlyApp = response.data.applications.find((app: any) =>
+            isEarlyMandateStatus(app.status)
+          );
+          const picked = disbursalApp || earlyApp;
+          if (picked) {
+            console.log(`✅ Found loan ${picked.id} status=${picked.status}`);
+            appId = picked.id;
             setApplicationId(appId);
-            setIsWaitingForDisbursement(false); // Reset flag for valid post-disbursal status
-            isWaitingForDisbursementRef.current = false; // Reset ref
+            setApplicationStatus(picked.status);
+            setIsWaitingForDisbursement(false);
+            isWaitingForDisbursementRef.current = false;
+            navigate(`/post-disbursal?applicationId=${picked.id}`, { replace: true });
           } else {
-            console.log('ℹ️ No disbursal loans found');
+            console.log('ℹ️ No disbursal or early-mandate loans found');
           }
         }
       }
@@ -456,6 +476,16 @@ export const PostDisbursalFlowPage = () => {
     try {
       // Clear cache before fetching to ensure fresh data
       apiService.clearCache('/post-disbursal');
+
+      const appsResponse = await apiService.getLoanApplications();
+      const appsOk = appsResponse.success === true || appsResponse.status === 'success';
+      let appStatus: string | undefined;
+      if (appsOk && appsResponse.data?.applications) {
+        const app = appsResponse.data.applications.find((a: any) => a.id == appId);
+        appStatus = app?.status;
+        setApplicationStatus(appStatus ?? null);
+      }
+
       const response = await apiService.getPostDisbursalProgress(appId);
       console.log('📊 Post-disbursal progress response:', response);
 
@@ -481,8 +511,24 @@ export const PostDisbursalFlowPage = () => {
           } else {
             determinedStep = 4; // Step 4: Confirmation (all done)
           }
+        } else if (!isRepeatCustomer && appStatus && isEarlyMandateStatus(appStatus)) {
+          // Phase 1: only eNACH + selfie; then go to under review (KFS/agreement after disbursal)
+          if (!progressData.references_completed) {
+            setLoading(false);
+            navigate(`/user-references?applicationId=${appId}`, { replace: true });
+            return;
+          }
+          if (!progressData.enach_done) {
+            determinedStep = 1;
+          } else if (!progressData.selfie_captured || !progressData.selfie_verified) {
+            determinedStep = 2;
+          } else {
+            setLoading(false);
+            navigate('/application-under-review', { replace: true });
+            return;
+          }
         } else {
-          // New customer flow: eNACH -> Selfie -> References -> KFS -> Agreement -> Confirmation
+          // New customer full flow (disbursal / repeat_disbursal): eNACH -> Selfie -> References -> KFS -> Agreement -> Confirmation
           if (!progressData.enach_done) {
             determinedStep = 1; // Step 1: eNACH
           } else if (!progressData.selfie_captured) {
@@ -501,6 +547,7 @@ export const PostDisbursalFlowPage = () => {
         }
         
         console.log('🎯 Determined step based on columns:', {
+          appStatus,
           is_repeat_customer: isRepeatCustomer,
           enach_done: progressData.enach_done,
           selfie_captured: progressData.selfie_captured,
@@ -685,13 +732,18 @@ export const PostDisbursalFlowPage = () => {
             <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
             <h2 className="text-xl font-bold mb-2">No Application Found</h2>
             <p className="text-gray-600 mb-4">
-              No loan application in disbursal status found.
+              No loan application ready for eNACH and verification steps.
             </p>
           </CardContent>
         </Card>
       </div>
     );
   }
+
+  const earlyMandateUiOnly =
+    !progress.is_repeat_customer &&
+    !!applicationStatus &&
+    isEarlyMandateStatus(applicationStatus);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
@@ -758,7 +810,7 @@ export const PostDisbursalFlowPage = () => {
                   />
                 )}
 
-                {currentStep === 3 && (
+                {!earlyMandateUiOnly && currentStep === 3 && (
                   <ReferencesStep
                     applicationId={applicationId}
                     onComplete={() => handleStepComplete(3, { references_completed: true })}
@@ -766,7 +818,7 @@ export const PostDisbursalFlowPage = () => {
                   />
                 )}
 
-                {currentStep === 4 && (
+                {!earlyMandateUiOnly && currentStep === 4 && (
                   <KFSViewStep
                     applicationId={applicationId}
                     onComplete={() => handleStepComplete(4, { kfs_viewed: true })}
@@ -774,7 +826,7 @@ export const PostDisbursalFlowPage = () => {
                   />
                 )}
 
-                {currentStep === 5 && (
+                {!earlyMandateUiOnly && currentStep === 5 && (
                   <AgreementSignStep
                     applicationId={applicationId}
                     onComplete={() => handleStepComplete(5, { agreement_signed: true })}
@@ -783,7 +835,7 @@ export const PostDisbursalFlowPage = () => {
                   />
                 )}
 
-                {currentStep === 6 && (
+                {!earlyMandateUiOnly && currentStep === 6 && (
                   <ConfirmationStep />
                 )}
               </>

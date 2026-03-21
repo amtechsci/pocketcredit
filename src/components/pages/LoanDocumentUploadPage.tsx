@@ -82,7 +82,7 @@ export const LoanDocumentUploadPage = () => {
                   'bank-statement': `/loan-application/bank-statement?applicationId=${id}`,
                   'bank-details': `/link-salary-bank-account?applicationId=${id}`,
                   'references': '/user-references',
-                  'steps': `/application-under-review?applicationId=${id}`
+                  'steps': `/post-disbursal?applicationId=${id}`
                 };
                 const route = stepRoutes[currentStep] || STEP_ROUTES[currentStep as keyof typeof STEP_ROUTES] || '/dashboard';
                 navigate(route, { replace: true });
@@ -235,9 +235,9 @@ export const LoanDocumentUploadPage = () => {
                             'bank-details': `/link-salary-bank-account?applicationId=${appId}`,
                             'references': '/user-references',
                             'upload-documents': `/loan-application/upload-documents?applicationId=${appId}`,
-                            'steps': `/application-under-review?applicationId=${appId}`
+                            'steps': `/post-disbursal?applicationId=${appId}`
                           };
-                          const route = stepRoutes[currentStep] || `/application-under-review?applicationId=${appId}`;
+                          const route = stepRoutes[currentStep] || `/post-disbursal?applicationId=${appId}`;
                           
                           toast.success('All required documents have been uploaded!');
                           setTimeout(() => {
@@ -246,7 +246,7 @@ export const LoanDocumentUploadPage = () => {
                         } else {
                           toast.success('All required documents have been uploaded!');
                           setTimeout(() => {
-                            navigate('/application-under-review');
+                            navigate('/post-disbursal');
                           }, 1500);
                         }
                       }
@@ -254,7 +254,7 @@ export const LoanDocumentUploadPage = () => {
                       console.error('Error getting loan application:', error);
                       toast.success('All required documents have been uploaded!');
                       setTimeout(() => {
-                        navigate('/application-under-review');
+                        navigate('/post-disbursal');
                       }, 1500);
                     }
                     setLoading(false);
@@ -328,9 +328,7 @@ export const LoanDocumentUploadPage = () => {
             console.log('✅ All required documents are uploaded (fallback), redirecting...');
             toast.success('All required documents have been uploaded!');
             setTimeout(() => {
-              navigate('/application-under-review', { 
-                state: { applicationId: appId } 
-              });
+              navigate(`/post-disbursal?applicationId=${appId}`, { replace: true });
             }, 1500);
             setLoading(false);
             return;
@@ -491,16 +489,16 @@ export const LoanDocumentUploadPage = () => {
               navigate(nextRoute, { replace: true });
             } catch (error) {
               console.error('[LoanDocumentUpload] Error getting next step, using fallback:', error);
-              // Fallback to under review page
-              navigate(`/application-under-review?applicationId=${applicationId}`, { replace: true });
+              // Fallback: post-disbursal flow
+              navigate(`/post-disbursal?applicationId=${applicationId}`, { replace: true });
             }
           }, 1500);
         } catch (innerError) {
           console.error('[LoanDocumentUpload] Error checking email or getting next step:', innerError);
-          // Fallback: just navigate to under review
+          // Fallback: post-disbursal (eNACH/selfie) before under review
           toast.success('All documents uploaded successfully!');
           setTimeout(() => {
-            navigate(`/application-under-review?applicationId=${applicationId}`, { replace: true });
+            navigate(`/post-disbursal?applicationId=${applicationId}`, { replace: true });
           }, 1500);
         }
       } else {

@@ -122,7 +122,7 @@ export const STEP_ROUTES: Record<LoanApplicationStep, string> = {
   'references': '/user-references',
   'aa-consent': '/loan-application/aa-flow',
   'upload-documents': '/loan-application/upload-documents',
-  'steps': '/application-under-review'
+  'steps': '/post-disbursal'
 };
 
 /**

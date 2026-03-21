@@ -42,6 +42,14 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       });
     }
 
+    const kfsAllowedStatuses = ['disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal'];
+    if (!kfsAllowedStatuses.includes(loans[0].status)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Key Facts Statement is available after your loan reaches the disbursal stage.'
+      });
+    }
+
     // Use the same KFS generation logic as admin endpoint
     // Fetch full loan application details including processed data
     // Use DATE() function to extract date portion directly from MySQL (avoids timezone conversion)
@@ -5770,6 +5778,14 @@ router.post('/:loanId/generate-and-save', requireAuth, async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Loan application not found or access denied'
+      });
+    }
+
+    const kfsAllowedStatuses = ['disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal'];
+    if (!kfsAllowedStatuses.includes(loans[0].status)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Key Facts Statement is available after your loan reaches the disbursal stage.'
       });
     }
 

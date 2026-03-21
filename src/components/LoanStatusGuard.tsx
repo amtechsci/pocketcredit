@@ -107,7 +107,23 @@ export function LoanStatusGuard({ children }: { children: React.ReactNode }) {
                     });
                     // Note: If they have pending documents, DocumentRequiredGuard will handle it.
                     // This only applies if they are waiting for admin review.
-                    if (reviewApp && !location.pathname.includes('/application-under-review') && !location.pathname.includes('/loan-application/upload-documents')) {
+                    // eNACH + selfie must be completed before under review (post-disbursal phase 1)
+                    if (reviewApp && !location.pathname.includes('/application-under-review') && !location.pathname.includes('/loan-application/upload-documents') && !location.pathname.includes('/post-disbursal')) {
+                        try {
+                            const pd = await apiService.getPostDisbursalProgress(reviewApp.id);
+                            if (pd.success && pd.data) {
+                                const p = pd.data as any;
+                                const mandateOk = p.enach_done && p.selfie_verified;
+                                const refsOk = p.references_completed;
+                                if (!refsOk || !mandateOk) {
+                                    setRedirectPath(`/post-disbursal?applicationId=${reviewApp.id}`);
+                                    setIsChecking(false);
+                                    return;
+                                }
+                            }
+                        } catch (e) {
+                            console.error('LoanStatusGuard post-disbursal check:', e);
+                        }
                         setRedirectPath('/application-under-review');
                         setIsChecking(false);
                         return;

@@ -97,8 +97,8 @@ export function EnhancedUserReferencesPage({
             return; // Exit early - don't load the form
           } catch (error) {
             console.error('[UserReferences] Error getting next step, using fallback:', error);
-            // Fallback to application under review
-            navigate('/application-under-review', { replace: true });
+            // Fallback: eNACH + selfie before under review
+            navigate('/post-disbursal', { replace: true });
             return;
           }
         }
@@ -340,8 +340,30 @@ export function EnhancedUserReferencesPage({
           if (onComplete) {
             onComplete();
           } else {
-            // Navigate to application under review page after references are saved
-            navigate('/application-under-review');
+            (async () => {
+              const urlParams = new URLSearchParams(window.location.search);
+              const appIdParam = urlParams.get('applicationId');
+              if (appIdParam) {
+                navigate(`/post-disbursal?applicationId=${appIdParam}`);
+                return;
+              }
+              try {
+                const res = await apiService.getLoanApplications();
+                const ok = res.success === true || res.status === 'success';
+                if (ok && res.data?.applications?.length) {
+                  const active = res.data.applications.find(
+                    (a: any) => !['cleared', 'cancelled'].includes(a.status)
+                  );
+                  if (active) {
+                    navigate(`/post-disbursal?applicationId=${active.id}`);
+                    return;
+                  }
+                }
+              } catch (_) {
+                /* fall through */
+              }
+              navigate('/post-disbursal');
+            })();
           }
         }, 100);
       } else {

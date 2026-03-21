@@ -214,7 +214,7 @@ export function SimplifiedLoanApplicationPage() {
               (app: any) => app.status === 'follow_up' || (app.status === 'ready_for_disbursement' && app.status !== 'ready_to_repeat_disbursal')
             );
             if (preDisbursalApp) {
-              navigate('/application-under-review');
+              navigate(`/post-disbursal?applicationId=${preDisbursalApp.id}`);
               return;
             }
 

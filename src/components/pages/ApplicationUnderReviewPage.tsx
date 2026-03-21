@@ -35,6 +35,23 @@ export const ApplicationUnderReviewPage = () => {
       if (isSuccess && response.data && response.data.applications && response.data.applications.length > 0) {
         const applications = response.data.applications;
         console.log('📋 ApplicationUnderReview: All applications:', applications);
+
+        const earlyReviewStatuses = ['submitted', 'under_review', 'follow_up', 'qa_verification'];
+        const reviewForMandate = applications.find((app: any) => earlyReviewStatuses.includes(app.status));
+        if (reviewForMandate) {
+          try {
+            const pd = await apiService.getPostDisbursalProgress(reviewForMandate.id);
+            if (pd.success && pd.data) {
+              const p = pd.data as any;
+              if (!p.references_completed || !p.enach_done || !p.selfie_verified) {
+                navigate(`/post-disbursal?applicationId=${reviewForMandate.id}`, { replace: true });
+                return;
+              }
+            }
+          } catch (e) {
+            console.error('ApplicationUnderReview mandate check:', e);
+          }
+        }
         
         // Find the most recent application with a post-disbursal status
         const postDisbursalStatuses = ['disbursal', 'ready_for_disbursement', 'repeat_disbursal', 'ready_to_repeat_disbursal'];
@@ -104,7 +121,7 @@ export const ApplicationUnderReviewPage = () => {
               <p className="text-base md:text-lg text-gray-600 mb-6 md:mb-8">
                 {applicationStatus === 'follow_up'
                   ? 'We have received your documents and will verify them shortly.'
-                  : '& will update you shortly.'}
+                  : 'We will update you shortly.'}
               </p>
 
               {/* Thank You Message */}

@@ -78,6 +78,14 @@ router.post('/initiate', requireAuth, async (req, res) => {
       });
     }
 
+    const agreementAllowedStatuses = ['disbursal', 'repeat_disbursal'];
+    if (!agreementAllowedStatuses.includes(application.status)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Loan agreement signing is available after your application reaches the disbursal stage.'
+      });
+    }
+
     // Always create a new transaction to avoid expired link issues
     // Clear old transaction IDs if they exist (they may be expired)
     if (application.clickwrap_ent_transaction_id || application.clickwrap_doc_transaction_id) {

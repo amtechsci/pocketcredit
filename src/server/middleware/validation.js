@@ -1,5 +1,27 @@
 const Joi = require('joi');
 
+/** Values for loan_applications.status on PUT /admin/applications/:id/status — must match DB enum and admin flows (e.g. QA → disbursal). */
+const LOAN_APPLICATION_ADMIN_STATUSES = [
+  'applied',
+  'submitted',
+  'under_review',
+  'follow_up',
+  'approved',
+  'rejected',
+  'pending_documents',
+  'disbursal',
+  'ready_for_disbursement',
+  'ready_to_repeat_disbursal',
+  'repeat_disbursal',
+  'qa_verification',
+  'account_manager',
+  'overdue',
+  'cleared',
+  'cancelled',
+  'disbursed',
+  'disbursement_ready'
+];
+
 // Common validation schemas
 const schemas = {
   // User registration
@@ -142,7 +164,7 @@ const schemas = {
 
   // Admin Applications schemas
   updateApplicationStatus: Joi.object({
-    status: Joi.string().valid('applied', 'under_review', 'approved', 'rejected', 'pending_documents').required(),
+    status: Joi.string().valid(...LOAN_APPLICATION_ADMIN_STATUSES).required(),
     reason: Joi.string().max(500).allow(''),
     assignedManager: Joi.string().min(2).max(100).allow(''),
     recoveryOfficer: Joi.string().min(2).max(100).allow('')

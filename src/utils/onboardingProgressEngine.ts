@@ -82,7 +82,7 @@ export const STEP_ROUTES: Record<OnboardingStep, string> = {
   'email-verification': '/email-verification',
   'references': '/user-references',
   'upload-documents': '/loan-application/upload-documents',
-  'steps': '/application-under-review'
+  'steps': '/post-disbursal'
 };
 
 /**
