@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { executeQuery, initializeDatabase } = require('../config/database');
+const { executeQuery, initializeDatabase, ensureLoanStatusHistoryTable } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
 const { uploadToS3 } = require('../services/s3Service');
 const { compareFaces, downloadImage } = require('../services/faceMatchService');
@@ -127,12 +127,33 @@ router.get('/progress/:applicationId', requireAuth, async (req, res) => {
           hasActiveEnach = true;
           console.log(`✅ User ${userId} has existing active E-NACH mandate. Auto-completing E-NACH step for loan ${applicationId}.`);
           
-          // Update the loan application to mark enach_done = true
+          // Update the loan application to mark enach_done = true and move submitted → under_review (same as explicit E-NACH completion)
           if (existingColumns.includes('enach_done')) {
+            const wasSubmitted = application.status === 'submitted';
             await executeQuery(
-              'UPDATE loan_applications SET enach_done = 1 WHERE id = ?',
+              `UPDATE loan_applications SET enach_done = 1,
+               status = IF(status = 'submitted', 'under_review', status),
+               updated_at = NOW()
+               WHERE id = ?`,
               [applicationId]
             );
+            if (wasSubmitted) {
+              try {
+                const { reassignFollowUpUserWhenStatusBecomesUnderReview } = require('../services/adminAssignmentService');
+                await reassignFollowUpUserWhenStatusBecomesUnderReview(applicationId);
+              } catch (e) {
+                console.warn('reassignFollowUpUserWhenStatusBecomesUnderReview (GET auto-enach):', e.message);
+              }
+              try {
+                await ensureLoanStatusHistoryTable();
+                await executeQuery(
+                  `INSERT INTO loan_status_history (loan_application_id, from_status, to_status, admin_id, source) VALUES (?, ?, ?, NULL, 'status_api')`,
+                  [applicationId, 'submitted', 'under_review']
+                );
+              } catch (e) {
+                console.warn('loan_status_history (GET auto-enach):', e.message);
+              }
+            }
           }
         }
       } catch (enachCheckError) {
@@ -440,6 +461,16 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
       });
     }
 
+    const promoteToUnderReviewAfterEnach =
+      enach_done === true &&
+      existingColumns.includes('enach_done') &&
+      application.status === 'submitted';
+
+    if (promoteToUnderReviewAfterEnach) {
+      updates.push('status = ?');
+      params.push('under_review');
+    }
+
     updates.push('updated_at = NOW()');
     params.push(applicationId);
 
@@ -447,6 +478,24 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
       `UPDATE loan_applications SET ${updates.join(', ')} WHERE id = ?`,
       params
     );
+
+    if (promoteToUnderReviewAfterEnach) {
+      try {
+        const { reassignFollowUpUserWhenStatusBecomesUnderReview } = require('../services/adminAssignmentService');
+        await reassignFollowUpUserWhenStatusBecomesUnderReview(applicationId);
+      } catch (e) {
+        console.warn('reassignFollowUpUserWhenStatusBecomesUnderReview (postDisbursal enach):', e.message);
+      }
+      try {
+        await ensureLoanStatusHistoryTable();
+        await executeQuery(
+          `INSERT INTO loan_status_history (loan_application_id, from_status, to_status, admin_id, source) VALUES (?, ?, ?, NULL, 'status_api')`,
+          [applicationId, 'submitted', 'under_review']
+        );
+      } catch (e) {
+        console.warn('loan_status_history (postDisbursal enach):', e.message);
+      }
+    }
 
     if (
       agreement_signed &&

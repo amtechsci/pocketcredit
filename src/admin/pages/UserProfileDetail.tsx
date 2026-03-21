@@ -269,6 +269,7 @@ function UserProfileDetail() {
       'upload-documents': 'Documents page',
       'language': 'Language spoken page',
       'e-nach': 'E-nach page',
+      'bank-confirm': 'Bank confirm page',
       'selfie': 'Selfie page',
       'kfs': 'KFS page',
       'agreement': 'Agreement page',

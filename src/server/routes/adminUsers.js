@@ -9,7 +9,56 @@ const pdfParseModule = require('pdf-parse');
 // Try accessing it via .default or use the module itself if it's callable
 const pdf = pdfParseModule.default || pdfParseModule;
 const router = express.Router();
+const { computePostDisbursalAdminStep } = require('../utils/adminOnboardingStep');
 
+/**
+ * Override raw loan_applications.current_step with computed post-disbursal step when applicable.
+ */
+async function enrichUsersCurrentStep(users) {
+  if (!users || users.length === 0) return users;
+  const ids = users.map(u => u.id);
+  const placeholders = ids.map(() => '?').join(',');
+  let latestLoans = [];
+  let clearedRows = [];
+  try {
+    latestLoans = await executeQuery(
+      `SELECT la.id, la.user_id, la.status,
+        COALESCE(la.enach_done, 0) as enach_done,
+        COALESCE(la.selfie_captured, 0) as selfie_captured,
+        COALESCE(la.selfie_verified, 0) as selfie_verified,
+        COALESCE(la.references_completed, 0) as references_completed,
+        COALESCE(la.kfs_viewed, 0) as kfs_viewed,
+        COALESCE(la.agreement_signed, 0) as agreement_signed,
+        COALESCE(la.bank_confirm_done, 0) as bank_confirm_done
+      FROM loan_applications la
+      INNER JOIN (
+        SELECT user_id, MAX(id) as mid FROM loan_applications WHERE user_id IN (${placeholders}) GROUP BY user_id
+      ) t ON la.user_id = t.user_id AND la.id = t.mid`,
+      ids
+    );
+  } catch (e) {
+    console.warn('enrichUsersCurrentStep latest loans:', e.message);
+  }
+  const loanByUserId = {};
+  for (const row of latestLoans || []) {
+    loanByUserId[row.user_id] = row;
+  }
+  try {
+    clearedRows = await executeQuery(
+      `SELECT user_id FROM loan_applications WHERE user_id IN (${placeholders}) AND status = 'cleared' GROUP BY user_id`,
+      ids
+    );
+  } catch (e) {
+    console.warn('enrichUsersCurrentStep cleared:', e.message);
+  }
+  const repeatSet = new Set((clearedRows || []).map(r => r.user_id));
+  for (const u of users) {
+    const loan = loanByUserId[u.id];
+    const postStep = loan ? computePostDisbursalAdminStep(loan, repeatSet.has(u.id)) : null;
+    u.currentStep = postStep || u.currentStep || null;
+  }
+  return users;
+}
 
 /**
  * Extract PAN number from PDF text
@@ -211,6 +260,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
       console.error('❌ Users query execution error:', queryError);
       throw queryError;
     }
+
+    await enrichUsersCurrentStep(users);
 
     // Transform the data to match the expected format
     const usersWithData = users.map(user => ({
@@ -1154,7 +1205,8 @@ router.get('/registered/list', authenticateAdmin, async (req, res) => {
       ORDER BY u.created_at DESC
       LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
     `;
-    const users = await executeQuery(usersQuery, queryParams);
+    let users = await executeQuery(usersQuery, queryParams);
+    await enrichUsersCurrentStep(users);
     res.json({
       status: 'success',
       data: {
@@ -1239,7 +1291,8 @@ router.get('/approved/list', authenticateAdmin, async (req, res) => {
       ORDER BY u.updated_at DESC
       LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
     `;
-    const users = await executeQuery(usersQuery, queryParams);
+    let users = await executeQuery(usersQuery, queryParams);
+    await enrichUsersCurrentStep(users);
     res.json({
       status: 'success',
       data: {

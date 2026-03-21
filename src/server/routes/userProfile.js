@@ -4,6 +4,7 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 const { validateRequest } = require('../middleware/validation');
 const { getPresignedUrl, uploadStudentDocument } = require('../services/s3Service');
 const { getLoanCalculation } = require('../utils/loanCalculations');
+const { computeOnboardingCurrentStep } = require('../utils/adminOnboardingStep');
 const pdfService = require('../services/pdfService');
 const emailService = require('../services/emailService');
 const axios = require('axios');
@@ -31,93 +32,6 @@ function formatDateLocal(date) {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
-}
-
-/**
- * Step order for onboarding (must match frontend onboardingProgressEngine STEP_ORDER).
- * Used to compute first incomplete step for admin "Current step" display.
- */
-const ONBOARDING_STEP_ORDER = [
-  'application',
-  'kyc-verification',
-  'pan-verification',
-  'aa-consent',
-  'credit-analytics',
-  'employment-details',
-  'bank-statement',
-  'bank-details',
-  'email-verification',
-  'references',
-  'upload-documents',
-  'steps'
-];
-
-/**
- * Compute onboarding current step from actual completion state (so admin shows correct step).
- * Walks step order and returns the first incomplete step; early steps (KYC, employment, AA, etc.)
- * no longer show as "bank-details".
- * @param {object} user - User row (kyc_completed, employment_type, income_range, email flags, etc.)
- * @param {object} latestApplication - Latest loan application (user_bank_id, id)
- * @param {number} referencesCount - Count of references (excl. Self/Credit%)
- * @param {object} opts - Optional: kycData, kycDocuments, employment, bankStatementRecords, creditCheck, aaOrBankStatement
- */
-function computeOnboardingCurrentStep(user, latestApplication, referencesCount, opts = {}) {
-  if (!latestApplication) return null;
-
-  const hasVerifiedEmail = !!(
-    (user.email && String(user.email).trim() !== '' && user.email_verified) ||
-    (user.personal_email && String(user.personal_email).trim() !== '' && user.personal_email_verified) ||
-    (user.official_email && String(user.official_email).trim() !== '' && user.official_email_verified)
-  );
-  const hasRefs = referencesCount >= 3 && !!(user.alternate_mobile && String(user.alternate_mobile).trim() !== '');
-  const status = latestApplication.status || '';
-  const finalStatuses = ['under_review', 'submitted', 'approved', 'disbursal', 'ready_for_disbursement', 'account_manager', 'overdue', 'cleared', 'ready_to_repeat_disbursal', 'repeat_disbursal'];
-  if (finalStatuses.includes(status) && hasRefs) return 'complete';
-  if (hasRefs) return 'complete';
-
-  const kycData = opts.kycData || null;
-  const kycDocuments = opts.kycDocuments || [];
-  const employment = opts.employment || [];
-  const bankStatementRecords = opts.bankStatementRecords || [];
-  const creditCheck = opts.creditCheck || null;
-  const aaOrBankStatement = opts.aaOrBankStatement || false;
-
-  const rekycRequired = !!(kycData && kycData.verification_data && (typeof kycData.verification_data === 'string'
-    ? (() => { try { const v = JSON.parse(kycData.verification_data); return v && v.rekyc_required === true; } catch (e) { return false; } })()
-    : (kycData.verification_data.rekyc_required === true)));
-
-  const kycVerified = (user.kyc_completed || (kycData && kycData.status === 'verified')) && !rekycRequired;
-  const hasPanDocument = Array.isArray(kycDocuments) && kycDocuments.some(d => (d.document_type || '').toUpperCase().includes('PAN'));
-  const aaConsentGiven = aaOrBankStatement;
-  const creditAnalyticsCompleted = !!(creditCheck && creditCheck.credit_score != null && Number(creditCheck.credit_score) > 450);
-  const employmentCompleted = !!(
-    (user.employment_type && String(user.employment_type).trim() !== '') &&
-    (user.income_range != null && String(user.income_range).trim() !== '') &&
-    (employment.length === 0 || employment.some(e => (e.salary_payment_mode != null && e.salary_payment_mode !== '') || (e.monthly_salary_old != null && Number(e.monthly_salary_old) > 0)))
-  );
-  const bankStatementCompleted = bankStatementRecords.some(r => r.status === 'completed' || r.upload_method === 'manual');
-  const bankDetailsCompleted = !!(latestApplication.user_bank_id != null && latestApplication.user_bank_id !== '');
-
-  const checks = [
-    true, // application (we have an application)
-    kycVerified,
-    hasPanDocument,
-    aaConsentGiven,
-    creditAnalyticsCompleted,
-    employmentCompleted,
-    bankStatementCompleted,
-    bankDetailsCompleted,
-    hasVerifiedEmail,
-    hasRefs,
-    true, // upload-documents: treat as done if refs done
-    true  // steps
-  ];
-
-  const stepOrder = ONBOARDING_STEP_ORDER;
-  for (let i = 0; i < stepOrder.length; i++) {
-    if (!checks[i]) return stepOrder[i];
-  }
-  return 'complete';
 }
 
 /**
@@ -421,6 +335,13 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         DATE_FORMAT(la.closed_date, '%Y-%m-%d') as closed_date,
         la.closed_amount,
         la.current_step,
+        COALESCE(la.enach_done, 0) as enach_done,
+        COALESCE(la.selfie_captured, 0) as selfie_captured,
+        COALESCE(la.selfie_verified, 0) as selfie_verified,
+        COALESCE(la.references_completed, 0) as references_completed,
+        COALESCE(la.kfs_viewed, 0) as kfs_viewed,
+        COALESCE(la.agreement_signed, 0) as agreement_signed,
+        COALESCE(la.bank_confirm_done, 0) as bank_confirm_done,
         la.user_bank_id,
         es.status as enach_status,
         av.name as verify_user_name,
@@ -455,9 +376,15 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
 
     console.log('📋 Found applications:', applications ? applications.length : 0);
 
+    /** Match admin applications list: Submitted until E-NACH is done (under_review + enach_done ≠ 1 → show submitted). */
+    const effectiveAdminLoanStatus = (st, enachDone) =>
+      st === 'under_review' && Number(enachDone) !== 1 ? 'submitted' : st;
+
     // Get latest loan application status for profile status display
     const latestApplication = applications && applications.length > 0 ? applications[0] : null;
-    const profileStatus = latestApplication ? latestApplication.status : (user.status || 'active');
+    const profileStatus = latestApplication
+      ? effectiveAdminLoanStatus(latestApplication.status, latestApplication.enach_done)
+      : (user.status || 'active');
 
     // Get assigned account manager if status is account_manager or overdue
     let assignedManager = null;
@@ -476,6 +403,17 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         [userId, '', 'Self', 'Credit%']
       );
       referencesCount = (refRows && refRows[0]) ? (refRows[0].c || 0) : 0;
+    }
+
+    let isRepeatCustomer = false;
+    try {
+      const rcRows = await executeQuery(
+        'SELECT COUNT(*) as c FROM loan_applications WHERE user_id = ? AND status = ?',
+        [userId, 'cleared']
+      );
+      isRepeatCustomer = (rcRows[0]?.c || 0) > 0;
+    } catch (e) {
+      isRepeatCustomer = false;
     }
 
     // Calculate pocket credit score (default 640, increase by 6 if loan cleared on/before due date)
@@ -1254,7 +1192,8 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
             employment,
             bankStatementRecords,
             creditCheck,
-            aaOrBankStatement
+            aaOrBankStatement,
+            isRepeatCustomer
           })
         : null, // Computed from completion state so admin shows correct step
       registeredDate: user.created_at, // For admin UI compatibility
@@ -1370,7 +1309,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           loan_amount: app.loan_amount,
           principalAmount: app.loan_amount,
           type: app.loan_purpose || 'Personal Loan',
-          status: app.status,
+          status: effectiveAdminLoanStatus(app.status, app.enach_done),
           appliedDate: app.created_at,
           approvedDate: app.approved_at,
           disbursedDate: app.disbursed_at,
@@ -1414,7 +1353,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           closed_amount: app.closed_amount != null ? parseFloat(app.closed_amount) : null,
           enach_status: app.enach_status || null,
           subAdminAssignments: (() => {
-            const status = app.status;
+            const status = effectiveAdminLoanStatus(app.status, app.enach_done);
             const afterDisbursal = status === 'account_manager';
             const overdue = status === 'overdue';
             const verifyName = (app.temp_verify_user_name || app.verify_user_name) || 'N/A';

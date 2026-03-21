@@ -48,6 +48,12 @@ function formatDateDDMMYYYY(date) {
   return `${day}${month}${year}`;
 }
 
+/** Admin list/profile: show Submitted until E-NACH completes (legacy rows may be under_review with enach_done = 0). */
+function effectiveAdminLoanStatus(status, enachDone) {
+  if (status === 'under_review' && Number(enachDone) !== 1) return 'submitted';
+  return status;
+}
+
 // Get all loan applications with filters and pagination
 router.get('/', authenticateAdmin, async (req, res) => {
   try {
@@ -118,6 +124,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
         la.interest_percent_per_day,
         la.emi_amount as emiAmount,
         la.status,
+        COALESCE(la.enach_done, 0) as enach_done,
         la.rejection_reason as rejectionReason,
         la.approved_by as approvedBy,
         DATE_FORMAT(la.approved_at, '%Y-%m-%d') as approvedDate,
@@ -231,8 +238,14 @@ router.get('/', authenticateAdmin, async (req, res) => {
 
     // Status filter (use effectiveStatus so sub_admin/nbfc_admin cannot see disallowed statuses)
     if (effectiveStatus && effectiveStatus !== 'all') {
-      whereConditions.push('la.status = ?');
-      queryParams.push(effectiveStatus);
+      if (effectiveStatus === 'submitted') {
+        whereConditions.push(`(la.status = 'submitted' OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0))`);
+      } else if (effectiveStatus === 'under_review') {
+        whereConditions.push(`(la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 1)`);
+      } else {
+        whereConditions.push('la.status = ?');
+        queryParams.push(effectiveStatus);
+      }
       
       // Special handling for cleared status: only show cleared loans where user has no current active loan
       if (effectiveStatus === 'cleared') {
@@ -555,7 +568,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
         userId: app.userId,
         loanAmount: parseFloat(app.loanAmount) || 0,
         loanType: app.loanType?.toLowerCase() || 'personal',
-        status: app.status,
+        status: effectiveAdminLoanStatus(app.status, app.enach_done),
         applicationDate: app.applicationDate,
         tenure: app.tenure || 0,
         interestRate: app.interest_percent_per_day 
@@ -2238,6 +2251,7 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         la.interest_percent_per_day,
         la.emi_amount as emiAmount,
         la.status,
+        COALESCE(la.enach_done, 0) as enach_done,
         la.rejection_reason as rejectionReason,
         la.approved_by as approvedBy,
         la.approved_at as approvedDate,
@@ -2335,8 +2349,14 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
 
     // Status filter (use effectiveStatus for permission enforcement)
     if (effectiveStatus && effectiveStatus !== 'all') {
-      whereConditions.push('la.status = ?');
-      queryParams.push(effectiveStatus);
+      if (effectiveStatus === 'submitted') {
+        whereConditions.push(`(la.status = 'submitted' OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0))`);
+      } else if (effectiveStatus === 'under_review') {
+        whereConditions.push(`(la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 1)`);
+      } else {
+        whereConditions.push('la.status = ?');
+        queryParams.push(effectiveStatus);
+      }
       
       if (effectiveStatus === 'cleared') {
         whereConditions.push(`NOT EXISTS (
@@ -2465,7 +2485,7 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         'Tenure (Months)': app.tenure || 0,
         'Interest Rate (% per day)': app.interest_percent_per_day ? parseFloat(app.interest_percent_per_day) : 0,
         'EMI Amount': app.emiAmount ? parseFloat(app.emiAmount) : 0,
-        'Status': app.status || '',
+        'Status': effectiveAdminLoanStatus(app.status, app.enach_done) || '',
         'Application Date': app.applicationDate ? formatDateDDMMYYYY(app.applicationDate) : '',
         'Approved Date': app.approvedDate ? formatDateDDMMYYYY(app.approvedDate) : '',
         'Disbursed Date': app.disbursedDate ? formatDateDDMMYYYY(app.disbursedDate) : '',

@@ -169,8 +169,9 @@ router.post('/', requireAuth, async (req, res) => {
     console.log('✅ Updated user alternate data for user:', userId);
 
     // After references saved, update loan application status
-    // If status is 'submitted', change to 'under_review' (ready for admin review)
     // If status is 'pending' or 'in_progress', change to 'submitted'
+    // If status is 'submitted', move to 'under_review' only after E-NACH is done (post-disbursal mandate).
+    // Otherwise the user may still be on the E-NACH step while admin would incorrectly see Under Review.
     try {
       const applications = await executeQuery(
         `SELECT id, status, current_step FROM loan_applications 
@@ -185,8 +186,18 @@ router.post('/', requireAuth, async (req, res) => {
         
         // Determine new status based on current status
         if (application.status === 'submitted') {
-          // If already submitted, move to under_review when references are updated
-          newStatus = 'under_review';
+          let enachDone = false;
+          try {
+            const enachRows = await executeQuery(
+              'SELECT COALESCE(enach_done, 0) AS enach_done FROM loan_applications WHERE id = ?',
+              [application.id]
+            );
+            enachDone = Number(enachRows[0]?.enach_done) === 1;
+          } catch (e) {
+            // Column missing (legacy DB): keep previous behaviour
+            enachDone = true;
+          }
+          newStatus = enachDone ? 'under_review' : null;
         } else if (['pending', 'in_progress'].includes(application.status)) {
           // If pending or in_progress, move to submitted
           newStatus = 'submitted';
