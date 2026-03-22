@@ -93,6 +93,13 @@ function computePostDisbursalAdminStep(app, isRepeatCustomer) {
  * @param {number} referencesCount - ref count (excl. Self / Credit%)
  * @param {object} opts - kycData, kycDocuments, employment, bankStatementRecords, creditCheck, aaOrBankStatement, isRepeatCustomer
  */
+function hasPanVerifiedForAdmin(user, kycDocuments) {
+  const fromDocs = Array.isArray(kycDocuments) && kycDocuments.some(d => (d.document_type || '').toUpperCase().includes('PAN'));
+  if (fromDocs) return true;
+  const pan = user && user.pan_number != null ? String(user.pan_number).trim().toUpperCase() : '';
+  return /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan);
+}
+
 function computeOnboardingCurrentStep(user, latestApplication, referencesCount, opts = {}) {
   if (!latestApplication) return null;
 
@@ -122,7 +129,7 @@ function computeOnboardingCurrentStep(user, latestApplication, referencesCount, 
     : (kycData.verification_data.rekyc_required === true)));
 
   const kycVerified = (user.kyc_completed || (kycData && kycData.status === 'verified')) && !rekycRequired;
-  const hasPanDocument = Array.isArray(kycDocuments) && kycDocuments.some(d => (d.document_type || '').toUpperCase().includes('PAN'));
+  const hasPanDocument = hasPanVerifiedForAdmin(user, kycDocuments);
   const aaConsentGiven = aaOrBankStatement;
   const creditAnalyticsCompleted = !!(creditCheck && creditCheck.credit_score != null && Number(creditCheck.credit_score) > 450);
   const employmentCompleted = !!(
@@ -132,6 +139,11 @@ function computeOnboardingCurrentStep(user, latestApplication, referencesCount, 
   );
   const bankStatementCompleted = bankStatementRecords.some(r => r.status === 'completed' || r.upload_method === 'manual');
   const bankDetailsCompleted = !!(latestApplication.user_bank_id != null && latestApplication.user_bank_id !== '');
+
+  // Digitap AA / bank statement collection started but report not in yet — user is on bank-statement UI, not PAN
+  if (opts.bankStatementAaInProgress && !bankStatementCompleted) {
+    return 'bank-statement';
+  }
 
   const checks = [
     true,

@@ -231,8 +231,22 @@ router.get('/', authenticateAdmin, async (req, res) => {
     let whereConditions = [];
     let queryParams = [];
 
-    // Exclude users moved to TVR from status-specific tabs only; when status is 'all', show every loan so they are visible and searchable
-    if (effectiveStatus && effectiveStatus !== 'all') {
+    // Direct loan id lookup (PLL123 / 123) — same rules as search block below
+    const trimmedSearchForLoanId = search ? String(search).trim() : '';
+    let loanIdFromSearch = null;
+    if (trimmedSearchForLoanId) {
+      const pllMatchEarly = trimmedSearchForLoanId.match(/^pll(\d+)$/i);
+      loanIdFromSearch = pllMatchEarly
+        ? parseInt(pllMatchEarly[1], 10)
+        : /^\d+$/.test(trimmedSearchForLoanId)
+          ? parseInt(trimmedSearchForLoanId, 10)
+          : null;
+    }
+    const relaxTabFiltersForLoanIdLookup = loanIdFromSearch != null;
+
+    // Exclude users moved to TVR from status-specific tabs only; when status is 'all', show every loan so they are visible and searchable.
+    // When searching by explicit loan id, include TVR rows so a loan is findable from Submitted / other tabs (matches All-tab search).
+    if (effectiveStatus && effectiveStatus !== 'all' && !relaxTabFiltersForLoanIdLookup) {
       whereConditions.push('(COALESCE(u.moved_to_tvr, 0) = 0)');
     }
 
@@ -294,29 +308,33 @@ router.get('/', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // Loan type filter
-    if (loanType && loanType !== 'all') {
+    // Loan type filter (skip when searching by loan id so lookup always hits)
+    if (loanType && loanType !== 'all' && !relaxTabFiltersForLoanIdLookup) {
       whereConditions.push('la.loan_purpose = ?');
       queryParams.push(loanType);
     }
 
-    // Date filters
-    if (dateFrom) {
-      whereConditions.push('DATE(la.created_at) >= ?');
-      queryParams.push(dateFrom);
-    }
-    if (dateTo) {
-      whereConditions.push('DATE(la.created_at) <= ?');
-      queryParams.push(dateTo);
+    // Date filters (skip when searching by loan id so lookup always hits)
+    if (!relaxTabFiltersForLoanIdLookup) {
+      if (dateFrom) {
+        whereConditions.push('DATE(la.created_at) >= ?');
+        queryParams.push(dateFrom);
+      }
+      if (dateTo) {
+        whereConditions.push('DATE(la.created_at) <= ?');
+        queryParams.push(dateTo);
+      }
     }
 
-    // Loan amount filter (below_3k, 3k_8k, 8k_above)
-    if (loanAmountFilter === 'below_3k') {
-      whereConditions.push('la.loan_amount < 3000');
-    } else if (loanAmountFilter === '3k_8k') {
-      whereConditions.push('la.loan_amount >= 3000 AND la.loan_amount <= 8000');
-    } else if (loanAmountFilter === '8k_above') {
-      whereConditions.push('la.loan_amount > 8000');
+    // Loan amount filter (below_3k, 3k_8k, 8k_above); skip when searching by loan id so lookup always hits
+    if (!relaxTabFiltersForLoanIdLookup) {
+      if (loanAmountFilter === 'below_3k') {
+        whereConditions.push('la.loan_amount < 3000');
+      } else if (loanAmountFilter === '3k_8k') {
+        whereConditions.push('la.loan_amount >= 3000 AND la.loan_amount <= 8000');
+      } else if (loanAmountFilter === '8k_above') {
+        whereConditions.push('la.loan_amount > 8000');
+      }
     }
 
     // Sub-admin only: restrict to assigned applications. Main admin (admin/super_admin) always sees all
@@ -2367,8 +2385,20 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
     let whereConditions = [];
     let queryParams = [];
 
+    const trimmedExportSearch = search ? String(search).trim() : '';
+    let loanIdFromExportSearch = null;
+    if (trimmedExportSearch) {
+      const pllMatchExport = trimmedExportSearch.match(/^pll(\d+)$/i);
+      loanIdFromExportSearch = pllMatchExport
+        ? parseInt(pllMatchExport[1], 10)
+        : /^\d+$/.test(trimmedExportSearch)
+          ? parseInt(trimmedExportSearch, 10)
+          : null;
+    }
+    const relaxTabFiltersForLoanIdLookupExport = loanIdFromExportSearch != null;
+
     // Exclude users moved to TVR from status-specific export only; when exporting 'all', include every loan
-    if (effectiveStatus && effectiveStatus !== 'all') {
+    if (effectiveStatus && effectiveStatus !== 'all' && !relaxTabFiltersForLoanIdLookupExport) {
       whereConditions.push('(COALESCE(u.moved_to_tvr, 0) = 0)');
     }
 
@@ -2429,20 +2459,22 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // Loan type filter
-    if (loanType && loanType !== 'all') {
+    // Loan type filter (skip when searching by loan id so export matches list lookup)
+    if (loanType && loanType !== 'all' && !relaxTabFiltersForLoanIdLookupExport) {
       whereConditions.push('la.loan_purpose = ?');
       queryParams.push(loanType);
     }
 
-    // Date filters
-    if (dateFrom) {
-      whereConditions.push('DATE(la.created_at) >= ?');
-      queryParams.push(dateFrom);
-    }
-    if (dateTo) {
-      whereConditions.push('DATE(la.created_at) <= ?');
-      queryParams.push(dateTo);
+    // Date filters (skip when searching by loan id so export matches list lookup)
+    if (!relaxTabFiltersForLoanIdLookupExport) {
+      if (dateFrom) {
+        whereConditions.push('DATE(la.created_at) >= ?');
+        queryParams.push(dateFrom);
+      }
+      if (dateTo) {
+        whereConditions.push('DATE(la.created_at) <= ?');
+        queryParams.push(dateTo);
+      }
     }
 
     // Sub-admin: restrict to assigned applications and allowed statuses (same as list endpoint)

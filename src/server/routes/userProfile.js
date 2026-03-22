@@ -637,6 +637,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     // Credit check and AA/bank statement status for onboarding current step (early steps)
     let creditCheck = null;
     let aaOrBankStatement = false;
+    let bankStatementAaInProgress = false;
     try {
       const ccRows = await executeQuery(
         'SELECT id, credit_score, is_eligible, checked_at FROM credit_checks WHERE user_id = ? ORDER BY checked_at DESC LIMIT 1',
@@ -649,8 +650,15 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
           'SELECT id, status FROM digitap_bank_statements WHERE user_id = ? AND application_id = ? ORDER BY created_at DESC LIMIT 1',
           [userId, latestApplication.id]
         );
-        const digitapOk = digitapRows && digitapRows.length > 0 && (digitapRows[0].status === 'completed' || digitapRows[0].status === 'ReportGenerated');
-        aaOrBankStatement = digitapOk || (bankStatementRecords && bankStatementRecords.length > 0 && bankStatementRecords.some(r => r.status === 'completed' || r.upload_method === 'manual'));
+        if (digitapRows && digitapRows.length > 0) {
+          const st = String(digitapRows[0].status || '');
+          const stLower = st.toLowerCase();
+          const digitapOk = st === 'completed' || st === 'ReportGenerated';
+          bankStatementAaInProgress = stLower !== 'failed' && stLower !== 'cancelled' && !digitapOk;
+          aaOrBankStatement = digitapOk || (bankStatementRecords && bankStatementRecords.length > 0 && bankStatementRecords.some(r => r.status === 'completed' || r.upload_method === 'manual'));
+        } else {
+          aaOrBankStatement = bankStatementRecords && bankStatementRecords.length > 0 && bankStatementRecords.some(r => r.status === 'completed' || r.upload_method === 'manual');
+        }
       } else {
         aaOrBankStatement = bankStatementRecords && bankStatementRecords.length > 0 && bankStatementRecords.some(r => r.status === 'completed' || r.upload_method === 'manual');
       }
@@ -1193,6 +1201,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
             bankStatementRecords,
             creditCheck,
             aaOrBankStatement,
+            bankStatementAaInProgress,
             isRepeatCustomer
           })
         : null, // Computed from completion state so admin shows correct step

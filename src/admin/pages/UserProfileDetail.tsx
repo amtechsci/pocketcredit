@@ -261,7 +261,7 @@ function UserProfileDetail() {
       'aa-consent': 'Account Aggregator page',
       'credit-analytics': 'Credit analytics page',
       'employment-details': 'Employment details page',
-      'bank-statement': 'Bank statement page',
+      'bank-statement': 'Bank statement / Account Aggregator',
       'bank-details': 'Bank details page',
       'email-verification': 'Email verification page',
       'references': 'References page',
