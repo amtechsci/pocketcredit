@@ -64,7 +64,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
       limit = 20,
       status = 'all',
       search = '',
-      sortBy = 'applicationDate',
+      sortBy = 'updatedAt',
       sortOrder = 'desc',
       loanType = 'all',
       dateFrom = '',
@@ -345,9 +345,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
       if (subCategory === 'verify_user') {
         whereConditions.push('(la.assigned_verify_admin_id = ? OR la.temp_assigned_verify_admin_id = ?)');
         queryParams.push(adminId, adminId);
-        if (!effectiveStatus || effectiveStatus === 'all') {
-          whereConditions.push("la.status IN ('submitted','under_review','follow_up','disbursal','ready_for_disbursement')");
-        }
+        // When a specific tab is selected, status is filtered below. For "All", show every assigned loan
+        // (e.g. qa_verification, repeat_disbursal) — the old IN list hid loans from every tab.
       } else if (subCategory === 'qa_user') {
         whereConditions.push('(la.assigned_qa_admin_id = ? OR la.temp_assigned_qa_admin_id = ?)');
         queryParams.push(adminId, adminId);
@@ -364,9 +363,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
         // Restrict to assigned applications for all tabs (including disbursal and TVR)
         whereConditions.push('(la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)');
         queryParams.push(adminId, adminId);
-        if (!effectiveStatus || effectiveStatus === 'all') {
-          whereConditions.push("la.status IN ('submitted','under_review','follow_up','disbursal')");
-        } else if (effectiveStatus === 'disbursal') {
+        if (effectiveStatus === 'disbursal') {
           whereConditions.push("la.status = 'disbursal'");
         }
       } else if (subCategory === 'debt_agency') {
@@ -381,14 +378,16 @@ router.get('/', authenticateAdmin, async (req, res) => {
 
     // Add ORDER BY clause
     const validSortFields = {
-      'applicationDate': 'applicationDate',
-      'applicantName': 'u.first_name',
-      'loanAmount': 'la.loan_amount',
-      'status': 'la.status',
-      'cibilScore': 'la.loan_amount' // Use loan amount as proxy since credit_score doesn't exist
+      applicationDate: 'la.created_at',
+      updatedAt: 'la.updated_at',
+      id: 'la.id',
+      applicantName: 'u.first_name',
+      loanAmount: 'la.loan_amount',
+      status: 'la.status',
+      cibilScore: 'la.loan_amount' // Use loan amount as proxy since credit_score doesn't exist
     };
-    
-    const sortField = validSortFields[sortBy] || 'applicationDate';
+
+    const sortField = validSortFields[sortBy] || 'la.updated_at';
     const sortDirection = sortOrder === 'asc' ? 'ASC' : 'DESC';
     baseQuery += ` ORDER BY ${sortField} ${sortDirection}`;
 
@@ -2483,9 +2482,6 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
       if (exportSubCategory === 'verify_user') {
         whereConditions.push('(la.assigned_verify_admin_id = ? OR la.temp_assigned_verify_admin_id = ?)');
         queryParams.push(adminId, adminId);
-        if (!effectiveStatus || effectiveStatus === 'all') {
-          whereConditions.push("la.status IN ('submitted','under_review','follow_up','disbursal','ready_for_disbursement')");
-        }
       } else if (exportSubCategory === 'qa_user') {
         whereConditions.push('(la.assigned_qa_admin_id = ? OR la.temp_assigned_qa_admin_id = ?)');
         queryParams.push(adminId, adminId);
@@ -2501,9 +2497,7 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
       } else if (exportSubCategory === 'follow_up_user') {
         whereConditions.push('(la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)');
         queryParams.push(adminId, adminId);
-        if (!effectiveStatus || effectiveStatus === 'all') {
-          whereConditions.push("la.status IN ('submitted','under_review','follow_up','disbursal')");
-        } else if (effectiveStatus === 'disbursal') {
+        if (effectiveStatus === 'disbursal') {
           whereConditions.push("la.status = 'disbursal'");
         }
       } else if (exportSubCategory === 'debt_agency') {

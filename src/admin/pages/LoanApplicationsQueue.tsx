@@ -109,7 +109,7 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState(initialStatus || 'all');
-  const [sortBy, setSortBy] = useState('applicationDate');
+  const [sortBy, setSortBy] = useState('updatedAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const { canApproveLoans, canRejectLoans, currentUser, isNbfcAdmin, shouldMaskMobile } = useAdmin();
   const isMainAdmin = currentUser?.role !== 'nbfc_admin' && currentUser?.role !== 'sub_admin';
