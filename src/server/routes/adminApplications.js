@@ -2127,6 +2127,31 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       const rs = repeatSplitRows[0] || {};
       statusCounts['ready_to_repeat_disbursal_cleared'] = Number(rs.ready_repeat_cleared) || 0;
       statusCounts['ready_to_repeat_disbursal_qa_pending'] = Number(rs.repeat_qa_pending) || 0;
+
+      // Align tab badges with Applications list filters (Submitted / Under Review tabs use enach_done split)
+      try {
+        const submittedQueueRows = await executeQuery(`
+          SELECT COUNT(*) as c FROM loan_applications la
+          INNER JOIN users u ON la.user_id = u.id
+          WHERE (COALESCE(u.moved_to_tvr, 0) = 0)
+          AND (
+            la.status = 'submitted'
+            OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0)
+          )
+        `);
+        const underReviewQueueRows = await executeQuery(`
+          SELECT COUNT(*) as c FROM loan_applications la
+          INNER JOIN users u ON la.user_id = u.id
+          WHERE (COALESCE(u.moved_to_tvr, 0) = 0)
+          AND la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 1
+        `);
+        statusCounts['_submitted_queue'] = Number(submittedQueueRows[0]?.c) || 0;
+        statusCounts['_under_review_queue'] = Number(underReviewQueueRows[0]?.c) || 0;
+      } catch (queueErr) {
+        console.warn('stats submitted/under_review queue counts (using raw status counts):', queueErr.message);
+        statusCounts['_submitted_queue'] = statusCounts['submitted'] || 0;
+        statusCounts['_under_review_queue'] = statusCounts['under_review'] || 0;
+      }
     }
 
     // TVR user count: full admin gets total, follow_up_user gets count of TVR users assigned to them
@@ -2152,8 +2177,8 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
 
     const stats = {
       totalApplications: total,
-      submittedApplications: statusCounts['submitted'] || 0,
-      pendingApplications: statusCounts['under_review'] || 0,
+      submittedApplications: (statusCounts['_submitted_queue'] ?? statusCounts['submitted']) || 0,
+      pendingApplications: (statusCounts['_under_review_queue'] ?? statusCounts['under_review']) || 0,
       followUpApplications: statusCounts['follow_up'] || 0,
       rejectedApplications: statusCounts['rejected'] || 0,
       disbursalApplications: statusCounts['disbursal'] || 0,
@@ -2170,10 +2195,10 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       accountManagerApplications: statusCounts['account_manager'] || 0,
       overdueApplications: statusCounts['overdue'] || 0,
       clearedApplications: statusCounts['cleared'] || 0,
-      newApplications: statusCounts['submitted'] || 0,
+      newApplications: (statusCounts['_submitted_queue'] ?? statusCounts['submitted']) || 0,
       total: total,
       applied: statusCounts['applied'] || 0,
-      underReview: statusCounts['under_review'] || 0,
+      underReview: (statusCounts['_under_review_queue'] ?? statusCounts['under_review']) || 0,
       approved: statusCounts['follow_up'] || 0,
       rejected: statusCounts['rejected'] || 0,
       pendingDocuments: statusCounts['pending_documents'] || 0,

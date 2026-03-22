@@ -208,6 +208,9 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
     (value: string) => {
       setStatusFilter(value);
       setCurrentPage(1);
+      // Clear search when switching tabs so list matches tab badges (search was narrowing the table)
+      setSearchInput('');
+      setSearchTerm('');
       if (!initialStatus) {
         setSearchParams(
           (prev) => {

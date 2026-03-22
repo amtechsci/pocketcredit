@@ -252,12 +252,11 @@ const createApplication = async (userId, applicationData) => {
 
     console.log(`✅ Loan application created with status: ${initialStatus}${hasCompletedLoan ? ' (Repeat customer - Expedited)' : ''}`);
 
-    // Assign to verify user when status is submitted (round-robin)
-    if (initialStatus === 'submitted') {
+    // Assign verify + follow-up when entering the main queues (first-time submitted or repeat_disbursal)
+    if (initialStatus === 'submitted' || initialStatus === 'repeat_disbursal') {
       try {
         const { assignVerifyUserForLoan, assignFollowUpUserForLoan } = require('../services/adminAssignmentService');
         await assignVerifyUserForLoan(insertedId);
-        // Also assign to follow-up user when status becomes submitted
         await assignFollowUpUserForLoan(insertedId);
       } catch (err) {
         console.error('Assign verify user/follow-up user for new loan failed:', err);
