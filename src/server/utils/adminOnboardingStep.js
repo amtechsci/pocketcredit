@@ -24,6 +24,27 @@ const EARLY_MANDATE_STATUSES = ['submitted', 'under_review', 'follow_up', 'qa_ve
 const DISBURSAL_POST_FLOW_STATUSES = ['disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal'];
 
 /**
+ * True when the borrower is past (or in) the post-disbursal / mandate flow so we must not
+ * show Digilocker/PAN/etc. from stale early-prerequisite checks.
+ */
+function shouldPrioritizePostDisbursal(app, hasRefs) {
+  if (!app) return false;
+  const st = app.status || '';
+  const refsDone = Number(app.references_completed) === 1;
+  const touchedEnach = Number(app.enach_done) === 1;
+  const touchedSelfie = Number(app.selfie_captured) === 1 || Number(app.selfie_verified) === 1;
+  return (
+    refsDone ||
+    hasRefs ||
+    touchedEnach ||
+    touchedSelfie ||
+    DISBURSAL_POST_FLOW_STATUSES.includes(st) ||
+    st === 'repeat_disbursal' ||
+    (EARLY_MANDATE_STATUSES.includes(st) && (refsDone || hasRefs))
+  );
+}
+
+/**
  * First incomplete post-disbursal step for admin display (e-nach, selfie, kfs, …).
  * @param {object|null} app - Latest loan_application row with flags
  * @param {boolean} isRepeatCustomer - User has at least one cleared loan (same as post-disbursal API)
@@ -82,6 +103,13 @@ function computeOnboardingCurrentStep(user, latestApplication, referencesCount, 
   );
   const hasRefs = referencesCount >= 3 && !!(user.alternate_mobile && String(user.alternate_mobile).trim() !== '');
 
+  // Post-disbursal first when loan/user clearly left onboarding (avoids false KYC/PAN when user is on e-nach/selfie)
+  if (shouldPrioritizePostDisbursal(latestApplication, hasRefs)) {
+    const postStep = computePostDisbursalAdminStep(latestApplication, !!opts.isRepeatCustomer);
+    if (postStep) return postStep;
+    return 'complete';
+  }
+
   const kycData = opts.kycData || null;
   const kycDocuments = opts.kycDocuments || [];
   const employment = opts.employment || [];
@@ -134,5 +162,6 @@ function computeOnboardingCurrentStep(user, latestApplication, referencesCount, 
 module.exports = {
   computeOnboardingCurrentStep,
   computePostDisbursalAdminStep,
+  shouldPrioritizePostDisbursal,
   ONBOARDING_STEP_ORDER
 };
