@@ -131,6 +131,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
         DATE_FORMAT(la.disbursed_at, '%Y-%m-%d') as disbursedDate,
         DATE_FORMAT(la.created_at, '%Y-%m-%d') as applicationDate,
         DATE_FORMAT(la.updated_at, '%Y-%m-%d') as updatedAt,
+        la.created_at as sortCreatedAt,
+        la.updated_at as sortUpdatedAt,
         la.loan_plan_id,
         la.plan_snapshot,
         la.processing_fee,
@@ -377,9 +379,10 @@ router.get('/', authenticateAdmin, async (req, res) => {
     }
 
     // Add ORDER BY clause
+    // Must use columns/aliases present in SELECT — ORDER BY la.updated_at breaks SELECT DISTINCT (MySQL 3065)
     const validSortFields = {
-      applicationDate: 'la.created_at',
-      updatedAt: 'la.updated_at',
+      applicationDate: 'sortCreatedAt',
+      updatedAt: 'sortUpdatedAt',
       id: 'la.id',
       applicantName: 'u.first_name',
       loanAmount: 'la.loan_amount',
@@ -387,7 +390,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
       cibilScore: 'la.loan_amount' // Use loan amount as proxy since credit_score doesn't exist
     };
 
-    const sortField = validSortFields[sortBy] || 'la.updated_at';
+    const sortField = validSortFields[sortBy] || 'sortUpdatedAt';
     const sortDirection = sortOrder === 'asc' ? 'ASC' : 'DESC';
     baseQuery += ` ORDER BY ${sortField} ${sortDirection}`;
 
