@@ -1,5 +1,32 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 
+/**
+ * Session/auth failures only — not permission denied (403) or business-rule 401/403.
+ * Sub-admins often get 403 for missing permission or assignment; those must not clear the session.
+ */
+function isAdminSessionAuthFailure(status: number, message: string): boolean {
+  const m = (message || '').toLowerCase();
+  if (status === 401) {
+    return (
+      m.includes('access token required') ||
+      m.includes('admin authentication required') ||
+      m.includes('invalid or expired token') ||
+      m.includes('invalid or expired admin token') ||
+      m.includes('no token provided') ||
+      m.includes('admin not found or inactive')
+    );
+  }
+  if (status !== 403) return false;
+  if (m.includes('digitap') || m.includes('bank data service')) return false;
+  return (
+    m.includes('invalid or expired admin token') ||
+    m.includes('invalid or expired token') ||
+    m.includes('access token required') ||
+    m.trim() === 'admin access required' ||
+    m.includes('admin account is deactivated')
+  );
+}
+
 // Types for admin API responses
 export interface AdminLoginResponse {
   admin: {
@@ -112,36 +139,23 @@ class AdminApiService {
         if (error.response) {
           const status = error.response.status;
           const message = error.response.data?.message || '';
-          const code = error.response.data?.code || '';
 
           // Check if we're on the login page (don't redirect login errors)
           const isLoginPage = window.location.pathname === '/stpl/login';
           const hasToken = !!this.token;
 
           // Check for login-related errors (OTP, IP whitelist, etc.) - don't redirect these
-          const isLoginError = 
+          const isLoginError =
             message.toLowerCase().includes('invalid otp') ||
             message.toLowerCase().includes('otp not found') ||
             message.toLowerCase().includes('otp expired') ||
             message.toLowerCase().includes('whitelisted ip') ||
             message.toLowerCase().includes('ip address') ||
             message.toLowerCase().includes('admin not found with this mobile') ||
-            message.toLowerCase().includes('account is deactivated') ||
             (status === 403 && (isLoginPage || !hasToken));
 
-          // Only redirect auth errors if user is already logged in (not during login flow)
-          if (
-            !isLoginError &&
-            hasToken &&
-            (
-              status === 401 ||
-              (status === 403 && !message.toLowerCase().includes('digitap') && !message.toLowerCase().includes('bank data service')) ||
-              message.toLowerCase().includes('invalid') && message.toLowerCase().includes('token') ||
-              message.toLowerCase().includes('expired') && message.toLowerCase().includes('token') ||
-              message.toLowerCase().includes('access token required') ||
-              message.toLowerCase().includes('admin access required')
-            )
-          ) {
+          // Only redirect on real session/auth failures (not permission or business-rule 403s)
+          if (!isLoginError && hasToken && isAdminSessionAuthFailure(status, message)) {
             // Clear authentication data
             this.token = null;
             this.clearAuthHeader();
@@ -186,26 +200,18 @@ class AdminApiService {
         message.toLowerCase().includes('bank data service') ||
         error.response.data?.errorDetails;
 
-      // Check for auth-related errors (but not external API errors)
-      if (
-        (status === 401 || (status === 403 && !isExternalApiError)) ||
-        (message.toLowerCase().includes('invalid') && message.toLowerCase().includes('token')) ||
-        (message.toLowerCase().includes('expired') && message.toLowerCase().includes('token')) ||
-        message.toLowerCase().includes('access token required') ||
-        message.toLowerCase().includes('admin not found') ||
-        message.toLowerCase().includes('admin access required')
-      ) {
-        // Clear authentication data
-        this.token = null;
-        this.clearAuthHeader();
-        localStorage.removeItem('adminToken');
-        localStorage.removeItem('adminUser');
-
-        // Redirect to admin login page
-        setTimeout(() => {
-          window.location.href = '/stpl/login';
-        }, 100);
+      if (isExternalApiError || !isAdminSessionAuthFailure(status, message)) {
+        return;
       }
+
+      this.token = null;
+      this.clearAuthHeader();
+      localStorage.removeItem('adminToken');
+      localStorage.removeItem('adminUser');
+
+      setTimeout(() => {
+        window.location.href = '/stpl/login';
+      }, 100);
     }
   }
 
