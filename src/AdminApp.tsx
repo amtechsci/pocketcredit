@@ -129,6 +129,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
   if (currentUser?.role === 'sub_admin') {
     if (subCat === 'verify_user') {
       navByRole.push({ path: `${BASE_PATH}/applications`, label: 'Applications', color: 'blue' });
+      navByRole.push({ path: `${BASE_PATH}/applications?status=under_review`, label: 'Under Review', color: 'orange' });
       navByRole.push({ path: `${BASE_PATH}/performance`, label: 'Performance', color: 'blue' });
     } else if (subCat === 'qa_user') {
       navByRole.push({ path: `${BASE_PATH}/qa-verification`, label: 'QA Verification', color: 'cyan' });
@@ -143,6 +144,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
     } else if (subCat === 'follow_up_user') {
       navByRole.push(
         { path: `${BASE_PATH}/follow-up?tab=submitted`, label: 'Submitted', color: 'blue' },
+        { path: `${BASE_PATH}/follow-up?tab=under_review`, label: 'Under Review', color: 'orange' },
         { path: `${BASE_PATH}/follow-up?tab=follow_up`, label: 'Follow Up', color: 'orange' },
         { path: `${BASE_PATH}/follow-up?tab=disbursal`, label: 'Disbursal', color: 'green' },
         { path: `${BASE_PATH}/follow-up?tab=tvr`, label: 'TVR IDs', color: 'purple' },

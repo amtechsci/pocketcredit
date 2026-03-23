@@ -343,6 +343,10 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         COALESCE(la.agreement_signed, 0) as agreement_signed,
         COALESCE(la.bank_confirm_done, 0) as bank_confirm_done,
         la.user_bank_id,
+        la.assigned_verify_admin_id,
+        la.temp_assigned_verify_admin_id,
+        la.assigned_follow_up_admin_id,
+        la.temp_assigned_follow_up_admin_id,
         es.status as enach_status,
         av.name as verify_user_name,
         avt.name as temp_verify_user_name,
@@ -375,6 +379,35 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     `, [userId]);
 
     console.log('📋 Found applications:', applications ? applications.length : 0);
+
+    if (req.admin?.role === 'sub_admin' && req.admin?.sub_admin_category === 'verify_user') {
+      const aid = String(req.admin.id);
+      const assignedToMe = (applications || []).some(
+        (app) =>
+          String(app.assigned_verify_admin_id || '') === aid ||
+          String(app.temp_assigned_verify_admin_id || '') === aid
+      );
+      if (!assignedToMe) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'You can only view profiles for applications assigned to you.'
+        });
+      }
+    }
+    if (req.admin?.role === 'sub_admin' && req.admin?.sub_admin_category === 'follow_up_user') {
+      const aid = String(req.admin.id);
+      const assignedToMeFu = (applications || []).some(
+        (app) =>
+          String(app.assigned_follow_up_admin_id || '') === aid ||
+          String(app.temp_assigned_follow_up_admin_id || '') === aid
+      );
+      if (!assignedToMeFu) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'You can only view profiles for applications assigned to you as follow-up.'
+        });
+      }
+    }
 
     /** Match admin applications list: Submitted until E-NACH is done (under_review + enach_done ≠ 1 → show submitted). */
     const effectiveAdminLoanStatus = (st, enachDone) =>
@@ -637,14 +670,13 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
     // Credit check and AA/bank statement status for onboarding current step (early steps)
     let creditCheck = null;
     let aaOrBankStatement = false;
-    let bankStatementAaInProgress = false;
     try {
       const ccRows = await executeQuery(
         'SELECT id, credit_score, is_eligible, checked_at FROM credit_checks WHERE user_id = ? ORDER BY checked_at DESC LIMIT 1',
         [userId]
       );
       if (ccRows && ccRows.length > 0) creditCheck = ccRows[0];
-      // AA consent / bank statement: digitap for this app, or user_bank_statements completed
+      // AA consent (late in flow): digitap completed for this app, or bank statement on file
       if (latestApplication && latestApplication.id) {
         const digitapRows = await executeQuery(
           'SELECT id, status FROM digitap_bank_statements WHERE user_id = ? AND application_id = ? ORDER BY created_at DESC LIMIT 1',
@@ -652,9 +684,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         );
         if (digitapRows && digitapRows.length > 0) {
           const st = String(digitapRows[0].status || '');
-          const stLower = st.toLowerCase();
           const digitapOk = st === 'completed' || st === 'ReportGenerated';
-          bankStatementAaInProgress = stLower !== 'failed' && stLower !== 'cancelled' && !digitapOk;
           aaOrBankStatement = digitapOk || (bankStatementRecords && bankStatementRecords.length > 0 && bankStatementRecords.some(r => r.status === 'completed' || r.upload_method === 'manual'));
         } else {
           aaOrBankStatement = bankStatementRecords && bankStatementRecords.length > 0 && bankStatementRecords.some(r => r.status === 'completed' || r.upload_method === 'manual');
@@ -1201,7 +1231,6 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
             bankStatementRecords,
             creditCheck,
             aaOrBankStatement,
-            bankStatementAaInProgress,
             isRepeatCustomer
           })
         : null, // Computed from completion state so admin shows correct step

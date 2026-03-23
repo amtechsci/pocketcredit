@@ -1,18 +1,20 @@
 /**
- * Admin-facing onboarding + post-disbursal step (must align with PostDisbursalFlowPage + onboardingProgressEngine).
+ * Admin-facing onboarding + post-disbursal step.
+ * Early flow must match src/hooks/useLoanApplicationStepManager.ts (credit → employment → bank → … → aa-consent).
+ * onboardingProgressEngine.ts order differs — admin uses the live app guard order.
  */
 
 const ONBOARDING_STEP_ORDER = [
   'application',
   'kyc-verification',
   'pan-verification',
-  'aa-consent',
   'credit-analytics',
   'employment-details',
   'bank-statement',
   'bank-details',
   'email-verification',
   'references',
+  'aa-consent',
   'upload-documents',
   'steps'
 ];
@@ -91,7 +93,7 @@ function computePostDisbursalAdminStep(app, isRepeatCustomer) {
  * @param {object} user - users row
  * @param {object|null} latestApplication - latest loan_application with status + post-disbursal columns
  * @param {number} referencesCount - ref count (excl. Self / Credit%)
- * @param {object} opts - kycData, kycDocuments, employment, bankStatementRecords, creditCheck, aaOrBankStatement, isRepeatCustomer
+ * @param {object} opts - kycData, kycDocuments, employment, bankStatementRecords, creditCheck, aaOrBankStatement (late-step AA), isRepeatCustomer
  */
 function hasPanVerifiedForAdmin(user, kycDocuments) {
   const fromDocs = Array.isArray(kycDocuments) && kycDocuments.some(d => (d.document_type || '').toUpperCase().includes('PAN'));
@@ -140,22 +142,17 @@ function computeOnboardingCurrentStep(user, latestApplication, referencesCount, 
   const bankStatementCompleted = bankStatementRecords.some(r => r.status === 'completed' || r.upload_method === 'manual');
   const bankDetailsCompleted = !!(latestApplication.user_bank_id != null && latestApplication.user_bank_id !== '');
 
-  // Digitap AA / bank statement collection started but report not in yet — user is on bank-statement UI, not PAN
-  if (opts.bankStatementAaInProgress && !bankStatementCompleted) {
-    return 'bank-statement';
-  }
-
   const checks = [
     true,
     kycVerified,
     hasPanDocument,
-    aaConsentGiven,
     creditAnalyticsCompleted,
     employmentCompleted,
     bankStatementCompleted,
     bankDetailsCompleted,
     hasVerifiedEmail,
     hasRefs,
+    aaConsentGiven,
     true,
     true
   ];

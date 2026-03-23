@@ -20,6 +20,7 @@ export function FollowUpUserPage() {
 
   const tabs = [
     { id: 'submitted', label: 'Submitted', status: 'submitted' },
+    { id: 'under_review', label: 'Under Review', status: 'under_review' },
     { id: 'follow_up', label: 'Follow Up', status: 'follow_up' },
     { id: 'disbursal', label: 'Disbursal', status: 'disbursal' },
     { id: 'tvr', label: 'TVR IDs', count: tvrCount }

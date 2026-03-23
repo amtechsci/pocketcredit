@@ -86,7 +86,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
         account_manager: ['account_manager'],
         recovery_officer: ['overdue'],
         debt_agency: ['overdue'],
-        follow_up_user: ['submitted', 'follow_up', 'disbursal']
+        follow_up_user: ['submitted', 'under_review', 'follow_up', 'disbursal']
       };
       const allowed = allowedByCategory[subCategory];
       if (allowed && (!status || status === 'all' || !allowed.includes(status))) {
@@ -2098,6 +2098,61 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
             statusCounts['disbursal'] = disbRows?.[0]?.c ?? 0;
             total += Number(statusCounts['disbursal']);
           }
+          // Verify user: same Submitted / Under Review split as main admin list, scoped to assigned loans only
+          if (subCat === 'verify_user') {
+            try {
+              const submittedQueueRows = await executeQuery(
+                `SELECT COUNT(*) as c FROM loan_applications la
+                 INNER JOIN users u ON la.user_id = u.id
+                 WHERE (la.assigned_verify_admin_id = ? OR la.temp_assigned_verify_admin_id = ?)
+                 AND (COALESCE(u.moved_to_tvr, 0) = 0)
+                 AND (
+                   la.status = 'submitted'
+                   OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0)
+                 )`,
+                [adminId, adminId]
+              );
+              const underReviewQueueRows = await executeQuery(
+                `SELECT COUNT(*) as c FROM loan_applications la
+                 INNER JOIN users u ON la.user_id = u.id
+                 WHERE (la.assigned_verify_admin_id = ? OR la.temp_assigned_verify_admin_id = ?)
+                 AND (COALESCE(u.moved_to_tvr, 0) = 0)
+                 AND la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 1`,
+                [adminId, adminId]
+              );
+              statusCounts['_submitted_queue'] = Number(submittedQueueRows[0]?.c) || 0;
+              statusCounts['_under_review_queue'] = Number(underReviewQueueRows[0]?.c) || 0;
+            } catch (queueErr) {
+              console.warn('verify_user submitted/under_review queue counts:', queueErr.message);
+            }
+          }
+          if (subCat === 'follow_up_user') {
+            try {
+              const submittedQueueRowsFu = await executeQuery(
+                `SELECT COUNT(*) as c FROM loan_applications la
+                 INNER JOIN users u ON la.user_id = u.id
+                 WHERE (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)
+                 AND (COALESCE(u.moved_to_tvr, 0) = 0)
+                 AND (
+                   la.status = 'submitted'
+                   OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0)
+                 )`,
+                [adminId, adminId]
+              );
+              const underReviewQueueRowsFu = await executeQuery(
+                `SELECT COUNT(*) as c FROM loan_applications la
+                 INNER JOIN users u ON la.user_id = u.id
+                 WHERE (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)
+                 AND (COALESCE(u.moved_to_tvr, 0) = 0)
+                 AND la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 1`,
+                [adminId, adminId]
+              );
+              statusCounts['_submitted_queue'] = Number(submittedQueueRowsFu[0]?.c) || 0;
+              statusCounts['_under_review_queue'] = Number(underReviewQueueRowsFu[0]?.c) || 0;
+            } catch (queueErr) {
+              console.warn('follow_up_user submitted/under_review queue counts:', queueErr.message);
+            }
+          }
         }
       }
     } else {
@@ -2270,7 +2325,7 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         account_manager: ['account_manager'],
         recovery_officer: ['overdue'],
         debt_agency: ['overdue'],
-        follow_up_user: ['submitted', 'follow_up', 'disbursal']
+        follow_up_user: ['submitted', 'under_review', 'follow_up', 'disbursal']
       };
       const allowed = allowedByCategory[exportSubCategory];
       if (allowed && (!status || status === 'all' || !allowed.includes(status))) {
