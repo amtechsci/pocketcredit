@@ -360,13 +360,56 @@ const resolveBsDisbursalProcessingFeeAndGst = (row) => {
 };
 
 /**
- * Processing fee % for BS CSV: prefer column; else derive from disbursal fee/principal; else plan_snapshot.
+ * Parse plan_snapshot JSON object (caller may pass string or object).
+ */
+const parsePlanSnapshotObject = (raw) => {
+    if (raw == null) return null;
+    if (typeof raw === 'object') return raw;
+    if (typeof raw === 'string') {
+        try {
+            return JSON.parse(raw);
+        } catch {
+            return null;
+        }
+    }
+    return null;
+};
+
+/**
+ * Processing fee % from plan: fees[].fee_percent where fee_name is "processing fee", else top-level processing_fee_percent.
+ */
+const getProcessingFeePercentFromPlanSnapshot = (ps) => {
+    if (!ps) return null;
+    if (ps.fees && Array.isArray(ps.fees)) {
+        for (const f of ps.fees) {
+            const name = String(f.fee_name || '')
+                .trim()
+                .toLowerCase();
+            if (name === 'processing fee') {
+                const pct = parseFloat(f.fee_percent);
+                if (!Number.isNaN(pct)) return pct;
+            }
+        }
+    }
+    if (ps.processing_fee_percent != null && !Number.isNaN(parseFloat(ps.processing_fee_percent))) {
+        return parseFloat(ps.processing_fee_percent);
+    }
+    return null;
+};
+
+/**
+ * Processing fee % for BS CSV: loan column pro_fee_per; else plan_snapshot (fees + processing_fee_percent); else derive from fee/principal.
  * @param {number} [resolvedDisbursalFee] - pre-GST disbursal fee from resolveBsDisbursalProcessingFeeAndGst
  */
 const resolveBsDisbursalProcessingFeePercent = (row, resolvedDisbursalFee) => {
     const stored = row.pro_fee_per;
     if (stored != null && stored !== '' && !Number.isNaN(parseFloat(stored))) {
         return parseFloat(stored).toFixed(2);
+    }
+    const ps = parsePlanSnapshotObject(row.plan_snapshot);
+    const fromPlan = getProcessingFeePercentFromPlanSnapshot(ps);
+    if (fromPlan != null) {
+        return fromPlan.toFixed(2);
     }
     const principal = parseFloat(row.amount || row.principal_amount || 0);
     const fee =
@@ -375,19 +418,6 @@ const resolveBsDisbursalProcessingFeePercent = (row, resolvedDisbursalFee) => {
             : parseFloat(row.p_fee || row.processing_fees || 0);
     if (principal > 0 && fee > 0) {
         return ((fee / principal) * 100).toFixed(2);
-    }
-    if (row.plan_snapshot) {
-        let ps = row.plan_snapshot;
-        if (typeof ps === 'string') {
-            try {
-                ps = JSON.parse(ps);
-            } catch {
-                ps = null;
-            }
-        }
-        if (ps && ps.processing_fee_percent != null && !Number.isNaN(parseFloat(ps.processing_fee_percent))) {
-            return parseFloat(ps.processing_fee_percent).toFixed(2);
-        }
     }
     return '';
 };
@@ -1035,7 +1065,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             'PCID', 'Name', 'Ledger Name', 'Reg.Type', 'Master type', 'Voucher No. (or PLLID)',
             'Loan Process Date', 'Exhausted Days',
             'Sanctioned Amount', 'Disbursal Amount', 'Narration Journal', 'Reference No. (or Payout ID)',
-            'Mode', 'Status', 'LoanDate', 'Country', 'State', 'Processing fee(%)', 'Processing Fees Collected',
+            'Mode', 'Status', 'LoanDate', 'Country', 'State', 'Processing fee %', 'Processing Fees Collected',
             'GST Amount on Processing Fees', 'Post Service Fee (incl. GST)', 'INTEREST (%)', 'LOAN CLOSURE TYPE',
             'INTEREST COLLECTED', 'PENALTY', 'GST On PENALTY',
             'REPAYMENT AMOUNT'
@@ -1241,7 +1271,7 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
         const headers = [
             'PCID (Account ID)', 'Name', 'Ledger Name', 'Reg.Type', 'Master type', 'Voucher No. (or PLLID)',
             'Sanctioned Amount', 'Disbursal Amount', 'Reference No. (or Payout ID)', 'Mode', 'Status', 'LoanDate',
-            'Country', 'State', 'Processing fee(%)', 'Tenure', 'Processing Fees Collected', 'GST Amount on Processing Fees',
+            'Country', 'State', 'Processing fee %', 'Tenure', 'Processing Fees Collected', 'GST Amount on Processing Fees',
             'Check', 'Remarks'
         ];
         /** BS Disbursal CSV: preserve leading zeros for Voucher No (PLL+id), LoanDate */
