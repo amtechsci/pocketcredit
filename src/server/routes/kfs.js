@@ -8,6 +8,15 @@ const pdfService = require('../services/pdfService');
 const emailService = require('../services/emailService');
 const { uploadGeneratedPDF } = require('../services/s3Service');
 
+/** User can load KFS / accept KFS when loan is at or past disbursal-related stages */
+const KFS_USER_ALLOWED_STATUSES = [
+  'disbursal',
+  'repeat_disbursal',
+  'ready_to_repeat_disbursal',
+  'account_manager',
+  'cleared'
+];
+
 /**
  * Format date to YYYY-MM-DD
  */
@@ -42,8 +51,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
       });
     }
 
-    const kfsAllowedStatuses = ['disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal'];
-    if (!kfsAllowedStatuses.includes(loans[0].status)) {
+    if (!KFS_USER_ALLOWED_STATUSES.includes(loans[0].status)) {
       return res.status(403).json({
         success: false,
         message: 'Key Facts Statement is available after your loan reaches the disbursal stage.'
@@ -5781,8 +5789,7 @@ router.post('/:loanId/generate-and-save', requireAuth, async (req, res) => {
       });
     }
 
-    const kfsAllowedStatuses = ['disbursal', 'repeat_disbursal', 'ready_to_repeat_disbursal'];
-    if (!kfsAllowedStatuses.includes(loans[0].status)) {
+    if (!KFS_USER_ALLOWED_STATUSES.includes(loans[0].status)) {
       return res.status(403).json({
         success: false,
         message: 'Key Facts Statement is available after your loan reaches the disbursal stage.'
