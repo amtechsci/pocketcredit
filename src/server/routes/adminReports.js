@@ -1,6 +1,13 @@
 const express = require('express');
 const { authenticateAdmin } = require('../middleware/auth');
 const { executeQuery, initializeDatabase } = require('../config/database');
+const {
+    parseDateToString,
+    calculateDaysBetween,
+    formatDateToString,
+    toDecimal2,
+    getFullLoanCalculation
+} = require('../utils/loanCalculations');
 
 const router = express.Router();
 
@@ -212,6 +219,308 @@ const escapeCSV = (value, preserveLeadingZero = false) => {
         return `"${str.replace(/"/g, '""')}"`;
     }
     return str;
+};
+
+/** Latest YYYY-MM-DD from EMI schedule (due_date). */
+const maxDueDateFromEmiSchedule = (emiScheduleRaw) => {
+    if (!emiScheduleRaw) return null;
+    let schedule = emiScheduleRaw;
+    if (typeof schedule === 'string') {
+        try {
+            schedule = JSON.parse(schedule);
+        } catch {
+            return null;
+        }
+    }
+    if (!Array.isArray(schedule) || schedule.length === 0) return null;
+    let max = null;
+    for (const emi of schedule) {
+        const d = emi.due_date || emi.dueDate;
+        if (!d || typeof d !== 'string') continue;
+        const ds = d.slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(ds)) continue;
+        if (!max || ds > max) max = ds;
+    }
+    return max;
+};
+
+/** Latest due date from processed_due_date (JSON array of dates or legacy shapes). */
+const maxDueDateFromProcessedDueDate = (processedDueRaw) => {
+    if (!processedDueRaw) return null;
+    try {
+        const parsed = typeof processedDueRaw === 'string' ? JSON.parse(processedDueRaw) : processedDueRaw;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+            let max = null;
+            for (const d of parsed) {
+                const ds = typeof d === 'string' ? d.slice(0, 10) : null;
+                if (ds && /^\d{4}-\d{2}-\d{2}$/.test(ds)) {
+                    if (!max || ds > max) max = ds;
+                }
+            }
+            return max;
+        }
+        if (parsed && typeof parsed === 'object' && parsed.date) {
+            const ds = String(parsed.date).slice(0, 10);
+            return /^\d{4}-\d{2}-\d{2}$/.test(ds) ? ds : null;
+        }
+    } catch {
+        const s = String(processedDueRaw).slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    }
+    return null;
+};
+
+/**
+ * Tenure (days): inclusive calendar days from disbursal (processed_at) to last EMI due date.
+ * Falls back to exhausted_period_days when schedule/due dates are missing.
+ */
+const getBsDisbursalTenureDays = (row) => {
+    const startStr = parseDateToString(row.processed_date);
+    if (!startStr) return 0;
+    let lastDue = maxDueDateFromEmiSchedule(row.emi_schedule);
+    if (!lastDue) lastDue = maxDueDateFromProcessedDueDate(row.processed_due_date);
+    if (!lastDue) {
+        const ex = parseInt(row.exhausted_period, 10);
+        return !Number.isNaN(ex) && ex > 0 ? ex : 0;
+    }
+    if (lastDue < startStr) return 0;
+    return calculateDaysBetween(startStr, lastDue);
+};
+
+const round2 = (n) => Math.round(Number(n) * 100) / 100;
+
+/**
+ * Sums fee/GST from fees_breakdown by application_method (matches calculateCompleteLoanValues).
+ */
+const parseFeesBreakdownTotals = (raw) => {
+    const out = { disbursalFee: 0, disbursalGst: 0, repayableFee: 0, repayableGst: 0 };
+    if (!raw) return out;
+    let arr = raw;
+    if (typeof arr === 'string') {
+        try {
+            arr = JSON.parse(arr);
+        } catch {
+            return out;
+        }
+    }
+    if (!Array.isArray(arr)) return out;
+    for (const line of arr) {
+        const method = String(line.application_method || 'deduct_from_disbursal').toLowerCase();
+        const feeAmt = parseFloat(line.fee_amount);
+        const gstAmt = parseFloat(line.gst_amount);
+        const fee = Number.isNaN(feeAmt) ? 0 : feeAmt;
+        const gst = Number.isNaN(gstAmt) ? 0 : gstAmt;
+        if (method === 'add_to_total') {
+            out.repayableFee += fee;
+            out.repayableGst += gst;
+        } else {
+            out.disbursalFee += fee;
+            out.disbursalGst += gst;
+        }
+    }
+    return out;
+};
+
+/**
+ * Processing fees collected (pre-GST) and GST thereon for disbursal only — not post-service / EMI fees.
+ * Uses fees_breakdown when present; else processed_p_fee + split processed_gst using repayable GST.
+ */
+const resolveBsDisbursalProcessingFeeAndGst = (row) => {
+    const b = parseFeesBreakdownTotals(row.fees_breakdown);
+
+    if (b.disbursalFee > 0 || b.disbursalGst > 0) {
+        let fee = round2(b.disbursalFee);
+        let gst = round2(b.disbursalGst);
+        if (fee <= 0 && gst > 0) fee = round2(gst / 0.18);
+        else if (gst <= 0 && fee > 0) gst = round2(fee * 0.18);
+        return { feeCollected: fee, gstOnFees: gst };
+    }
+
+    const pFee = parseFloat(row.processed_p_fee);
+    const colFee = parseFloat(row.p_fee || row.processing_fees || 0);
+    let fee = !Number.isNaN(pFee) && pFee > 0 ? pFee : (!Number.isNaN(colFee) ? colFee : 0);
+    fee = round2(fee);
+
+    const totalGst = parseFloat(row.processed_gst);
+    let gst;
+    if (!Number.isNaN(totalGst) && totalGst >= 0) {
+        let repayGst = round2(b.repayableGst);
+        if (repayGst <= 0 && b.repayableFee > 0) repayGst = round2(b.repayableFee * 0.18);
+        if (repayGst <= 0) {
+            const post = parseFloat(row.processed_post_service_fee);
+            if (!Number.isNaN(post) && post > 0) repayGst = round2(post * 0.18);
+        }
+        if (repayGst > 0) gst = Math.max(0, round2(totalGst - repayGst));
+        else gst = round2(totalGst);
+    } else {
+        gst = round2(fee * 0.18);
+    }
+
+    return { feeCollected: fee, gstOnFees: gst };
+};
+
+/**
+ * Processing fee % for BS CSV: prefer column; else derive from disbursal fee/principal; else plan_snapshot.
+ * @param {number} [resolvedDisbursalFee] - pre-GST disbursal fee from resolveBsDisbursalProcessingFeeAndGst
+ */
+const resolveBsDisbursalProcessingFeePercent = (row, resolvedDisbursalFee) => {
+    const stored = row.pro_fee_per;
+    if (stored != null && stored !== '' && !Number.isNaN(parseFloat(stored))) {
+        return parseFloat(stored).toFixed(2);
+    }
+    const principal = parseFloat(row.amount || row.principal_amount || 0);
+    const fee =
+        resolvedDisbursalFee != null && !Number.isNaN(parseFloat(resolvedDisbursalFee))
+            ? parseFloat(resolvedDisbursalFee)
+            : parseFloat(row.p_fee || row.processing_fees || 0);
+    if (principal > 0 && fee > 0) {
+        return ((fee / principal) * 100).toFixed(2);
+    }
+    if (row.plan_snapshot) {
+        let ps = row.plan_snapshot;
+        if (typeof ps === 'string') {
+            try {
+                ps = JSON.parse(ps);
+            } catch {
+                ps = null;
+            }
+        }
+        if (ps && ps.processing_fee_percent != null && !Number.isNaN(parseFloat(ps.processing_fee_percent))) {
+            return parseFloat(ps.processing_fee_percent).toFixed(2);
+        }
+    }
+    return '';
+};
+
+/** BS Repayment: reference like ADMIN_262_emi_2nd_1774374857752 → trailing numeric id */
+const extractBsRepaymentReferenceNumber = (raw) => {
+    if (raw == null || raw === '') return '';
+    const s = String(raw).trim();
+    const tailDigits = s.match(/(\d{10,})$/);
+    if (tailDigits) return tailDigits[1];
+    const parts = s.split('_');
+    const last = parts[parts.length - 1];
+    if (last && /^\d+$/.test(last)) return last;
+    return s;
+};
+
+/** Map payment_orders.payment_type → BS "LOAN CLOSURE TYPE" */
+const mapPaymentTypeToClosureType = (pt) => {
+    if (!pt) return 'part';
+    const p = String(pt);
+    if (p === 'emi_1st') return 'emi1';
+    if (p === 'emi_2nd') return 'emi2';
+    if (p === 'emi_3rd') return 'emi3';
+    if (p === 'emi_4th') return 'emi4';
+    if (p === 'pre-close') return 'preclose';
+    if (p === 'full_payment') return 'full';
+    if (p === 'settlement') return 'settlement';
+    if (p === 'loan_repayment') return 'part';
+    if (p === 'preclose') return 'preclose';
+    if (p === 'full') return 'full';
+    if (p === 'part') return 'part';
+    return 'part';
+};
+
+const emiNumberFromPaymentType = (pt) => {
+    if (!pt || typeof pt !== 'string') return null;
+    if (pt === 'emi_1st') return 1;
+    if (pt === 'emi_2nd') return 2;
+    if (pt === 'emi_3rd') return 3;
+    if (pt === 'emi_4th') return 4;
+    return null;
+};
+
+/**
+ * Per-EMI interest + post-service fee (base + GST) using same reducing-balance logic as processing;
+ * repayable fee/GST split evenly per EMI from getFullLoanCalculation totals.
+ */
+const buildEmiBreakdownMap = (loanRow, fullCalc) => {
+    const map = new Map();
+    let plan = loanRow.plan_snapshot;
+    if (typeof plan === 'string') {
+        try {
+            plan = JSON.parse(plan);
+        } catch {
+            plan = {};
+        }
+    }
+    plan = plan || {};
+    const emiCount = parseInt(plan.emi_count, 10) || 1;
+    const processedAmount = parseFloat(loanRow.processed_amount || loanRow.loan_amount || 0);
+    const rate = parseFloat(loanRow.interest_percent_per_day || 0.001);
+
+    let repayFeePerEmi = 0;
+    let repayGstPerEmi = 0;
+    if (fullCalc && fullCalc.totals && emiCount > 0) {
+        repayFeePerEmi = toDecimal2((fullCalc.totals.repayableFee || 0) / emiCount);
+        repayGstPerEmi = toDecimal2((fullCalc.totals.repayableFeeGST || 0) / emiCount);
+    }
+
+    if (emiCount <= 1) {
+        const intAmt =
+            fullCalc && fullCalc.interest && fullCalc.interest.amount != null
+                ? toDecimal2(fullCalc.interest.amount)
+                : 0;
+        map.set(1, { interest: intAmt, postFee: repayFeePerEmi, postGst: repayGstPerEmi });
+        return map;
+    }
+
+    let sched = loanRow.emi_schedule;
+    if (typeof sched === 'string') {
+        try {
+            sched = JSON.parse(sched);
+        } catch {
+            sched = null;
+        }
+    }
+    if (!Array.isArray(sched) || sched.length < emiCount) {
+        for (let k = 1; k <= emiCount; k++) {
+            map.set(k, { interest: 0, postFee: repayFeePerEmi, postGst: repayGstPerEmi });
+        }
+        return map;
+    }
+
+    const principalPerEmi = toDecimal2(Math.floor((processedAmount / emiCount) * 100) / 100);
+    const remainder = toDecimal2(processedAmount - principalPerEmi * emiCount);
+    const baseDateStr = parseDateToString(loanRow.processed_at);
+    if (!baseDateStr) {
+        for (let k = 1; k <= emiCount; k++) {
+            map.set(k, { interest: 0, postFee: repayFeePerEmi, postGst: repayGstPerEmi });
+        }
+        return map;
+    }
+
+    let outstandingPrincipal = processedAmount;
+    for (let i = 0; i < emiCount; i++) {
+        const emiDateStr = String(sched[i].due_date || '').slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(emiDateStr)) continue;
+
+        let previousDateStr;
+        if (i === 0) {
+            previousDateStr = baseDateStr;
+        } else {
+            const prevStr = String(sched[i - 1].due_date || '').slice(0, 10);
+            const [py, pm, pd] = prevStr.split('-').map(Number);
+            const prevDueDate = new Date(py, pm - 1, pd);
+            prevDueDate.setDate(prevDueDate.getDate() + 1);
+            previousDateStr = formatDateToString(prevDueDate);
+        }
+        if (!previousDateStr) continue;
+
+        const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStr);
+        const principalForThisEmi =
+            i === emiCount - 1 ? toDecimal2(principalPerEmi + remainder) : principalPerEmi;
+        const interestForPeriod = toDecimal2(outstandingPrincipal * rate * daysForPeriod);
+        outstandingPrincipal = toDecimal2(outstandingPrincipal - principalForThisEmi);
+
+        map.set(i + 1, {
+            interest: interestForPeriod,
+            postFee: repayFeePerEmi,
+            postGst: repayGstPerEmi
+        });
+    }
+    return map;
 };
 
 /** CIBIL CSV column indices (0-based) to prefix with tab + quote so Excel keeps leading zeros: DOB, State, PIN, Address Category, dates, Account Type, Ownership, Asset Classification */
@@ -656,19 +965,23 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 la.id as lid, la.disbursal_amount as processed_amount, 
                 la.processing_fee as p_fee, la.total_interest as service_charge, 
                 la.processed_penalty as penality_charge,
-                la.loan_amount AS principal_amount, la.processing_fee as processing_fees, 
+                la.loan_amount AS principal_amount,
+                la.loan_amount AS amount,
+                la.processing_fee as processing_fees, 
                 la.processing_fee_percent as pro_fee_per, 
                 COALESCE(la.interest_percent_per_day * 100, 0) as interest_percentage,
                 COALESCE(lp.transaction_id, po.order_id) as transaction_number, 
                 COALESCE(lp.payment_date, po.updated_at) as transaction_date, 
-                CASE 
-                    WHEN po.payment_type = 'pre-close' THEN 'preclose'
-                    WHEN po.payment_type = 'full_payment' THEN 'full'
-                    WHEN po.payment_type = 'settlement' THEN 'settlement'
-                    ELSE 'part'
-                END as transaction_flow,
+                po.payment_type as payment_type,
                 COALESCE(lp.amount, po.amount) as transaction_amount,
-                la.processed_at AS loan_start_date
+                la.processed_at AS loan_start_date,
+                la.fees_breakdown as fees_breakdown,
+                la.processed_p_fee as processed_p_fee,
+                la.processed_post_service_fee as processed_post_service_fee,
+                la.processed_gst as processed_gst,
+                la.plan_snapshot as plan_snapshot,
+                la.emi_schedule as emi_schedule,
+                la.interest_percent_per_day as interest_percent_per_day
             FROM payment_orders po
             INNER JOIN loan_applications la ON la.id = po.loan_id
             INNER JOIN users u ON u.id = la.user_id
@@ -694,9 +1007,11 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 SELECT 
                     u.rcid, u.pan_name, u.state_code,
                     l.lid, l.processed_amount, l.p_fee, l.service_charge, l.penality_charge,
-                    la.amount AS principal_amount, la.processing_fees, la.pro_fee_per, la.interest_percentage,
-                    td.transaction_number, td.transaction_date, td.transaction_flow, td.transaction_amount,
-                    l.processed_date AS loan_start_date
+                    la.amount AS principal_amount, la.amount AS amount, la.processing_fees, la.pro_fee_per, la.interest_percentage,
+                    td.transaction_number, td.transaction_date, td.transaction_flow AS payment_type, td.transaction_amount,
+                    l.processed_date AS loan_start_date,
+                    NULL as fees_breakdown, NULL as processed_p_fee, NULL as processed_post_service_fee, NULL as processed_gst,
+                    NULL as plan_snapshot, NULL as emi_schedule, NULL as interest_percent_per_day
                 FROM transaction_details td
                 INNER JOIN loan_apply la ON la.id = td.cllid
                 INNER JOIN user u ON u.id = la.uid
@@ -721,28 +1036,48 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             'Loan Process Date', 'Exhausted Days',
             'Sanctioned Amount', 'Disbursal Amount', 'Narration Journal', 'Reference No. (or Payout ID)',
             'Mode', 'Status', 'LoanDate', 'Country', 'State', 'Processing fee(%)', 'Processing Fees Collected',
-            'GST Amount on Processing Fees', 'INTEREST (%)', 'LOAN CLOSURE TYPE', 'INTEREST COLLECTED', 'PENALTY', 'GST On PENALTY',
+            'GST Amount on Processing Fees', 'Post Service Fee (incl. GST)', 'INTEREST (%)', 'LOAN CLOSURE TYPE',
+            'INTEREST COLLECTED', 'PENALTY', 'GST On PENALTY',
             'REPAYMENT AMOUNT'
         ];
         /** BS Repayment CSV: preserve leading zeros for Voucher No (PLL+id), Loan Process Date, LoanDate */
         const BS_REPAYMENT_DATE_INDICES = [5, 6, 14];
         csvRows.push(headers.map(escapeCSV).join(','));
 
+        const uniqueLids = [...new Set((rows || []).map((r) => r.lid))];
+        const emiBreakdownByLoan = new Map();
+        for (const lid of uniqueLids) {
+            try {
+                const fullCalc = await getFullLoanCalculation(lid);
+                const [loanRow] = await executeQuery(
+                    `SELECT id, loan_amount, processed_amount, processed_at, plan_snapshot, emi_schedule, interest_percent_per_day
+                     FROM loan_applications WHERE id = ?`,
+                    [lid]
+                );
+                if (loanRow) {
+                    emiBreakdownByLoan.set(lid, buildEmiBreakdownMap(loanRow, fullCalc));
+                }
+            } catch (e) {
+                console.warn(`BS repayment: EMI breakdown cache failed for loan ${lid}:`, e.message);
+            }
+        }
+
         for (const row of rows) {
             // Voucher No: PLL + loan_application.id (unique)
             const voucher_no = 'PLL' + row.lid;
-            const loan_closure_type = row.transaction_flow;
+            const paymentType = row.payment_type || '';
+            const loan_closure_type = mapPaymentTypeToClosureType(paymentType);
 
-            const processing_fee_collected = row.transaction_flow === 'part' ? 'P.P' : (row.processing_fees || row.p_fee || 0);
-            const gst_on_processing_fees = row.transaction_flow === 'part' ? 'P.P' : ((row.processing_fees || row.p_fee || 0) * GST_RATE);
+            const { feeCollected: processing_fee_collected, gstOnFees: gst_on_processing_fees } =
+                resolveBsDisbursalProcessingFeeAndGst(row);
+            const pro_fee_pct = resolveBsDisbursalProcessingFeePercent(row, processing_fee_collected);
 
             const principal_amt = parseFloat(row.principal_amount) || 0;
             const disbursed_amount = parseFloat(row.processed_amount) || 0;
             const sanctioned_amount = principal_amt; // Sanctioned Amount = Principal loan amount only
 
-            const pf_numeric = isNaN(row.processing_fees) ? (parseFloat(row.p_fee) || 0) : (parseFloat(row.processing_fees) || 0);
-
             let interest_collected = 0;
+            let post_service_incl_gst = 0;
             let penalty = 0;
             let gst_on_penalty = 0;
             let exhausted_days = 0;
@@ -761,10 +1096,18 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             const repayment_amt = parseFloat(row.transaction_amount) || 0;
             const extra_amount = repayment_amt - sanctioned_amount;
 
-            if (extra_amount > 0 && row.loan_start_date) {
+            const emiNum = emiNumberFromPaymentType(paymentType);
+            if (emiNum != null) {
+                const bdMap = emiBreakdownByLoan.get(row.lid);
+                const bd = bdMap?.get(emiNum);
+                if (bd) {
+                    interest_collected = bd.interest;
+                    post_service_incl_gst = toDecimal2(bd.postFee + bd.postGst);
+                }
+            } else if (extra_amount > 0 && row.loan_start_date) {
                 const calculated_interest = sanctioned_amount * DAILY_INTEREST_RATE * exhausted_days;
 
-                if ((extra_amount > calculated_interest) && (exhausted_days > 30)) {
+                if (extra_amount > calculated_interest && exhausted_days > 30) {
                     interest_collected = calculated_interest;
                     const remainder_for_penalty = extra_amount - calculated_interest;
 
@@ -779,6 +1122,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
 
             const loanDate = row.loan_start_date ? formatDateDDMMYYYY(row.loan_start_date) : '';
             const transactionDate = row.transaction_date ? formatDateDDMMYYYY(row.transaction_date) : '';
+            const refNo = extractBsRepaymentReferenceNumber(row.transaction_number);
 
             const data = [
                 row.rcid || '',
@@ -790,15 +1134,16 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 sanctioned_amount.toFixed(2),
                 disbursed_amount,
                 'REPAYMENT DONE',
-                row.transaction_number || '',
+                refNo,
                 '',
                 'received',
                 transactionDate,
                 'India',
                 row.state_name || '',
-                row.pro_fee_per || '',
-                processing_fee_collected === 'P.P' ? 'P.P' : (Number(processing_fee_collected) || 0).toFixed(2),
-                gst_on_processing_fees === 'P.P' ? 'P.P' : (Number(gst_on_processing_fees) || 0).toFixed(2),
+                pro_fee_pct,
+                processing_fee_collected.toFixed(2),
+                gst_on_processing_fees.toFixed(2),
+                emiNum != null ? post_service_incl_gst.toFixed(2) : (0).toFixed(2),
                 row.interest_percentage || '',
                 loan_closure_type,
                 interest_collected.toFixed(2),
@@ -843,7 +1188,14 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
                 la.id as lid, la.loan_amount as amount, la.processing_fee as processing_fees,
                 la.disbursal_amount as processed_amount, la.processing_fee as p_fee,
                 la.exhausted_period_days as exhausted_period, la.processed_at as processed_date,
-                la.processing_fee_percent as pro_fee_per
+                la.processing_fee_percent as pro_fee_per,
+                la.emi_schedule as emi_schedule,
+                la.processed_due_date as processed_due_date,
+                la.plan_snapshot as plan_snapshot,
+                la.fees_breakdown as fees_breakdown,
+                la.processed_p_fee as processed_p_fee,
+                la.processed_post_service_fee as processed_post_service_fee,
+                la.processed_gst as processed_gst
             FROM loan_applications la
             INNER JOIN users u ON u.id = la.user_id
             WHERE la.status IN ('account_manager', 'cleared')
@@ -866,7 +1218,9 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
                 SELECT 
                     u.rcid, u.pan_name, u.state_code, 
                     l.lid, la.amount, la.processing_fees, l.processed_amount, l.p_fee, 
-                    l.exhausted_period, l.processed_date, la.pro_fee_per
+                    l.exhausted_period, l.processed_date, la.pro_fee_per,
+                    NULL as emi_schedule, NULL as processed_due_date, NULL as plan_snapshot,
+                    NULL as fees_breakdown, NULL as processed_p_fee, NULL as processed_post_service_fee, NULL as processed_gst
                 FROM loan l 
                 INNER JOIN loan_apply la ON la.id = l.lid 
                 INNER JOIN user u ON u.id = la.uid 
@@ -914,10 +1268,12 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
             }
 
             const sanctioned_amount = parseFloat(row.amount || 0); // Principal loan amount only
-            const processing_fee = parseFloat(row.p_fee || row.processing_fees || 0);
-            const gst_amount = processing_fee * 0.18;
-            
+            const { feeCollected: processing_fee_collected, gstOnFees: gst_on_processing_fee } =
+                resolveBsDisbursalProcessingFeeAndGst(row);
+
             const loanDate = row.processed_date ? formatDateDDMMYYYY(row.processed_date) : '';
+            const proFeePct = resolveBsDisbursalProcessingFeePercent(row, processing_fee_collected);
+            const tenureDays = getBsDisbursalTenureDays(row);
 
             const data = [
                 row.rcid || '',
@@ -932,10 +1288,10 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
                 loanDate,
                 'India',
                 row.state_name || '',
-                row.pro_fee_per || '',
-                30,
-                processing_fee,
-                gst_amount.toFixed(2),
+                proFeePct,
+                tenureDays > 0 ? tenureDays : '',
+                processing_fee_collected.toFixed(2),
+                gst_on_processing_fee.toFixed(2),
                 '',
                 ''
             ];
