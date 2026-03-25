@@ -323,9 +323,15 @@ const parseFeesBreakdownTotals = (raw) => {
 
 /**
  * Processing fees collected (pre-GST) and GST thereon for disbursal only — not post-service / EMI fees.
- * Uses fees_breakdown when present; else processed_p_fee + split processed_gst using repayable GST.
+ * Prefers plan_snapshot × principal (matches product math); else fees_breakdown "processing fee" lines only; else full breakdown / processed_p_fee.
  */
 const resolveBsDisbursalProcessingFeeAndGst = (row) => {
+    const fromPlan = getDisbursalProcessingFeeAndGstFromPlanSnapshot(row);
+    if (fromPlan) return fromPlan;
+
+    const fromProcessingLinesOnly = sumFeesBreakdownDeductProcessingFeeOnly(row.fees_breakdown);
+    if (fromProcessingLinesOnly) return fromProcessingLinesOnly;
+
     const b = parseFeesBreakdownTotals(row.fees_breakdown);
 
     if (b.disbursalFee > 0 || b.disbursalGst > 0) {
@@ -398,6 +404,65 @@ const getProcessingFeePercentFromPlanSnapshot = (ps) => {
 };
 
 /**
+ * One-time disbursal processing fee + GST from plan_snapshot.fees (same formula as calculateCompleteLoanValues).
+ * Prefer this over raw fees_breakdown sums when the stored breakdown double-counts duplicate lines.
+ */
+const getDisbursalProcessingFeeAndGstFromPlanSnapshot = (row) => {
+    const ps = parsePlanSnapshotObject(row.plan_snapshot);
+    if (!ps || !Array.isArray(ps.fees)) return null;
+    const principal = parseFloat(row.amount || row.principal_amount || 0);
+    if (!(principal > 0)) return null;
+    for (const f of ps.fees) {
+        const name = String(f.fee_name || '')
+            .trim()
+            .toLowerCase();
+        const method = String(f.application_method || 'deduct_from_disbursal').toLowerCase();
+        if (name !== 'processing fee' || method !== 'deduct_from_disbursal') continue;
+        const pct = parseFloat(f.fee_percent);
+        if (Number.isNaN(pct)) continue;
+        const fee = round2((principal * pct) / 100);
+        const gst = round2(fee * 0.18);
+        return { feeCollected: fee, gstOnFees: gst };
+    }
+    return null;
+};
+
+/**
+ * Sum only deduct_from_disbursal lines named "processing fee" (excludes post service and accidental double-count of other deduct lines).
+ */
+const sumFeesBreakdownDeductProcessingFeeOnly = (raw) => {
+    if (!raw) return null;
+    let arr = raw;
+    if (typeof arr === 'string') {
+        try {
+            arr = JSON.parse(arr);
+        } catch {
+            return null;
+        }
+    }
+    if (!Array.isArray(arr)) return null;
+    let fee = 0;
+    let gst = 0;
+    for (const line of arr) {
+        const method = String(line.application_method || 'deduct_from_disbursal').toLowerCase();
+        const feeName = String(line.fee_name || '')
+            .trim()
+            .toLowerCase();
+        if (method !== 'deduct_from_disbursal' || feeName !== 'processing fee') continue;
+        const feeAmt = parseFloat(line.fee_amount);
+        const gstAmt = parseFloat(line.gst_amount);
+        if (!Number.isNaN(feeAmt)) fee += feeAmt;
+        if (!Number.isNaN(gstAmt)) gst += gstAmt;
+    }
+    fee = round2(fee);
+    gst = round2(gst);
+    if (fee <= 0 && gst <= 0) return null;
+    if (fee <= 0 && gst > 0) fee = round2(gst / 0.18);
+    else if (gst <= 0 && fee > 0) gst = round2(fee * 0.18);
+    return { feeCollected: fee, gstOnFees: gst };
+};
+
+/**
  * Processing fee % for BS CSV: loan column pro_fee_per; else plan_snapshot (fees + processing_fee_percent); else derive from fee/principal.
  * @param {number} [resolvedDisbursalFee] - pre-GST disbursal fee from resolveBsDisbursalProcessingFeeAndGst
  */
@@ -422,7 +487,10 @@ const resolveBsDisbursalProcessingFeePercent = (row, resolvedDisbursalFee) => {
     return '';
 };
 
-/** BS Repayment: reference like ADMIN_262_emi_2nd_1774374857752 → trailing numeric id */
+/**
+ * BS Repayment fallback when transactions.reference_number is unavailable:
+ * prefer trailing numeric id from strings like ADMIN_262_emi_2nd_1774374857752.
+ */
 const extractBsRepaymentReferenceNumber = (raw) => {
     if (raw == null || raw === '') return '';
     const s = String(raw).trim();
@@ -1000,7 +1068,20 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 la.processing_fee as processing_fees, 
                 la.processing_fee_percent as pro_fee_per, 
                 COALESCE(la.interest_percent_per_day * 100, 0) as interest_percentage,
-                COALESCE(lp.transaction_id, po.order_id) as transaction_number, 
+                COALESCE(lp.transaction_id, po.order_id) as transaction_number,
+                (
+                    SELECT t.reference_number
+                    FROM transactions t
+                    WHERE t.loan_application_id = la.id
+                      AND t.transaction_type NOT IN ('loan_disbursement')
+                      AND t.transaction_type NOT LIKE 'loan_extension%'
+                      AND (
+                          t.description LIKE CONCAT('%Order: ', po.order_id, '%')
+                          OR t.reference_number = po.order_id
+                      )
+                    ORDER BY t.id DESC
+                    LIMIT 1
+                ) AS payment_reference_number,
                 COALESCE(lp.payment_date, po.updated_at) as transaction_date, 
                 po.payment_type as payment_type,
                 COALESCE(lp.amount, po.amount) as transaction_amount,
@@ -1041,7 +1122,8 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                     td.transaction_number, td.transaction_date, td.transaction_flow AS payment_type, td.transaction_amount,
                     l.processed_date AS loan_start_date,
                     NULL as fees_breakdown, NULL as processed_p_fee, NULL as processed_post_service_fee, NULL as processed_gst,
-                    NULL as plan_snapshot, NULL as emi_schedule, NULL as interest_percent_per_day
+                    NULL as plan_snapshot, NULL as emi_schedule, NULL as interest_percent_per_day,
+                    NULL AS payment_reference_number
                 FROM transaction_details td
                 INNER JOIN loan_apply la ON la.id = td.cllid
                 INNER JOIN user u ON u.id = la.uid
@@ -1066,7 +1148,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             'Loan Process Date', 'Exhausted Days',
             'Sanctioned Amount', 'Disbursal Amount', 'Narration Journal', 'Reference No. (or Payout ID)',
             'Mode', 'Status', 'LoanDate', 'Country', 'State', 'Processing fee %', 'Processing Fees Collected',
-            'GST Amount on Processing Fees', 'Post Service Fee (incl. GST)', 'INTEREST (%)', 'LOAN CLOSURE TYPE',
+            'GST Amount on Processing Fees', 'Post Service Fee (ex GST)', 'GST on Post Service Fee', 'INTEREST (%)', 'LOAN CLOSURE TYPE',
             'INTEREST COLLECTED', 'PENALTY', 'GST On PENALTY',
             'REPAYMENT AMOUNT'
         ];
@@ -1097,6 +1179,10 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             const voucher_no = 'PLL' + row.lid;
             const paymentType = row.payment_type || '';
             const loan_closure_type = mapPaymentTypeToClosureType(paymentType);
+            const isPreclosePayment =
+                paymentType === 'pre-close' ||
+                paymentType === 'preclose' ||
+                loan_closure_type === 'preclose';
 
             const { feeCollected: processing_fee_collected, gstOnFees: gst_on_processing_fees } =
                 resolveBsDisbursalProcessingFeeAndGst(row);
@@ -1107,7 +1193,8 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             const sanctioned_amount = principal_amt; // Sanctioned Amount = Principal loan amount only
 
             let interest_collected = 0;
-            let post_service_incl_gst = 0;
+            let post_service_fee_ex_gst = 0;
+            let post_service_fee_gst = 0;
             let penalty = 0;
             let gst_on_penalty = 0;
             let exhausted_days = 0;
@@ -1132,27 +1219,51 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 const bd = bdMap?.get(emiNum);
                 if (bd) {
                     interest_collected = bd.interest;
-                    post_service_incl_gst = toDecimal2(bd.postFee + bd.postGst);
+                    post_service_fee_ex_gst = toDecimal2(bd.postFee);
+                    post_service_fee_gst = toDecimal2(bd.postGst);
                 }
-            } else if (extra_amount > 0 && row.loan_start_date) {
-                const calculated_interest = sanctioned_amount * DAILY_INTEREST_RATE * exhausted_days;
+            } else if (
+                row.loan_start_date &&
+                (extra_amount > 0 || (isPreclosePayment && sanctioned_amount > 0))
+            ) {
+                const ratePerDay = parseFloat(row.interest_percent_per_day);
+                const dailyRate =
+                    !Number.isNaN(ratePerDay) && ratePerDay > 0 ? ratePerDay : DAILY_INTEREST_RATE;
+                const calculated_interest = toDecimal2(sanctioned_amount * dailyRate * exhausted_days);
 
-                if (extra_amount > calculated_interest && exhausted_days > 30) {
+                // Pre-close: repayment = principal + interest till date + 10% pre-close fee + GST on that fee (payment.js).
+                // Do not attribute full (repayment − principal) to interest — that double-counts fees already in Post Service columns.
+                if (isPreclosePayment) {
+                    interest_collected = calculated_interest;
+                    penalty = 0;
+                    gst_on_penalty = 0;
+                } else if (extra_amount > 0 && extra_amount > calculated_interest && exhausted_days > 30) {
                     interest_collected = calculated_interest;
                     const remainder_for_penalty = extra_amount - calculated_interest;
 
                     penalty = remainder_for_penalty / GST_FACTOR;
                     gst_on_penalty = penalty * GST_RATE;
-                } else {
+                } else if (extra_amount > 0) {
                     interest_collected = extra_amount;
                     penalty = 0;
                     gst_on_penalty = 0;
                 }
             }
 
+            // Pre-close (matches calculatePaymentAmount in payment.js): fixed 10% of sanctioned principal + 18% GST
+            if (isPreclosePayment && sanctioned_amount > 0) {
+                const preclosePostFee = toDecimal2(sanctioned_amount * 0.1);
+                post_service_fee_ex_gst = preclosePostFee;
+                post_service_fee_gst = toDecimal2(preclosePostFee * GST_RATE);
+            }
+
             const loanDate = row.loan_start_date ? formatDateDDMMYYYY(row.loan_start_date) : '';
             const transactionDate = row.transaction_date ? formatDateDDMMYYYY(row.transaction_date) : '';
-            const refNo = extractBsRepaymentReferenceNumber(row.transaction_number);
+            const pr = row.payment_reference_number;
+            const refNo =
+                pr != null && String(pr).trim() !== ''
+                    ? String(pr).trim()
+                    : extractBsRepaymentReferenceNumber(row.transaction_number);
 
             const data = [
                 row.rcid || '',
@@ -1173,7 +1284,8 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 pro_fee_pct,
                 processing_fee_collected.toFixed(2),
                 gst_on_processing_fees.toFixed(2),
-                emiNum != null ? post_service_incl_gst.toFixed(2) : (0).toFixed(2),
+                emiNum != null || isPreclosePayment ? post_service_fee_ex_gst.toFixed(2) : (0).toFixed(2),
+                emiNum != null || isPreclosePayment ? post_service_fee_gst.toFixed(2) : (0).toFixed(2),
                 row.interest_percentage || '',
                 loan_closure_type,
                 interest_collected.toFixed(2),
