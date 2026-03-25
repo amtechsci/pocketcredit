@@ -289,6 +289,20 @@ const getBsDisbursalTenureDays = (row) => {
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
+/** Decimal per day (0.001 = 0.1%/day), same as loan_applications.interest_percent_per_day in normal rows */
+const BS_DEFAULT_DAILY_INTEREST_RATE = 0.001;
+
+/**
+ * Normal loans store interest_percent_per_day as a small decimal (e.g. 0.001). Bad rows sometimes have
+ * wrong units (huge numbers), which would explode INTEREST COLLECTED; fall back to the product default.
+ */
+const clampDailyInterestRateForBsReport = (raw) => {
+    const r = parseFloat(raw);
+    if (Number.isNaN(r) || r <= 0) return BS_DEFAULT_DAILY_INTEREST_RATE;
+    if (r > 0.01) return BS_DEFAULT_DAILY_INTEREST_RATE;
+    return r;
+};
+
 /**
  * Sums fee/GST from fees_breakdown by application_method (matches calculateCompleteLoanValues).
  */
@@ -546,7 +560,7 @@ const buildEmiBreakdownMap = (loanRow, fullCalc) => {
     plan = plan || {};
     const emiCount = parseInt(plan.emi_count, 10) || 1;
     const processedAmount = parseFloat(loanRow.processed_amount || loanRow.loan_amount || 0);
-    const rate = parseFloat(loanRow.interest_percent_per_day || 0.001);
+    const rate = clampDailyInterestRateForBsReport(loanRow.interest_percent_per_day);
 
     let repayFeePerEmi = 0;
     let repayGstPerEmi = 0;
@@ -1051,7 +1065,6 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
 
         const GST_RATE = 0.18;
         const GST_FACTOR = 1.18;
-        const DAILY_INTEREST_RATE = 0.001; // 0.1% as a decimal
 
         // Try new structure first (payment_orders + loan_payments)
         // Join with state_codes table to convert state code to state name
@@ -1226,9 +1239,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 row.loan_start_date &&
                 (extra_amount > 0 || (isPreclosePayment && sanctioned_amount > 0))
             ) {
-                const ratePerDay = parseFloat(row.interest_percent_per_day);
-                const dailyRate =
-                    !Number.isNaN(ratePerDay) && ratePerDay > 0 ? ratePerDay : DAILY_INTEREST_RATE;
+                const dailyRate = clampDailyInterestRateForBsReport(row.interest_percent_per_day);
                 const calculated_interest = toDecimal2(sanctioned_amount * dailyRate * exhausted_days);
 
                 // Pre-close: repayment = principal + interest till date + 10% pre-close fee + GST on that fee (payment.js).
@@ -1265,6 +1276,11 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                     ? String(pr).trim()
                     : extractBsRepaymentReferenceNumber(row.transaction_number);
 
+            const interestPctForCsv =
+                row.interest_percent_per_day != null && row.interest_percent_per_day !== ''
+                    ? (clampDailyInterestRateForBsReport(row.interest_percent_per_day) * 100).toFixed(6)
+                    : row.interest_percentage || '';
+
             const data = [
                 row.rcid || '',
                 row.pan_name || '',
@@ -1286,7 +1302,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 gst_on_processing_fees.toFixed(2),
                 emiNum != null || isPreclosePayment ? post_service_fee_ex_gst.toFixed(2) : (0).toFixed(2),
                 emiNum != null || isPreclosePayment ? post_service_fee_gst.toFixed(2) : (0).toFixed(2),
-                row.interest_percentage || '',
+                interestPctForCsv,
                 loan_closure_type,
                 interest_collected.toFixed(2),
                 penalty.toFixed(2),
