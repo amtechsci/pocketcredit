@@ -336,15 +336,42 @@ const parseFeesBreakdownTotals = (raw) => {
 };
 
 /**
+ * processing_fee_percent on loan (e.g. 14) × principal — avoids bad fees_breakdown duplicates when column is set.
+ */
+const getDisbursalProcessingFeeFromStoredProFeePer = (row) => {
+    const pct = parseFloat(row.pro_fee_per);
+    const principal = parseFloat(row.amount || row.principal_amount || 0);
+    if (Number.isNaN(pct) || pct <= 0 || !(principal > 0)) return null;
+    const fee = round2((principal * pct) / 100);
+    const gst = round2(fee * 0.18);
+    return { feeCollected: fee, gstOnFees: gst };
+};
+
+/**
+ * Single stored processing fee amount on loan_applications (pre-GST), when breakdown is unreliable.
+ */
+const getDisbursalProcessingFeeFromLoanColumn = (row) => {
+    const pf = parseFloat(row.processing_fee ?? row.processing_fees ?? row.p_fee);
+    if (Number.isNaN(pf) || pf <= 0) return null;
+    return { feeCollected: round2(pf), gstOnFees: round2(pf * 0.18) };
+};
+
+/**
  * Processing fees collected (pre-GST) and GST thereon for disbursal only — not post-service / EMI fees.
- * Prefers plan_snapshot × principal (matches product math); else fees_breakdown "processing fee" lines only; else full breakdown / processed_p_fee.
+ * Order: plan_snapshot; pro_fee_per×principal; first fees_breakdown processing line; loan.processing_fee; full breakdown; processed_p_fee.
  */
 const resolveBsDisbursalProcessingFeeAndGst = (row) => {
     const fromPlan = getDisbursalProcessingFeeAndGstFromPlanSnapshot(row);
     if (fromPlan) return fromPlan;
 
+    const fromPro = getDisbursalProcessingFeeFromStoredProFeePer(row);
+    if (fromPro) return fromPro;
+
     const fromProcessingLinesOnly = sumFeesBreakdownDeductProcessingFeeOnly(row.fees_breakdown);
     if (fromProcessingLinesOnly) return fromProcessingLinesOnly;
+
+    const fromLoanCol = getDisbursalProcessingFeeFromLoanColumn(row);
+    if (fromLoanCol) return fromLoanCol;
 
     const b = parseFeesBreakdownTotals(row.fees_breakdown);
 
@@ -418,22 +445,29 @@ const getProcessingFeePercentFromPlanSnapshot = (ps) => {
 };
 
 /**
- * One-time disbursal processing fee + GST from plan_snapshot.fees (same formula as calculateCompleteLoanValues).
- * Prefer this over raw fees_breakdown sums when the stored breakdown double-counts duplicate lines.
+ * One-time disbursal processing fee + GST from plan_snapshot (fees[] or top-level processing_fee_percent).
  */
 const getDisbursalProcessingFeeAndGstFromPlanSnapshot = (row) => {
     const ps = parsePlanSnapshotObject(row.plan_snapshot);
-    if (!ps || !Array.isArray(ps.fees)) return null;
+    if (!ps) return null;
     const principal = parseFloat(row.amount || row.principal_amount || 0);
     if (!(principal > 0)) return null;
-    for (const f of ps.fees) {
-        const name = String(f.fee_name || '')
-            .trim()
-            .toLowerCase();
-        const method = String(f.application_method || 'deduct_from_disbursal').toLowerCase();
-        if (name !== 'processing fee' || method !== 'deduct_from_disbursal') continue;
-        const pct = parseFloat(f.fee_percent);
-        if (Number.isNaN(pct)) continue;
+    if (Array.isArray(ps.fees)) {
+        for (const f of ps.fees) {
+            const name = String(f.fee_name || '')
+                .trim()
+                .toLowerCase();
+            const method = String(f.application_method || 'deduct_from_disbursal').toLowerCase();
+            if (name !== 'processing fee' || method !== 'deduct_from_disbursal') continue;
+            const pct = parseFloat(f.fee_percent);
+            if (Number.isNaN(pct)) continue;
+            const fee = round2((principal * pct) / 100);
+            const gst = round2(fee * 0.18);
+            return { feeCollected: fee, gstOnFees: gst };
+        }
+    }
+    if (ps.processing_fee_percent != null && !Number.isNaN(parseFloat(ps.processing_fee_percent))) {
+        const pct = parseFloat(ps.processing_fee_percent);
         const fee = round2((principal * pct) / 100);
         const gst = round2(fee * 0.18);
         return { feeCollected: fee, gstOnFees: gst };
@@ -442,7 +476,7 @@ const getDisbursalProcessingFeeAndGstFromPlanSnapshot = (row) => {
 };
 
 /**
- * Sum only deduct_from_disbursal lines named "processing fee" (excludes post service and accidental double-count of other deduct lines).
+ * First deduct_from_disbursal line named "processing fee" only (stored JSON often duplicates the same line for multi-EMI).
  */
 const sumFeesBreakdownDeductProcessingFeeOnly = (raw) => {
     if (!raw) return null;
@@ -455,8 +489,6 @@ const sumFeesBreakdownDeductProcessingFeeOnly = (raw) => {
         }
     }
     if (!Array.isArray(arr)) return null;
-    let fee = 0;
-    let gst = 0;
     for (const line of arr) {
         const method = String(line.application_method || 'deduct_from_disbursal').toLowerCase();
         const feeName = String(line.fee_name || '')
@@ -465,15 +497,14 @@ const sumFeesBreakdownDeductProcessingFeeOnly = (raw) => {
         if (method !== 'deduct_from_disbursal' || feeName !== 'processing fee') continue;
         const feeAmt = parseFloat(line.fee_amount);
         const gstAmt = parseFloat(line.gst_amount);
-        if (!Number.isNaN(feeAmt)) fee += feeAmt;
-        if (!Number.isNaN(gstAmt)) gst += gstAmt;
+        let fee = Number.isNaN(feeAmt) ? 0 : feeAmt;
+        let gst = Number.isNaN(gstAmt) ? 0 : gstAmt;
+        if (fee <= 0 && gst <= 0) continue;
+        if (fee <= 0 && gst > 0) fee = round2(gst / 0.18);
+        else if (gst <= 0 && fee > 0) gst = round2(fee * 0.18);
+        return { feeCollected: round2(fee), gstOnFees: round2(gst) };
     }
-    fee = round2(fee);
-    gst = round2(gst);
-    if (fee <= 0 && gst <= 0) return null;
-    if (fee <= 0 && gst > 0) fee = round2(gst / 0.18);
-    else if (gst <= 0 && fee > 0) gst = round2(fee * 0.18);
-    return { feeCollected: fee, gstOnFees: gst };
+    return null;
 };
 
 /**
