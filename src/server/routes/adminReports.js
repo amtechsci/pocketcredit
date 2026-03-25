@@ -574,6 +574,50 @@ const emiNumberFromPaymentType = (pt) => {
     return null;
 };
 
+/** Calendar days after due date until repayment (0 if same day or early). Aligns with late-fee “past due” rather than tenure from disbursement. */
+const daysAfterDueUntilRepayment = (dueRaw, repaymentRaw) => {
+    if (dueRaw == null || repaymentRaw == null) return null;
+    const dueStr =
+        typeof dueRaw === 'string'
+            ? dueRaw.split('T')[0].split(' ')[0]
+            : formatDateToString(dueRaw);
+    const repStr =
+        typeof repaymentRaw === 'string'
+            ? String(repaymentRaw).split('T')[0].split(' ')[0]
+            : formatDateToString(repaymentRaw);
+    if (!dueStr || !repStr || !/^\d{4}-\d{2}-\d{2}$/.test(dueStr) || !/^\d{4}-\d{2}-\d{2}$/.test(repStr)) {
+        return null;
+    }
+    const [dy, dm, dd] = dueStr.split('-').map(Number);
+    const [ry, rm, rd] = repStr.split('-').map(Number);
+    const due = new Date(dy, dm - 1, dd);
+    const rep = new Date(ry, rm - 1, rd);
+    const diff = Math.floor((rep - due) / (1000 * 60 * 60 * 24));
+    return diff > 0 ? diff : 0;
+};
+
+/**
+ * Principal component for EMI instalment emiNum (1-based), same split as buildEmiBreakdownMap (last EMI gets rounding remainder).
+ */
+const getEmiPrincipalPortionForBs = (row, emiNum) => {
+    let plan = row.plan_snapshot;
+    if (typeof plan === 'string') {
+        try {
+            plan = JSON.parse(plan);
+        } catch {
+            plan = {};
+        }
+    }
+    plan = plan || {};
+    const emiCount = parseInt(plan.emi_count, 10) || 1;
+    if (emiNum < 1 || emiNum > emiCount || emiCount <= 1) return null;
+    const processedAmount = parseFloat(row.processed_amount || row.principal_amount || 0);
+    if (!(processedAmount > 0)) return null;
+    const principalPerEmi = toDecimal2(Math.floor((processedAmount / emiCount) * 100) / 100);
+    const remainder = toDecimal2(processedAmount - principalPerEmi * emiCount);
+    return emiNum === emiCount ? toDecimal2(principalPerEmi + remainder) : principalPerEmi;
+};
+
 /**
  * Per-EMI interest + post-service fee (base + GST) using same reducing-balance logic as processing;
  * repayable fee/GST split evenly per EMI from getFullLoanCalculation totals.
@@ -1107,6 +1151,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 la.id as lid, la.disbursal_amount as processed_amount, 
                 la.processing_fee as p_fee, la.total_interest as service_charge, 
                 la.processed_penalty as penality_charge,
+                la.processed_due_date,
                 la.loan_amount AS principal_amount,
                 la.loan_amount AS amount,
                 la.processing_fee as processing_fees, 
@@ -1167,7 +1212,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                     l.processed_date AS loan_start_date,
                     NULL as fees_breakdown, NULL as processed_p_fee, NULL as processed_post_service_fee, NULL as processed_gst,
                     NULL as plan_snapshot, NULL as emi_schedule, NULL as interest_percent_per_day,
-                    NULL AS payment_reference_number
+                    NULL AS payment_reference_number, NULL as processed_due_date
                 FROM transaction_details td
                 INNER JOIN loan_apply la ON la.id = td.cllid
                 INNER JOIN user u ON u.id = la.uid
@@ -1266,6 +1311,23 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                     post_service_fee_ex_gst = toDecimal2(bd.postFee);
                     post_service_fee_gst = toDecimal2(bd.postGst);
                 }
+                // Overdue EMI: payment.js adds penalty to instalment_amount; split residual ex-GST + GST (18%).
+                if (bd) {
+                    const principalEmi = getEmiPrincipalPortionForBs(row, emiNum);
+                    if (principalEmi != null) {
+                        const residualAfter = toDecimal2(
+                            repayment_amt -
+                                principalEmi -
+                                interest_collected -
+                                post_service_fee_ex_gst -
+                                post_service_fee_gst
+                        );
+                        if (residualAfter > 0.02) {
+                            penalty = toDecimal2(residualAfter / GST_FACTOR);
+                            gst_on_penalty = toDecimal2(penalty * GST_RATE);
+                        }
+                    }
+                }
             } else if (
                 row.loan_start_date &&
                 (extra_amount > 0 || (isPreclosePayment && sanctioned_amount > 0))
@@ -1279,16 +1341,23 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                     interest_collected = calculated_interest;
                     penalty = 0;
                     gst_on_penalty = 0;
-                } else if (extra_amount > 0 && extra_amount > calculated_interest && exhausted_days > 30) {
-                    interest_collected = calculated_interest;
-                    const remainder_for_penalty = extra_amount - calculated_interest;
+                } else {
+                    const dpd = daysAfterDueUntilRepayment(row.processed_due_date, row.transaction_date);
+                    // Prefer days past contractual due date; legacy fallback: long tenure from disbursement (old heuristic).
+                    const penaltyEligible =
+                        dpd != null ? dpd >= 1 : exhausted_days > 30;
 
-                    penalty = remainder_for_penalty / GST_FACTOR;
-                    gst_on_penalty = penalty * GST_RATE;
-                } else if (extra_amount > 0) {
-                    interest_collected = extra_amount;
-                    penalty = 0;
-                    gst_on_penalty = 0;
+                    if (extra_amount > 0 && extra_amount > calculated_interest && penaltyEligible) {
+                        interest_collected = calculated_interest;
+                        const remainder_for_penalty = extra_amount - calculated_interest;
+
+                        penalty = toDecimal2(remainder_for_penalty / GST_FACTOR);
+                        gst_on_penalty = toDecimal2(penalty * GST_RATE);
+                    } else if (extra_amount > 0) {
+                        interest_collected = extra_amount;
+                        penalty = 0;
+                        gst_on_penalty = 0;
+                    }
                 }
             }
 
