@@ -5631,10 +5631,13 @@ function UserProfileDetail() {
       }
 
       setEditingLoan(loan.id);
+      // interestRate from API is annualized for display: interest_percent_per_day * 365 * 100 (see userProfile loans map).
+      // Do not pass it through as interest_percent_per_day on save — convert back with / (365 * 100).
+      const defaultAnnualInterestDisplay = 0.001 * 365 * 100;
       setEditValues({
         principalAmount: loan.principalAmount || loan.amount || 0,
         pfPercent: loan.processingFeePercent || 14,
-        intPercent: loan.interestRate || 0.10,
+        intPercent: loan.interestRate ?? defaultAnnualInterestDisplay,
       });
     };
 
@@ -5658,9 +5661,16 @@ function UserProfileDetail() {
         }
 
         // Call API to save the edited values (processing fee and interest)
+        const intRaw = editValues.intPercent !== undefined && editValues.intPercent !== ''
+          ? parseFloat(editValues.intPercent)
+          : NaN;
+        // Stored column is decimal per day (e.g. 0.001); form shows same units as interestRate (annual % scale).
+        const interestPercentPerDay =
+          !Number.isNaN(intRaw) ? intRaw / (365 * 100) : undefined;
+
         const response: any = await adminApiService.updateLoanCalculation(loanId, {
           processing_fee_percent: editValues.pfPercent ? parseFloat(editValues.pfPercent) : undefined,
-          interest_percent_per_day: editValues.intPercent ? parseFloat(editValues.intPercent) : undefined
+          interest_percent_per_day: interestPercentPerDay
         });
 
         if (response.success || response.status === 'success') {

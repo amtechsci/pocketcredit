@@ -883,10 +883,18 @@ async function updateLoanCalculation(loanIdOrDb, loanIdOrUpdates, updatesParam) 
     }
 
     if (updates.interest_percent_per_day !== undefined) {
-      const intPercent = parseFloat(updates.interest_percent_per_day);
-      if (isNaN(intPercent) || intPercent < 0) {
+      let intPerDay = parseFloat(updates.interest_percent_per_day);
+      if (isNaN(intPerDay) || intPerDay < 0) {
         throw new Error('Invalid interest percentage');
       }
+      // Admin UI historically sent interestRate (annual % = daily * 365 * 100) as this field — fix persisted bad values.
+      if (intPerDay > 0.05) {
+        intPerDay = intPerDay / (365 * 100);
+      }
+      if (intPerDay > 0.01) {
+        throw new Error('interest_percent_per_day must be <= 0.01 (1% per day) after normalization');
+      }
+      updates.interest_percent_per_day = intPerDay;
     }
 
     // Build update query
