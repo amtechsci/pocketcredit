@@ -1141,6 +1141,154 @@ function calculateCompleteLoanValues(loanData, planData, userData = {}, options 
   };
 }
 
+/**
+ * Split loan principal across EMIs (same formula as loan processing / loanCalculations route).
+ * Last EMI absorbs rounding remainder.
+ */
+function splitPrincipalForEmiSchedule(totalPrincipal, emiCount) {
+  const principal = toDecimal2(totalPrincipal);
+  if (!emiCount || emiCount <= 1) {
+    return [principal];
+  }
+  const principalPerEmi = toDecimal2(Math.floor((principal / emiCount) * 100) / 100);
+  const remainder = toDecimal2(principal - principalPerEmi * emiCount);
+  const amounts = [];
+  for (let i = 0; i < emiCount; i++) {
+    amounts.push(i === emiCount - 1 ? toDecimal2(principalPerEmi + remainder) : principalPerEmi);
+  }
+  return amounts;
+}
+
+function _penaltyIsOverdueDate(dueDateStr, today) {
+  const dueDate = new Date(dueDateStr);
+  dueDate.setHours(0, 0, 0, 0);
+  const t = new Date(today);
+  t.setHours(0, 0, 0, 0);
+  return t > dueDate;
+}
+
+function _penaltyCalculateDaysInclusive(startDate, endDate) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  start.setHours(0, 0, 0, 0);
+  end.setHours(0, 0, 0, 0);
+  return Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+}
+
+/**
+ * Penalty base + GST from late_fee_structure tiers (aligned with loanCalculationJob / EMI schedule).
+ */
+function calculatePenaltyFromLateFeeStructure(principalForPenalty, daysOverdue, lateFeeStructure) {
+  if (daysOverdue <= 0) {
+    return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+  }
+  if (!lateFeeStructure || !Array.isArray(lateFeeStructure) || lateFeeStructure.length === 0) {
+    return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+  }
+
+  let penaltyBase = 0;
+  const sortedTiers = [...lateFeeStructure].sort((a, b) => {
+    const orderA = a.tier_order !== undefined ? a.tier_order : (a.days_overdue_start || 0);
+    const orderB = b.tier_order !== undefined ? b.tier_order : (b.days_overdue_start || 0);
+    return orderA - orderB;
+  });
+
+  for (const tier of sortedTiers) {
+    const startDay = tier.days_overdue_start || 0;
+    const endDay = tier.days_overdue_end !== null && tier.days_overdue_end !== undefined
+      ? tier.days_overdue_end
+      : null;
+
+    if (daysOverdue < startDay) continue;
+
+    const feeValue = parseFloat(tier.fee_value || tier.penalty_percent || 0);
+    if (feeValue <= 0) continue;
+
+    if (startDay === endDay || (startDay === 1 && endDay === 1)) {
+      if (daysOverdue >= startDay) {
+        penaltyBase += principalForPenalty * (feeValue / 100);
+      }
+    } else if (endDay === null || endDay === undefined) {
+      if (daysOverdue >= startDay) {
+        const daysInTier = daysOverdue - startDay + 1;
+        penaltyBase += principalForPenalty * (feeValue / 100) * daysInTier;
+      }
+    } else {
+      if (daysOverdue >= startDay) {
+        const tierStartDay = startDay;
+        const tierEndDay = Math.min(endDay, daysOverdue);
+        const daysInTier = Math.max(0, tierEndDay - tierStartDay + 1);
+        if (daysInTier > 0) {
+          penaltyBase += principalForPenalty * (feeValue / 100) * daysInTier;
+        }
+      }
+    }
+  }
+
+  const penaltyBaseRounded = toDecimal2(penaltyBase);
+  const gstPercent = lateFeeStructure[0]?.gst_percent || 18;
+  const penaltyGST = toDecimal2(penaltyBaseRounded * (gstPercent / 100));
+  const penaltyTotal = toDecimal2(penaltyBaseRounded + penaltyGST);
+
+  return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
+}
+
+/**
+ * Total overdue penalty: single instalment uses full principal × DPD tiers.
+ * Multi-EMI: each overdue instalment's fee applies only to that instalment's principal share (not full loan).
+ */
+function calculateAggregatedOverduePenalty(processedAmount, dueDates, today, lateFeeStructure) {
+  if (!lateFeeStructure || !Array.isArray(lateFeeStructure) || lateFeeStructure.length === 0) {
+    return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+  }
+  if (!dueDates || dueDates.length === 0) {
+    return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+  }
+
+  const principal = toDecimal2(processedAmount);
+  if (principal <= 0) {
+    return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+  }
+
+  const t = new Date(today);
+  t.setHours(0, 0, 0, 0);
+
+  if (dueDates.length <= 1) {
+    const dueDateStr = dueDates[0];
+    if (!dueDateStr || !_penaltyIsOverdueDate(dueDateStr, t)) {
+      return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
+    }
+    const dueDate = new Date(dueDateStr);
+    dueDate.setHours(0, 0, 0, 0);
+    const daysOverdueInclusive = _penaltyCalculateDaysInclusive(dueDate, t);
+    const daysOverdue = Math.max(1, daysOverdueInclusive - 1);
+    return calculatePenaltyFromLateFeeStructure(principal, daysOverdue, lateFeeStructure);
+  }
+
+  const n = dueDates.length;
+  const amounts = splitPrincipalForEmiSchedule(principal, n);
+  let totalBase = 0;
+  let totalGST = 0;
+
+  for (let i = 0; i < dueDates.length; i++) {
+    const dueDateStr = dueDates[i];
+    if (!dueDateStr || !_penaltyIsOverdueDate(dueDateStr, t)) continue;
+
+    const dueDate = new Date(dueDateStr);
+    dueDate.setHours(0, 0, 0, 0);
+    const daysOverdueInclusive = _penaltyCalculateDaysInclusive(dueDate, t);
+    const daysOverdue = Math.max(1, daysOverdueInclusive - 1);
+
+    const emiPrincipal = amounts[i] !== undefined ? amounts[i] : amounts[amounts.length - 1];
+    const p = calculatePenaltyFromLateFeeStructure(emiPrincipal, daysOverdue, lateFeeStructure);
+    totalBase = toDecimal2(totalBase + p.penaltyBase);
+    totalGST = toDecimal2(totalGST + p.penaltyGST);
+  }
+
+  const penaltyTotal = toDecimal2(totalBase + totalGST);
+  return { penaltyBase: totalBase, penaltyGST: totalGST, penaltyTotal };
+}
+
 module.exports = {
   calculateLoanValues,
   calculateTotalDays,
@@ -1164,6 +1312,9 @@ module.exports = {
   decimalToString,
   // Financial constants (exported as numbers for compatibility)
   GST_RATE: parseFloat(GST_RATE.toString()),
-  EXTENSION_FEE_RATE: parseFloat(EXTENSION_FEE_RATE.toString())
+  EXTENSION_FEE_RATE: parseFloat(EXTENSION_FEE_RATE.toString()),
+  splitPrincipalForEmiSchedule,
+  calculatePenaltyFromLateFeeStructure,
+  calculateAggregatedOverduePenalty
 };
 

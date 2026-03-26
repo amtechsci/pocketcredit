@@ -18,7 +18,7 @@
 
 const { executeQuery } = require('../config/database');
 const cronLogger = require('../services/cronLogger');
-const { toDecimal2, parseDateToString } = require('../utils/loanCalculations');
+const { toDecimal2, parseDateToString, calculateAggregatedOverduePenalty } = require('../utils/loanCalculations');
 
 /**
  * Parse due dates from processed_due_date field
@@ -48,90 +48,12 @@ function parseDueDates(processedDueDate) {
 }
 
 /**
- * Check if a date is overdue
- */
-function isOverdue(dueDateStr, today) {
-  const dueDate = new Date(dueDateStr);
-  dueDate.setHours(0, 0, 0, 0);
-  return today > dueDate;
-}
-
-/**
  * Calculate days between two dates (inclusive)
  */
 function calculateDaysInclusive(startDate, endDate) {
   startDate.setHours(0, 0, 0, 0);
   endDate.setHours(0, 0, 0, 0);
   return Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
-}
-
-/**
- * Calculate penalty for overdue loan using late_fee_structure
- * IMPORTANT: Always use late_fee_structure from database, not hardcoded values
- */
-function calculatePenalty(principal, daysOverdue, lateFeeStructure) {
-  if (daysOverdue <= 0) {
-    return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
-  }
-
-  // If no late_fee_structure, return 0 (no penalty)
-  if (!lateFeeStructure || !Array.isArray(lateFeeStructure) || lateFeeStructure.length === 0) {
-    return { penaltyBase: 0, penaltyGST: 0, penaltyTotal: 0 };
-  }
-
-  let penaltyBase = 0;
-
-  // Sort tiers by tier_order or days_overdue_start
-  const sortedTiers = [...lateFeeStructure].sort((a, b) => {
-    const orderA = a.tier_order !== undefined ? a.tier_order : (a.days_overdue_start || 0);
-    const orderB = b.tier_order !== undefined ? b.tier_order : (b.days_overdue_start || 0);
-    return orderA - orderB;
-  });
-
-  // Calculate penalty based on tiers
-  for (const tier of sortedTiers) {
-    const startDay = tier.days_overdue_start || 0;
-    const endDay = tier.days_overdue_end !== null && tier.days_overdue_end !== undefined 
-      ? tier.days_overdue_end 
-      : null; // null means unlimited (e.g., Day 121+)
-    
-    // Skip tiers that haven't started yet
-    if (daysOverdue < startDay) continue;
-    
-    const feeValue = parseFloat(tier.fee_value || tier.penalty_percent || 0);
-    if (feeValue <= 0) continue;
-    
-    if (startDay === endDay || (startDay === 1 && endDay === 1)) {
-      // Single day tier (e.g., "Day 1-1"): apply as one-time percentage
-      if (daysOverdue >= startDay) {
-        penaltyBase += principal * (feeValue / 100);
-      }
-    } else if (endDay === null || endDay === undefined) {
-      // Unlimited tier (e.g., "Day 121+"): apply for all days from startDay onwards
-      if (daysOverdue >= startDay) {
-        const daysInTier = daysOverdue - startDay + 1;
-        penaltyBase += principal * (feeValue / 100) * daysInTier;
-      }
-    } else {
-      // Multi-day tier (e.g., "Day 2-10", "Day 11-120"): calculate for applicable days
-      if (daysOverdue >= startDay) {
-        const tierStartDay = startDay;
-        const tierEndDay = Math.min(endDay, daysOverdue); // Cap at days overdue
-        const daysInTier = Math.max(0, tierEndDay - tierStartDay + 1);
-        
-        if (daysInTier > 0) {
-          penaltyBase += principal * (feeValue / 100) * daysInTier;
-        }
-      }
-    }
-  }
-
-  const penaltyBaseRounded = toDecimal2(penaltyBase);
-  const gstPercent = lateFeeStructure[0]?.gst_percent || 18; // Use GST from structure or default 18%
-  const penaltyGST = toDecimal2(penaltyBaseRounded * (gstPercent / 100));
-  const penaltyTotal = toDecimal2(penaltyBaseRounded + penaltyGST);
-
-  return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
 }
 
 /**
@@ -252,27 +174,10 @@ async function calculateLoanInterestAndPenalty() {
             await cronLogger.error(`Error parsing late_fee_structure for loan #${loan.id}`, e);
           }
           
-          // Check if any EMI is overdue
-          let maxDaysOverdue = 0;
-          for (const dueDateStr of dueDates) {
-            if (isOverdue(dueDateStr, today)) {
-              const dueDate = new Date(dueDateStr);
-              dueDate.setHours(0, 0, 0, 0);
-              // Calculate days overdue: if due date is 1st and today is 11th, that's 10 days past due
-              // calculateDaysInclusive gives 11 days (1st to 11th inclusive), but for penalty we need exclusive
-              // So subtract 1 to get actual days past due (excluding today)
-              const daysOverdueInclusive = calculateDaysInclusive(dueDate, today);
-              const daysOverdue = Math.max(1, daysOverdueInclusive - 1); // Exclude today for penalty calculation
-              maxDaysOverdue = Math.max(maxDaysOverdue, daysOverdue);
-            }
-          }
-
-          if (maxDaysOverdue > 0) {
-            // Calculate total penalty from scratch using late_fee_structure
-            const penaltyCalc = calculatePenalty(principal, maxDaysOverdue, lateFeeStructure);
-            newPenalty = toDecimal2(penaltyCalc.penaltyTotal);
-            
-            await cronLogger.debug(`Loan #${loan.id}: ${maxDaysOverdue} days overdue, Penalty: ₹${penaltyCalc.penaltyBase} + GST ₹${penaltyCalc.penaltyGST} = ₹${newPenalty}`);
+          const penaltyCalc = calculateAggregatedOverduePenalty(principal, dueDates, today, lateFeeStructure);
+          newPenalty = toDecimal2(penaltyCalc.penaltyTotal);
+          if (penaltyCalc.penaltyTotal > 0) {
+            await cronLogger.debug(`Loan #${loan.id}: overdue instalment(s), Penalty: ₹${penaltyCalc.penaltyBase} + GST ₹${penaltyCalc.penaltyGST} = ₹${newPenalty}`);
           }
         }
 

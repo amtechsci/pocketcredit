@@ -6624,8 +6624,22 @@ function UserProfileDetail() {
                             total: penaltyTotal
                           };
                         } else {
-                          // Fallback: Calculate dynamically
-                          penaltyData = calculatePenalty(principal, dpd);
+                          // Fallback: use overdue instalment principal for multi-EMI (penalty % applies per EMI, not full loan)
+                          let penaltyPrincipal = principal;
+                          if (calculation?.repayment?.schedule && calculation.repayment.schedule.length > 1) {
+                            const pending = calculation.repayment.schedule.filter(
+                              (emi: any) => (emi.status || '').toLowerCase() !== 'paid'
+                            );
+                            pending.sort((a: any, b: any) =>
+                              String(a.due_date || '').localeCompare(String(b.due_date || ''))
+                            );
+                            const firstPending = pending[0];
+                            const p = firstPending?.principal;
+                            if (typeof p === 'number' && p > 0) {
+                              penaltyPrincipal = p;
+                            }
+                          }
+                          penaltyData = calculatePenalty(penaltyPrincipal, dpd);
                         }
 
                         // Calculate interest for full tenure (till due date, not till today)

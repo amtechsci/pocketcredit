@@ -883,10 +883,9 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
             const daysOverdueInclusive = calculateDaysBetween(emiDateStr, todayStr);
             const daysOverdue = Math.max(1, daysOverdueInclusive - 1); // Exclude today for penalty calculation
             
-            // Calculate penalty based on LOAN PRINCIPAL (not EMI principal)
-            // Penalty is calculated on the full loan amount, not per-EMI principal
+            // Penalty applies to overdue principal for this instalment only (e.g. 1st EMI = that EMI's principal share)
             if (lateFeeStructure && Array.isArray(lateFeeStructure) && lateFeeStructure.length > 0) {
-              const penaltyCalc = calculateEmiPenalty(principal, daysOverdue, lateFeeStructure);
+              const penaltyCalc = calculateEmiPenalty(principalForThisEmi, daysOverdue, lateFeeStructure);
               penaltyAmount = penaltyCalc.penaltyTotal;
               penaltyBase = penaltyCalc.penaltyBase;
               penaltyGST = penaltyCalc.penaltyGST;
