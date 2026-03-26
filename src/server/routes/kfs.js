@@ -1271,6 +1271,37 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           // Use baseDateStr (already calculated above) for schedule generation to avoid timezone issues
           const baseDateStrForSchedule = baseDateStr || getTodayString();
 
+          let emiScheduleForDpdStatus = null;
+          if (loan.emi_schedule) {
+            try {
+              emiScheduleForDpdStatus = typeof loan.emi_schedule === 'string'
+                ? JSON.parse(loan.emi_schedule)
+                : loan.emi_schedule;
+            } catch (e) {
+              emiScheduleForDpdStatus = null;
+            }
+          }
+          const todayStrForDpd = getTodayString();
+          let firstOverdueUnpaidEmiIndex = -1;
+          if (loan.status !== 'cleared') {
+            for (let j = 0; j < emiCount; j++) {
+              const raw = allEmiDates[j];
+              const dObj = raw instanceof Date ? new Date(raw) : new Date(raw);
+              dObj.setHours(0, 0, 0, 0);
+              const dStr = formatDateToString(dObj) || parseDateToString(dObj);
+              if (!dStr || dStr >= todayStrForDpd) continue;
+              let st = 'pending';
+              if (emiScheduleForDpdStatus && Array.isArray(emiScheduleForDpdStatus)) {
+                const se = emiScheduleForDpdStatus.find(e => (e.emi_number === j + 1 || e.instalment_no === j + 1)) || emiScheduleForDpdStatus[j];
+                if (se && se.status) st = se.status;
+              }
+              if (String(st).toLowerCase() !== 'paid') {
+                firstOverdueUnpaidEmiIndex = j;
+                break;
+              }
+            }
+          }
+
           for (let i = 0; i < emiCount; i++) {
             // Get EMI date (handle both Date objects and strings)
             const emiDateStr = allEmiDates[i];
@@ -1318,6 +1349,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             let penaltyBase = 0;
             let penaltyGST = 0;
             let penaltyTotal = 0;
+            let dpdInterestOnTotalPrincipal = 0;
             
             // Check if EMI is overdue by comparing due_date with today
             const todayStr = getTodayString();
@@ -1351,10 +1383,14 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
                 penaltyGST = penaltyCalc.penaltyGST;
                 penaltyTotal = penaltyCalc.penaltyTotal;
               }
+
+              if (firstOverdueUnpaidEmiIndex === i) {
+                dpdInterestOnTotalPrincipal = toDecimal2(daysOverdue * interestRatePerDay * principal);
+              }
             }
             
-            // Calculate final installment amount (base + penalty)
-            const instalmentAmount = toDecimal2(baseInstalmentAmount + penaltyTotal);
+            // Calculate final installment amount (base + penalty + DPD interest on total principal)
+            const instalmentAmount = toDecimal2(baseInstalmentAmount + penaltyTotal + dpdInterestOnTotalPrincipal);
 
             schedule.push({
               instalment_no: i + 1,
@@ -1366,6 +1402,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               penalty_base: penaltyBase,
               penalty_gst: penaltyGST,
               penalty_total: penaltyTotal,
+              dpd_interest_on_total_principal: dpdInterestOnTotalPrincipal,
               instalment_amount: instalmentAmount,
               due_date: formatDateLocal(emiDate) // Use local date format without timezone conversion
             });

@@ -477,17 +477,20 @@ async function calculatePaymentAmount(loan, paymentType) {
         const postServiceFee = emi.post_service_fee || 0;
         const gstOnPostServiceFee = emi.gst_on_post_service_fee || 0;
         const penaltyTotal = emi.penalty_total || emi.penalty || 0;
+        const dpdInterestOnTotalPrincipal = parseFloat(emi.dpd_interest_on_total_principal || emi.dpd_interest || 0) || 0;
         
-        emiAmount = principal + interest + postServiceFee + gstOnPostServiceFee + penaltyTotal;
+        emiAmount = principal + interest + postServiceFee + gstOnPostServiceFee + penaltyTotal + dpdInterestOnTotalPrincipal;
       }
       
       // CRITICAL: If EMI is overdue, ensure penalty is included
       // Check if penalty_total exists in the EMI data (from dynamic calculation)
       const penaltyTotal = emi.penalty_total || emi.penalty || 0;
       
+      const dpdInterestOnTotalPrincipal = parseFloat(emi.dpd_interest_on_total_principal || emi.dpd_interest || 0) || 0;
+
       // If instalment_amount doesn't include penalty but penalty exists, add it
       if (penaltyTotal > 0) {
-        const baseAmount = (emi.principal || 0) + (emi.interest || 0) + (emi.post_service_fee || 0) + (emi.gst_on_post_service_fee || 0);
+        const baseAmount = (emi.principal || 0) + (emi.interest || 0) + (emi.post_service_fee || 0) + (emi.gst_on_post_service_fee || 0) + dpdInterestOnTotalPrincipal;
         // Only add penalty if it's not already included in instalment_amount
         // We check by comparing: if instalment_amount ≈ baseAmount, then penalty is missing
         const tolerance = 0.01; // 1 paise tolerance
@@ -498,7 +501,7 @@ async function calculatePaymentAmount(loan, paymentType) {
         }
       }
       
-      console.log(`💰 EMI ${emiNumber} calculation: ₹${emiAmount} (Principal: ₹${emi.principal || 0}, Interest: ₹${emi.interest || 0}, Fee: ₹${emi.post_service_fee || 0}, GST: ₹${emi.gst_on_post_service_fee || 0}, Penalty: ₹${penaltyTotal})`);
+      console.log(`💰 EMI ${emiNumber} calculation: ₹${emiAmount} (Principal: ₹${emi.principal || 0}, Interest: ₹${emi.interest || 0}, Fee: ₹${emi.post_service_fee || 0}, GST: ₹${emi.gst_on_post_service_fee || 0}, Penalty: ₹${penaltyTotal}, DPD int. on total principal: ₹${dpdInterestOnTotalPrincipal})`);
       
       return emiAmount;
     } else {

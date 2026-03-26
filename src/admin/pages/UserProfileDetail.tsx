@@ -12014,6 +12014,11 @@ function UserProfileDetail() {
                       const dueDate = emiDate !== 'N/A' ? new Date(emiDate) : null;
                       const isOverdue = !isPaid && dueDate && dueDate < today;
                       const hasPenalty = !isPaid && (emi.penalty_total > 0 || emi.penalty_base > 0);
+                      const dpdInterestOnTotalPrincipal = parseFloat(emi.dpd_interest_on_total_principal || emi.dpd_interest || 0) || 0;
+                      const hasDpdInterest = !isPaid && dpdInterestOnTotalPrincipal > 0;
+                      const showEmiBreakdown = hasPenalty || hasDpdInterest;
+                      const baseEmiBeforePenDpd =
+                        emiAmount - (emi.penalty_total || 0) - dpdInterestOnTotalPrincipal;
 
                       return (
                         <tr key={index} className={`hover:bg-gray-50 ${isPaid ? 'bg-green-50' : isOverdue ? 'bg-red-50' : ''}`}>
@@ -12024,16 +12029,23 @@ function UserProfileDetail() {
                             {emiDate !== 'N/A' ? formatDate(emiDate) : 'N/A'}
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap">
-                            {hasPenalty ? (
+                            {showEmiBreakdown ? (
                               <div>
                                 <div className="text-sm text-gray-700">
-                                  Base EMI: {formatCurrencyWithDecimals(emiAmount - (emi.penalty_total || 0))}
+                                  Base EMI: {formatCurrencyWithDecimals(baseEmiBeforePenDpd)}
                                 </div>
+                                {hasDpdInterest ? (
+                                  <div className="text-xs text-amber-800 mt-1">
+                                    DPD interest (on total principal): ₹{dpdInterestOnTotalPrincipal.toFixed(2)}
+                                  </div>
+                                ) : null}
+                                {hasPenalty ? (
                                 <div className="text-xs text-red-600 mt-1">
                                   <div>Penalty: ₹{(emi.penalty_base || 0).toFixed(2)}</div>
                                   <div>GST: ₹{(emi.penalty_gst || 0).toFixed(2)}</div>
                                   <div className="font-semibold">Total Penalty: ₹{(emi.penalty_total || 0).toFixed(2)}</div>
                                 </div>
+                                ) : null}
                                 <div className="text-sm font-semibold text-gray-900 mt-1">
                                   Total: {formatCurrencyWithDecimals(emiAmount)}
                                 </div>

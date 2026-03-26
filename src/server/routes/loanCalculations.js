@@ -840,6 +840,25 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           
           return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
         };
+
+        // First overdue EMI that is still unpaid: add DPD interest = DPD days × rate × FULL principal (not EMI share)
+        const todayStrForSchedule = getTodayString();
+        let firstOverdueUnpaidEmiIndex = -1;
+        if (loan.status !== 'cleared') {
+          for (let j = 0; j < emiCount; j++) {
+            const dStr = formatDateToString(allEmiDates[j]);
+            if (!dStr || dStr >= todayStrForSchedule) continue;
+            let emiStatus = 'pending';
+            if (storedEmiSchedule && Array.isArray(storedEmiSchedule)) {
+              const storedEmi = storedEmiSchedule.find(e => (e.emi_number === j + 1 || e.instalment_no === j + 1)) || storedEmiSchedule[j];
+              if (storedEmi && storedEmi.status) emiStatus = storedEmi.status;
+            }
+            if (String(emiStatus).toLowerCase() !== 'paid') {
+              firstOverdueUnpaidEmiIndex = j;
+              break;
+            }
+          }
+        }
         
         let outstandingPrincipal = principal;
         let totalInterest = 0;
@@ -872,15 +891,15 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           
           // Calculate penalty if EMI is overdue
           // Use string-based date comparison to avoid timezone issues
-          const todayStr = getTodayString();
           let penaltyAmount = 0;
           let penaltyBase = 0;
           let penaltyGST = 0;
+          let dpdInterestOnTotalPrincipal = 0;
           
           // Check if EMI is overdue by comparing date strings (YYYY-MM-DD format)
-          if (emiDateStr < todayStr) {
+          if (emiDateStr < todayStrForSchedule) {
             // EMI is overdue - calculate days overdue (exclusive, not including today)
-            const daysOverdueInclusive = calculateDaysBetween(emiDateStr, todayStr);
+            const daysOverdueInclusive = calculateDaysBetween(emiDateStr, todayStrForSchedule);
             const daysOverdue = Math.max(1, daysOverdueInclusive - 1); // Exclude today for penalty calculation
             
             // Penalty applies to overdue principal for this instalment only (e.g. 1st EMI = that EMI's principal share)
@@ -894,13 +913,18 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
             } else {
               console.warn(`⚠️ [EMI Penalty] EMI #${i + 1} is overdue but no late_fee_structure found`);
             }
+
+            // Extra interest on total principal for each DPD day (e.g. DPD 1 → 1 × 0.001 × 3840); attach to first overdue unpaid EMI only
+            if (firstOverdueUnpaidEmiIndex === i) {
+              dpdInterestOnTotalPrincipal = toDecimal2(daysOverdue * interestRatePerDay * principal);
+            }
           }
           
           // Calculate installment amount (principal + interest + post service fee + GST + penalty)
           // CRITICAL: Include post service fee + GST in each EMI
-          // Penalty is added to overdue EMIs
+          // Penalty is added to overdue EMIs; DPD interest on full principal on first overdue unpaid EMI only
           const baseAmount = principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi;
-          const instalmentAmount = toDecimal2(baseAmount + penaltyAmount);
+          const instalmentAmount = toDecimal2(baseAmount + penaltyAmount + dpdInterestOnTotalPrincipal);
           
           // Preserve stored status and paid_date if available (for account_manager loans with payment tracking)
           // For cleared loans, always show all EMIs as paid (fixes EMI details showing Pending for closed loans)
@@ -934,6 +958,7 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
             penalty_base: penaltyBase,
             penalty_gst: penaltyGST,
             penalty_total: penaltyAmount,
+            dpd_interest_on_total_principal: dpdInterestOnTotalPrincipal,
             instalment_amount: instalmentAmount,
             days: daysForPeriod,
             status: emiStatus
