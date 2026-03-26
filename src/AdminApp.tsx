@@ -30,6 +30,7 @@ import { OverduePage } from './admin/pages/OverduePage';
 import { TvrIdsPage } from './admin/pages/TvrIdsPage';
 import { FollowUpUserPage } from './admin/pages/FollowUpUserPage';
 import { PerformancePage } from './admin/pages/PerformancePage';
+import { SalesTrackerUserPage } from './admin/pages/SalesTrackerUserPage';
 import { AdminProvider, useAdmin } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './components/ui/sheet';
@@ -44,7 +45,7 @@ import {
 import { Avatar, AvatarFallback } from './components/ui/avatar';
 
 export type AdminRole = 'superadmin' | 'manager' | 'officer' | 'super_admin' | 'master_admin' | 'nbfc_admin' | 'sub_admin';
-export type SubAdminCategory = 'verify_user' | 'qa_user' | 'account_manager' | 'recovery_officer' | 'debt_agency' | 'follow_up_user';
+export type SubAdminCategory = 'verify_user' | 'qa_user' | 'account_manager' | 'recovery_officer' | 'debt_agency' | 'follow_up_user' | 'sales_tracker_user';
 
 export interface AdminUser {
   id: string;
@@ -66,6 +67,9 @@ function DashboardOrRedirect() {
   // Follow-up sub-admin: no dashboard, go straight to Follow Up view
   if (currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category === 'follow_up_user') {
     return <Navigate to={`${BASE_PATH}/follow-up?tab=submitted`} replace />;
+  }
+  if (currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category === 'sales_tracker_user') {
+    return <Navigate to={`${BASE_PATH}/sales-tracker?tab=under_review`} replace />;
   }
   if (currentUser?.role === 'nbfc_admin') {
     return <Navigate to={`${BASE_PATH}/applications?status=ready_for_disbursement`} replace />;
@@ -150,12 +154,21 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
         { path: `${BASE_PATH}/follow-up?tab=tvr`, label: 'TVR IDs', color: 'purple' },
         { path: `${BASE_PATH}/performance`, label: 'Performance', color: 'blue' }
       );
+    } else if (subCat === 'sales_tracker_user') {
+      navByRole.push(
+        { path: `${BASE_PATH}/sales-tracker?tab=under_review`, label: 'Under Review', color: 'orange' },
+        { path: `${BASE_PATH}/sales-tracker?tab=tvr`, label: 'TVR', color: 'purple' },
+        { path: `${BASE_PATH}/sales-tracker?tab=follow_up`, label: 'Follow Up', color: 'green' },
+        { path: `${BASE_PATH}/sales-tracker?tab=submitted`, label: 'Submitted', color: 'blue' },
+        { path: `${BASE_PATH}/sales-tracker?tab=performance`, label: 'Performance', color: 'blue' }
+      );
     }
   } else if (currentUser?.role === 'nbfc_admin') {
     navByRole.push(
       { path: `${BASE_PATH}/overdue`, label: 'Over Due', color: 'red' },
       { path: `${BASE_PATH}/applications?status=ready_for_disbursement`, label: 'Ready for Disbursement', color: 'blue' },
-      { path: `${BASE_PATH}/applications?status=ready_to_repeat_disbursal`, label: 'Repeat Loan Ready for Disbursal', color: 'blue' }
+      { path: `${BASE_PATH}/applications?status=ready_to_repeat_disbursal`, label: 'Repeat Loan Ready for Disbursal', color: 'blue' },
+      { path: `${BASE_PATH}/reports`, label: 'Reports', color: 'blue' }
     );
   } else {
     navByRole.push(
@@ -180,7 +193,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
   }
   const navigationItems = navByRole;
   const showSearch = isSuperAdmin || currentUser?.role === 'manager' || currentUser?.role === 'officer' || currentUser?.role === 'master_admin'
-    || (currentUser?.role === 'sub_admin' && ['verify_user', 'qa_user', 'account_manager', 'recovery_officer', 'follow_up_user'].includes(subCat || ''))
+    || (currentUser?.role === 'sub_admin' && ['verify_user', 'qa_user', 'account_manager', 'recovery_officer', 'follow_up_user', 'sales_tracker_user'].includes(subCat || ''))
     || currentUser?.role === 'nbfc_admin';
 
   const getActiveClasses = (path: string, color: string) => {
@@ -306,7 +319,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
                       Settings
                     </DropdownMenuItem>
                   )}
-                  {currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category && currentUser.sub_admin_category !== 'debt_agency' && (
+                  {currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category && currentUser.sub_admin_category !== 'debt_agency' && currentUser.sub_admin_category !== 'sales_tracker_user' && (
                     <DropdownMenuItem
                       onClick={() => navigate(`${BASE_PATH}/my-leave`)}
                       className="cursor-pointer"
@@ -493,6 +506,11 @@ export default function AdminApp() {
         <Route path="follow-up" element={
           <ProtectedRoute>
             <FollowUpUserPage />
+          </ProtectedRoute>
+        } />
+        <Route path="sales-tracker" element={
+          <ProtectedRoute>
+            <SalesTrackerUserPage />
           </ProtectedRoute>
         } />
         <Route path="tvr-ids" element={

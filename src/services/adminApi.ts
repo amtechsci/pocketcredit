@@ -612,6 +612,35 @@ class AdminApiService {
     return await response.blob();
   }
 
+  /** Sales tracker sub-admin: CSV with Customer Id (PC…) and Loan ID (PLL…) only */
+  async exportSalesTrackerMinimal(segment: 'submitted' | 'under_review' | 'follow_up' | 'tvr' | 'performance'): Promise<Blob> {
+    const token = localStorage.getItem('adminToken');
+    const response = await fetch(
+      `${this.api.defaults.baseURL}/applications/export/sales-tracker-minimal?segment=${encodeURIComponent(segment)}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      try {
+        const j = JSON.parse(errText) as { message?: string };
+        if (j?.message) throw new Error(j.message);
+      } catch (e) {
+        if (e instanceof SyntaxError) {
+          /* not JSON */
+        } else {
+          throw e;
+        }
+      }
+      throw new Error(errText?.slice(0, 200) || 'Failed to export');
+    }
+    return await response.blob();
+  }
+
   async exportIdfcBankCsv(status: 'ready_for_disbursement' | 'ready_to_repeat_disbursal'): Promise<Blob> {
     const token = localStorage.getItem('adminToken');
     const response = await fetch(`${this.api.defaults.baseURL}/applications/export/idfc-bank-csv?status=${status}`, {
@@ -2475,11 +2504,20 @@ class AdminApiService {
   /**
    * Get users with loans in Account Manager status (account_manager or overdue)
    */
-  async getAccountManagerUsers(page: number = 1, limit: number = 20, search: string = ''): Promise<ApiResponse<any>> {
+  async getAccountManagerUsers(
+    page: number = 1,
+    limit: number = 20,
+    search: string = '',
+    fromDate?: string,
+    toDate?: string
+  ): Promise<ApiResponse<any>> {
     try {
       const token = localStorage.getItem('adminToken');
+      const params: Record<string, string | number> = { page, limit, search };
+      if (fromDate) params.from_date = fromDate;
+      if (toDate) params.to_date = toDate;
       const response = await axios.get('/api/admin/users/account-manager/list', {
-        params: { page, limit, search },
+        params,
         headers: {
           'Authorization': `Bearer ${token}`
         }

@@ -86,11 +86,12 @@ router.get('/', authenticateAdmin, async (req, res) => {
         account_manager: ['account_manager'],
         recovery_officer: ['overdue'],
         debt_agency: ['overdue'],
-        follow_up_user: ['submitted', 'under_review', 'follow_up', 'disbursal']
+        follow_up_user: ['submitted', 'under_review', 'follow_up', 'disbursal'],
+        sales_tracker_user: ['submitted', 'under_review', 'follow_up']
       };
       const allowed = allowedByCategory[subCategory];
       if (allowed && (!status || status === 'all' || !allowed.includes(status))) {
-        effectiveStatus = 'all';
+        effectiveStatus = subCategory === 'sales_tracker_user' ? allowed[0] : 'all';
       }
     }
 
@@ -2027,7 +2028,8 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
       account_manager: ['account_manager'],
       recovery_officer: ['overdue'],
       follow_up_user: ['submitted', 'under_review', 'follow_up', 'disbursal'],
-      debt_agency: ['overdue']
+      debt_agency: ['overdue'],
+      sales_tracker_user: ['submitted', 'under_review', 'follow_up']
     };
 
     let total = 0;
@@ -2061,7 +2063,7 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
          )`
       );
       amountResult = amountRows.length ? amountRows : [{ totalAmount: 0, averageAmount: 0 }];
-    } else if (isSubAdmin && subCat && adminId) {
+    } else if (isSubAdmin && subCat && adminId && subCat !== 'sales_tracker_user') {
       // Sub-admin: return only assigned counts for allowed statuses (or for debt_agency, total overdue), exclude TVR users
       if (subCat === 'debt_agency') {
         const overdueResult = await executeQuery(
@@ -2298,6 +2300,106 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
   }
 });
 
+/**
+ * Sales tracker sub-admin only: CSV with columns Customer Id (PC…) and Loan ID (PLL…).
+ * segment: submitted | under_review | follow_up | tvr | performance
+ */
+router.get('/export/sales-tracker-minimal', authenticateAdmin, async (req, res) => {
+  try {
+    await initializeDatabase();
+    if (req.admin?.role !== 'sub_admin' || req.admin?.sub_admin_category !== 'sales_tracker_user') {
+      return res.status(403).json({ status: 'error', message: 'Forbidden' });
+    }
+    const segment = String(req.query.segment || 'submitted');
+    const valid = ['submitted', 'under_review', 'follow_up', 'tvr', 'performance'];
+    if (!valid.includes(segment)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid segment' });
+    }
+
+    const fmtCustomer = (userId) => `PC${String(userId).padStart(5, '0')}`;
+    const fmtLoan = (loanAppId) => `PLL${loanAppId}`;
+
+    const toRows = (pairs) =>
+      pairs
+        .filter((p) => p.userId != null && p.loanId != null)
+        .map((p) => ({ 'Customer Id': fmtCustomer(p.userId), 'Loan ID': fmtLoan(p.loanId) }));
+
+    let pairs = [];
+
+    if (segment === 'tvr') {
+      const rows = await executeQuery(`
+        SELECT u.id AS userId, la.id AS loanId
+        FROM users u
+        INNER JOIN loan_applications la ON u.id = la.user_id AND la.id = (
+          SELECT MAX(id) FROM loan_applications WHERE user_id = u.id
+        )
+        WHERE u.moved_to_tvr = 1
+      `);
+      pairs = rows;
+    } else if (segment === 'performance') {
+      const a = await executeQuery(`
+        SELECT la.user_id AS userId, la.id AS loanId
+        FROM loan_applications la
+        INNER JOIN users u ON la.user_id = u.id
+        WHERE COALESCE(u.moved_to_tvr, 0) = 0
+          AND (la.status IN ('submitted', 'follow_up') OR la.status = 'under_review')
+      `);
+      const b = await executeQuery(`
+        SELECT u.id AS userId, la.id AS loanId
+        FROM users u
+        INNER JOIN loan_applications la ON u.id = la.user_id AND la.id = (
+          SELECT MAX(id) FROM loan_applications WHERE user_id = u.id
+        )
+        WHERE u.moved_to_tvr = 1
+      `);
+      const seen = new Set();
+      pairs = [];
+      for (const p of [...a, ...b]) {
+        const k = `${p.userId}:${p.loanId}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        pairs.push(p);
+      }
+    } else {
+      let statusWhere = '';
+      if (segment === 'submitted') {
+        statusWhere = `(la.status = 'submitted' OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0))`;
+      } else if (segment === 'under_review') {
+        statusWhere = `(la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 1)`;
+      } else {
+        statusWhere = `la.status = 'follow_up'`;
+      }
+      pairs = await executeQuery(
+        `SELECT la.user_id AS userId, la.id AS loanId
+         FROM loan_applications la
+         INNER JOIN users u ON la.user_id = u.id
+         WHERE (COALESCE(u.moved_to_tvr, 0) = 0) AND ${statusWhere}`
+      );
+    }
+
+    const exportData = toRows(pairs);
+
+    const headers = ['Customer Id', 'Loan ID'];
+    const csvRows = exportData.map((row) =>
+      headers.map((h) => {
+        const v = row[h];
+        const s = v == null ? '' : String(v);
+        if (s.includes(',') || s.includes('\n') || s.includes('"')) return `"${s.replace(/"/g, '""')}"`;
+        return s;
+      })
+    );
+    const csvContent = [headers.join(','), ...csvRows.map((r) => r.join(','))].join('\n');
+    const BOM = '\uFEFF';
+    const label = segment;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="sales_tracker_${label}_${new Date().toISOString().split('T')[0]}.csv"`);
+    res.send(BOM + csvContent);
+  } catch (error) {
+    console.error('Export sales-tracker-minimal error:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to export' });
+  }
+});
+
 // Export applications to Excel (CSV format that Excel can open)
 router.get('/export/excel', authenticateAdmin, async (req, res) => {
   try {
@@ -2314,6 +2416,12 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
 
     // Enforce status by role (same as list endpoint)
     const exportSubCategory = req.admin?.sub_admin_category;
+    if (req.admin?.role === 'sub_admin' && exportSubCategory === 'sales_tracker_user') {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Use the Sales Tracker download for this role'
+      });
+    }
     let effectiveStatus = status;
     if (req.admin?.role === 'nbfc_admin') {
       const nbfcAllowed = ['overdue', 'ready_for_disbursement', 'ready_to_repeat_disbursal'];
@@ -2325,11 +2433,12 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
         account_manager: ['account_manager'],
         recovery_officer: ['overdue'],
         debt_agency: ['overdue'],
-        follow_up_user: ['submitted', 'under_review', 'follow_up', 'disbursal']
+        follow_up_user: ['submitted', 'under_review', 'follow_up', 'disbursal'],
+        sales_tracker_user: ['submitted', 'under_review', 'follow_up']
       };
       const allowed = allowedByCategory[exportSubCategory];
       if (allowed && (!status || status === 'all' || !allowed.includes(status))) {
-        effectiveStatus = 'all';
+        effectiveStatus = exportSubCategory === 'sales_tracker_user' ? allowed[0] : 'all';
       }
     }
 

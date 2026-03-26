@@ -380,7 +380,9 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
 
     console.log('📋 Found applications:', applications ? applications.length : 0);
 
-    if (req.admin?.role === 'sub_admin' && req.admin?.sub_admin_category === 'verify_user') {
+    if (req.admin?.role === 'sub_admin' && req.admin?.sub_admin_category === 'sales_tracker_user') {
+      // Sales tracker: pipeline visibility; no assignment restriction
+    } else if (req.admin?.role === 'sub_admin' && req.admin?.sub_admin_category === 'verify_user') {
       const aid = String(req.admin.id);
       const assignedToMe = (applications || []).some(
         (app) =>
@@ -394,20 +396,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         });
       }
     }
-    if (req.admin?.role === 'sub_admin' && req.admin?.sub_admin_category === 'follow_up_user') {
-      const aid = String(req.admin.id);
-      const assignedToMeFu = (applications || []).some(
-        (app) =>
-          String(app.assigned_follow_up_admin_id || '') === aid ||
-          String(app.temp_assigned_follow_up_admin_id || '') === aid
-      );
-      if (!assignedToMeFu) {
-        return res.status(403).json({
-          status: 'error',
-          message: 'You can only view profiles for applications assigned to you as follow-up.'
-        });
-      }
-    }
+    // follow_up_user (Synergy): no assignment check — any follow-up sub-admin may open any profile (same as sales_tracker_user)
 
     /** Match admin applications list: Submitted until E-NACH is done (under_review + enach_done ≠ 1 → show submitted). */
     const effectiveAdminLoanStatus = (st, enachDone) =>

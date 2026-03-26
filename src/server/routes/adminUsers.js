@@ -1444,6 +1444,13 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
       }
     }
 
+    const fromDate = req.query.from_date ? String(req.query.from_date).trim() : '';
+    const toDate = req.query.to_date ? String(req.query.to_date).trim() : '';
+    if (fromDate && toDate) {
+      whereConditions.push(`DATE(COALESCE(la.disbursed_at, la.processed_at)) BETWEEN ? AND ?`);
+      queryParams.push(fromDate, toDate);
+    }
+
     const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
 
     const countQuery = `

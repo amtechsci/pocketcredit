@@ -26,10 +26,11 @@ router.get('/', authenticateAdmin, async (req, res) => {
     if (!fromDate) fromDate = toDate;
 
     const isSuperAdmin = role === 'superadmin' || role === 'super_admin';
+    const isSalesTracker = subCat === 'sales_tracker_user';
     const isFollowUp = subCat === 'follow_up_user' || isSuperAdmin;
-    const isVerify = subCat === 'verify_user' || isSuperAdmin;
-    const isQA = subCat === 'qa_user' || isSuperAdmin;
-    const effectiveFollowUpAdminId = (isSuperAdmin && followUpUserId) ? followUpUserId : adminId;
+    const isVerify = subCat === 'verify_user' || isSuperAdmin || isSalesTracker;
+    const isQA = subCat === 'qa_user' || isSuperAdmin || isSalesTracker;
+    const effectiveFollowUpAdminId = (isSuperAdmin && followUpUserId) ? followUpUserId : (isSalesTracker ? null : adminId);
 
     const out = {
       from_date: fromDate,
@@ -41,14 +42,15 @@ router.get('/', authenticateAdmin, async (req, res) => {
       follow_up_user: followUpUserId || null
     };
 
-    const assignFollowUp = isSuperAdmin ? '' : `AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)`;
-    const assignVerify = isSuperAdmin ? '' : `AND (la.assigned_verify_admin_id = ? OR la.temp_assigned_verify_admin_id = ?)`;
-    const assignQA = isSuperAdmin ? '' : `AND (la.assigned_qa_admin_id = ? OR la.temp_assigned_qa_admin_id = ?)`;
-    const params = (key) => (key === 'follow_up' || key === 'verify' || key === 'qa' ? (isSuperAdmin ? [] : [adminId, adminId]) : []);
+    const assignFollowUp = (isSuperAdmin || isSalesTracker) ? '' : `AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)`;
+    const assignVerify = (isSuperAdmin || isSalesTracker) ? '' : `AND (la.assigned_verify_admin_id = ? OR la.temp_assigned_verify_admin_id = ?)`;
+    const assignQA = (isSuperAdmin || isSalesTracker) ? '' : `AND (la.assigned_qa_admin_id = ? OR la.temp_assigned_qa_admin_id = ?)`;
+    const params = (key) =>
+      (key === 'follow_up' || key === 'verify' || key === 'qa' ? (isSuperAdmin || isSalesTracker ? [] : [adminId, adminId]) : []);
     const followUpParams = (key) => (key === 'follow_up' ? (effectiveFollowUpAdminId ? [effectiveFollowUpAdminId, effectiveFollowUpAdminId] : []) : (isSuperAdmin ? [] : [adminId, adminId]));
 
-    // ---- A) Follow-up user metrics (for follow_up_user role, or superadmin viewing a specific user via ?follow_up_user=) ----
-    if (subCat === 'follow_up_user' || (isSuperAdmin && followUpUserId)) {
+    // ---- A) Follow-up user metrics (for follow_up_user role, sales tracker global view, or superadmin viewing a specific user via ?follow_up_user=) ----
+    if (subCat === 'follow_up_user' || (isSuperAdmin && followUpUserId) || isSalesTracker) {
       const fp = followUpParams('follow_up');
       const followUpWhereClause = effectiveFollowUpAdminId ? ` AND (la.assigned_follow_up_admin_id = ? OR la.temp_assigned_follow_up_admin_id = ?)` : '';
       const followUpParamsArr = (extra = []) => [...fp, ...extra];

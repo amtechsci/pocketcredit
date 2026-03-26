@@ -142,10 +142,13 @@ export function PerformancePage() {
 
   const subCat = currentUser?.sub_admin_category;
   const isSuperAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'super_admin';
-  const showFollowUp = subCat === 'follow_up_user' || isSuperAdmin;
-  const showFollowUpSection = (subCat === 'follow_up_user' && perf?.followUp) || (isSuperAdmin && !!followUpUserId && perf?.followUp);
-  const showVerify = subCat === 'verify_user' || isSuperAdmin;
-  const showQA = subCat === 'qa_user' || isSuperAdmin;
+  const showFollowUp = subCat === 'follow_up_user' || isSuperAdmin || subCat === 'sales_tracker_user';
+  const showFollowUpSection =
+    (subCat === 'follow_up_user' && perf?.followUp) ||
+    (isSuperAdmin && !!followUpUserId && perf?.followUp) ||
+    (subCat === 'sales_tracker_user' && perf?.followUp);
+  const showVerify = subCat === 'verify_user' || isSuperAdmin || subCat === 'sales_tracker_user';
+  const showQA = subCat === 'qa_user' || isSuperAdmin || subCat === 'sales_tracker_user';
   const viewingFollowUpUserName = isSuperAdmin && followUpUserId && followUpUsersReport?.users?.find((u) => u.admin_id === followUpUserId)?.name;
 
   const formatCurrency = (amount: number) => {

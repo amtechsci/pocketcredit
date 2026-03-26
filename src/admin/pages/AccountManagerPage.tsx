@@ -162,7 +162,12 @@ export function AccountManagerPage() {
 
         const breakdown = Array.isArray(row.emi_breakdown) ? [...row.emi_breakdown] : [];
         breakdown.sort((a, b) => (a.emi_number ?? 0) - (b.emi_number ?? 0));
-        const emiList = breakdown.length > 0 ? breakdown : [null];
+        const unpaidEmis = breakdown.filter((emi) => {
+          const st = String(emi?.status ?? '').toLowerCase();
+          return st !== 'paid';
+        });
+        // One CSV row per unpaid EMI only; omit paid/closed EMI rows. If all EMIs are paid, still one loan row with empty EMI columns.
+        const emiList = unpaidEmis.length > 0 ? unpaidEmis : [null];
 
         for (let i = 0; i < emiList.length; i++) {
           const emi = emiList[i];

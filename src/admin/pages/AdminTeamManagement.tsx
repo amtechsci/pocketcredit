@@ -326,11 +326,14 @@ export function AdminTeamManagement() {
     { value: 'qa_user', label: 'QA User' },
     { value: 'account_manager', label: 'Account Manager' },
     { value: 'follow_up_user', label: 'Follow-up User' },
+    { value: 'sales_tracker_user', label: 'Sales Tracker User' },
     { value: 'recovery_officer', label: 'Recovery Officer' },
     { value: 'debt_agency', label: 'Debt Agency' }
   ];
 
-  const REDISTRIBUTE_CATEGORIES = SUB_ADMIN_CATEGORIES.filter(c => c.value !== 'debt_agency');
+  const REDISTRIBUTE_CATEGORIES = SUB_ADMIN_CATEGORIES.filter(
+    (c) => c.value !== 'debt_agency' && c.value !== 'sales_tracker_user'
+  );
 
   const handleRedistribute = async () => {
     if (!reassignCategory) return;

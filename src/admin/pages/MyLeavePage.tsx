@@ -24,7 +24,11 @@ export function MyLeavePage() {
   const [tempInactiveFrom, setTempInactiveFrom] = useState('');
   const [tempInactiveTo, setTempInactiveTo] = useState('');
 
-  const isSubAdmin = currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category && currentUser.sub_admin_category !== 'debt_agency';
+  const isSubAdmin =
+    currentUser?.role === 'sub_admin' &&
+    currentUser?.sub_admin_category &&
+    currentUser.sub_admin_category !== 'debt_agency' &&
+    currentUser.sub_admin_category !== 'sales_tracker_user';
 
   useEffect(() => {
     if (!isSubAdmin) return;
