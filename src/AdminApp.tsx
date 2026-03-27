@@ -142,7 +142,11 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
       navByRole.push({ path: `${BASE_PATH}/account-manager`, label: 'Account Manager', color: 'purple' });
       navByRole.push({ path: `${BASE_PATH}/applications`, label: 'Applications', color: 'blue' });
       navByRole.push({ path: `${BASE_PATH}/performance`, label: 'Performance', color: 'blue' });
-    } else if (subCat === 'recovery_officer' || subCat === 'debt_agency') {
+    } else if (subCat === 'recovery_officer') {
+      navByRole.push({ path: `${BASE_PATH}/dashboard`, label: 'Dashboard', color: 'blue' });
+      navByRole.push({ path: `${BASE_PATH}/account-manager`, label: 'Account Manager', color: 'purple' });
+      navByRole.push({ path: `${BASE_PATH}/performance`, label: 'Performance', color: 'blue' });
+    } else if (subCat === 'debt_agency') {
       navByRole.push({ path: `${BASE_PATH}/overdue`, label: 'Over Due', color: 'red' });
       navByRole.push({ path: `${BASE_PATH}/performance`, label: 'Performance', color: 'blue' });
     } else if (subCat === 'follow_up_user') {

@@ -10,6 +10,11 @@ const pdfParseModule = require('pdf-parse');
 const pdf = pdfParseModule.default || pdfParseModule;
 const router = express.Router();
 const { computePostDisbursalAdminStep } = require('../utils/adminOnboardingStep');
+const {
+  computeDpdForLoanRow,
+  matchesDpdSegment,
+  passesRecoveryOfficerScope
+} = require('../utils/accountManagerDpd');
 
 /**
  * Override raw loan_applications.current_step with computed post-disbursal step when applicable.
@@ -1410,13 +1415,43 @@ router.get('/qa-verification/list', authenticateAdmin, async (req, res) => {
 
 // GET /api/admin/users/account-manager/list
 // Get loans in Account Manager status with: SLNO, name (user id), contact, total loans, principal, exhausted days, DPD, outstanding, loan id, salary date, CST response, commitment date, updates (all AM entries)
+// Query: dpd_segment = all | lt_m2 | m2_5 | 6_10 | 11_15 | 16_plus (Recovery Officer: only m2_5–16_plus, enforced DPD ≥ -2)
 router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
+    const admin = req.admin;
+    const isRecoveryOfficer = admin.role === 'sub_admin' && admin.sub_admin_category === 'recovery_officer';
+    const isAccountManagerSub = admin.role === 'sub_admin' && admin.sub_admin_category === 'account_manager';
+    const role = admin.role;
+    const canAccess =
+      ['superadmin', 'super_admin', 'manager', 'master_admin', 'officer', 'nbfc_admin'].includes(role) ||
+      isRecoveryOfficer ||
+      isAccountManagerSub;
+    if (!canAccess) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'You do not have access to Account Manager data.'
+      });
+    }
+
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const search = req.query.search || '';
     const offset = (page - 1) * limit;
+
+    let rawSeg = req.query.dpd_segment != null && String(req.query.dpd_segment).trim() !== ''
+      ? String(req.query.dpd_segment).trim()
+      : null;
+    let dpdSegment = rawSeg;
+    if (!dpdSegment) {
+      dpdSegment = isRecoveryOfficer ? 'm2_5' : 'all';
+    }
+    if (isRecoveryOfficer) {
+      const allowed = ['m2_5', '6_10', '11_15', '16_plus'];
+      if (!allowed.includes(dpdSegment)) {
+        dpdSegment = 'm2_5';
+      }
+    }
 
     let whereConditions = [];
     let queryParams = [];
@@ -1453,54 +1488,7 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
 
     const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
 
-    const countQuery = `
-      SELECT COUNT(*) as total FROM loan_applications la INNER JOIN users u ON la.user_id = u.id ${whereClause}
-    `;
-    const countResult = await executeQuery(countQuery, queryParams);
-    const total = countResult && countResult.length > 0 ? countResult[0].total : 0;
-
-    // First PENDING (unpaid) EMI due date. DPD = today - that due_date.
-    // When first EMI is paid, use next EMI due date (e.g. DPD -31 = 31 days until next due).
-    const getFirstPendingEmiDueDate = (row) => {
-      if (row.emi_schedule) {
-        try {
-          const schedule = typeof row.emi_schedule === 'string' ? JSON.parse(row.emi_schedule) : row.emi_schedule;
-          if (Array.isArray(schedule) && schedule.length > 0) {
-            const unpaid = schedule.filter(emi => (emi.status || '').toLowerCase() !== 'paid');
-            if (unpaid.length > 0) {
-              unpaid.sort((a, b) => {
-                const da = String(a.due_date || a.dueDate || '');
-                const db = String(b.due_date || b.dueDate || '');
-                return da.localeCompare(db);
-              });
-              const d = unpaid[0].due_date || unpaid[0].dueDate;
-              return d ? String(d).split('T')[0].split(' ')[0] : null;
-            }
-          }
-        } catch (e) { /* ignore */ }
-      }
-      if (row.processed_due_date) {
-        try {
-          const pd = typeof row.processed_due_date === 'string' ? JSON.parse(row.processed_due_date) : row.processed_due_date;
-          if (Array.isArray(pd) && pd.length > 0) return String(pd[0]).split('T')[0];
-          if (typeof pd === 'string') return pd.split('T')[0];
-        } catch (e) { return String(row.processed_due_date).split('T')[0]; }
-      }
-      if (row.processed_at) {
-        const d = new Date(row.processed_at);
-        d.setDate(d.getDate() + 30);
-        return d.toISOString().slice(0, 10);
-      }
-      return null;
-    };
-
     const todayStr = new Date().toISOString().slice(0, 10);
-    const daysDiff = (dueStr, tStr) => {
-      if (!dueStr) return null;
-      const due = new Date(dueStr);
-      const cur = new Date(tStr || todayStr);
-      return Math.floor((cur - due) / (24 * 60 * 60 * 1000));
-    };
     const maxFetch = 5000;
 
     const usersQuery = `
@@ -1539,16 +1527,24 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
     `;
     const allRows = await executeQuery(usersQuery, queryParams);
     const list = allRows || [];
-    const withDpd = list.map(r => ({ ...r, _dpd: daysDiff(getFirstPendingEmiDueDate(r), todayStr) }));
-    const sorted = withDpd.sort((a, b) => {
+    const withDpd = list.map((r) => ({ ...r, _dpd: computeDpdForLoanRow(r, todayStr) }));
+    const filtered = withDpd.filter((r) => {
+      if (isRecoveryOfficer && !passesRecoveryOfficerScope(r._dpd)) return false;
+      return matchesDpdSegment(r._dpd, dpdSegment);
+    });
+    const sorted = filtered.sort((a, b) => {
       const ad = a._dpd != null ? a._dpd : -9999;
       const bd = b._dpd != null ? b._dpd : -9999;
-      if (bd !== ad) return bd - ad; // DPD DESC (highest/most overdue first)
-      return (b.updated_at || '').localeCompare(a.updated_at || ''); // secondary: recent first
+      if (bd !== ad) return bd - ad;
+      return (b.updated_at || '').localeCompare(a.updated_at || '');
     });
+    const total = sorted.length;
     const rows = sorted.slice(offset, offset + parseInt(limit, 10));
     if (!rows || rows.length === 0) {
-      return res.json({ status: 'success', data: { users: [], total: 0, page, limit, totalPages: 0 } });
+      return res.json({
+        status: 'success',
+        data: { users: [], total: 0, page, limit, totalPages: 0, dpd_segment: dpdSegment }
+      });
     }
 
     const loanIds = rows.map((r) => r.loan_application_id);
@@ -1706,7 +1702,8 @@ router.get('/account-manager/list', authenticateAdmin, async (req, res) => {
         total,
         page,
         limit,
-        totalPages: Math.ceil(total / limit)
+        totalPages: Math.ceil(total / limit),
+        dpd_segment: dpdSegment
       }
     });
   } catch (error) {

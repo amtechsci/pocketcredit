@@ -15,6 +15,18 @@ const { generateLoanAgreementHTML } = require('../utils/loanAgreementHtmlGenerat
 
 const router = express.Router();
 
+/** Block profile mutations for Recovery Officer sub-admins (GET passes through). */
+function denyRecoveryOfficerWrite(req, res, next) {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
+  if (req.admin?.role === 'sub_admin' && req.admin?.sub_admin_category === 'recovery_officer') {
+    return res.status(403).json({
+      status: 'error',
+      message: 'Recovery officers have read-only access for profile updates.'
+    });
+  }
+  next();
+}
+
 /**
  * Format date to YYYY-MM-DD without timezone conversion
  */
@@ -254,7 +266,7 @@ async function sendKFSAndAgreementEmails(loanId) {
 }
 
 // Get user profile with all related data
-router.get('/:userId', authenticateAdmin, async (req, res) => {
+router.get('/:userId', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -393,6 +405,20 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
         return res.status(403).json({
           status: 'error',
           message: 'You can only view profiles for applications assigned to you.'
+        });
+      }
+    } else if (req.admin?.role === 'sub_admin' && req.admin?.sub_admin_category === 'recovery_officer') {
+      const { computeDpdForLoanRow, passesRecoveryOfficerScope } = require('../utils/accountManagerDpd');
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const eligible = (applications || []).some((app) => {
+        if (!['account_manager', 'overdue'].includes(app.status)) return false;
+        const dpd = computeDpdForLoanRow(app, todayStr);
+        return passesRecoveryOfficerScope(dpd);
+      });
+      if (!eligible) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'You can only view profiles for borrowers in your recovery scope (DPD ≥ -2 with a loan in Account Manager or Overdue).'
         });
       }
     }
@@ -1415,7 +1441,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
 });
 
 // Update user basic information
-router.put('/:userId/basic-info', authenticateAdmin, async (req, res) => {
+router.put('/:userId/basic-info', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     console.log('📝 Updating basic info for user:', req.params.userId);
     await initializeDatabase();
@@ -1471,7 +1497,7 @@ router.put('/:userId/basic-info', authenticateAdmin, async (req, res) => {
 });
 
 // Update user's loan plan (admin only)
-router.put('/:userId/loan-plan', authenticateAdmin, async (req, res) => {
+router.put('/:userId/loan-plan', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -1518,7 +1544,7 @@ router.put('/:userId/loan-plan', authenticateAdmin, async (req, res) => {
 });
 
 // Update user's loan limit (admin only)
-router.put('/:userId/loan-limit', authenticateAdmin, async (req, res) => {
+router.put('/:userId/loan-limit', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -1569,7 +1595,7 @@ router.put('/:userId/loan-limit', authenticateAdmin, async (req, res) => {
 });
 
 // Update user's credit limit rule assignment (admin only)
-router.put('/:userId/credit-limit-rule', authenticateAdmin, async (req, res) => {
+router.put('/:userId/credit-limit-rule', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -1622,7 +1648,7 @@ router.put('/:userId/credit-limit-rule', authenticateAdmin, async (req, res) => 
 });
 
 // Update user salary date (admin only)
-router.put('/:userId/salary-date', authenticateAdmin, async (req, res) => {
+router.put('/:userId/salary-date', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -1661,7 +1687,7 @@ router.put('/:userId/salary-date', authenticateAdmin, async (req, res) => {
 });
 
 // Update user contact information
-router.put('/:userId/contact-info', authenticateAdmin, async (req, res) => {
+router.put('/:userId/contact-info', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     console.log('📞 Updating contact info for user:', req.params.userId);
     await initializeDatabase();
@@ -1746,7 +1772,7 @@ router.put('/:userId/contact-info', authenticateAdmin, async (req, res) => {
 });
 
 // Add new address for user
-router.post('/:userId/addresses', authenticateAdmin, async (req, res) => {
+router.post('/:userId/addresses', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     console.log('🏠 Adding address for user:', req.params.userId);
     await initializeDatabase();
@@ -1806,7 +1832,7 @@ router.post('/:userId/addresses', authenticateAdmin, async (req, res) => {
 });
 
 // Update user address information
-router.put('/:userId/address-info', authenticateAdmin, async (req, res) => {
+router.put('/:userId/address-info', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     console.log('🏠 Updating address info for user:', req.params.userId);
     await initializeDatabase();
@@ -1832,7 +1858,7 @@ router.put('/:userId/address-info', authenticateAdmin, async (req, res) => {
 });
 
 // Update specific address
-router.put('/:userId/addresses/:addressId', authenticateAdmin, async (req, res) => {
+router.put('/:userId/addresses/:addressId', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     console.log('🏠 Updating address:', req.params.addressId, 'for user:', req.params.userId);
     await initializeDatabase();
@@ -1893,7 +1919,7 @@ router.put('/:userId/addresses/:addressId', authenticateAdmin, async (req, res) 
 });
 
 // Create new follow-up
-router.post('/:userId/follow-ups', authenticateAdmin, async (req, res) => {
+router.post('/:userId/follow-ups', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -1970,7 +1996,7 @@ router.post('/:userId/follow-ups', authenticateAdmin, async (req, res) => {
 });
 
 // Update user employment information
-router.put('/:userId/employment-info', authenticateAdmin, async (req, res) => {
+router.put('/:userId/employment-info', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     console.log('💼 Updating employment info for user:', req.params.userId);
     await initializeDatabase();
@@ -2109,7 +2135,7 @@ router.put('/:userId/employment-info', authenticateAdmin, async (req, res) => {
 });
 
 // Update bank details (edit) - More specific route must come first
-router.put('/:userId/bank-details/:bankId/edit', authenticateAdmin, async (req, res) => {
+router.put('/:userId/bank-details/:bankId/edit', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     console.log('🏦 Updating bank details:', req.params.bankId);
     await initializeDatabase();
@@ -2187,7 +2213,7 @@ router.put('/:userId/bank-details/:bankId/edit', authenticateAdmin, async (req, 
 });
 
 // Update bank details status
-router.put('/:userId/bank-details/:bankId', authenticateAdmin, async (req, res) => {
+router.put('/:userId/bank-details/:bankId', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     console.log('🏦 Updating bank details status:', req.params.bankId);
     await initializeDatabase();
@@ -2250,7 +2276,7 @@ router.put('/:userId/bank-details/:bankId', authenticateAdmin, async (req, res) 
 });
 
 // Add bank details
-router.post('/:userId/bank-details', authenticateAdmin, async (req, res) => {
+router.post('/:userId/bank-details', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     console.log('🏦 Adding bank details for user:', req.params.userId);
     await initializeDatabase();
@@ -2275,7 +2301,7 @@ router.post('/:userId/bank-details', authenticateAdmin, async (req, res) => {
 });
 
 // Add reference details
-router.post('/:userId/reference-details', authenticateAdmin, async (req, res) => {
+router.post('/:userId/reference-details', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     console.log('👥 Adding reference details for user:', req.params.userId);
     await initializeDatabase();
@@ -2300,7 +2326,7 @@ router.post('/:userId/reference-details', authenticateAdmin, async (req, res) =>
 });
 
 // Update reference status (Admin only)
-router.put('/:userId/references/:referenceId', authenticateAdmin, async (req, res) => {
+router.put('/:userId/references/:referenceId', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     console.log('👥 Updating reference status:', req.params.referenceId);
     await initializeDatabase();
@@ -2379,7 +2405,7 @@ router.put('/:userId/references/:referenceId', authenticateAdmin, async (req, re
 });
 
 // POST /api/user-profile/:userId/references - Add a new reference (Admin only)
-router.post('/:userId/references', authenticateAdmin, async (req, res) => {
+router.post('/:userId/references', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -2414,7 +2440,7 @@ router.post('/:userId/references', authenticateAdmin, async (req, res) => {
 });
 
 // DELETE /api/admin/user-profile/:userId/references/:referenceId - Delete a reference (Admin only)
-router.delete('/:userId/references/:referenceId', authenticateAdmin, async (req, res) => {
+router.delete('/:userId/references/:referenceId', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId, referenceId } = req.params;
@@ -2461,7 +2487,7 @@ const upload = multer({
   }
 });
 
-router.post('/:userId/documents/upload', authenticateAdmin, upload.single('document'), async (req, res) => {
+router.post('/:userId/documents/upload', authenticateAdmin, denyRecoveryOfficerWrite, upload.single('document'), async (req, res) => {
   try {
     console.log('📄 Uploading document for user:', req.params.userId);
     await initializeDatabase();
@@ -2604,7 +2630,7 @@ router.post('/:userId/documents/upload', authenticateAdmin, upload.single('docum
 });
 
 // Upload document (legacy endpoint for backward compatibility)
-router.post('/:userId/documents', authenticateAdmin, async (req, res) => {
+router.post('/:userId/documents', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     console.log('📄 Uploading document for user:', req.params.userId);
     await initializeDatabase();
@@ -2629,7 +2655,7 @@ router.post('/:userId/documents', authenticateAdmin, async (req, res) => {
 });
 
 // Update transaction
-router.put('/:userId/transactions/:transactionId', authenticateAdmin, async (req, res) => {
+router.put('/:userId/transactions/:transactionId', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId, transactionId } = req.params;
@@ -2697,7 +2723,7 @@ router.put('/:userId/transactions/:transactionId', authenticateAdmin, async (req
 });
 
 // Add transaction
-router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
+router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -3973,7 +3999,7 @@ router.post('/:userId/transactions', authenticateAdmin, async (req, res) => {
 });
 
 // Get user transactions
-router.get('/:userId/transactions', authenticateAdmin, async (req, res) => {
+router.get('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -4010,7 +4036,7 @@ router.get('/:userId/transactions', authenticateAdmin, async (req, res) => {
 });
 
 // Get follow-ups for a user
-router.get('/:userId/follow-ups', authenticateAdmin, async (req, res) => {
+router.get('/:userId/follow-ups', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -4043,7 +4069,7 @@ router.get('/:userId/follow-ups', authenticateAdmin, async (req, res) => {
 });
 
 // Add follow-up
-router.post('/:userId/follow-ups', authenticateAdmin, async (req, res) => {
+router.post('/:userId/follow-ups', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     console.log('📞 Adding follow-up for user:', req.params.userId);
     await initializeDatabase();
@@ -4139,7 +4165,7 @@ router.post('/:userId/follow-ups', authenticateAdmin, async (req, res) => {
 });
 
 // Add note (simple: note content only)
-router.post('/:userId/notes', authenticateAdmin, async (req, res) => {
+router.post('/:userId/notes', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -4181,7 +4207,7 @@ router.post('/:userId/notes', authenticateAdmin, async (req, res) => {
 });
 
 // Get profile comments (QA and TVR comments)
-router.get('/:userId/profile-comments', authenticateAdmin, async (req, res) => {
+router.get('/:userId/profile-comments', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -4227,7 +4253,7 @@ router.get('/:userId/profile-comments', authenticateAdmin, async (req, res) => {
 });
 
 // Add profile comment (QA or TVR)
-router.post('/:userId/profile-comments', authenticateAdmin, async (req, res) => {
+router.post('/:userId/profile-comments', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -4299,7 +4325,7 @@ router.post('/:userId/profile-comments', authenticateAdmin, async (req, res) => 
 });
 
 // Update profile comment
-router.put('/:userId/profile-comments/:commentId', authenticateAdmin, async (req, res) => {
+router.put('/:userId/profile-comments/:commentId', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId, commentId } = req.params;
@@ -4367,7 +4393,7 @@ router.put('/:userId/profile-comments/:commentId', authenticateAdmin, async (req
 });
 
 // Delete profile comment
-router.delete('/:userId/profile-comments/:commentId', authenticateAdmin, async (req, res) => {
+router.delete('/:userId/profile-comments/:commentId', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId, commentId } = req.params;
@@ -4405,7 +4431,7 @@ router.delete('/:userId/profile-comments/:commentId', authenticateAdmin, async (
 });
 
 // Send SMS
-router.post('/:userId/sms', authenticateAdmin, async (req, res) => {
+router.post('/:userId/sms', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     console.log('📱 Sending SMS for user:', req.params.userId);
     await initializeDatabase();
@@ -4430,7 +4456,7 @@ router.post('/:userId/sms', authenticateAdmin, async (req, res) => {
 });
 
 // Reset selfie verification - allows user to redo selfie verification
-router.post('/:userId/reset-selfie-verification', authenticateAdmin, async (req, res) => {
+router.post('/:userId/reset-selfie-verification', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -4484,7 +4510,7 @@ router.post('/:userId/reset-selfie-verification', authenticateAdmin, async (req,
  * POST /api/admin/user-profile/:userId/trigger-rekyc
  * Trigger re-KYC for a user (admin action)
  */
-router.post('/:userId/trigger-rekyc', authenticateAdmin, async (req, res) => {
+router.post('/:userId/trigger-rekyc', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -4554,7 +4580,7 @@ router.post('/:userId/trigger-rekyc', authenticateAdmin, async (req, res) => {
   }
 });
 
-router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
+router.post('/:userId/refetch-kyc', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -4795,7 +4821,7 @@ router.post('/:userId/refetch-kyc', authenticateAdmin, async (req, res) => {
 });
 
 // Get E-NACH subscriptions for a user
-router.get('/:userId/enach-subscriptions', authenticateAdmin, async (req, res) => {
+router.get('/:userId/enach-subscriptions', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -4969,7 +4995,7 @@ router.get('/:userId/enach-subscriptions', authenticateAdmin, async (req, res) =
 });
 
 // Recheck E-NACH subscription status from Cashfree API
-router.post('/:userId/enach-subscriptions/:subscriptionId/recheck-status', authenticateAdmin, async (req, res) => {
+router.post('/:userId/enach-subscriptions/:subscriptionId/recheck-status', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   
   try {
@@ -5226,7 +5252,7 @@ router.post('/:userId/enach-subscriptions/:subscriptionId/recheck-status', authe
 });
 
 // Admin endpoint to charge/deduct amount from existing E-NACH subscription
-router.post('/:userId/enach-subscriptions/:subscriptionId/charge', authenticateAdmin, async (req, res) => {
+router.post('/:userId/enach-subscriptions/:subscriptionId/charge', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   
   try {
@@ -5463,7 +5489,7 @@ router.post('/:userId/enach-subscriptions/:subscriptionId/charge', authenticateA
 });
 
 // Admin endpoint to get E-NACH charge history
-router.get('/:userId/enach-subscriptions/charge-history', authenticateAdmin, async (req, res) => {
+router.get('/:userId/enach-subscriptions/charge-history', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   try {
     await initializeDatabase();
     const { userId } = req.params;
@@ -5540,7 +5566,7 @@ router.get('/:userId/enach-subscriptions/charge-history', authenticateAdmin, asy
 });
 
 // Admin endpoint to check payment status from Cashfree
-router.post('/:userId/enach-subscriptions/charge-history/:chargeId/recheck-status', authenticateAdmin, async (req, res) => {
+router.post('/:userId/enach-subscriptions/charge-history/:chargeId/recheck-status', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   
   try {

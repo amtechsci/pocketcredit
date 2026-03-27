@@ -18,6 +18,8 @@ interface AdminContextType {
   isNbfcAdmin: boolean;
   /** Mask mobile numbers in profile/list (e.g. NBFC in certain views, Debt Agency) */
   shouldMaskMobile: (context?: 'overdue' | 'ready_disbursement' | 'profile') => boolean;
+  /** Recovery Officer sub-admin: scoped AM list + read-mostly profile */
+  isRecoveryOfficer: boolean;
 }
 
 const AdminContext = createContext<AdminContextType | undefined>(undefined);
@@ -45,6 +47,7 @@ export function AdminProvider({ children, currentUser }: AdminProviderProps) {
   const shouldHideTransactionTab = !!(currentUser?.role === 'sub_admin' && subCat && SUB_ADMINS_HIDE_TRANSACTION.includes(subCat));
   const isDebtAgency = currentUser?.role === 'sub_admin' && subCat === 'debt_agency';
   const isNbfcAdmin = currentUser?.role === 'nbfc_admin';
+  const isRecoveryOfficer = currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category === 'recovery_officer';
 
   const shouldMaskMobile = (context?: 'overdue' | 'ready_disbursement' | 'profile'): boolean => {
     if (isNbfcAdmin) {
@@ -68,6 +71,7 @@ export function AdminProvider({ children, currentUser }: AdminProviderProps) {
     isDebtAgency,
     isNbfcAdmin,
     shouldMaskMobile,
+    isRecoveryOfficer,
   };
 
   return (

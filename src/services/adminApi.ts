@@ -2509,13 +2509,15 @@ class AdminApiService {
     limit: number = 20,
     search: string = '',
     fromDate?: string,
-    toDate?: string
+    toDate?: string,
+    dpdSegment?: string
   ): Promise<ApiResponse<any>> {
     try {
       const token = localStorage.getItem('adminToken');
       const params: Record<string, string | number> = { page, limit, search };
       if (fromDate) params.from_date = fromDate;
       if (toDate) params.to_date = toDate;
+      if (dpdSegment) params.dpd_segment = dpdSegment;
       const response = await axios.get('/api/admin/users/account-manager/list', {
         params,
         headers: {

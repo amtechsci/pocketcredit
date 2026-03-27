@@ -20,7 +20,7 @@ import {
 
 export function AdminDashboard() {
   const navigate = useNavigate();
-  const { currentUser } = useAdmin();
+  const { currentUser, isRecoveryOfficer } = useAdmin();
   const [searchQuery, setSearchQuery] = useState('');
   const [dashboardData, setDashboardData] = useState<any>(null);
 
@@ -149,7 +149,7 @@ export function AdminDashboard() {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <input
               type="text"
-              placeholder="Search by name, PAN, mobile..."
+              placeholder={isRecoveryOfficer ? 'Search by ID, name, or phone…' : 'Search by name, PAN, mobile...'}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => {

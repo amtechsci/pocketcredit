@@ -1,8 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminApiService } from '../../services/adminApi';
+import { useAdmin } from '../context/AdminContext';
 import { Search, Eye, ArrowLeft, Briefcase, Download } from 'lucide-react';
 import { toast } from 'sonner';
+
+export type AccountManagerDpdSegment = 'all' | 'lt_m2' | 'm2_5' | '6_10' | '11_15' | '16_plus';
 
 interface AccountManagerUser {
   slno: number;
@@ -37,17 +40,48 @@ interface AccountManagerUser {
 
 export function AccountManagerPage() {
   const navigate = useNavigate();
+  const { isRecoveryOfficer } = useAdmin();
   const [users, setUsers] = useState<AccountManagerUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 20;
   const [totalUsers, setTotalUsers] = useState(0);
+  const [dpdSegment, setDpdSegment] = useState<AccountManagerDpdSegment>(() =>
+    isRecoveryOfficer ? 'm2_5' : 'all'
+  );
+
+  const dpdTabs = useMemo(
+    () =>
+      isRecoveryOfficer
+        ? [
+            { key: 'm2_5' as const, label: 'DPD -2 to 5' },
+            { key: '6_10' as const, label: 'DPD 6 to 10' },
+            { key: '11_15' as const, label: 'DPD 11 to 15' },
+            { key: '16_plus' as const, label: 'DPD 16+' }
+          ]
+        : [
+            { key: 'all' as const, label: 'All' },
+            { key: 'lt_m2' as const, label: 'DPD < -2' },
+            { key: 'm2_5' as const, label: 'DPD -2 to 5' },
+            { key: '6_10' as const, label: 'DPD 6 to 10' },
+            { key: '11_15' as const, label: 'DPD 11 to 15' },
+            { key: '16_plus' as const, label: 'DPD 16+' }
+          ],
+    [isRecoveryOfficer]
+  );
 
   const fetchUsers = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await adminApiService.getAccountManagerUsers(currentPage, pageSize, searchTerm);
+      const response = await adminApiService.getAccountManagerUsers(
+        currentPage,
+        pageSize,
+        searchTerm,
+        undefined,
+        undefined,
+        dpdSegment
+      );
 
       if (response.status === 'success' && response.data) {
         setUsers(response.data.users || []);
@@ -65,7 +99,7 @@ export function AccountManagerPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, pageSize, searchTerm]);
+  }, [currentPage, pageSize, searchTerm, dpdSegment]);
 
   useEffect(() => {
     fetchUsers();
@@ -122,7 +156,7 @@ export function AccountManagerPage() {
   const handleDownloadCsv = async () => {
     try {
       setLoading(true);
-      const response = await adminApiService.getAccountManagerUsers(1, 5000, searchTerm);
+      const response = await adminApiService.getAccountManagerUsers(1, 5000, searchTerm, undefined, undefined, dpdSegment);
       if (response.status !== 'success' || !response.data?.users) {
         toast.error(response.message || 'Failed to download CSV');
         return;
@@ -194,15 +228,15 @@ export function AccountManagerPage() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `account_manager_${new Date().toISOString().slice(0, 10)}.csv`;
+      link.download = `account_manager_${dpdSegment}_${new Date().toISOString().slice(0, 10)}.csv`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      toast.success('CSV downloaded successfully');
+      toast.success('Excel file downloaded successfully');
     } catch (error) {
       console.error('CSV download failed:', error);
-      toast.error('Failed to download CSV');
+      toast.error('Failed to download Excel');
     } finally {
       setLoading(false);
     }
@@ -252,7 +286,7 @@ export function AccountManagerPage() {
                 className="inline-flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-medium text-purple-700 hover:bg-purple-100"
               >
                 <Download className="w-4 h-4" />
-                Download CSV
+                Download Excel
               </button>
               <div className="text-right">
                 <div className="text-3xl font-bold text-purple-600">{totalUsers}</div>
@@ -260,6 +294,25 @@ export function AccountManagerPage() {
               </div>
             </div>
           </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {dpdTabs.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => {
+                setDpdSegment(t.key);
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                dpdSegment === t.key
+                  ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
         {/* Search Bar - same card */}
         <div className="relative max-w-md">

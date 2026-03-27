@@ -221,7 +221,8 @@ function UserProfileDetail() {
   const [creditLimitRulesList, setCreditLimitRulesList] = useState<Array<{ id: number; rule_name: string; rule_code: string | null }>>([]);
   const [updatingCreditLimitRule, setUpdatingCreditLimitRule] = useState(false);
 
-  const { canEditUsers, canEditReferences, currentUser, shouldHideTransactionTab, isDebtAgency, isNbfcAdmin, shouldMaskMobile } = useAdmin();
+  const { canEditUsers, canEditReferences, currentUser, shouldHideTransactionTab, isDebtAgency, isNbfcAdmin, shouldMaskMobile, isRecoveryOfficer } = useAdmin();
+  const canMutateReferences = canEditReferences && !isRecoveryOfficer;
   const isFollowUpUserAdmin = currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category === 'follow_up_user';
   const isFollowUpUser = currentUser?.role === 'sub_admin' && currentUser?.sub_admin_category === 'follow_up_user';
 
@@ -278,10 +279,12 @@ function UserProfileDetail() {
     };
     return stepMap[step] || step.charAt(0).toUpperCase() + step.slice(1).replace(/-/g, ' ');
   };
+  const recoveryOfficerAllowedTabIds = ['personal', 'kyc', 'statement-verification', 'reference', 'loans', 'notes', 'accounts'];
   const tabsFiltered = allTabsList.filter((tab) => {
     if (shouldHideTransactionTab && tab.id === 'transactions') return false;
     if (isDebtAgency && debtAgencyHiddenTabIdsList.includes(tab.id)) return false;
     if (isFollowUpUser && !followUpUserAllowedTabIds.includes(tab.id)) return false;
+    if (isRecoveryOfficer && !recoveryOfficerAllowedTabIds.includes(tab.id)) return false;
     return true;
   });
   const visibleTabIdsList = tabsFiltered.map((t) => t.id);
@@ -2248,6 +2251,34 @@ function UserProfileDetail() {
   };
 
   const renderKYCTab = () => {
+    if (isRecoveryOfficer) {
+      const selfie = getUserData('selfieData');
+      return (
+        <div className="space-y-6">
+          <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-4">Selfie verification</h3>
+            {!selfie?.selfie_url ? (
+              <div className="text-center py-8 bg-gray-50 rounded-lg border border-dashed border-gray-300">
+                <p className="text-sm text-gray-500">No selfie verification image available.</p>
+              </div>
+            ) : (
+              <div className="w-48 h-48 rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                <img
+                  src={selfie.selfie_url}
+                  alt="Selfie verification"
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src =
+                      'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23f3f4f6" width="200" height="200"/%3E%3Ctext fill="%239ca3af" font-family="sans-serif" font-size="14" x="50%25" y="50%25" text-anchor="middle" dy=".3em"%3EImage not available%3C/text%3E%3C/svg%3E';
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     const kycData = getUserData('kycVerification');
     const kycDocs = getUserData('kycDocuments', []);
 
@@ -2614,6 +2645,7 @@ function UserProfileDetail() {
   };
 
   const renderPersonalTab = () => {
+    const editableProfile = canEditUsers && !isRecoveryOfficer;
     const allAddresses = userData?.allAddresses || [];
     const allReferences = userData?.references || [];
     const allEmployment = userData?.allEmployment || [];
@@ -2649,7 +2681,7 @@ function UserProfileDetail() {
                   ⚠️
                 </span>
               )}
-              {!editingPan && (
+              {editableProfile && !editingPan && (
                 <button
                   onClick={() => {
                     setPanValue(userData?.panNumber || '');
@@ -2963,7 +2995,7 @@ function UserProfileDetail() {
                 <Phone className="w-4 h-4" />
                 Contact Information
               </h3>
-              {canEditUsers && (
+              {editableProfile && (
                 <button
                   onClick={() => {
                     setContactInfoForm({
@@ -3042,7 +3074,7 @@ function UserProfileDetail() {
                 <Briefcase className="w-4 h-4" />
                 Employment
               </h3>
-              {canEditUsers && (
+              {editableProfile && (
                 <button
                   onClick={() => {
                     const latestEmployment = userData?.allEmployment?.[0] || {};
@@ -3131,7 +3163,7 @@ function UserProfileDetail() {
                         })()}`
                         : 'N/A'}
                     </span>
-                    {canEditUsers && (
+                    {editableProfile && (
                       <button
                         onClick={handleEditSalaryDate}
                         className="text-blue-600 hover:text-blue-800"
@@ -3231,7 +3263,7 @@ function UserProfileDetail() {
                 <MapPin className="w-4 h-4" />
                 Present Address
               </h3>
-              {canEditUsers && (
+              {editableProfile && (
                 <button
                   onClick={() => {
                     setAddressInfoForm({
@@ -3306,7 +3338,7 @@ function UserProfileDetail() {
                           </div>
                         </div>
                       </div>
-                      {canEditUsers && (
+                      {editableProfile && (
                         <div className="mt-3 pt-3 border-t border-gray-200">
                           <button
                             onClick={() => {
@@ -3353,7 +3385,7 @@ function UserProfileDetail() {
                 <CreditCard className="w-4 h-4" />
                 Loan Plan
               </h3>
-              {canEditUsers && (
+              {editableProfile && (
                 <button
                   onClick={() => {
                     setSelectedLoanPlanId(userLoanPlan?.id || null);
@@ -4663,7 +4695,7 @@ function UserProfileDetail() {
                         ) : (
                           <span className="flex items-center gap-1">
                             {ref.name || 'N/A'}
-                            {canEditReferences && (
+                            {canMutateReferences && (
                               <button onClick={() => handleEditReference(ref.id, 'name')} className="text-blue-600 hover:text-blue-800" title="Edit"><Edit className="w-3.5 h-3.5" /></button>
                             )}
                           </span>
@@ -4706,7 +4738,7 @@ function UserProfileDetail() {
                               >
                                 <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
                               </a>
-                              {canEditReferences && (
+                              {canMutateReferences && (
                                 <button onClick={() => handleEditReference(ref.id, 'phone')} className="text-blue-600 hover:text-blue-800" title="Edit"><Edit className="w-3.5 h-3.5" /></button>
                               )}
                             </div>
@@ -4732,7 +4764,7 @@ function UserProfileDetail() {
                         ) : (
                           <span className="flex items-center gap-1">
                             {ref.relation || 'N/A'}
-                            {canEditReferences && (
+                            {canMutateReferences && (
                               <button onClick={() => handleEditReference(ref.id, 'relation')} className="text-blue-600 hover:text-blue-800" title="Edit"><Edit className="w-3.5 h-3.5" /></button>
                             )}
                           </span>
@@ -4758,7 +4790,7 @@ function UserProfileDetail() {
                             <span className="text-gray-600 truncate block max-w-[160px]" title={ref.notes || ''}>
                               {ref.notes ? (ref.notes.length > 40 ? `${ref.notes.slice(0, 40)}...` : ref.notes) : '—'}
                             </span>
-                            {canEditReferences && (
+                            {canMutateReferences && (
                               <button
                                 onClick={() => {
                                   setEditingNote(ref.id);
@@ -4782,7 +4814,7 @@ function UserProfileDetail() {
                             <MessageSquare className="w-3.5 h-3.5" />
                             Send SMS
                           </button>
-                          {canEditReferences && (
+                          {canMutateReferences && (
                             <button
                               onClick={() => handleDeleteReference(ref.id)}
                               className="flex items-center gap-1 px-2.5 py-1 bg-gray-600 text-white text-xs rounded hover:bg-gray-700"
