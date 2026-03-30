@@ -19,6 +19,10 @@ const router = express.Router();
 function denyRecoveryOfficerWrite(req, res, next) {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
   if (req.admin?.role === 'sub_admin' && req.admin?.sub_admin_category === 'recovery_officer') {
+    // Special Exception: Allow adding follow-ups specifically for the Account Manager module
+    if (req.method === 'POST' && req.path.includes('/follow-ups') && req.body?.type === 'account_manager') {
+      return next();
+    }
     return res.status(403).json({
       status: 'error',
       message: 'Recovery officers have read-only access for profile updates.'
