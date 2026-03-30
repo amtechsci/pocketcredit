@@ -186,7 +186,7 @@ function UserProfileDetail() {
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
   const [showAddTemplateModal, setShowAddTemplateModal] = useState(false);
   const [triggeringSMS, setTriggeringSMS] = useState<{ [key: string]: boolean }>({});
-  
+
   // Profile Comments State
   const [profileComments, setProfileComments] = useState<{ qa_comments: any[], tvr_comments: any[] }>({ qa_comments: [], tvr_comments: [] });
   const [loadingComments, setLoadingComments] = useState(false);
@@ -279,7 +279,7 @@ function UserProfileDetail() {
     };
     return stepMap[step] || step.charAt(0).toUpperCase() + step.slice(1).replace(/-/g, ' ');
   };
-  const recoveryOfficerAllowedTabIds = ['personal', 'kyc', 'statement-verification', 'reference', 'loans', 'notes', 'accounts'];
+  const recoveryOfficerAllowedTabIds = ['personal', 'kyc', 'statement-verification', 'reference', 'loans', 'notes', 'account-manager'];
   const tabsFiltered = allTabsList.filter((tab) => {
     if (shouldHideTransactionTab && tab.id === 'transactions') return false;
     if (isDebtAgency && debtAgencyHiddenTabIdsList.includes(tab.id)) return false;
@@ -572,7 +572,7 @@ function UserProfileDetail() {
   const handlePerformCreditCheck = async (forceRefetch: boolean = false) => {
     if (!userData?.id) return;
 
-    const confirmMessage = forceRefetch 
+    const confirmMessage = forceRefetch
       ? 'Are you sure you want to refetch credit data? This will call the credit API again and fetch new data from Experian.'
       : 'Are you sure you want to perform a credit check for this user? This will fetch credit analytics data from Experian.';
 
@@ -582,7 +582,7 @@ function UserProfileDetail() {
 
     try {
       setPerformingCreditCheck(true);
-      
+
       // Old credit score will now be saved in database (previous_credit_score field)
       // No need to store in state anymore - it's permanently saved in DB
 
@@ -592,7 +592,7 @@ function UserProfileDetail() {
         if (response.data?.already_checked && !forceRefetch) {
           alert('Credit check already performed for this user. Use "Refetch Credit" button to get new data.');
         } else {
-          const message = forceRefetch 
+          const message = forceRefetch
             ? `Credit check refetched! New Score: ${response.data?.credit_score || 'N/A'}, Eligible: ${response.data?.is_eligible ? 'Yes' : 'No'}`
             : `Credit check completed! Score: ${response.data?.credit_score || 'N/A'}, Eligible: ${response.data?.is_eligible ? 'Yes' : 'No'}`;
           toast.success(message);
@@ -1078,11 +1078,11 @@ function UserProfileDetail() {
   // Fetch profile comments
   const fetchProfileComments = useCallback(async () => {
     if (!params.userId) return;
-    
+
     try {
       setLoadingComments(true);
       const response = await adminApiService.getProfileComments(params.userId);
-      
+
       if (response.status === 'success' && response.data) {
         const comments = response.data;
         const qaComments = comments.filter((c: any) => c.comment_type === 'qa_comments');
@@ -1158,7 +1158,7 @@ function UserProfileDetail() {
             setCreditLimitRulesList(res.data.map((r: any) => ({ id: r.id, rule_name: r.rule_name, rule_code: r.rule_code || null })));
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     }
   }, [params.userId, canEditUsers]);
 
@@ -1296,7 +1296,7 @@ function UserProfileDetail() {
     setContactInfoError(null); // Clear previous errors
     try {
       const response = await adminApiService.updateUserContactInfo(params.userId!, contactInfoForm);
-      
+
       if (response.status === 'success') {
         toast.success('Contact information updated successfully!');
         setShowContactModal(false);
@@ -1316,9 +1316,9 @@ function UserProfileDetail() {
     } catch (error: any) {
       console.error('Error updating contact info:', error);
       // Extract error message from various possible error structures
-      const errorMessage = 
-        error.response?.data?.message || 
-        error.message || 
+      const errorMessage =
+        error.response?.data?.message ||
+        error.message ||
         (typeof error === 'string' ? error : 'Error updating contact information');
       setContactInfoError(errorMessage);
       toast.error(errorMessage);
@@ -1927,14 +1927,14 @@ function UserProfileDetail() {
   // Trigger event-based SMS
   const handleTriggerEventSMS = async (templateKey: string, loanId?: string) => {
     if (!params.userId) return;
-    
+
     try {
       setTriggeringSMS(prev => ({ ...prev, [templateKey]: true }));
       const response = await adminApiService.triggerEventSMS(templateKey, {
         userId: params.userId!,
         loanId: loanId
       });
-      
+
       if (response.status === 'success' || (response as any).success) {
         toast.success('SMS sent successfully!');
       } else {
@@ -2343,7 +2343,7 @@ function UserProfileDetail() {
     const verificationData = getVerificationData();
     const isVerified = ['verified', 'completed', 'success'].includes(kycData?.status?.toLowerCase());
     const hasTransactionId = kycData?.verification_data?.transactionId;
-    
+
     // Check if re-KYC is required
     let rekycRequired = false;
     const rawVerificationData = kycData?.verification_data;
@@ -2355,7 +2355,7 @@ function UserProfileDetail() {
         // Ignore parsing errors
       }
     }
-    
+
     // Determine display status
     let displayStatus = kycData?.status?.toUpperCase() || 'NOT VERIFIED';
     let statusColor = 'bg-yellow-100 text-yellow-800';
@@ -2511,13 +2511,13 @@ function UserProfileDetail() {
                       View
                     </button>
                     {!isFollowUpUser && (
-                    <button
-                      onClick={() => window.open(doc.url, '_blank')}
-                      className="px-3 py-2 bg-gray-100 text-gray-700 text-xs font-medium rounded hover:bg-gray-200 transition-colors"
-                      title="Download"
-                    >
-                      <Download className="w-3 h-3" />
-                    </button>
+                      <button
+                        onClick={() => window.open(doc.url, '_blank')}
+                        className="px-3 py-2 bg-gray-100 text-gray-700 text-xs font-medium rounded hover:bg-gray-200 transition-colors"
+                        title="Download"
+                      >
+                        <Download className="w-3 h-3" />
+                      </button>
                     )}
                   </div>
                 </div>
@@ -2851,17 +2851,17 @@ function UserProfileDetail() {
                 <span className="text-gray-500">Education:</span>
                 <span className="ml-2 text-gray-900">{latestEmployment.education || getUserData('personalInfo.education') || 'N/A'}</span>
               </div>
-              
+
               {/* PAN API Details Section */}
               {(() => {
                 const userInfoRecords = userData?.userInfoRecords || [];
                 const panInfo = userInfoRecords.find((r: any) => r.source === 'pan_api');
                 const panDetails = panInfo?.additionalDetails || {};
-                
+
                 if (!panInfo || Object.keys(panDetails).length === 0) {
                   return null;
                 }
-                
+
                 return (
                   <div className="mt-4 pt-4 border-t border-gray-200">
                     <h4 className="text-xs font-semibold text-gray-700 mb-2">PAN API Details:</h4>
@@ -2912,7 +2912,7 @@ function UserProfileDetail() {
                         <div>
                           <span className="text-gray-500">Aadhaar Number:</span>
                           <span className="ml-2 text-gray-900 font-medium">
-                            {panDetails.aadhaar_number.length > 8 
+                            {panDetails.aadhaar_number.length > 8
                               ? `XXXX${panDetails.aadhaar_number.slice(-4)}`
                               : panDetails.aadhaar_number}
                           </span>
@@ -3196,7 +3196,7 @@ function UserProfileDetail() {
 
           {/* UAN Employment Info */}
           <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <UANEmploymentInfo 
+            <UANEmploymentInfo
               aadharLinkedMobile={userData?.aadharLinkedMobile}
               userId={params.userId}
               maskMobile={shouldMaskMobile('profile')}
@@ -3224,19 +3224,19 @@ function UserProfileDetail() {
             {(() => {
               // Filter API addresses (digilocker, pan_api, etc.)
               const apiSources = ['digilocker', 'pan_api', 'digitap'];
-              const permanentAddresses = allAddresses.filter((addr: any) => 
+              const permanentAddresses = allAddresses.filter((addr: any) =>
                 addr.source && apiSources.includes(addr.source.toLowerCase())
               );
-              
+
               return permanentAddresses.length > 0 ? (
                 <div className="space-y-3">
                   {permanentAddresses.map((addr: any, idx: number) => (
                     <div key={addr.id || idx} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
                       <div className="flex items-start justify-between mb-2">
                         <span className="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-0.5 rounded capitalize">
-                          {addr.source === 'digilocker' ? 'Aadhar Address' : 
-                           addr.source === 'pan_api' ? 'PAN API Address' : 
-                           addr.source || 'API Address'}
+                          {addr.source === 'digilocker' ? 'Aadhar Address' :
+                            addr.source === 'pan_api' ? 'PAN API Address' :
+                              addr.source || 'API Address'}
                         </span>
                       </div>
                       <div className="text-xs space-y-1 text-gray-700">
@@ -3284,7 +3284,7 @@ function UserProfileDetail() {
                   <UserPlus className="w-3 h-3" />
                   {(() => {
                     const apiSources = ['digilocker', 'pan_api', 'digitap'];
-                    const presentAddresses = allAddresses.filter((addr: any) => 
+                    const presentAddresses = allAddresses.filter((addr: any) =>
                       !addr.source || !apiSources.includes(addr.source.toLowerCase())
                     );
                     return presentAddresses.length > 0 ? 'Edit' : 'Add';
@@ -3295,10 +3295,10 @@ function UserProfileDetail() {
             {(() => {
               // Filter manual addresses (user entered or admin entered)
               const apiSources = ['digilocker', 'pan_api', 'digitap'];
-              const presentAddresses = allAddresses.filter((addr: any) => 
+              const presentAddresses = allAddresses.filter((addr: any) =>
                 !addr.source || !apiSources.includes(addr.source.toLowerCase())
               );
-              
+
               if (presentAddresses.length > 0) {
                 const presentAddr = presentAddresses[0]; // Show first present address
                 return (
@@ -3558,29 +3558,29 @@ function UserProfileDetail() {
                       View
                     </button>
                     {!isFollowUpUser && (
-                    <button
-                      onClick={() => {
-                        if (doc.url) {
-                          const link = document.createElement('a');
-                          link.href = doc.url;
-                          link.download = doc.fileName || 'document';
-                          link.target = '_blank';
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
-                        } else {
-                          alert('Document URL not available. Please refresh the page.');
-                        }
-                      }}
-                      disabled={!doc.url}
-                      className={`flex items-center gap-1 text-sm px-3 py-1.5 border rounded-md transition-colors ${doc.url
-                        ? 'text-green-600 hover:text-green-800 border-green-200 hover:bg-green-50'
-                        : 'text-gray-400 border-gray-200 cursor-not-allowed'
-                        }`}
-                    >
-                      <Download className="w-4 h-4" />
-                      Download
-                    </button>
+                      <button
+                        onClick={() => {
+                          if (doc.url) {
+                            const link = document.createElement('a');
+                            link.href = doc.url;
+                            link.download = doc.fileName || 'document';
+                            link.target = '_blank';
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                          } else {
+                            alert('Document URL not available. Please refresh the page.');
+                          }
+                        }}
+                        disabled={!doc.url}
+                        className={`flex items-center gap-1 text-sm px-3 py-1.5 border rounded-md transition-colors ${doc.url
+                          ? 'text-green-600 hover:text-green-800 border-green-200 hover:bg-green-50'
+                          : 'text-gray-400 border-gray-200 cursor-not-allowed'
+                          }`}
+                      >
+                        <Download className="w-4 h-4" />
+                        Download
+                      </button>
                     )}
                   </div>
 
@@ -4025,10 +4025,10 @@ function UserProfileDetail() {
 
     const handleDownloadReport = async (statementId: number, format: 'json' | 'xlsx' = 'json') => {
       if (!params.userId) return;
-      
+
       try {
         const blob = await adminApiService.downloadBankStatementReport(params.userId, statementId, format);
-        
+
         // Create download link
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -4038,7 +4038,7 @@ function UserProfileDetail() {
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
-        
+
         toast.success(`Report downloaded successfully`);
       } catch (error: any) {
         console.error('Download report error:', error);
@@ -4056,10 +4056,10 @@ function UserProfileDetail() {
       try {
         // Call Start Upload API to generate upload URL for manual statement
         const response = await adminApiService.startBankStatementUploadForStatement(params.userId, statementId);
-        
+
         // Check for both 'status' and 'success' properties (API might return either)
         const isSuccess = (response.status === 'success' || response.success === true);
-        
+
         if (isSuccess) {
           // For manual uploads, the file is automatically uploaded to Digitap
           // For online uploads, we would redirect to the upload URL
@@ -4096,9 +4096,9 @@ function UserProfileDetail() {
       setVerifyingStatement(true);
       try {
         const response = await adminApiService.checkBankStatementStatus(params.userId, statementId);
-        
+
         const isSuccess = (response.status === 'success' || response.success === true);
-        
+
         if (isSuccess) {
           if (response.data?.hasReport) {
             toast.success('Report is ready! Download options are now available.');
@@ -4149,7 +4149,7 @@ function UserProfileDetail() {
         setVerifyingStatement(true);
         try {
           const response = await adminApiService.uploadFileForStatement(params.userId, statementId, file);
-          
+
           if (response.status === 'success' || response.success === true) {
             toast.success('File uploaded successfully');
             await fetchBankStatement();
@@ -4244,7 +4244,7 @@ function UserProfileDetail() {
         {/* Statement Details Table */}
         <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
           <h4 className="text-md font-semibold text-gray-900 mb-4">Statement Details</h4>
-          
+
           {!hasStatements ? (
             <div className="text-center py-12">
               <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
@@ -4280,7 +4280,7 @@ function UserProfileDetail() {
                     const isManualUpload = statement.upload_method === 'manual';
                     const hasFile = !!statement.file_path;
                     const hasReport = statement.hasReport || statement.report_data;
-                    
+
                     return (
                       <tr key={statement.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -4289,15 +4289,14 @@ function UserProfileDetail() {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${
-                            !hasFile && statement.upload_method === 'online' 
-                              ? 'bg-gray-100 text-gray-600' 
-                              : statement.upload_method === 'manual' 
-                              ? 'bg-purple-100 text-purple-800'
-                              : 'bg-blue-100 text-blue-800'
-                          }`}>
-                            {!hasFile && statement.upload_method === 'online' 
-                              ? 'Not Uploaded' 
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${!hasFile && statement.upload_method === 'online'
+                              ? 'bg-gray-100 text-gray-600'
+                              : statement.upload_method === 'manual'
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-blue-100 text-blue-800'
+                            }`}>
+                            {!hasFile && statement.upload_method === 'online'
+                              ? 'Not Uploaded'
                               : statement.upload_method || 'N/A'}
                           </span>
                         </td>
@@ -4306,15 +4305,15 @@ function UserProfileDetail() {
                             isFollowUpUser ? (
                               <span className="text-gray-500 text-xs">{statement.file_name || 'File'}</span>
                             ) : (
-                            <a
-                              href={statement.file_path}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-blue-600 hover:underline"
-                            >
-                              <Download className="w-3 h-3" />
-                              {statement.file_name || 'Download File'}
-                            </a>
+                              <a
+                                href={statement.file_path}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+                              >
+                                <Download className="w-3 h-3" />
+                                {statement.file_name || 'Download File'}
+                              </a>
                             )
                           ) : (
                             <Button
@@ -4334,17 +4333,16 @@ function UserProfileDetail() {
                           )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            statement.verification_status === 'api_verified' ? 'bg-green-100 text-green-800' :
-                            statement.verification_status === 'api_verification_pending' ? 'bg-yellow-100 text-yellow-800' :
-                            statement.verification_status === 'api_failed' ? 'bg-red-100 text-red-800' :
-                            'bg-gray-100 text-gray-800'
-                          }`}>
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statement.verification_status === 'api_verified' ? 'bg-green-100 text-green-800' :
+                              statement.verification_status === 'api_verification_pending' ? 'bg-yellow-100 text-yellow-800' :
+                                statement.verification_status === 'api_failed' ? 'bg-red-100 text-red-800' :
+                                  'bg-gray-100 text-gray-800'
+                            }`}>
                             {statement.verification_status === 'api_verified' ? 'Verified' :
-                             statement.verification_status === 'api_verification_pending' ? 'Pending' :
-                             statement.verification_status === 'api_failed' ? 'Failed' :
-                             statement.verification_status === 'not_started' ? 'Not Started' :
-                             statement.verification_status || 'N/A'}
+                              statement.verification_status === 'api_verification_pending' ? 'Pending' :
+                                statement.verification_status === 'api_failed' ? 'Failed' :
+                                  statement.verification_status === 'not_started' ? 'Not Started' :
+                                    statement.verification_status || 'N/A'}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -4353,29 +4351,29 @@ function UserProfileDetail() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                           <div className="flex gap-2 flex-wrap">
                             {/* Show Refresh button if processing or pending */}
-                            {(statement.status === 'InProgress' || statement.status === 'processing' || 
+                            {(statement.status === 'InProgress' || statement.status === 'processing' ||
                               (statement.verification_status === 'api_verification_pending' && !hasReport)) && (
-                              <Button
-                                onClick={() => handleRefreshStatus(statement.id)}
-                                variant="outline"
-                                size="sm"
-                                className="h-8"
-                                disabled={verifyingStatement}
-                              >
-                                {verifyingStatement ? (
-                                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                ) : (
-                                  <RefreshCw className="w-3 h-3 mr-1" />
-                                )}
-                                Refresh
-                              </Button>
-                            )}
-                            
+                                <Button
+                                  onClick={() => handleRefreshStatus(statement.id)}
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8"
+                                  disabled={verifyingStatement}
+                                >
+                                  {verifyingStatement ? (
+                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="w-3 h-3 mr-1" />
+                                  )}
+                                  Refresh
+                                </Button>
+                              )}
+
                             {/* Show Generate Report button for manual uploads without report */}
-                            {isManualUpload && !hasReport && 
-                             statement.verification_status !== 'api_verification_pending' && 
-                             statement.status !== 'InProgress' && 
-                             statement.status !== 'processing' ? (
+                            {isManualUpload && !hasReport &&
+                              statement.verification_status !== 'api_verification_pending' &&
+                              statement.status !== 'InProgress' &&
+                              statement.status !== 'processing' ? (
                               <Button
                                 onClick={() => handleGenerateReport(statement.id)}
                                 variant="outline"
@@ -4391,7 +4389,7 @@ function UserProfileDetail() {
                                 Generate Report
                               </Button>
                             ) : null}
-                            
+
                             {/* Show download buttons if report exists - hidden for follow-up user */}
                             {hasReport && !isFollowUpUser && (
                               <>
@@ -4736,7 +4734,7 @@ function UserProfileDetail() {
                                 className="inline-flex w-6 h-6 items-center justify-center rounded bg-green-500 text-white hover:bg-green-600"
                                 title="WhatsApp"
                               >
-                                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" /></svg>
                               </a>
                               {canMutateReferences && (
                                 <button onClick={() => handleEditReference(ref.id, 'phone')} className="text-blue-600 hover:text-blue-800" title="Edit"><Edit className="w-3.5 h-3.5" /></button>
@@ -5284,14 +5282,14 @@ function UserProfileDetail() {
 
                     const getStatusBadge = (status: string) => {
                       if (!status) return <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">N/A</span>;
-                      
+
                       const statusUpper = status.toUpperCase();
                       const statusDisplay = status.replace(/_/g, ' '); // Replace underscores with spaces for display
-                      
+
                       // Determine color based on status
                       let bgColor = 'bg-gray-100';
                       let textColor = 'text-gray-800';
-                      
+
                       if (statusUpper === 'ACTIVE' || statusUpper === 'APPROVED' || statusUpper === 'AUTHORIZED') {
                         bgColor = 'bg-green-100';
                         textColor = 'text-green-800';
@@ -5305,7 +5303,7 @@ function UserProfileDetail() {
                         bgColor = 'bg-blue-100';
                         textColor = 'text-blue-800';
                       }
-                      
+
                       return (
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${bgColor} ${textColor}`}>
                           {statusDisplay}
@@ -5452,13 +5450,13 @@ function UserProfileDetail() {
                   {chargeHistory.map((charge: any) => {
                     const getStatusBadge = (status: string) => {
                       if (!status) return <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">N/A</span>;
-                      
+
                       const statusUpper = status.toUpperCase();
                       const statusDisplay = status.replace(/_/g, ' ');
-                      
+
                       let bgColor = 'bg-gray-100';
                       let textColor = 'text-gray-800';
-                      
+
                       if (statusUpper === 'SUCCESS' || statusUpper === 'COMPLETED') {
                         bgColor = 'bg-green-100';
                         textColor = 'text-green-800';
@@ -5469,7 +5467,7 @@ function UserProfileDetail() {
                         bgColor = 'bg-red-100';
                         textColor = 'text-red-800';
                       }
-                      
+
                       return (
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${bgColor} ${textColor}`}>
                           {statusDisplay}
@@ -5500,8 +5498,8 @@ function UserProfileDetail() {
                         <td className="px-3 py-4 text-sm text-gray-900">
                           {charge.error_message ? (
                             <span className="text-red-600 text-xs" title={charge.error_message}>
-                              {charge.error_message.length > 50 
-                                ? `${charge.error_message.substring(0, 50)}...` 
+                              {charge.error_message.length > 50
+                                ? `${charge.error_message.substring(0, 50)}...`
                                 : charge.error_message}
                             </span>
                           ) : (
@@ -6279,16 +6277,16 @@ function UserProfileDetail() {
     // Try to get calculation from loanCalculations state
     const loanId = loan.id || loan.loanId;
     const calculation = loanCalculations[loanId];
-    
+
     let firstDueDate: string | null = null;
-    
+
     // Priority 1: emi_schedule - find first pending (unpaid) EMI
     if (loan.emi_schedule) {
       try {
-        const parsedSchedule = typeof loan.emi_schedule === 'string' 
-          ? JSON.parse(loan.emi_schedule) 
+        const parsedSchedule = typeof loan.emi_schedule === 'string'
+          ? JSON.parse(loan.emi_schedule)
           : loan.emi_schedule;
-        
+
         if (Array.isArray(parsedSchedule) && parsedSchedule.length > 0) {
           const pending = parsedSchedule.filter((emi: any) => (emi.status || '').toLowerCase() !== 'paid');
           if (pending.length > 0) {
@@ -6301,7 +6299,7 @@ function UserProfileDetail() {
         console.error('Error parsing emi_schedule for DPD calculation:', e);
       }
     }
-    
+
     // Priority 2: calculation repayment schedule - find first pending
     if (!firstDueDate && calculation?.repayment?.schedule && Array.isArray(calculation.repayment.schedule) && calculation.repayment.schedule.length > 0) {
       const pending = calculation.repayment.schedule.filter((emi: any) => (emi.status || '').toLowerCase() !== 'paid');
@@ -6314,14 +6312,14 @@ function UserProfileDetail() {
         if (firstDueDate) firstDueDate = String(firstDueDate).split('T')[0].split(' ')[0];
       }
     }
-    
+
     // Priority 3: processed_due_date - use first or index by paid count
     if (!firstDueDate && loan.processed_due_date) {
       try {
-        const parsedDueDate = typeof loan.processed_due_date === 'string' 
-          ? JSON.parse(loan.processed_due_date) 
+        const parsedDueDate = typeof loan.processed_due_date === 'string'
+          ? JSON.parse(loan.processed_due_date)
           : loan.processed_due_date;
-        
+
         if (Array.isArray(parsedDueDate) && parsedDueDate.length > 0) {
           let idx = 0;
           if (loan.emi_schedule) {
@@ -6339,7 +6337,7 @@ function UserProfileDetail() {
         firstDueDate = loan.processed_due_date ? String(loan.processed_due_date).split('T')[0].split(' ')[0] : null;
       }
     }
-    
+
     // Priority 4: Fallback to single due date calculation
     if (!firstDueDate) {
       const disbursedDate = loan.disbursedDate || loan.disbursed_at;
@@ -6353,7 +6351,7 @@ function UserProfileDetail() {
         firstDueDate = parseDateString(calculation.interest.repayment_date);
       }
     }
-    
+
     // Calculate DPD using first due date
     if (!firstDueDate) return 0;
     return calculateDPD(loan.disbursedDate || loan.disbursed_at || '', firstDueDate);
@@ -6704,12 +6702,12 @@ function UserProfileDetail() {
                             if (timestamp.includes('T')) return timestamp.substring(0, 10);
                             return timestamp.split('T')[0] || null;
                           };
-                          
+
                           const getTodayStr = (): string => {
                             const today = new Date();
                             return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
                           };
-                          
+
                           const calculateDaysBetween = (startStr: string, endStr: string): number => {
                             const [sy, sm, sd] = startStr.split('-').map(Number);
                             const [ey, em, ed] = endStr.split('-').map(Number);
@@ -6718,17 +6716,17 @@ function UserProfileDetail() {
                             const diffMs = end.getTime() - start.getTime();
                             return Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
                           };
-                          
+
                           const todayStr = getTodayStr();
                           let baseDateStr: string | null = null;
-                          
+
                           // Priority: extension date, then disbursed_at
                           if (loan.last_extension_date && loan.extension_count > 0) {
                             baseDateStr = extractUTCDate(loan.last_extension_date);
                           } else if (loan.disbursed_at || loan.processed_at) {
                             baseDateStr = extractUTCDate(loan.disbursed_at || loan.processed_at);
                           }
-                          
+
                           if (baseDateStr && calculation?.interest?.rate_per_day) {
                             let exhaustedDays = 0;
                             // Use inclusive counting (same as backend)
@@ -7921,7 +7919,7 @@ function UserProfileDetail() {
     // Filter flagged loans: Written_off_Settled_Status (00-17) OR SuitFiled_WilfulDefault (01-03, excluding 00)
     const writtenOffCodes = ['00', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17'];
     const suitFiledCodes = ['01', '02', '03']; // Exclude '00' (No Suit Filed)
-    
+
     // Helper function to get status descriptions
     const getWrittenOffStatusDescription = (code: string) => {
       const descriptions: { [key: string]: string } = {
@@ -7959,17 +7957,17 @@ function UserProfileDetail() {
 
     // Filter and deduplicate flagged loans
     const flaggedLoansMap = new Map();
-    
+
     if (accountSummary && accountSummary.length > 0) {
       accountSummary.forEach((account: any) => {
         const accountNumber = account.Account_Number || '';
         const writtenOffStatus = account.Written_off_Settled_Status;
         const suitFiledStatus = account.SuitFiled_WilfulDefault;
-        
+
         // Check if loan matches either condition
         const matchesWrittenOff = writtenOffStatus && writtenOffCodes.includes(String(writtenOffStatus));
         const matchesSuitFiled = suitFiledStatus && suitFiledCodes.includes(String(suitFiledStatus));
-        
+
         if (matchesWrittenOff || matchesSuitFiled) {
           // Use account number as key to deduplicate
           if (!flaggedLoansMap.has(accountNumber)) {
@@ -7978,7 +7976,7 @@ function UserProfileDetail() {
               flagReasons: []
             });
           }
-          
+
           // Add flag reasons
           const loan = flaggedLoansMap.get(accountNumber);
           if (matchesWrittenOff) {
@@ -7990,7 +7988,7 @@ function UserProfileDetail() {
         }
       });
     }
-    
+
     const flaggedLoans = Array.from(flaggedLoansMap.values());
 
     return (
@@ -8036,11 +8034,11 @@ function UserProfileDetail() {
                 </thead>
                 <tbody>
                   {flaggedLoans.map((account: any, index: number) => {
-                    const latestHistory = account.CAIS_Account_History && account.CAIS_Account_History.length > 0 
-                      ? account.CAIS_Account_History[0] 
+                    const latestHistory = account.CAIS_Account_History && account.CAIS_Account_History.length > 0
+                      ? account.CAIS_Account_History[0]
                       : null;
                     const dpd = latestHistory ? parseInt(latestHistory.Days_Past_Due || 0) : 0;
-                    
+
                     // Format dates from YYYYMMDD to DD/MM/YYYY
                     const formatDate = (dateStr: string) => {
                       if (!dateStr || dateStr.length !== 8) return '-';
@@ -8261,7 +8259,7 @@ function UserProfileDetail() {
                     <p className="text-sm font-medium text-gray-600 mt-2">{firstFetchDate}</p>
                   )}
                 </div>
-                
+
                 {/* Arrow */}
                 <div className="flex flex-row sm:flex-col items-center gap-2">
                   <ArrowRight className="w-6 h-6 sm:w-8 sm:h-8 text-gray-500 rotate-90 sm:rotate-0" />
@@ -8276,7 +8274,7 @@ function UserProfileDetail() {
                         {(() => {
                           const newScoreNum = typeof displayScore === 'number' ? displayScore : (displayScore && displayScore !== 'N/A' ? parseInt(String(displayScore)) : null);
                           const oldScoreNum = typeof previous_credit_score === 'number' ? previous_credit_score : (previous_credit_score && previous_credit_score !== 'N/A' ? parseInt(String(previous_credit_score)) : null);
-                          const scoreColor = newScoreNum !== null && oldScoreNum !== null 
+                          const scoreColor = newScoreNum !== null && oldScoreNum !== null
                             ? (newScoreNum > oldScoreNum ? 'text-green-600' : newScoreNum < oldScoreNum ? 'text-red-600' : 'text-blue-600')
                             : 'text-blue-600';
                           return (
@@ -8303,7 +8301,7 @@ function UserProfileDetail() {
                   {(() => {
                     const newScoreNum = typeof displayScore === 'number' ? displayScore : (displayScore && displayScore !== 'N/A' ? parseInt(String(displayScore)) : null);
                     const oldScoreNum = typeof previous_credit_score === 'number' ? previous_credit_score : (previous_credit_score && previous_credit_score !== 'N/A' ? parseInt(String(previous_credit_score)) : null);
-                    
+
                     if (newScoreNum !== null && oldScoreNum !== null) {
                       const diff = newScoreNum - oldScoreNum;
                       if (diff > 0) {
@@ -8887,10 +8885,10 @@ function UserProfileDetail() {
               Add Follow Up
             </button>
             {!isFollowUpUser && (
-            <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
-              <Download className="w-4 h-4" />
-              Export
-            </button>
+              <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
+                <Download className="w-4 h-4" />
+                Export
+              </button>
             )}
             <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
               <Calendar className="w-4 h-4" />
@@ -9347,9 +9345,9 @@ function UserProfileDetail() {
                           <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
                             <span>By: {comment.created_by_name || comment.created_by_email || 'Unknown'}</span>
                             <span>•</span>
-                            <span>{new Date(comment.created_at).toLocaleString('en-IN', { 
-                              day: 'numeric', 
-                              month: 'short', 
+                            <span>{new Date(comment.created_at).toLocaleString('en-IN', {
+                              day: 'numeric',
+                              month: 'short',
                               year: 'numeric',
                               hour: '2-digit',
                               minute: '2-digit'
@@ -9405,9 +9403,9 @@ function UserProfileDetail() {
                           <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
                             <span>By: {comment.created_by_name || comment.created_by_email || 'Unknown'}</span>
                             <span>•</span>
-                            <span>{new Date(comment.created_at).toLocaleString('en-IN', { 
-                              day: 'numeric', 
-                              month: 'short', 
+                            <span>{new Date(comment.created_at).toLocaleString('en-IN', {
+                              day: 'numeric',
+                              month: 'short',
                               year: 'numeric',
                               hour: '2-digit',
                               minute: '2-digit'
@@ -9457,10 +9455,10 @@ function UserProfileDetail() {
               Add Note
             </button>
             {!isFollowUpUser && (
-            <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
-              <Download className="w-4 h-4" />
-              Export
-            </button>
+              <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
+                <Download className="w-4 h-4" />
+                Export
+              </button>
             )}
             <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
               <Filter className="w-4 h-4" />
@@ -9523,10 +9521,10 @@ function UserProfileDetail() {
               Send SMS
             </button>
             {!isFollowUpUser && (
-            <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
-              <Download className="w-4 h-4" />
-              Export
-            </button>
+              <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
+                <Download className="w-4 h-4" />
+                Export
+              </button>
             )}
             <button
               onClick={() => setShowTemplatesModal(true)}
@@ -9761,10 +9759,10 @@ function UserProfileDetail() {
               Add Transaction
             </button>
             {!isFollowUpUser && (
-            <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
-              <Download className="w-4 h-4" />
-              Export
-            </button>
+              <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-xs sm:text-sm whitespace-nowrap">
+                <Download className="w-4 h-4" />
+                Export
+              </button>
             )}
           </div>
         </div>
@@ -12072,11 +12070,11 @@ function UserProfileDetail() {
                                   </div>
                                 ) : null}
                                 {hasPenalty ? (
-                                <div className="text-xs text-red-600 mt-1">
-                                  <div>Penalty: ₹{(emi.penalty_base || 0).toFixed(2)}</div>
-                                  <div>GST: ₹{(emi.penalty_gst || 0).toFixed(2)}</div>
-                                  <div className="font-semibold">Total Penalty: ₹{(emi.penalty_total || 0).toFixed(2)}</div>
-                                </div>
+                                  <div className="text-xs text-red-600 mt-1">
+                                    <div>Penalty: ₹{(emi.penalty_base || 0).toFixed(2)}</div>
+                                    <div>GST: ₹{(emi.penalty_gst || 0).toFixed(2)}</div>
+                                    <div className="font-semibold">Total Penalty: ₹{(emi.penalty_total || 0).toFixed(2)}</div>
+                                  </div>
                                 ) : null}
                                 <div className="text-sm font-semibold text-gray-900 mt-1">
                                   Total: {formatCurrencyWithDecimals(emiAmount)}
@@ -12172,13 +12170,13 @@ function UserProfileDetail() {
                 const s = l.status;
                 return ['submitted', 'under_review', 'follow_up', 'disbursal', 'ready_for_disbursement', 'qa_verification'].includes(s);
               }) && (
-                <button
-                  onClick={() => handleCancelLoan()}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium bg-red-600 text-white hover:bg-red-700 shadow-sm"
-                >
-                  Cancel Loan
-                </button>
-              )}
+                  <button
+                    onClick={() => handleCancelLoan()}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium bg-red-600 text-white hover:bg-red-700 shadow-sm"
+                  >
+                    Cancel Loan
+                  </button>
+                )}
             </div>
           )}
         </div>
@@ -12287,10 +12285,10 @@ function UserProfileDetail() {
                           getUserData('profileStatus') === 'disbursal' ? 'bg-purple-100 text-purple-800' :
                             getUserData('profileStatus') === 'ready_for_disbursement' ? 'bg-indigo-100 text-indigo-800' :
                               getUserData('profileStatus') === 'account_manager' ? 'bg-green-100 text-green-800' :
-                              getUserData('profileStatus') === 'overdue' ? 'bg-red-100 text-red-800' :
-                                getUserData('profileStatus') === 'cleared' ? 'bg-gray-100 text-gray-800' :
-                                  getUserData('profileStatus') === 'hold' || getUserData('status') === 'on_hold' ? 'bg-red-100 text-red-800' :
-                                    'bg-gray-100 text-gray-800'
+                                getUserData('profileStatus') === 'overdue' ? 'bg-red-100 text-red-800' :
+                                  getUserData('profileStatus') === 'cleared' ? 'bg-gray-100 text-gray-800' :
+                                    getUserData('profileStatus') === 'hold' || getUserData('status') === 'on_hold' ? 'bg-red-100 text-red-800' :
+                                      'bg-gray-100 text-gray-800'
                       }`}>
                       {(getUserData('profileStatus') === 'account_manager' || getUserData('profileStatus') === 'overdue') && getUserData('assignedManager')
                         ? `Account Manager: ${getUserData('assignedManager')}`
