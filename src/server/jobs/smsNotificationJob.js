@@ -14,6 +14,7 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 const cronLogger = require('../services/cronLogger');
 const { smsService } = require('../utils/smsService');
 const { initSmsTemplatesTable, seedDefaultTemplates } = require('../routes/adminSmsTemplates');
+const { getFirstPendingEmiDueDate, daysDiff } = require('../utils/accountManagerDpd');
 
 // Dry-run mode: Set SMS_DRY_RUN=true in .env to enable (logs what would be sent without actually sending)
 const DRY_RUN = process.env.SMS_DRY_RUN === 'true' || process.env.SMS_DRY_RUN === '1';
@@ -428,11 +429,26 @@ async function processDPDBasedSMS(templates, currentTime) {
         continue;
       }
       
+      const todayStr = getCurrentDateIST().toISOString().split('T')[0];
+      
       for (const loan of loans) {
-        // Parse due date for display
+        // Recalculate DPD using the first UNPAID EMI due date (not just the first due date).
+        // Without this, loans where EMI 1 is paid still show DPD > 0 based on EMI 1's due date.
+        const pendingDueDate = getFirstPendingEmiDueDate(loan);
+        const correctedDpd = pendingDueDate ? daysDiff(pendingDueDate, todayStr) : loan.dpd;
+        
+        if (correctedDpd !== null && correctedDpd !== loan.dpd && !isDpdInRange(correctedDpd, dpdValues)) {
+          continue;
+        }
+        
+        const effectiveDpd = (correctedDpd !== null) ? correctedDpd : loan.dpd;
+
+        // Parse due date for display — use the pending EMI due date for accuracy
         let dueDate = '';
         try {
-          if (loan.processed_due_date) {
+          if (pendingDueDate) {
+            dueDate = formatDate(pendingDueDate);
+          } else if (loan.processed_due_date) {
             const dueDateParsed = typeof loan.processed_due_date === 'string' 
               ? (loan.processed_due_date.startsWith('[') ? JSON.parse(loan.processed_due_date)[0] : loan.processed_due_date)
               : loan.processed_due_date;
@@ -445,7 +461,7 @@ async function processDPDBasedSMS(templates, currentTime) {
         // Calculate savings for preclose template
         let savings = 0;
         if (template.template_key === 'preclose') {
-          const remainingDays = Math.max(0, -loan.dpd);
+          const remainingDays = Math.max(0, -effectiveDpd);
           savings = Math.round((loan.loan_amount || 0) * 0.001 * remainingDays);
         }
         
@@ -456,7 +472,7 @@ async function processDPDBasedSMS(templates, currentTime) {
           email: 'support@pocketcredit.in',
           due_date: dueDate,
           emi_amount: (loan.processed_amount || loan.loan_amount || 0).toLocaleString('en-IN'),
-          days_passed: Math.abs(loan.dpd || 0),
+          days_passed: Math.abs(effectiveDpd || 0),
           savings: savings.toLocaleString('en-IN'),
           loan_amount: (loan.loan_amount || 0).toLocaleString('en-IN')
         };
