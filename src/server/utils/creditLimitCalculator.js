@@ -785,7 +785,8 @@ async function checkAndMarkCoolingPeriod(userId, loanId = null, creditLimitData 
 
 /**
  * Auto-assign a credit limit rule to a user based on salary.
- * Only assigns if user does not already have a rule and a matching auto_assign rule exists.
+ * Assigns a matching auto_assign rule by salary.
+ * If a user already has a rule, it will only reassign when the current rule is also auto_assign.
  * @param {number} userId
  * @param {number} salary - Monthly salary (rupees)
  * @returns {Promise<{assigned: boolean, ruleId: number|null, ruleName: string|null}>}
@@ -809,11 +810,6 @@ async function autoAssignCreditLimitRule(userId, salary) {
       return { assigned: false, ruleId: null, ruleName: null };
     }
 
-    if (currentRuleId != null) {
-      console.log(`[CreditLimit] User ${userId} already has credit_limit_rule_id=${currentRuleId}, skipping auto-assign`);
-      return { assigned: false, ruleId: currentRuleId, ruleName: null };
-    }
-
     const matchingRules = await executeQuery(
       `SELECT id, rule_name, rule_code
        FROM credit_limit_rules
@@ -821,7 +817,7 @@ async function autoAssignCreditLimitRule(userId, salary) {
          AND is_active = 1
          AND (salary_min IS NULL OR salary_min <= ?)
          AND (salary_max IS NULL OR salary_max >= ?)
-       ORDER BY sort_order ASC
+       ORDER BY sort_order ASC, salary_min DESC
        LIMIT 1`,
       [salary, salary]
     );
@@ -832,12 +828,40 @@ async function autoAssignCreditLimitRule(userId, salary) {
     }
 
     const matched = matchingRules[0];
+
+    // If user already has a rule, only switch when current rule is also auto-assign.
+    // This prevents overriding manually assigned/pinned rules.
+    if (currentRuleId != null) {
+      const currentRows = await executeQuery(
+        `SELECT id, rule_name, auto_assign
+         FROM credit_limit_rules
+         WHERE id = ?
+         LIMIT 1`,
+        [currentRuleId]
+      );
+      const currentRule = currentRows && currentRows.length > 0 ? currentRows[0] : null;
+
+      if (!currentRule) {
+        console.log(`[CreditLimit] User ${userId} has missing rule id=${currentRuleId}; will re-assign by salary`);
+      } else if (!(currentRule.auto_assign === 1 || currentRule.auto_assign === true)) {
+        console.log(`[CreditLimit] User ${userId} has manual rule "${currentRule.rule_name}" (id=${currentRuleId}), skipping auto-reassign`);
+        return { assigned: false, ruleId: currentRuleId, ruleName: currentRule.rule_name || null };
+      } else if (parseInt(currentRuleId, 10) === parseInt(matched.id, 10)) {
+        console.log(`[CreditLimit] User ${userId} already has matching auto rule "${matched.rule_name}" (id=${matched.id})`);
+        return { assigned: false, ruleId: matched.id, ruleName: matched.rule_name };
+      }
+    }
+
     await executeQuery(
       'UPDATE users SET credit_limit_rule_id = ?, updated_at = NOW() WHERE id = ?',
       [matched.id, userId]
     );
 
-    console.log(`[CreditLimit] Auto-assigned rule "${matched.rule_name}" (id=${matched.id}) to user ${userId} (salary=₹${salary})`);
+    if (currentRuleId != null) {
+      console.log(`[CreditLimit] Auto-reassigned rule "${matched.rule_name}" (id=${matched.id}) to user ${userId} (salary=₹${salary})`);
+    } else {
+      console.log(`[CreditLimit] Auto-assigned rule "${matched.rule_name}" (id=${matched.id}) to user ${userId} (salary=₹${salary})`);
+    }
     return { assigned: true, ruleId: matched.id, ruleName: matched.rule_name };
   } catch (err) {
     console.error(`[CreditLimit] autoAssignCreditLimitRule(${userId}) failed:`, err.message);

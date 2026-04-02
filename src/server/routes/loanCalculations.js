@@ -841,24 +841,11 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
         };
 
-        // First overdue EMI that is still unpaid: add DPD interest = DPD days × rate × FULL principal (not EMI share)
-        const todayStrForSchedule = getTodayString();
-        let firstOverdueUnpaidEmiIndex = -1;
-        if (loan.status !== 'cleared') {
-          for (let j = 0; j < emiCount; j++) {
-            const dStr = formatDateToString(allEmiDates[j]);
-            if (!dStr || dStr >= todayStrForSchedule) continue;
-            let emiStatus = 'pending';
-            if (storedEmiSchedule && Array.isArray(storedEmiSchedule)) {
-              const storedEmi = storedEmiSchedule.find(e => (e.emi_number === j + 1 || e.instalment_no === j + 1)) || storedEmiSchedule[j];
-              if (storedEmi && storedEmi.status) emiStatus = storedEmi.status;
-            }
-            if (String(emiStatus).toLowerCase() !== 'paid') {
-              firstOverdueUnpaidEmiIndex = j;
-              break;
-            }
-          }
-        }
+        const normalizeScheduleDueDateStr = (d) => {
+          if (d == null || d === '') return '';
+          const s = typeof d === 'string' ? d : String(d);
+          return s.split('T')[0].split(' ')[0];
+        };
         
         let outstandingPrincipal = principal;
         let totalInterest = 0;
@@ -889,42 +876,9 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
           const interestForPeriod = toDecimal2(outstandingPrincipal * interestRatePerDay * daysForPeriod);
           totalInterest += interestForPeriod;
           
-          // Calculate penalty if EMI is overdue
-          // Use string-based date comparison to avoid timezone issues
-          let penaltyAmount = 0;
-          let penaltyBase = 0;
-          let penaltyGST = 0;
-          let dpdInterestOnTotalPrincipal = 0;
-          
-          // Check if EMI is overdue by comparing date strings (YYYY-MM-DD format)
-          if (emiDateStr < todayStrForSchedule) {
-            // EMI is overdue - calculate days overdue (exclusive, not including today)
-            const daysOverdueInclusive = calculateDaysBetween(emiDateStr, todayStrForSchedule);
-            const daysOverdue = Math.max(1, daysOverdueInclusive - 1); // Exclude today for penalty calculation
-            
-            // Penalty applies to overdue principal for this instalment only (e.g. 1st EMI = that EMI's principal share)
-            if (lateFeeStructure && Array.isArray(lateFeeStructure) && lateFeeStructure.length > 0) {
-              const penaltyCalc = calculateEmiPenalty(principalForThisEmi, daysOverdue, lateFeeStructure);
-              penaltyAmount = penaltyCalc.penaltyTotal;
-              penaltyBase = penaltyCalc.penaltyBase;
-              penaltyGST = penaltyCalc.penaltyGST;
-              
-              // Penalty calculated for overdue EMI
-            } else {
-              console.warn(`⚠️ [EMI Penalty] EMI #${i + 1} is overdue but no late_fee_structure found`);
-            }
-
-            // Extra interest on total principal for each DPD day (e.g. DPD 1 → 1 × 0.001 × 3840); attach to first overdue unpaid EMI only
-            if (firstOverdueUnpaidEmiIndex === i) {
-              dpdInterestOnTotalPrincipal = toDecimal2(daysOverdue * interestRatePerDay * principal);
-            }
-          }
-          
-          // Calculate installment amount (principal + interest + post service fee + GST + penalty)
-          // CRITICAL: Include post service fee + GST in each EMI
-          // Penalty is added to overdue EMIs; DPD interest on full principal on first overdue unpaid EMI only
+          // Base instalment (penalty + DPD applied after emi_schedule status merge — see below)
           const baseAmount = principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi;
-          const instalmentAmount = toDecimal2(baseAmount + penaltyAmount + dpdInterestOnTotalPrincipal);
+          const instalmentAmount = toDecimal2(baseAmount);
           
           // Preserve stored status and paid_date if available (for account_manager loans with payment tracking)
           // For cleared loans, always show all EMIs as paid (fixes EMI details showing Pending for closed loans)
@@ -955,10 +909,10 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
             interest: interestForPeriod,
             post_service_fee: postServiceFeePerEmi,
             gst_on_post_service_fee: postServiceFeeGSTPerEmi,
-            penalty_base: penaltyBase,
-            penalty_gst: penaltyGST,
-            penalty_total: penaltyAmount,
-            dpd_interest_on_total_principal: dpdInterestOnTotalPrincipal,
+            penalty_base: 0,
+            penalty_gst: 0,
+            penalty_total: 0,
+            dpd_interest_on_total_principal: 0,
             instalment_amount: instalmentAmount,
             days: daysForPeriod,
             status: emiStatus
@@ -1055,7 +1009,75 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
             status: instalment.status || 'pending'
           }));
         }
-        // Note: For account_manager loans, status was already preserved during recalculation above
+
+        // Apply penalty + DPD only after merged payment status (paid EMIs must not carry overdue charges;
+        // DPD on total principal attaches to the first overdue unpaid EMI by instalment order)
+        const todayStrRecalc = getTodayString();
+        let firstOverdueUnpaidIdx = -1;
+        if (loan.status !== 'cleared') {
+          for (let si = 0; si < schedule.length; si++) {
+            const st = String(schedule[si].status || 'pending').toLowerCase();
+            if (st === 'paid' || st === 'completed') continue;
+            const dueS = normalizeScheduleDueDateStr(schedule[si].due_date);
+            if (dueS && dueS < todayStrRecalc) {
+              firstOverdueUnpaidIdx = si;
+              break;
+            }
+          }
+        }
+
+        schedule = schedule.map((inst, idx) => {
+          const baseAmount = toDecimal2(
+            (parseFloat(inst.principal) || 0) +
+            (parseFloat(inst.interest) || 0) +
+            (parseFloat(inst.post_service_fee) || 0) +
+            (parseFloat(inst.gst_on_post_service_fee) || 0)
+          );
+          const st = String(inst.status || 'pending').toLowerCase();
+          if (st === 'paid' || st === 'completed' || loan.status === 'cleared') {
+            return {
+              ...inst,
+              penalty_base: 0,
+              penalty_gst: 0,
+              penalty_total: 0,
+              dpd_interest_on_total_principal: 0,
+              instalment_amount: baseAmount
+            };
+          }
+          const dueS = normalizeScheduleDueDateStr(inst.due_date);
+          if (!dueS || dueS >= todayStrRecalc) {
+            return {
+              ...inst,
+              penalty_base: 0,
+              penalty_gst: 0,
+              penalty_total: 0,
+              dpd_interest_on_total_principal: 0,
+              instalment_amount: baseAmount
+            };
+          }
+          const daysOverdue = Math.max(1, calculateDaysBetween(dueS, todayStrRecalc) - 1);
+          const pEmi = parseFloat(inst.principal) || 0;
+          let penB = 0;
+          let penG = 0;
+          let penT = 0;
+          if (lateFeeStructure && Array.isArray(lateFeeStructure) && lateFeeStructure.length > 0) {
+            const pc = calculateEmiPenalty(pEmi, daysOverdue, lateFeeStructure);
+            penB = pc.penaltyBase;
+            penG = pc.penaltyGST;
+            penT = pc.penaltyTotal;
+          }
+          const dpdInt = (firstOverdueUnpaidIdx === idx)
+            ? toDecimal2(daysOverdue * interestRatePerDay * principal)
+            : 0;
+          return {
+            ...inst,
+            penalty_base: penB,
+            penalty_gst: penG,
+            penalty_total: penT,
+            dpd_interest_on_total_principal: dpdInt,
+            instalment_amount: toDecimal2(baseAmount + penT + dpdInt)
+          };
+        });
         
         calculation.repayment.schedule = schedule;
         

@@ -1271,37 +1271,6 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
           // Use baseDateStr (already calculated above) for schedule generation to avoid timezone issues
           const baseDateStrForSchedule = baseDateStr || getTodayString();
 
-          let emiScheduleForDpdStatus = null;
-          if (loan.emi_schedule) {
-            try {
-              emiScheduleForDpdStatus = typeof loan.emi_schedule === 'string'
-                ? JSON.parse(loan.emi_schedule)
-                : loan.emi_schedule;
-            } catch (e) {
-              emiScheduleForDpdStatus = null;
-            }
-          }
-          const todayStrForDpd = getTodayString();
-          let firstOverdueUnpaidEmiIndex = -1;
-          if (loan.status !== 'cleared') {
-            for (let j = 0; j < emiCount; j++) {
-              const raw = allEmiDates[j];
-              const dObj = raw instanceof Date ? new Date(raw) : new Date(raw);
-              dObj.setHours(0, 0, 0, 0);
-              const dStr = formatDateToString(dObj) || parseDateToString(dObj);
-              if (!dStr || dStr >= todayStrForDpd) continue;
-              let st = 'pending';
-              if (emiScheduleForDpdStatus && Array.isArray(emiScheduleForDpdStatus)) {
-                const se = emiScheduleForDpdStatus.find(e => (e.emi_number === j + 1 || e.instalment_no === j + 1)) || emiScheduleForDpdStatus[j];
-                if (se && se.status) st = se.status;
-              }
-              if (String(st).toLowerCase() !== 'paid') {
-                firstOverdueUnpaidEmiIndex = j;
-                break;
-              }
-            }
-          }
-
           for (let i = 0; i < emiCount; i++) {
             // Get EMI date (handle both Date objects and strings)
             const emiDateStr = allEmiDates[i];
@@ -1344,53 +1313,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
 
             // Calculate base installment amount (principal + interest + post service fee + GST)
             const baseInstalmentAmount = Math.round((principalForThisEmi + interestForPeriod + postServiceFeePerEmi + postServiceFeeGSTPerEmi) * 100) / 100;
-            
-            // Calculate penalty if EMI is overdue
-            let penaltyBase = 0;
-            let penaltyGST = 0;
-            let penaltyTotal = 0;
-            let dpdInterestOnTotalPrincipal = 0;
-            
-            // Check if EMI is overdue by comparing due_date with today
-            const todayStr = getTodayString();
-            const emiDateStrForCheck = emiDateStrFormatted || formatDateToString(emiDate);
-            
-            if (emiDateStrForCheck < todayStr) {
-              // EMI is overdue - calculate days overdue (exclusive, not including today)
-              const daysOverdueInclusive = calculateDaysBetween(emiDateStrForCheck, todayStr);
-              const daysOverdue = Math.max(1, daysOverdueInclusive - 1); // Exclude today for penalty calculation
-              
-              // Get late_fee_structure for penalty calculation
-              let lateFeeStructure = null;
-              try {
-                if (loan.late_fee_structure) {
-                  lateFeeStructure = typeof loan.late_fee_structure === 'string' 
-                    ? JSON.parse(loan.late_fee_structure) 
-                    : loan.late_fee_structure;
-                } else if (planSnapshot && planSnapshot.late_fee_structure) {
-                  lateFeeStructure = typeof planSnapshot.late_fee_structure === 'string'
-                    ? JSON.parse(planSnapshot.late_fee_structure)
-                    : planSnapshot.late_fee_structure;
-                }
-              } catch (e) {
-                console.error('⚠️ [KFS] Error parsing late_fee_structure for penalty:', e);
-              }
-              
-              // Penalty on overdue principal for this instalment only (matches loanCalculations / loan job)
-              if (lateFeeStructure && Array.isArray(lateFeeStructure) && lateFeeStructure.length > 0) {
-                const penaltyCalc = calculatePenaltyFromLateFeeStructure(principalForThisEmi, daysOverdue, lateFeeStructure);
-                penaltyBase = penaltyCalc.penaltyBase;
-                penaltyGST = penaltyCalc.penaltyGST;
-                penaltyTotal = penaltyCalc.penaltyTotal;
-              }
-
-              if (firstOverdueUnpaidEmiIndex === i) {
-                dpdInterestOnTotalPrincipal = toDecimal2(daysOverdue * interestRatePerDay * principal);
-              }
-            }
-            
-            // Calculate final installment amount (base + penalty + DPD interest on total principal)
-            const instalmentAmount = toDecimal2(baseInstalmentAmount + penaltyTotal + dpdInterestOnTotalPrincipal);
+            const instalmentAmount = toDecimal2(baseInstalmentAmount);
 
             schedule.push({
               instalment_no: i + 1,
@@ -1399,10 +1322,10 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               interest: interestForPeriod,
               post_service_fee: postServiceFeePerEmi,
               gst_on_post_service_fee: postServiceFeeGSTPerEmi,
-              penalty_base: penaltyBase,
-              penalty_gst: penaltyGST,
-              penalty_total: penaltyTotal,
-              dpd_interest_on_total_principal: dpdInterestOnTotalPrincipal,
+              penalty_base: 0,
+              penalty_gst: 0,
+              penalty_total: 0,
+              dpd_interest_on_total_principal: 0,
               instalment_amount: instalmentAmount,
               due_date: formatDateLocal(emiDate) // Use local date format without timezone conversion
             });
@@ -1487,6 +1410,93 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
             ...instalment,
             status: 'pending'
           }));
+        }
+
+        if (isMultiEmi && schedule.length > 1) {
+          const normalizeKfsDue = (d) => {
+            if (d == null || d === '') return '';
+            const s = typeof d === 'string' ? d : String(d);
+            return s.split('T')[0].split(' ')[0];
+          };
+          let lateFeeStructKfs = null;
+          try {
+            if (loan.late_fee_structure) {
+              lateFeeStructKfs = typeof loan.late_fee_structure === 'string'
+                ? JSON.parse(loan.late_fee_structure)
+                : loan.late_fee_structure;
+            } else if (planSnapshot && planSnapshot.late_fee_structure) {
+              lateFeeStructKfs = typeof planSnapshot.late_fee_structure === 'string'
+                ? JSON.parse(planSnapshot.late_fee_structure)
+                : planSnapshot.late_fee_structure;
+            }
+          } catch (e) {
+            lateFeeStructKfs = null;
+          }
+          const todayStrRecalcKfs = getTodayString();
+          let firstOverdueUnpaidIdxKfs = -1;
+          if (loan.status !== 'cleared') {
+            for (let si = 0; si < schedule.length; si++) {
+              const st = String(schedule[si].status || 'pending').toLowerCase();
+              if (st === 'paid' || st === 'completed') continue;
+              const dueS = normalizeKfsDue(schedule[si].due_date);
+              if (dueS && dueS < todayStrRecalcKfs) {
+                firstOverdueUnpaidIdxKfs = si;
+                break;
+              }
+            }
+          }
+          schedule = schedule.map((inst, idx) => {
+            const baseAmount = toDecimal2(
+              (parseFloat(inst.principal) || 0) +
+              (parseFloat(inst.interest) || 0) +
+              (parseFloat(inst.post_service_fee) || 0) +
+              (parseFloat(inst.gst_on_post_service_fee) || 0)
+            );
+            const st = String(inst.status || 'pending').toLowerCase();
+            if (st === 'paid' || st === 'completed' || loan.status === 'cleared') {
+              return {
+                ...inst,
+                penalty_base: 0,
+                penalty_gst: 0,
+                penalty_total: 0,
+                dpd_interest_on_total_principal: 0,
+                instalment_amount: baseAmount
+              };
+            }
+            const dueS = normalizeKfsDue(inst.due_date);
+            if (!dueS || dueS >= todayStrRecalcKfs) {
+              return {
+                ...inst,
+                penalty_base: 0,
+                penalty_gst: 0,
+                penalty_total: 0,
+                dpd_interest_on_total_principal: 0,
+                instalment_amount: baseAmount
+              };
+            }
+            const daysOverdue = Math.max(1, calculateDaysBetween(dueS, todayStrRecalcKfs) - 1);
+            const pEmi = parseFloat(inst.principal) || 0;
+            let penB = 0;
+            let penG = 0;
+            let penT = 0;
+            if (lateFeeStructKfs && Array.isArray(lateFeeStructKfs) && lateFeeStructKfs.length > 0) {
+              const pc = calculatePenaltyFromLateFeeStructure(pEmi, daysOverdue, lateFeeStructKfs);
+              penB = pc.penaltyBase;
+              penG = pc.penaltyGST;
+              penT = pc.penaltyTotal;
+            }
+            const dpdInt = (firstOverdueUnpaidIdxKfs === idx)
+              ? toDecimal2(daysOverdue * interestRatePerDay * principal)
+              : 0;
+            return {
+              ...inst,
+              penalty_base: penB,
+              penalty_gst: penG,
+              penalty_total: penT,
+              dpd_interest_on_total_principal: dpdInt,
+              instalment_amount: toDecimal2(baseAmount + penT + dpdInt)
+            };
+          });
         }
 
         return {
