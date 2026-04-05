@@ -1251,11 +1251,12 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
         const principal = loanValues.principal || loan.sanctioned_amount || loan.principal_amount || loan.loan_amount || 0;
         let totalRepayable = loanValues.total?.repayable || loanValues.totalRepayableAmount || 0;
         const interest = loanValues.interest?.amount || loanValues.totalInterest || 0;
+        // Interest rate per day for penalty and schedule calculations
+        const interestRatePerDay = loanValues.interest?.rate_per_day || planData.interest_percent_per_day || 0.001;
 
         if (isMultiEmi && allEmiDates.length === emiCount) {
           // For Multi-EMI loans, generate schedule with all installments
           const interestDays = loanValues.interest?.days || plannedTermDays || 15;
-          const interestRatePerDay = loanValues.interest?.rate_per_day || planData.interest_percent_per_day || (interestDays > 0 ? (interest / (principal * interestDays)) : 0.001);
           const principalPerEmi = Math.floor(principal / emiCount * 100) / 100;
           const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
           // IMPORTANT: totals.repayableFee is ALREADY multiplied by emiCount in loanCalculations.js
@@ -5004,10 +5005,11 @@ router.get('/:loanId', async (req, res, next) => {
 
         // Generate repayment schedule with all installments
         let schedule = [];
+        // Interest rate per day for penalty and schedule calculations
+        const interestRatePerDay = calculations.interest.rate_per_day || (interest / (principal * days)) || 0.001;
 
         if (isMultiEmi && allEmiDates.length === emiCount) {
           // For Multi-EMI loans, generate schedule with all installments
-          const interestRatePerDay = calculations.interest.rate_per_day || (interest / (principal * days));
           const principalPerEmi = Math.floor(principal / emiCount * 100) / 100;
           const remainder = Math.round((principal - (principalPerEmi * emiCount)) * 100) / 100;
           // IMPORTANT: totals.repayableFee is ALREADY multiplied by emiCount in loanCalculations.js
