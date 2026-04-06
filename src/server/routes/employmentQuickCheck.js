@@ -251,12 +251,30 @@ router.post('/', requireAuth, async (req, res) => {
         // Use the loan limit from database tier configuration, or fallback to calculated amount
         const loanLimit = rangeConfig?.loan_limit ? parseFloat(rangeConfig.loan_limit) : parseFloat(eligible_loan_amount);
 
+        // Check if user is currently on a new-user temporary hold before overriding status.
+        // New users get a 72-hour hold when they complete basic profile, and the employment
+        // quick check must NOT clear it — the hold should only expire naturally via middleware.
+        const currentUserRows = await executeQuery(
+          'SELECT status, hold_until_date, application_hold_reason FROM users WHERE id = ?',
+          [userId]
+        );
+        const currentUser = currentUserRows && currentUserRows[0];
+        const isActiveNewUserHold = currentUser &&
+          currentUser.status === 'on_hold' &&
+          currentUser.hold_until_date &&
+          new Date(currentUser.hold_until_date) > new Date();
+
+        const newStatus = isActiveNewUserHold ? 'on_hold' : 'active';
+        if (isActiveNewUserHold) {
+          console.log(`🔒 User ${userId} is on active new-user hold — preserving hold status after eligibility check`);
+        }
+
         // User is eligible - update profile step, set loan limit, income range, date of birth, and save employment info
         // NEW: Mark profile_completed = 1 to skip remaining steps as per user request
         // Use COALESCE to preserve existing date_of_birth if it exists (prefer user-entered value over form value)
         await executeQuery(
           'UPDATE users SET profile_completion_step = 2, profile_completed = 1, status = ?, eligibility_status = ?, loan_limit = ?, income_range = ?, date_of_birth = COALESCE(date_of_birth, ?), updated_at = NOW() WHERE id = ?',
-          ['active', 'eligible', loanLimit, income_range, date_of_birth, userId]
+          [newStatus, 'eligible', loanLimit, income_range, date_of_birth, userId]
         );
 
         // Save employment data
