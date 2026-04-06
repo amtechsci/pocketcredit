@@ -6,6 +6,7 @@ const {
   getLoanApplicationStats 
 } = require('../controllers/loanApplicationController');
 const { requireAuthHybrid } = require('../middleware/jwtAuth');
+const { checkHoldStatus } = require('../middleware/checkHoldStatus');
 
 const router = express.Router();
 
@@ -19,7 +20,7 @@ const router = express.Router();
  * @desc    Apply for a new loan
  * @access  Private (requires complete profile)
  */
-router.post('/apply', requireAuthHybrid, applyForLoan);
+router.post('/apply', requireAuthHybrid, checkHoldStatus, applyForLoan);
 
 /**
  * @route   GET /api/loan-applications

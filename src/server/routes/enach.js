@@ -3,6 +3,7 @@ const router = express.Router();
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
+const { checkHoldStatus } = require('../middleware/checkHoldStatus');
 const { executeQuery, initializeDatabase } = require('../config/database');
 
 // Cashfree API configuration
@@ -75,7 +76,7 @@ const logApiCall = (method, url, headers, body, response = null, error = null) =
  * POST /api/enach/create-subscription
  * Create eNACH subscription for loan application
  */
-router.post('/create-subscription', authenticateToken, async (req, res) => {
+router.post('/create-subscription', authenticateToken, checkHoldStatus, async (req, res) => {
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     let subscriptionId = null; // Declare at function scope for error handling
     let planId = null;

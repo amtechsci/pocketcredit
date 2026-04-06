@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const { executeQuery, initializeDatabase, ensureLoanStatusHistoryTable } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
+const { checkHoldStatus } = require('../middleware/checkHoldStatus');
 const { uploadToS3 } = require('../services/s3Service');
 const { compareFaces, downloadImage } = require('../services/faceMatchService');
 const axios = require('axios');
@@ -269,7 +270,7 @@ router.get('/progress/:applicationId', requireAuth, async (req, res) => {
 });
 
 // Update post-disbursal progress
-router.put('/progress/:applicationId', requireAuth, async (req, res) => {
+router.put('/progress/:applicationId', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     await initializeDatabase();
     const { applicationId } = req.params;
@@ -541,7 +542,7 @@ router.put('/progress/:applicationId', requireAuth, async (req, res) => {
 });
 
 // Upload selfie for verification
-router.post('/upload-selfie', requireAuth, upload.single('selfie'), async (req, res) => {
+router.post('/upload-selfie', requireAuth, checkHoldStatus, upload.single('selfie'), async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;

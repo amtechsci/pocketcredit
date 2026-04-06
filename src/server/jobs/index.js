@@ -12,6 +12,7 @@ const { updateOverdueLoans } = require('./updateOverdueLoans');
 const { runSMSNotificationJob } = require('./smsNotificationJob');
 const { runSyncTempAssignments } = require('./syncTempAssignmentsJob');
 const { runProcessJobQueue } = require('./processJobQueue');
+const { runAutoEnachDueDateJob, runAutoEnachPendingRecheckJob } = require('./autoEnachDueDateJob');
 
 /**
  * Register all scheduled jobs
@@ -63,6 +64,23 @@ async function registerJobs() {
   }, {
     timezone: 'Asia/Kolkata', // IST
     runOnInit: false // Don't run on server start
+  });
+
+  // Auto eNACH due-date debit job
+  // Controlled by ENACH_AUTO_DEBIT_ENABLED and ENACH_AUTO_DEBIT_DRY_RUN
+  cronManager.everyMinutes(30, 'auto-enach-due-date', async () => {
+    await runAutoEnachDueDateJob();
+  }, {
+    timezone: 'Asia/Kolkata',
+    runOnInit: false
+  });
+
+  // Recheck pending eNACH charges and settle successful ones
+  cronManager.everyMinutes(20, 'auto-enach-pending-recheck', async () => {
+    await runAutoEnachPendingRecheckJob();
+  }, {
+    timezone: 'Asia/Kolkata',
+    runOnInit: false
   });
 
   // Add more jobs here as needed

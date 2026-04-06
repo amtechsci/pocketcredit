@@ -5,8 +5,7 @@ const { checkHoldStatus } = require('../middleware/checkHoldStatus');
 const router = express.Router();
 
 // POST /api/references - Save/Update User References and Alternate Data
-// Note: Removed checkHoldStatus - users should be able to update references even if on hold
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
   console.log('🔔 POST /api/references - Request received');
   console.log('🔔 Headers:', { 
     authorization: req.headers.authorization ? 'present' : 'missing',
@@ -319,7 +318,7 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // PUT /api/references/:id - Update a specific user reference
-router.put('/:id', requireAuth, async (req, res) => {
+router.put('/:id', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;
@@ -362,7 +361,7 @@ router.put('/:id', requireAuth, async (req, res) => {
 });
 
 // DELETE /api/references/:id - Delete a specific user reference
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;

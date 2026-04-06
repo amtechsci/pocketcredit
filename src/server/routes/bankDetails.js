@@ -65,7 +65,7 @@ router.get('/enach-status', requireAuth, async (req, res) => {
   }
 });
 // PUT /api/bank-details/:id - Update Bank Details
-router.put('/:id', requireAuth, async (req, res) => {
+router.put('/:id', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;
@@ -399,7 +399,7 @@ router.get('/user/:userId', requireAuth, async (req, res) => {
 });
 
 // POST /api/bank-details/user - Save Bank Details for User (without application_id)
-router.post('/user', requireAuth, async (req, res) => {
+router.post('/user', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;
@@ -535,7 +535,7 @@ router.post('/user', requireAuth, async (req, res) => {
 });
 
 // POST /api/bank-details/choose - Choose Existing Bank Details for Loan Application
-router.post('/choose', requireAuth, async (req, res) => {
+router.post('/choose', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;

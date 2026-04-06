@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
+const { checkHoldStatus } = require('../middleware/checkHoldStatus');
 const { authenticateAdmin } = require('../middleware/auth');
 const { getUserInfo, saveUserInfoFromDigilocker, saveAddressFromDigilocker, saveUserInfoFromBankAPI } = require('../services/userInfoService');
 
@@ -75,7 +76,7 @@ router.get('/:userId', authenticateAdmin, async (req, res) => {
  * POST /api/user-info
  * Create or update user info manually (input source)
  */
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;
@@ -146,7 +147,7 @@ router.post('/', requireAuth, async (req, res) => {
  * PUT /api/user-info/:id
  * Update a specific user info record
  */
-router.put('/:id', requireAuth, async (req, res) => {
+router.put('/:id', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;
@@ -206,7 +207,7 @@ router.put('/:id', requireAuth, async (req, res) => {
  * DELETE /api/user-info/:id
  * Delete a specific user info record
  */
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;

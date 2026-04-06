@@ -566,8 +566,8 @@ const saveResidenceAddress = async (req, res) => {
   }
 };
 
-router.post('/addresses/residence', requireAuth, saveResidenceAddress);
-router.post('/residence-address', requireAuth, saveResidenceAddress); // Backward compatibility
+router.post('/addresses/residence', requireAuth, checkHoldStatus, saveResidenceAddress);
+router.post('/residence-address', requireAuth, checkHoldStatus, saveResidenceAddress); // Backward compatibility
 
 // ============================================================================
 // LOAN PLAN ROUTES
@@ -623,8 +623,8 @@ const updateSelectedLoanPlan = async (req, res) => {
   }
 };
 
-router.put('/loan-plan', requireAuth, updateSelectedLoanPlan);
-router.put('/selected-loan-plan', requireAuth, updateSelectedLoanPlan); // Backward compatibility
+router.put('/loan-plan', requireAuth, checkHoldStatus, updateSelectedLoanPlan);
+router.put('/selected-loan-plan', requireAuth, checkHoldStatus, updateSelectedLoanPlan); // Backward compatibility
 
 /**
  * @route   GET /api/user/loan-plan
@@ -704,14 +704,14 @@ router.get('/selected-loan-plan', requireAuth, getSelectedLoanPlan); // Backward
  * @desc    Update graduation status for students (Upsell feature)
  * @access  Private
  */
-router.put('/graduation-status', requireAuth, updateGraduationStatus);
+router.put('/graduation-status', requireAuth, checkHoldStatus, updateGraduationStatus);
 
 /**
  * @route   POST /api/user/additional-information
  * @desc    Save marital status, spoken language, and work experience
  * @access  Private
  */
-router.post('/additional-information', requireAuth, async (req, res) => {
+router.post('/additional-information', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;

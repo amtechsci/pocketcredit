@@ -1,11 +1,12 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/jwtAuth');
+const { checkHoldStatus } = require('../middleware/checkHoldStatus');
 const { executeQuery, initializeDatabase } = require('../config/database');
 
 const router = express.Router();
 
 // POST /api/employment-details - Save employment details
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     const userId = req.userId; // JWT middleware provides this
 
@@ -278,7 +279,7 @@ router.get('/status', requireAuth, async (req, res) => {
  * POST /api/employment-details/details
  * Submit detailed employment information (user-specific, one-time step)
  */
-router.post('/details', requireAuth, async (req, res) => {
+router.post('/details', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;

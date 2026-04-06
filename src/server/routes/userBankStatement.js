@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
+const { checkHoldStatus } = require('../middleware/checkHoldStatus');
 const { authenticateAdmin } = require('../middleware/auth');
 const { uploadToS3, getPresignedUrl } = require('../services/s3Service');
 const {
@@ -264,7 +265,7 @@ const upload = multer({
  * POST /api/user/initiate-bank-statement
  * Initiate bank statement collection for user profile (one-time)
  */
-router.post('/initiate-bank-statement', requireAuth, async (req, res) => {
+router.post('/initiate-bank-statement', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;
@@ -472,7 +473,7 @@ router.post('/initiate-bank-statement', requireAuth, async (req, res) => {
  * REFACTORED: User-only upload - no Digitap API calls
  * Verification is now admin-triggered only
  */
-router.post('/upload-bank-statement', requireAuth, upload.single('statement'), async (req, res) => {
+router.post('/upload-bank-statement', requireAuth, checkHoldStatus, upload.single('statement'), async (req, res) => {
   try {
     await initializeDatabase();
     const userId = req.userId;

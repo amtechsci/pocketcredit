@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const { requireAuth } = require('../middleware/jwtAuth');
+const { checkHoldStatus } = require('../middleware/checkHoldStatus');
 const { initializeDatabase, executeQuery } = require('../config/database');
 const {
   initiateClickWrap,
@@ -30,7 +31,7 @@ router.post('/initiate/debug', (req, res) => {
  * POST /api/clickwrap/initiate
  * Initiate ClickWrap transaction and get upload URL
  */
-router.post('/initiate', requireAuth, async (req, res) => {
+router.post('/initiate', requireAuth, checkHoldStatus, async (req, res) => {
   try {
     console.log('✅ ClickWrap initiate route reached, userId:', req.userId);
     await initializeDatabase();
