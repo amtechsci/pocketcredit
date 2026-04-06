@@ -23,21 +23,21 @@ const router = express.Router();
  * @desc    Update basic profile details (Step 2)
  * @access  Private
  */
-router.put('/profile/basic', requireAuth, checkHoldStatus, updateBasicProfile);
+router.put('/profile/basic', requireAuth, updateBasicProfile);
 
 /**
  * @route   PUT /api/user/profile/additional
  * @desc    Update additional profile details (Step 3)
  * @access  Private
  */
-router.put('/profile/additional', requireAuth, checkHoldStatus, updateAdditionalProfile);
+router.put('/profile/additional', requireAuth, updateAdditionalProfile);
 
 /**
  * @route   PUT /api/user/profile/student
  * @desc    Update student profile details (Step 3 for students)
  * @access  Private
  */
-router.put('/profile/student', requireAuth, checkHoldStatus, updateStudentProfile);
+router.put('/profile/student', requireAuth, updateStudentProfile);
 
 /**
  * @route   GET /api/user/profile/status
@@ -51,7 +51,7 @@ router.get('/profile/status', requireAuth, getProfileStatus);
  * @desc    Update additional details (email, marital status, salary date)
  * @access  Private
  */
-router.put('/profile/additional-details', requireAuth, checkHoldStatus, updateAdditionalDetails);
+router.put('/profile/additional-details', requireAuth, updateAdditionalDetails);
 
 // ============================================================================
 // ADDRESS ROUTES

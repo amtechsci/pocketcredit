@@ -262,20 +262,6 @@ const updateBasicProfile = async (req, res) => {
       profile_completed: profileCompleted
     };
 
-    // Add temporary hold for all NEW users after completing basic details
-    // Only apply if they haven't completed Step 2 yet
-    if (currentStep < 2) {
-      const holdUntil = new Date();
-      holdUntil.setHours(holdUntil.getHours() + 72); // 72 hour verification hold (increased from 24h)
-      
-      updateData.status = 'on_hold';
-      updateData.application_hold_reason = 'New account safety check: Your profile is under temporary review. You will be able to proceed in 72 hours.';
-      updateData.hold_until_date = holdUntil;
-      
-      message = 'Basic details saved! Your profile is now under a temporary 72-hour verification hold for security purposes.';
-      console.log(`🔒 Applying temporary 72-hour hold for new user #${userId}`);
-    }
-
     // Update user profile
     const updatedUser = await updateProfileById(userId, updateData);
 
