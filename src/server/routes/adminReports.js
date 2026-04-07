@@ -1355,12 +1355,15 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 }
                 // Overdue EMI: payment.js adds penalty on top of the base emi_amount stored in emi_schedule.
                 // Use emi_schedule[emiNum-1].emi_amount as the exact base (principal+interest+fees, no penalty).
-                // residual = repayment_amt - emi_amount = the actual penalty+GST charged by payment.js.
-                // Only attribute residual to penalty when the loan has a recorded penalty AND was paid late.
+                // payment.js also charges dpd_interest_on_total_principal (loanCalc formula:
+                //   principal * rate * max(1, daysBetween(due,payment)-1)), but this is NOT written back
+                // to emi_schedule — compute it here using the same formula so the residual equals
+                // only the penalty+GST component.
                 if (bd) {
                     const hasActualPenalty = parseFloat(row.penality_charge) > 0;
                     let emiPaidLate = false;
                     let emiBaseFromSchedule = null;
+                    let emiDueDateStr = null;
 
                     if (row.emi_schedule) {
                         try {
@@ -1369,18 +1372,26 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                                 : row.emi_schedule;
                             if (Array.isArray(sched) && sched[emiNum - 1]) {
                                 const emiEntry = sched[emiNum - 1];
-                                // Check if this EMI was paid after its scheduled due date
                                 if (emiEntry.due_date && row.transaction_date) {
-                                    emiPaidLate = new Date(row.transaction_date) > new Date(emiEntry.due_date);
+                                    emiDueDateStr = String(emiEntry.due_date).slice(0, 10);
+                                    const txDateStr = String(row.transaction_date).slice(0, 10);
+                                    emiPaidLate = txDateStr > emiDueDateStr;
                                 }
-                                // emi_amount = base scheduled payment without penalty (set at loan creation).
-                                // payment.js also adds dpd_interest_on_total_principal (overdue interest)
-                                // on top of emi_amount before adding the penalty, so include it in the base.
                                 const base = parseFloat(emiEntry.emi_amount || 0);
-                                const dpdInterest = parseFloat(
+                                // Use stored dpd_interest if available; otherwise compute it using
+                                // the same formula as loanCalculations.js (only when actually late).
+                                let dpdInterest = parseFloat(
                                     emiEntry.dpd_interest_on_total_principal ||
                                     emiEntry.dpd_interest || 0
                                 ) || 0;
+                                if (dpdInterest === 0 && emiPaidLate && emiDueDateStr && row.transaction_date) {
+                                    const txDateStr2 = String(row.transaction_date).slice(0, 10);
+                                    const rawDays = calculateDaysBetween(emiDueDateStr, txDateStr2);
+                                    const dpdDays = Math.max(1, rawDays - 1);
+                                    const loanAmt = parseFloat(row.principal_amount || 0);
+                                    const dailyRate = clampDailyInterestRateForBsReport(row.interest_percent_per_day);
+                                    dpdInterest = toDecimal2(loanAmt * dailyRate * dpdDays);
+                                }
                                 if (base > 0) emiBaseFromSchedule = base + dpdInterest;
                             }
                         } catch (e) { /* ignore parse errors */ }
