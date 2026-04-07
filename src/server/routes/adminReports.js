@@ -828,7 +828,10 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 la.total_repayable, la.disbursed_at, la.processed_at,
                 la.closed_date,
                 la.updated_at as cleared_at, la.exhausted_period_days,
-                la.processed_penalty, la.status, la.plan_snapshot,
+                la.processed_penalty, la.status, la.plan_snapshot, la.emi_schedule,
+                (SELECT po_e1.updated_at FROM payment_orders po_e1
+                 WHERE po_e1.loan_id = la.id AND po_e1.payment_type = 'emi_1st' AND po_e1.status = 'PAID'
+                 ORDER BY po_e1.updated_at DESC LIMIT 1) as emi1_payment_date,
                 ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 ${CIBIL_CITY_SUBQUERY} as city,
@@ -838,17 +841,41 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 ${CIBIL_COUNTRY_SUBQUERY} as country
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
-            WHERE la.status = 'cleared'
-            AND NOT EXISTS (
-                SELECT 1 FROM payment_orders po 
-                WHERE po.loan_id = la.id 
-                AND po.payment_type = 'settlement' AND po.status = 'PAID'
+            WHERE (
+                (
+                    la.status = 'cleared'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM payment_orders po 
+                        WHERE po.loan_id = la.id 
+                        AND po.payment_type = 'settlement' AND po.status = 'PAID'
+                    )
+                )
+                OR
+                (
+                    la.status = 'account_manager'
+                    AND EXISTS (
+                        SELECT 1 FROM payment_orders po 
+                        WHERE po.loan_id = la.id 
+                        AND po.payment_type = 'emi_1st' AND po.status = 'PAID'
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM payment_orders po 
+                        WHERE po.loan_id = la.id 
+                        AND po.payment_type = 'settlement' AND po.status = 'PAID'
+                    )
+                )
             )
         `;
 
         const params = [];
         if (from_date && to_date) {
-            sql += ` AND DATE(COALESCE(la.closed_date, la.updated_at)) BETWEEN ? AND ?`;
+            sql += ` AND DATE(COALESCE(
+                la.closed_date,
+                (SELECT po_e1.updated_at FROM payment_orders po_e1
+                 WHERE po_e1.loan_id = la.id AND po_e1.payment_type = 'emi_1st' AND po_e1.status = 'PAID'
+                 ORDER BY po_e1.updated_at DESC LIMIT 1),
+                la.updated_at
+            )) BETWEEN ? AND ?`;
             params.push(from_date, to_date);
         }
         sql += ` ORDER BY COALESCE(la.closed_date, la.updated_at) DESC`;
@@ -861,15 +888,31 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
             const gender = getGenderCode(loan.gender);
             const stateCode = formatStateCodeForCibil(loan);
             const dateOpened = formatDateDDMMYYYY(loan.disbursed_at || loan.processed_at);
-            // Use closed_date (actual last payment/closure date); fallback to updated_at for legacy rows
-            const dateLastPayment = formatDateDDMMYYYY(loan.closed_date || loan.cleared_at);
-            const dateCleared = formatDateDDMMYYYY(loan.closed_date || loan.cleared_at);
+            const isFullyCleared = loan.status === 'cleared';
+            // Fully cleared: use closed_date; EMI-1-paid active loan: use emi1_payment_date
+            const effectivePaymentDate = isFullyCleared
+                ? (loan.closed_date || loan.cleared_at)
+                : loan.emi1_payment_date;
+            const dateLastPayment = formatDateDDMMYYYY(effectivePaymentDate);
+            const dateCleared = isFullyCleared ? formatDateDDMMYYYY(effectivePaymentDate) : '';
             const now = new Date();
             const dateReported = formatDateDDMMYYYY(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
 
             const loanAmount = parseFloat(loan.loan_amount) || 0;
             let processingFee = parseFloat(loan.processing_fee) || 0;
             let gst = processingFee * 0.18;
+
+            // Current Balance: 0 for fully cleared loans; second EMI amount for EMI-1-paid active loans
+            let currentBalance = 0;
+            if (!isFullyCleared && loan.emi_schedule) {
+                try {
+                    const schedule = typeof loan.emi_schedule === 'string' ? JSON.parse(loan.emi_schedule) : loan.emi_schedule;
+                    const arr = Array.isArray(schedule) ? schedule : [];
+                    const emi2 = arr[1] && (arr[1].emi_amount != null ? arr[1].emi_amount : arr[1].amount);
+                    const emi2Val = parseFloat(emi2) || 0;
+                    if (emi2Val > 0) currentBalance = Math.round(emi2Val);
+                } catch (e) { }
+            }
 
             let loanDays = 30;
             if (loan.plan_snapshot) {
@@ -891,7 +934,7 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 '', '', '', '', '',
                 'NB86590001', 'SPHEETIFINTECH', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, dateLastPayment, dateCleared, dateReported,
-                Math.round(loanAmount), 0, '', '',
+                Math.round(loanAmount), currentBalance, '', '',
                 '', '', '', '', '', '',
                 '', assetClass, '', '', '', '',
                 '', '', '', '', '',
