@@ -1373,9 +1373,15 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                             if (Array.isArray(sched) && sched[emiNum - 1]) {
                                 const emiEntry = sched[emiNum - 1];
                                 if (emiEntry.due_date && row.transaction_date) {
-                                    emiDueDateStr = String(emiEntry.due_date).slice(0, 10);
-                                    const txDateStr = String(row.transaction_date).slice(0, 10);
-                                    emiPaidLate = txDateStr > emiDueDateStr;
+                                    // parseDateToString handles both Date objects (mysql2 driver returns
+                                    // Date objects for DATETIME columns) and YYYY-MM-DD strings safely.
+                                    // String(dateObj).slice(0,10) would produce "Mon Apr 07" which breaks
+                                    // both the > comparison and calculateDaysBetween's YYYY-MM-DD parser.
+                                    emiDueDateStr = parseDateToString(emiEntry.due_date);
+                                    const txDateStr = parseDateToString(row.transaction_date);
+                                    if (emiDueDateStr && txDateStr) {
+                                        emiPaidLate = txDateStr > emiDueDateStr;
+                                    }
                                 }
                                 const base = parseFloat(emiEntry.emi_amount || 0);
                                 // Use stored dpd_interest if available; otherwise compute it using
@@ -1385,12 +1391,14 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                                     emiEntry.dpd_interest || 0
                                 ) || 0;
                                 if (dpdInterest === 0 && emiPaidLate && emiDueDateStr && row.transaction_date) {
-                                    const txDateStr2 = String(row.transaction_date).slice(0, 10);
-                                    const rawDays = calculateDaysBetween(emiDueDateStr, txDateStr2);
-                                    const dpdDays = Math.max(1, rawDays - 1);
-                                    const loanAmt = parseFloat(row.principal_amount || 0);
-                                    const dailyRate = clampDailyInterestRateForBsReport(row.interest_percent_per_day);
-                                    dpdInterest = toDecimal2(loanAmt * dailyRate * dpdDays);
+                                    const txDateStr2 = parseDateToString(row.transaction_date);
+                                    if (txDateStr2) {
+                                        const rawDays = calculateDaysBetween(emiDueDateStr, txDateStr2);
+                                        const dpdDays = Math.max(1, rawDays - 1);
+                                        const loanAmt = parseFloat(row.principal_amount || 0);
+                                        const dailyRate = clampDailyInterestRateForBsReport(row.interest_percent_per_day);
+                                        dpdInterest = toDecimal2(loanAmt * dailyRate * dpdDays);
+                                    }
                                 }
                                 if (base > 0) emiBaseFromSchedule = base + dpdInterest;
                             }
