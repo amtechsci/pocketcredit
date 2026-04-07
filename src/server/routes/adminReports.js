@@ -772,10 +772,9 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
                 try {
                     const schedule = typeof loan.emi_schedule === 'string' ? JSON.parse(loan.emi_schedule) : loan.emi_schedule;
                     const arr = Array.isArray(schedule) ? schedule : [];
-                    const emi1 = arr[0] && (arr[0].emi_amount != null ? arr[0].emi_amount : arr[0].amount);
                     const emi2 = arr[1] && (arr[1].emi_amount != null ? arr[1].emi_amount : arr[1].amount);
-                    const sum = (parseFloat(emi1) || 0) + (parseFloat(emi2) || 0);
-                    if (sum > 0) currentBalance = Math.round(sum);
+                    const emi2Val = parseFloat(emi2) || 0;
+                    if (emi2Val > 0) currentBalance = Math.round(emi2Val);
                 } catch (e) { }
             }
 

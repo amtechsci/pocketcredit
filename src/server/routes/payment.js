@@ -1653,9 +1653,9 @@ router.post('/webhook', async (req, res) => {
                         if (loanDetails.length > 0) {
                             const loan = loanDetails[0];
                             
-                            // Only check for cleared status if loan is in account_manager status
+                            // Check for cleared status if loan is in an active repayment status
                             // (Skip if already cleared by order-status check)
-                            if (loan.status === 'account_manager') {
+                            if (['account_manager', 'overdue', 'default', 'delinquent'].includes(loan.status)) {
                                 let shouldClearLoan = false;
                                 
                                 // Pre-close or full_payment: Immediately clear the loan
@@ -2156,8 +2156,8 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                     if (loanDetails.length > 0) {
                                         const loan = loanDetails[0];
                                         
-                                        // Only process if not already cleared (double-check)
-                                        if (loan.status === 'account_manager') {
+                                        // Process if loan is in an active repayment status (not already cleared)
+                                        if (['account_manager', 'overdue', 'default', 'delinquent'].includes(loan.status)) {
                                             let shouldClearLoan = false;
                                             
                                             // Pre-close or full_payment: Immediately clear the loan
