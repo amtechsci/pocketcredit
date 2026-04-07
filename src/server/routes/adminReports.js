@@ -1354,6 +1354,8 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                     post_service_fee_gst = toDecimal2(bd.postGst);
                 }
                 // Overdue EMI: payment.js adds penalty to instalment_amount; split residual ex-GST + GST (18%).
+                // Only attribute residual to penalty when the loan actually has a recorded penalty
+                // AND this specific EMI was paid after its due date — otherwise it's just a rounding artifact.
                 if (bd) {
                     const principalEmi = getEmiPrincipalPortionForBs(row, emiNum);
                     if (principalEmi != null) {
@@ -1364,7 +1366,22 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                                 post_service_fee_ex_gst -
                                 post_service_fee_gst
                         );
-                        if (residualAfter > 0.02) {
+                        const hasActualPenalty = parseFloat(row.penality_charge) > 0;
+                        let emiPaidLate = false;
+                        if (hasActualPenalty && row.emi_schedule) {
+                            try {
+                                const sched = typeof row.emi_schedule === 'string'
+                                    ? JSON.parse(row.emi_schedule)
+                                    : row.emi_schedule;
+                                if (Array.isArray(sched) && sched[emiNum - 1]) {
+                                    const dueDateStr = sched[emiNum - 1].due_date;
+                                    if (dueDateStr && row.transaction_date) {
+                                        emiPaidLate = new Date(row.transaction_date) > new Date(dueDateStr);
+                                    }
+                                }
+                            } catch (e) { /* ignore parse errors */ }
+                        }
+                        if (residualAfter > 0.02 && hasActualPenalty && emiPaidLate) {
                             penalty = toDecimal2(residualAfter / GST_FACTOR);
                             gst_on_penalty = toDecimal2(penalty * GST_RATE);
                         }
