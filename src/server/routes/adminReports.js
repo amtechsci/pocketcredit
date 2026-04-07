@@ -1353,35 +1353,52 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                     post_service_fee_ex_gst = toDecimal2(bd.postFee);
                     post_service_fee_gst = toDecimal2(bd.postGst);
                 }
-                // Overdue EMI: payment.js adds penalty to instalment_amount; split residual ex-GST + GST (18%).
-                // Only attribute residual to penalty when the loan actually has a recorded penalty
-                // AND this specific EMI was paid after its due date — otherwise it's just a rounding artifact.
+                // Overdue EMI: payment.js adds penalty on top of the base emi_amount stored in emi_schedule.
+                // Use emi_schedule[emiNum-1].emi_amount as the exact base (principal+interest+fees, no penalty).
+                // residual = repayment_amt - emi_amount = the actual penalty+GST charged by payment.js.
+                // Only attribute residual to penalty when the loan has a recorded penalty AND was paid late.
                 if (bd) {
-                    const principalEmi = getEmiPrincipalPortionForBs(row, emiNum);
-                    if (principalEmi != null) {
-                        const residualAfter = toDecimal2(
-                            repayment_amt -
-                                principalEmi -
-                                interest_collected -
-                                post_service_fee_ex_gst -
-                                post_service_fee_gst
-                        );
-                        const hasActualPenalty = parseFloat(row.penality_charge) > 0;
-                        let emiPaidLate = false;
-                        if (hasActualPenalty && row.emi_schedule) {
-                            try {
-                                const sched = typeof row.emi_schedule === 'string'
-                                    ? JSON.parse(row.emi_schedule)
-                                    : row.emi_schedule;
-                                if (Array.isArray(sched) && sched[emiNum - 1]) {
-                                    const dueDateStr = sched[emiNum - 1].due_date;
-                                    if (dueDateStr && row.transaction_date) {
-                                        emiPaidLate = new Date(row.transaction_date) > new Date(dueDateStr);
-                                    }
+                    const hasActualPenalty = parseFloat(row.penality_charge) > 0;
+                    let emiPaidLate = false;
+                    let emiBaseFromSchedule = null;
+
+                    if (row.emi_schedule) {
+                        try {
+                            const sched = typeof row.emi_schedule === 'string'
+                                ? JSON.parse(row.emi_schedule)
+                                : row.emi_schedule;
+                            if (Array.isArray(sched) && sched[emiNum - 1]) {
+                                const emiEntry = sched[emiNum - 1];
+                                // Check if this EMI was paid after its scheduled due date
+                                if (emiEntry.due_date && row.transaction_date) {
+                                    emiPaidLate = new Date(row.transaction_date) > new Date(emiEntry.due_date);
                                 }
-                            } catch (e) { /* ignore parse errors */ }
+                                // emi_amount = base scheduled payment without penalty (set at loan creation)
+                                const base = parseFloat(emiEntry.emi_amount || 0);
+                                if (base > 0) emiBaseFromSchedule = base;
+                            }
+                        } catch (e) { /* ignore parse errors */ }
+                    }
+
+                    if (hasActualPenalty && emiPaidLate) {
+                        let residualAfter = null;
+                        if (emiBaseFromSchedule != null) {
+                            // Primary: use stored base EMI amount — exactly what payment.js charged without penalty
+                            residualAfter = toDecimal2(repayment_amt - emiBaseFromSchedule);
+                        } else {
+                            // Fallback: reconstruct from formula when emi_schedule base is unavailable
+                            const principalEmi = getEmiPrincipalPortionForBs(row, emiNum);
+                            if (principalEmi != null) {
+                                residualAfter = toDecimal2(
+                                    repayment_amt -
+                                        principalEmi -
+                                        interest_collected -
+                                        post_service_fee_ex_gst -
+                                        post_service_fee_gst
+                                );
+                            }
                         }
-                        if (residualAfter > 0.02 && hasActualPenalty && emiPaidLate) {
+                        if (residualAfter != null && residualAfter > 0.02) {
                             penalty = toDecimal2(residualAfter / GST_FACTOR);
                             gst_on_penalty = toDecimal2(penalty * GST_RATE);
                         }
