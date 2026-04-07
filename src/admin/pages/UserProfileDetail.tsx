@@ -6924,12 +6924,13 @@ function UserProfileDetail() {
                               : loan.emi_schedule;
 
                             // Use raw emi_schedule data exactly as stored
-                            // Structure: emi_number, due_date, emi_amount, status
+                            // Structure: emi_number, due_date, emi_amount, status, paid_amount (if penalty was charged)
                             emiSchedule = Array.isArray(parsedSchedule) ? parsedSchedule.map((emi: any) => ({
                               emi_number: emi.emi_number || emi.instalment_no,
                               due_date: emi.due_date || emi.date,
                               emi_amount: emi.emi_amount || 0,
-                              status: emi.status || 'pending'
+                              status: emi.status || 'pending',
+                              paid_amount: emi.paid_amount ?? null
                             })) : [];
                           } catch (e) {
                             console.error('Error parsing loan.emi_schedule:', e);
@@ -6942,8 +6943,14 @@ function UserProfileDetail() {
                             // Fetch calculated schedule from loan calculations API (includes penalty)
                             const calcResponse = await adminApiService.getLoanCalculation(loan.id);
                             if (calcResponse.success && calcResponse.data?.repayment?.schedule) {
-                              // Use calculated schedule with penalty
-                              setSelectedLoanEmiSchedule(calcResponse.data.repayment.schedule);
+                              // Use calculated schedule with penalty; merge paid_amount from stored
+                              // emi_schedule so paid EMIs can show what was actually charged.
+                              const calcSchedule = calcResponse.data.repayment.schedule;
+                              const mergedSchedule = calcSchedule.map((item: any, idx: number) => ({
+                                ...item,
+                                paid_amount: emiSchedule[idx]?.paid_amount ?? item.paid_amount ?? null
+                              }));
+                              setSelectedLoanEmiSchedule(mergedSchedule);
                             } else {
                               // Fallback to stored emi_schedule if calculation fails
                               setSelectedLoanEmiSchedule(emiSchedule);
@@ -12033,12 +12040,29 @@ function UserProfileDetail() {
                       // Get data from calculated schedule (includes penalty) or stored emi_schedule
                       const emiNumber = emi.emi_number || emi.instalment_no || (index + 1);
                       const emiDate = emi.due_date || 'N/A';
-                      // Use instalment_amount if available (includes penalty), otherwise use emi_amount
-                      const emiAmount = parseFloat(emi.instalment_amount || emi.emi_amount || 0);
+                      // Base scheduled amount (no penalty); instalment_amount from calc API strips penalty for paid EMIs
+                      const baseEmiAmount = parseFloat(emi.emi_amount || emi.instalment_amount || 0);
                       const emiStatus = emi.status || 'pending';
                       const isPaid = emiStatus === 'paid' || emiStatus === 'completed';
 
-                      // Check if EMI is overdue and has penalty (only if not paid)
+                      // For paid EMIs, use paid_amount (actual charge incl. penalty) if stored,
+                      // otherwise fall back to instalment_amount/emi_amount.
+                      const paidAmount = isPaid ? (parseFloat(emi.paid_amount || 0) || 0) : 0;
+                      const emiAmount = isPaid && paidAmount > 0 ? paidAmount : parseFloat(emi.instalment_amount || emi.emi_amount || 0);
+
+                      // Penalty for PAID EMIs: derive from paid_amount - base (calc API strips penalty for paid)
+                      const paidPenaltyTotal = isPaid && paidAmount > baseEmiAmount
+                        ? parseFloat((paidAmount - baseEmiAmount).toFixed(2))
+                        : 0;
+                      const paidPenaltyBase = paidPenaltyTotal > 0.02
+                        ? parseFloat((paidPenaltyTotal / 1.18).toFixed(2))
+                        : 0;
+                      const paidPenaltyGst = paidPenaltyBase > 0
+                        ? parseFloat((paidPenaltyBase * 0.18).toFixed(2))
+                        : 0;
+                      const hasPaidPenalty = paidPenaltyTotal > 0.02;
+
+                      // Check if EMI is overdue and has penalty (unpaid EMIs)
                       const today = new Date();
                       today.setHours(0, 0, 0, 0);
                       const dueDate = emiDate !== 'N/A' ? new Date(emiDate) : null;
@@ -12046,9 +12070,10 @@ function UserProfileDetail() {
                       const hasPenalty = !isPaid && (emi.penalty_total > 0 || emi.penalty_base > 0);
                       const dpdInterestOnTotalPrincipal = parseFloat(emi.dpd_interest_on_total_principal || emi.dpd_interest || 0) || 0;
                       const hasDpdInterest = !isPaid && dpdInterestOnTotalPrincipal > 0;
-                      const showEmiBreakdown = hasPenalty || hasDpdInterest;
-                      const baseEmiBeforePenDpd =
-                        emiAmount - (emi.penalty_total || 0) - dpdInterestOnTotalPrincipal;
+                      const showEmiBreakdown = hasPenalty || hasDpdInterest || hasPaidPenalty;
+                      const baseEmiBeforePenDpd = hasPaidPenalty
+                        ? baseEmiAmount
+                        : emiAmount - (emi.penalty_total || 0) - dpdInterestOnTotalPrincipal;
 
                       return (
                         <tr key={index} className={`hover:bg-gray-50 ${isPaid ? 'bg-green-50' : isOverdue ? 'bg-red-50' : ''}`}>
@@ -12074,6 +12099,13 @@ function UserProfileDetail() {
                                     <div>Penalty: ₹{(emi.penalty_base || 0).toFixed(2)}</div>
                                     <div>GST: ₹{(emi.penalty_gst || 0).toFixed(2)}</div>
                                     <div className="font-semibold">Total Penalty: ₹{(emi.penalty_total || 0).toFixed(2)}</div>
+                                  </div>
+                                ) : null}
+                                {hasPaidPenalty ? (
+                                  <div className="text-xs text-red-600 mt-1">
+                                    <div>Penalty (paid): ₹{paidPenaltyBase.toFixed(2)}</div>
+                                    <div>GST on penalty: ₹{paidPenaltyGst.toFixed(2)}</div>
+                                    <div className="font-semibold">Total Penalty: ₹{paidPenaltyTotal.toFixed(2)}</div>
                                   </div>
                                 ) : null}
                                 <div className="text-sm font-semibold text-gray-900 mt-1">

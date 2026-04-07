@@ -1702,7 +1702,8 @@ router.post('/webhook', async (req, res) => {
                                                 emiScheduleArray[emiIndex] = {
                                                     ...emiScheduleArray[emiIndex],
                                                     status: 'paid',
-                                                    paid_date: new Date().toISOString().split('T')[0] // Set paid date to today
+                                                    paid_date: new Date().toISOString().split('T')[0],
+                                                    paid_amount: parseFloat(paymentOrder.amount) || null
                                                 };
                                                 
                                                 // Update emi_schedule in database
@@ -2203,7 +2204,8 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                                             emiScheduleArray[emiIndex] = {
                                                                 ...emiScheduleArray[emiIndex],
                                                                 status: 'paid',
-                                                                paid_date: new Date().toISOString().split('T')[0] // Set paid date to today
+                                                                paid_date: new Date().toISOString().split('T')[0],
+                                                                paid_amount: parseFloat(paymentOrder.amount) || null
                                                             };
                                                             
                                                             // Update emi_schedule in database
