@@ -1373,9 +1373,15 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                                 if (emiEntry.due_date && row.transaction_date) {
                                     emiPaidLate = new Date(row.transaction_date) > new Date(emiEntry.due_date);
                                 }
-                                // emi_amount = base scheduled payment without penalty (set at loan creation)
+                                // emi_amount = base scheduled payment without penalty (set at loan creation).
+                                // payment.js also adds dpd_interest_on_total_principal (overdue interest)
+                                // on top of emi_amount before adding the penalty, so include it in the base.
                                 const base = parseFloat(emiEntry.emi_amount || 0);
-                                if (base > 0) emiBaseFromSchedule = base;
+                                const dpdInterest = parseFloat(
+                                    emiEntry.dpd_interest_on_total_principal ||
+                                    emiEntry.dpd_interest || 0
+                                ) || 0;
+                                if (base > 0) emiBaseFromSchedule = base + dpdInterest;
                             }
                         } catch (e) { /* ignore parse errors */ }
                     }
