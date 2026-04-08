@@ -827,7 +827,7 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 la.processed_penalty, la.status, la.plan_snapshot, la.emi_schedule,
                 (SELECT po_e1.updated_at FROM payment_orders po_e1
                  WHERE po_e1.loan_id = la.id AND po_e1.payment_type = 'emi_1st' AND po_e1.status = 'PAID'
-                 ORDER BY po_e1.updated_at DESC LIMIT 1) as emi1_payment_date,
+                 ORDER BY po_e1.updated_at ASC LIMIT 1) as emi1_payment_date,
                 ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 ${CIBIL_CITY_SUBQUERY} as city,
@@ -865,13 +865,24 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
 
         const params = [];
         if (from_date && to_date) {
-            sql += ` AND DATE(COALESCE(
-                la.closed_date,
-                (SELECT po_e1.updated_at FROM payment_orders po_e1
-                 WHERE po_e1.loan_id = la.id AND po_e1.payment_type = 'emi_1st' AND po_e1.status = 'PAID'
-                 ORDER BY po_e1.updated_at DESC LIMIT 1),
-                la.updated_at
-            )) BETWEEN ? AND ?`;
+            // account_manager + EMI1: range must follow first EMI paid date, not closed_date (often stale/wrong).
+            // cleared: use closure date, then first EMI, then loan touch time.
+            sql += ` AND DATE(
+                CASE
+                    WHEN la.status = 'account_manager' THEN (
+                        SELECT po_e1.updated_at FROM payment_orders po_e1
+                        WHERE po_e1.loan_id = la.id AND po_e1.payment_type = 'emi_1st' AND po_e1.status = 'PAID'
+                        ORDER BY po_e1.updated_at ASC LIMIT 1
+                    )
+                    ELSE COALESCE(
+                        la.closed_date,
+                        (SELECT po_e1.updated_at FROM payment_orders po_e1
+                         WHERE po_e1.loan_id = la.id AND po_e1.payment_type = 'emi_1st' AND po_e1.status = 'PAID'
+                         ORDER BY po_e1.updated_at ASC LIMIT 1),
+                        la.updated_at
+                    )
+                END
+            ) BETWEEN ? AND ?`;
             params.push(from_date, to_date);
         }
         sql += ` ORDER BY COALESCE(la.closed_date, la.updated_at) DESC`;
