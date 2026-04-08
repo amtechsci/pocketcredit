@@ -259,6 +259,36 @@ const computeCibilDefaultBalanceAndOverdue = (loan) => {
     return Math.ceil(totalAmount + serviceCharge + penaltyCharge);
 };
 
+/** Max DPD across unpaid EMIs whose due date is before today (0 if none). Catches delinquency when processed_due_date is stale. */
+const calculateDPDFromEmiSchedule = (loan) => {
+    let schedule = [];
+    try {
+        const raw = loan.emi_schedule;
+        if (raw) {
+            schedule = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            if (!Array.isArray(schedule)) schedule = [];
+        }
+    } catch (e) {
+        return 0;
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let maxDpd = 0;
+    for (const emi of schedule) {
+        const s = String(emi.status || '').toLowerCase();
+        if (s === 'paid' || s === 'completed') continue;
+        const ds = emi.due_date || emi.date;
+        if (!ds) continue;
+        const due = new Date(ds);
+        if (isNaN(due.getTime())) continue;
+        due.setHours(0, 0, 0, 0);
+        if (today.getTime() <= due.getTime()) continue;
+        const diffDays = Math.ceil((today - due) / (1000 * 60 * 60 * 24));
+        if (diffDays > maxDpd) maxDpd = diffDays;
+    }
+    return maxDpd;
+};
+
 const getAssetClassification = (dpd) => {
     if (dpd < 90) return '01';
     if (dpd >= 90 && dpd < 180) return '02';
@@ -1157,7 +1187,8 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
 
 /**
  * GET /api/admin/reports/cibil/default
- * Generate CIBIL Default Report CSV - loans with DPD > 0
+ * Generate CIBIL Default Report CSV - active delinquent loans with DPD > 0.
+ * Includes overdue/default/delinquent (cron moves account_manager → overdue after DPD > 5).
  */
 router.get('/cibil/default', authenticateAdmin, async (req, res) => {
     try {
@@ -1184,7 +1215,7 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
                 ${CIBIL_COUNTRY_SUBQUERY} as country
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
-            WHERE la.status = 'account_manager'
+            WHERE la.status IN ('account_manager', 'overdue', 'default', 'delinquent')
             ORDER BY la.processed_at DESC
         `;
 
@@ -1199,8 +1230,9 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
                     loanDays = plan.repayment_days || plan.total_duration_days || 30;
                 } catch (e) { }
             }
-            // Use actual due date (processed_due_date) when available so extended loans are not wrongly included
-            const dpd = calculateDPDForDefault(loan);
+            const dpdFromDue = calculateDPDForDefault(loan);
+            const dpdFromSchedule = calculateDPDFromEmiSchedule(loan);
+            const dpd = Math.max(dpdFromDue, dpdFromSchedule);
             if (dpd > 0) {
                 defaultLoans.push({ ...loan, calculated_dpd: dpd, loan_days: loanDays });
             }
