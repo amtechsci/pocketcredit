@@ -716,7 +716,8 @@ const CIBIL_FORCE_QUOTE_INDICES = [1, 24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35
 /**
  * GET /api/admin/reports/cibil/disbursal
  * Generate CIBIL Disbursal Report CSV
- * Includes all active loans with status = 'account_manager' (disbursed loans)
+ * Every loan whose disbursement date falls in the selected range (cleared or active).
+ * Current Balance is always 0 — disbursal file reports the facility opening, not live outstanding.
  */
 router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
     try {
@@ -743,15 +744,19 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
                 ${CIBIL_COUNTRY_SUBQUERY} as country
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
-            WHERE la.status = 'account_manager'
+            WHERE 1=1
         `;
 
         const params = [];
         if (from_date && to_date) {
-            sql += ` AND DATE(la.disbursed_at) BETWEEN ? AND ?`;
+            sql += ` AND COALESCE(la.disbursed_at, la.processed_at) IS NOT NULL
+                     AND COALESCE(la.disbursal_amount, 0) > 0
+                     AND DATE(COALESCE(la.disbursed_at, la.processed_at)) BETWEEN ? AND ?`;
             params.push(from_date, to_date);
+        } else {
+            sql += ` AND la.status = 'account_manager'`;
         }
-        sql += ` ORDER BY la.disbursed_at DESC`;
+        sql += ` ORDER BY COALESCE(la.disbursed_at, la.processed_at) DESC`;
 
         const loans = await executeQuery(sql, params);
 
@@ -767,16 +772,7 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
             const loanAmount = parseFloat(loan.loan_amount) || 0;
             let processingFee = parseFloat(loan.processing_fee) || 0;
             let gst = processingFee * 0.18;
-            let currentBalance = parseFloat(loan.total_repayable) || 0;
-            if (loan.emi_schedule) {
-                try {
-                    const schedule = typeof loan.emi_schedule === 'string' ? JSON.parse(loan.emi_schedule) : loan.emi_schedule;
-                    const arr = Array.isArray(schedule) ? schedule : [];
-                    const emi2 = arr[1] && (arr[1].emi_amount != null ? arr[1].emi_amount : arr[1].amount);
-                    const emi2Val = parseFloat(emi2) || 0;
-                    if (emi2Val > 0) currentBalance = Math.round(emi2Val);
-                } catch (e) { }
-            }
+            const currentBalance = 0;
 
             return [
                 consumerName, dob, gender, loan.pan_number || '',
@@ -786,7 +782,7 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
                 '', '', '', '', '',
                 'NB86590001', 'SPHEETIFINTECH', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, '', '', dateReported,
-                Math.round(loanAmount), Math.round(currentBalance), '', '',
+                Math.round(loanAmount), currentBalance, '', '',
                 '', '', '', '', '', '',
                 '', '01', '', '', '', '',
                 '', '', '', '', '',
