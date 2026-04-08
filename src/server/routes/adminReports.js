@@ -180,6 +180,85 @@ const calculateDPDForDefault = (loan) => {
     return calculateDPD(loan.processed_at, loanDays);
 };
 
+/**
+ * CIBIL Default: Current Balance & Amt Overdue per product rules (2-EMI schedule):
+ * (1) Only EMI1 past due → EMI1 + EMI2 instalment amounts (+ loan penalty)
+ * (2) EMI1 paid, only EMI2 past due → EMI2 (+ loan penalty)
+ * (3) Both past due → EMI1 + EMI2 (+ loan penalty)
+ * Falls back to full sanction+charges when schedule is missing or single-instalment.
+ */
+const computeCibilDefaultBalanceAndOverdue = (loan) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const startOf = (d) => {
+        const x = new Date(d);
+        x.setHours(0, 0, 0, 0);
+        return x;
+    };
+    let schedule = [];
+    try {
+        const raw = loan.emi_schedule;
+        if (raw) {
+            schedule = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            if (!Array.isArray(schedule)) schedule = [];
+        }
+    } catch (e) {
+        schedule = [];
+    }
+    const penaltyCharge = parseFloat(loan.processed_penalty) || 0;
+    const emiPrincipal = (emi) => parseFloat(emi.emi_amount ?? emi.amount ?? 0) || 0;
+    const isPaidEmi = (emi) => {
+        const s = String(emi.status || '').toLowerCase();
+        return s === 'paid' || s === 'completed';
+    };
+    const dueOf = (emi) => {
+        const ds = emi.due_date || emi.date;
+        if (!ds) return null;
+        const dt = startOf(ds);
+        return isNaN(dt.getTime()) ? null : dt;
+    };
+    /** Strictly after due calendar day (aligned with DPD: due today → not yet overdue). */
+    const crossedDue = (emi) => {
+        if (isPaidEmi(emi)) return false;
+        const d = dueOf(emi);
+        if (!d) return false;
+        return today.getTime() > d.getTime();
+    };
+
+    const e0 = schedule[0];
+    const e1 = schedule[1];
+
+    if (e0 && e1) {
+        const paid0 = isPaidEmi(e0);
+        const paid1 = isPaidEmi(e1);
+        const c0 = crossedDue(e0);
+        const c1 = crossedDue(e1);
+        const a0 = emiPrincipal(e0);
+        const a1 = emiPrincipal(e1);
+        if (c0 && c1) {
+            return Math.ceil(a0 + a1 + penaltyCharge);
+        }
+        if (paid0 && c1) {
+            return Math.ceil(a1 + penaltyCharge);
+        }
+        if (c0 && !c1) {
+            return Math.ceil(a0 + a1 + penaltyCharge);
+        }
+    } else if (e0 && !e1) {
+        const c0 = crossedDue(e0);
+        if (c0) {
+            return Math.ceil(emiPrincipal(e0) + penaltyCharge);
+        }
+    }
+
+    let processingFee = parseFloat(loan.processing_fee) || 0;
+    let gst = processingFee * 0.18;
+    let loanAmount = parseFloat(loan.loan_amount) || 0;
+    let totalAmount = loanAmount + processingFee + gst;
+    let serviceCharge = parseFloat(loan.total_interest) || 0;
+    return Math.ceil(totalAmount + serviceCharge + penaltyCharge);
+};
+
 const getAssetClassification = (dpd) => {
     if (dpd < 90) return '01';
     if (dpd >= 90 && dpd < 180) return '02';
@@ -1095,7 +1174,7 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
                 la.disbursal_amount, la.processing_fee, la.total_interest,
                 la.total_repayable, la.disbursed_at, la.processed_at,
                 la.processed_due_date, la.exhausted_period_days,
-                la.processed_penalty, la.status, la.plan_snapshot,
+                la.processed_penalty, la.status, la.plan_snapshot, la.emi_schedule,
                 ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 ${CIBIL_CITY_SUBQUERY} as city,
@@ -1138,16 +1217,12 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
             const now = new Date();
             const dateReported = formatDateDDMMYYYY(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
 
-            let processingFee = parseFloat(loan.processing_fee) || 0;
-            let gst = processingFee * 0.18;
             let loanAmount = parseFloat(loan.loan_amount) || 0;
-            let totalAmount = loanAmount + processingFee + gst;
-            let serviceCharge = parseFloat(loan.total_interest) || 0;
-            let penaltyCharge = parseFloat(loan.processed_penalty) || 0;
-            let currentBalance = Math.ceil(totalAmount + serviceCharge + penaltyCharge);
+            const currentBalance = computeCibilDefaultBalanceAndOverdue(loan);
+            const amtOverdue = currentBalance;
 
             const dpd = loan.calculated_dpd;
-            const suitFiled = dpd > 60 ? '01' : '';
+            const suitFiled = dpd >= 30 ? '01' : '';
 
             return [
                 consumerName, dob, gender, loan.pan_number || '',
@@ -1157,7 +1232,7 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
                 '', '', '', '', '',
                 'NB86590001', 'SPHEETIFINTECH', 'PLL' + loan.loan_id,
                 '69', '1', dateOpened, '', '', dateReported,
-                Math.round(loanAmount), currentBalance, currentBalance, dpd,
+                Math.round(loanAmount), currentBalance, amtOverdue, dpd,
                 '', '', '', '', '', suitFiled,
                 '', '', '', '', '', '',
                 '', '', '', '', '',
