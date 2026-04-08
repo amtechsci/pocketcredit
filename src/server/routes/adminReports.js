@@ -1279,8 +1279,8 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             'Loan Process Date', 'Exhausted Days',
             'Sanctioned Amount', 'Disbursal Amount', 'Narration Journal', 'Reference No. (or Payout ID)',
             'Mode', 'Status', 'LoanDate', 'Country', 'State', 'Processing fee %', 'Processing Fees Collected',
-            'GST Amount on Processing Fees', 'Post Service Fee (ex GST)', 'GST on Post Service Fee', 'INTEREST (%)', 'LOAN CLOSURE TYPE',
-            'INTEREST COLLECTED', 'PENALTY', 'GST On PENALTY',
+            'GST Amount on Processing Fees', 'Post Service Fee (ex GST)', 'GST on Post Service Fee',             'INTEREST (%)', 'LOAN CLOSURE TYPE',
+            'INTEREST COLLECTED', 'PENAL INTEREST (DPD)', 'PENALTY', 'GST On PENALTY',
             'REPAYMENT AMOUNT'
         ];
         /** BS Repayment CSV: preserve leading zeros for Voucher No (PLL+id), Loan Process Date, LoanDate */
@@ -1328,6 +1328,8 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             let post_service_fee_gst = 0;
             let penalty = 0;
             let gst_on_penalty = 0;
+            /** Overdue interest on total principal (loanCalculations DPD), shown separately from EMI-period interest */
+            let penal_interest_dpd = 0;
             let exhausted_days = 0;
 
             if (row.loan_start_date) {
@@ -1401,6 +1403,9 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                                     }
                                 }
                                 if (base > 0) emiBaseFromSchedule = base + dpdInterest;
+                                if (emiPaidLate && dpdInterest > 0.001) {
+                                    penal_interest_dpd = toDecimal2(dpdInterest);
+                                }
                             }
                         } catch (e) { /* ignore parse errors */ }
                     }
@@ -1506,6 +1511,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 interestPctForCsv,
                 loan_closure_type,
                 interest_collected.toFixed(2),
+                penal_interest_dpd.toFixed(2),
                 penalty.toFixed(2),
                 gst_on_penalty.toFixed(2),
                 repayment_amt.toFixed(2)
