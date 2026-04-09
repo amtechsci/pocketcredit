@@ -181,13 +181,11 @@ const calculateDPDForDefault = (loan) => {
 };
 
 /**
- * CIBIL Default: Current Balance & Amt Overdue per product rules (2-EMI schedule):
- * (1) Only EMI1 past due → EMI1 + EMI2 instalment amounts (+ loan penalty)
- * (2) EMI1 paid, only EMI2 past due → EMI2 (+ loan penalty)
- * (3) Both past due → EMI1 + EMI2 (+ loan penalty)
- * Falls back to full sanction+charges when schedule is missing or single-instalment.
+ * CIBIL Default: Current Balance = all unpaid instalments (+ penalty).
+ * Amt Overdue = only instalments that are unpaid AND past due (+ penalty when anything is overdue).
+ * Falls back to full sanction+charges for balance when schedule is empty; overdue then penalty-only (or 0).
  */
-const computeCibilDefaultBalanceAndOverdue = (loan) => {
+const computeCibilDefaultAmounts = (loan) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const startOf = (d) => {
@@ -217,7 +215,6 @@ const computeCibilDefaultBalanceAndOverdue = (loan) => {
         const dt = startOf(ds);
         return isNaN(dt.getTime()) ? null : dt;
     };
-    /** Strictly after due calendar day (aligned with DPD: due today → not yet overdue). */
     const crossedDue = (emi) => {
         if (isPaidEmi(emi)) return false;
         const d = dueOf(emi);
@@ -225,30 +222,18 @@ const computeCibilDefaultBalanceAndOverdue = (loan) => {
         return today.getTime() > d.getTime();
     };
 
-    const e0 = schedule[0];
-    const e1 = schedule[1];
-
-    if (e0 && e1) {
-        const paid0 = isPaidEmi(e0);
-        const paid1 = isPaidEmi(e1);
-        const c0 = crossedDue(e0);
-        const c1 = crossedDue(e1);
-        const a0 = emiPrincipal(e0);
-        const a1 = emiPrincipal(e1);
-        if (c0 && c1) {
-            return Math.ceil(a0 + a1 + penaltyCharge);
+    if (schedule.length > 0) {
+        let unpaidSum = 0;
+        let overdueSum = 0;
+        for (const emi of schedule) {
+            if (isPaidEmi(emi)) continue;
+            const a = emiPrincipal(emi);
+            unpaidSum += a;
+            if (crossedDue(emi)) overdueSum += a;
         }
-        if (paid0 && c1) {
-            return Math.ceil(a1 + penaltyCharge);
-        }
-        if (c0 && !c1) {
-            return Math.ceil(a0 + a1 + penaltyCharge);
-        }
-    } else if (e0 && !e1) {
-        const c0 = crossedDue(e0);
-        if (c0) {
-            return Math.ceil(emiPrincipal(e0) + penaltyCharge);
-        }
+        const currentBalance = Math.ceil(unpaidSum + penaltyCharge);
+        const amtOverdue = Math.ceil(overdueSum + (overdueSum > 0 || penaltyCharge > 0 ? penaltyCharge : 0));
+        return { currentBalance, amtOverdue };
     }
 
     let processingFee = parseFloat(loan.processing_fee) || 0;
@@ -256,7 +241,11 @@ const computeCibilDefaultBalanceAndOverdue = (loan) => {
     let loanAmount = parseFloat(loan.loan_amount) || 0;
     let totalAmount = loanAmount + processingFee + gst;
     let serviceCharge = parseFloat(loan.total_interest) || 0;
-    return Math.ceil(totalAmount + serviceCharge + penaltyCharge);
+    const full = Math.ceil(totalAmount + serviceCharge + penaltyCharge);
+    return {
+        currentBalance: full,
+        amtOverdue: Math.ceil(penaltyCharge)
+    };
 };
 
 /** Max DPD across unpaid EMIs whose due date is before today (0 if none). Catches delinquency when processed_due_date is stale. */
@@ -934,9 +923,10 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 la.closed_date,
                 la.updated_at as cleared_at, la.exhausted_period_days,
                 la.processed_penalty, la.status, la.plan_snapshot, la.emi_schedule,
-                (SELECT po_e1.updated_at FROM payment_orders po_e1
-                 WHERE po_e1.loan_id = la.id AND po_e1.payment_type = 'emi_1st' AND po_e1.status = 'PAID'
-                 ORDER BY po_e1.updated_at ASC LIMIT 1) as emi1_payment_date,
+                (SELECT MIN(po_m.updated_at) FROM payment_orders po_m
+                 WHERE po_m.loan_id = la.id AND po_m.status = 'PAID'
+                 AND po_m.payment_type IN ('emi_1st', 'loan_repayment', 'full_payment', 'pre-close')
+                ) as first_instalment_paid_at,
                 ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 ${CIBIL_CITY_SUBQUERY} as city,
@@ -958,15 +948,38 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 OR
                 (
                     la.status = 'account_manager'
-                    AND EXISTS (
-                        SELECT 1 FROM payment_orders po 
-                        WHERE po.loan_id = la.id 
-                        AND po.payment_type = 'emi_1st' AND po.status = 'PAID'
-                    )
                     AND NOT EXISTS (
                         SELECT 1 FROM payment_orders po 
                         WHERE po.loan_id = la.id 
                         AND po.payment_type = 'settlement' AND po.status = 'PAID'
+                    )
+                    AND (
+                        EXISTS (
+                            SELECT 1 FROM payment_orders po 
+                            WHERE po.loan_id = la.id 
+                            AND po.payment_type = 'emi_1st' AND po.status = 'PAID'
+                        )
+                        OR (
+                            la.emi_schedule IS NOT NULL
+                            AND JSON_VALID(la.emi_schedule)
+                            AND LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(la.emi_schedule, '$[0].status')), '')) IN ('paid', 'completed')
+                            AND (
+                                JSON_EXTRACT(la.emi_schedule, '$[1]') IS NULL
+                                OR LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(la.emi_schedule, '$[1].status')), '')) NOT IN ('paid', 'completed')
+                            )
+                        )
+                        OR (
+                            EXISTS (
+                                SELECT 1 FROM payment_orders po 
+                                WHERE po.loan_id = la.id 
+                                AND po.payment_type = 'loan_repayment' AND po.status = 'PAID'
+                            )
+                            AND NOT EXISTS (
+                                SELECT 1 FROM payment_orders po2 
+                                WHERE po2.loan_id = la.id AND po2.status = 'PAID'
+                                AND po2.payment_type IN ('emi_2nd', 'emi_3rd', 'emi_4th', 'full_payment', 'pre-close', 'settlement')
+                            )
+                        )
                     )
                 )
             )
@@ -974,24 +987,14 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
 
         const params = [];
         if (from_date && to_date) {
-            // account_manager + EMI1: range must follow first EMI paid date, not closed_date (often stale/wrong).
-            // cleared: use closure date, then first EMI, then loan touch time.
-            sql += ` AND DATE(
-                CASE
-                    WHEN la.status = 'account_manager' THEN (
-                        SELECT po_e1.updated_at FROM payment_orders po_e1
-                        WHERE po_e1.loan_id = la.id AND po_e1.payment_type = 'emi_1st' AND po_e1.status = 'PAID'
-                        ORDER BY po_e1.updated_at ASC LIMIT 1
-                    )
-                    ELSE COALESCE(
-                        la.closed_date,
-                        (SELECT po_e1.updated_at FROM payment_orders po_e1
-                         WHERE po_e1.loan_id = la.id AND po_e1.payment_type = 'emi_1st' AND po_e1.status = 'PAID'
-                         ORDER BY po_e1.updated_at ASC LIMIT 1),
-                        la.updated_at
-                    )
-                END
-            ) BETWEEN ? AND ?`;
+            // Prefer first repayment timestamp (emi_1st or loan_repayment etc.) so March EMI1 is not dropped when closed_date is wrong/late.
+            sql += ` AND DATE(COALESCE(
+                (SELECT MIN(po_m.updated_at) FROM payment_orders po_m
+                 WHERE po_m.loan_id = la.id AND po_m.status = 'PAID'
+                 AND po_m.payment_type IN ('emi_1st', 'loan_repayment', 'full_payment', 'pre-close')),
+                la.closed_date,
+                la.updated_at
+            )) BETWEEN ? AND ?`;
             params.push(from_date, to_date);
         }
         sql += ` ORDER BY COALESCE(la.closed_date, la.updated_at) DESC`;
@@ -1005,10 +1008,10 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
             const stateCode = formatStateCodeForCibil(loan);
             const dateOpened = formatDateDDMMYYYY(loan.disbursed_at || loan.processed_at);
             const isFullyCleared = loan.status === 'cleared';
-            // Fully cleared: use closed_date; EMI-1-paid active loan: use emi1_payment_date
+            const firstPay = loan.first_instalment_paid_at;
             const effectivePaymentDate = isFullyCleared
-                ? (loan.closed_date || loan.cleared_at)
-                : loan.emi1_payment_date;
+                ? (loan.closed_date || firstPay || loan.cleared_at)
+                : (firstPay || loan.closed_date || loan.cleared_at);
             const dateLastPayment = formatDateDDMMYYYY(effectivePaymentDate);
             const dateCleared = isFullyCleared ? formatDateDDMMYYYY(effectivePaymentDate) : '';
             const now = new Date();
@@ -1250,8 +1253,7 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
             const dateReported = formatDateDDMMYYYY(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
 
             let loanAmount = parseFloat(loan.loan_amount) || 0;
-            const currentBalance = computeCibilDefaultBalanceAndOverdue(loan);
-            const amtOverdue = currentBalance;
+            const { currentBalance, amtOverdue } = computeCibilDefaultAmounts(loan);
 
             const dpd = loan.calculated_dpd;
             const suitFiled = dpd >= 30 ? '01' : '';
