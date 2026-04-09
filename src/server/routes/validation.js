@@ -505,9 +505,9 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
         console.log(`✅ Auto-cancelled ${activeLoans.length} loan(s) for user ${userId} due to hold status`);
       }
     } else if (actionType === 're_process') {
-      // Re-process: Hold for 45 days (cooling period)
+      // Re-process: Hold for 90 days (cooling period)
       const holdUntilDate = new Date();
-      holdUntilDate.setDate(holdUntilDate.getDate() + 45);
+      holdUntilDate.setDate(holdUntilDate.getDate() + 90);
 
       await executeQuery(
         `UPDATE users 
@@ -515,7 +515,7 @@ router.post('/submit', authenticateAdmin, async (req, res) => {
          WHERE id = ?`,
         [holdUntilDate, userId]
       );
-      console.log(`✅ User ${userId} marked as RE-PROCESS (45-day hold until ${holdUntilDate.toISOString()})`);
+      console.log(`✅ User ${userId} marked as RE-PROCESS (90-day hold until ${holdUntilDate.toISOString()})`);
       
       // Automatically cancel all active/submitted loans for this user
       const cancellableStatuses = ['submitted', 'under_review', 'follow_up', 'approved', 'disbursal', 'ready_for_disbursement', 'ready_to_repeat_disbursal', 'repeat_disbursal', 'qa_verification'];

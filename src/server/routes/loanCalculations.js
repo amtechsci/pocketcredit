@@ -129,30 +129,21 @@ const authenticateLoanAccess = async (req, res, next) => {
 };
 
 /**
- * GET /api/loan-calculations/:loanId
- * Get complete calculated values for a loan using centralized function
- * Accessible to both admin and users (users can only access their own loans)
- * Query params:
- *   - customDays: Optional custom days for calculation
- *   - calculationDate: Optional date to calculate from (YYYY-MM-DD format)
+ * Full loan calculation payload (same shape as GET /api/loan-calculations/:loanId data).
+ * Used by CIBIL Default report so balances match the admin EMI schedule modal.
  */
-router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
-  try {
-    await initializeDatabase();
-    const loanId = parseInt(req.params.loanId);
-    const customDays = req.query.customDays ? parseInt(req.query.customDays) : null;
-    // Keep calculationDate as string - don't convert to Date object (avoids timezone conversion)
-    const calculationDate = req.query.calculationDate || null;
-    
-    if (isNaN(loanId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid loan ID'
-      });
-    }
-    
-    // Fetch loan data
-    const loans = await executeQuery(
+async function computeLoanCalculationResponseData(loanId, opts = {}) {
+  const customDays = opts.customDays != null && opts.customDays !== ''
+    ? parseInt(String(opts.customDays), 10)
+    : null;
+  const calculationDate = opts.calculationDate || null;
+
+  if (isNaN(loanId)) {
+    throw new Error('Invalid loan ID');
+  }
+
+  // Fetch loan data
+  const loans = await executeQuery(
       `SELECT 
         id, loan_amount, status, 
         disbursed_at,
@@ -167,13 +158,10 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
       [loanId]
     );
     
-    if (!loans || loans.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: `Loan with ID ${loanId} not found`
-      });
-    }
-    const loan = loans[0];
+  if (!loans || loans.length === 0) {
+    throw new Error(`LOAN_NOT_FOUND:${loanId}`);
+  }
+  const loan = loans[0];
     
     // Parse plan snapshot
     let planSnapshot = null;
@@ -440,7 +428,7 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
       
       // For loans in account_manager status, ALWAYS trust stored data (emi_schedule and processed_due_date)
       // DO NOT recalculate - use what's in the database as source of truth
-      const isAccountManager = loan.processed_at && ['account_manager', 'cleared'].includes(loan.status);
+      const isAccountManager = loan.processed_at && ['account_manager', 'cleared', 'overdue', 'default', 'delinquent'].includes(loan.status);
       let allEmiDates = [];
       let baseDate;
       
@@ -1448,16 +1436,41 @@ router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
       calculation.total_with_penalty = calculation.total?.repayable || calculation.total_repayable || 0;
     }
     
-    res.json({
-      success: true,
-      data: {
-        loan_id: loanId,
-        ...calculation
-      }
-    });
-    
+  return {
+    loan_id: loanId,
+    ...calculation
+  };
+}
+
+/**
+ * GET /api/loan-calculations/:loanId
+ * Get complete calculated values for a loan using centralized function
+ */
+router.get('/:loanId', authenticateLoanAccess, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const loanId = parseInt(req.params.loanId, 10);
+    const customDays = req.query.customDays ? parseInt(req.query.customDays, 10) : null;
+    const calculationDate = req.query.calculationDate || null;
+
+    if (isNaN(loanId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid loan ID'
+      });
+    }
+
+    const data = await computeLoanCalculationResponseData(loanId, { customDays, calculationDate });
+    res.json({ success: true, data });
   } catch (error) {
     console.error('Error getting loan calculation:', error);
+    if (error.message && String(error.message).startsWith('LOAN_NOT_FOUND:')) {
+      const id = String(error.message).split(':')[1];
+      return res.status(404).json({
+        success: false,
+        message: `Loan with ID ${id} not found`
+      });
+    }
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to calculate loan values'
@@ -1715,4 +1728,5 @@ router.get('/:loanId/days', authenticateAdmin, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.computeLoanCalculationResponseData = computeLoanCalculationResponseData;
 

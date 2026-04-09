@@ -642,7 +642,7 @@ function UserProfileDetail() {
           actionDetails = { message: 'Application moved to disbursal status' };
           break;
         case 're_process':
-          actionDetails = { message: 'Profile moved to cooling period (45 days)' };
+          actionDetails = { message: 'Profile moved to cooling period (90 days)' };
           break;
         case 'unhold':
           actionDetails = { message: 'Profile unhold - moved to active status' };
@@ -7419,7 +7419,7 @@ function UserProfileDetail() {
                       <div className="flex items-center">
                         <AlertCircle className="w-5 h-5 text-yellow-600 mr-2" />
                         <span className="text-sm font-medium text-yellow-800">
-                          This will hold the profile for 45 days (cooling period). User will see: "Your profile is under cooling period (We will update you once you are eligible)"
+                          This will hold the profile for 90 days (cooling period). User will see: "Your profile is under cooling period (We will update you once you are eligible)"
                         </span>
                       </div>
                     </div>

@@ -6,8 +6,10 @@ const {
     calculateDaysBetween,
     formatDateToString,
     toDecimal2,
-    getFullLoanCalculation
+    getFullLoanCalculation,
+    getTodayString
 } = require('../utils/loanCalculations');
+const loanCalculationsRoute = require('./loanCalculations');
 
 const router = express.Router();
 
@@ -122,6 +124,27 @@ const formatDateDDMMYYYY = (dateStr) => {
     // Ensure 8 digits so leading zero is never missing (e.g. 05022026 not 5022026)
     if (out.length === 7 && /^\d{7}$/.test(out)) out = '0' + out;
     return out;
+};
+
+/** Normalize DB/datetime value to YYYY-MM-DD for comparison (CIBIL cleared as-of period end). */
+const toYyyyMmDd = (v) => {
+    if (v == null || v === '') return null;
+    const s = String(v).trim();
+    const iso = s.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (iso) return iso[1];
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return null;
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+};
+
+const paidOnOrBefore = (paymentValue, periodEndYyyyMmDd) => {
+    if (!periodEndYyyyMmDd) return false;
+    const p = toYyyyMmDd(paymentValue);
+    if (!p) return false;
+    return p <= String(periodEndYyyyMmDd).slice(0, 10);
 };
 
 const getGenderCode = (gender) => {
@@ -245,6 +268,40 @@ const computeCibilDefaultAmounts = (loan) => {
     return {
         currentBalance: full,
         amtOverdue: Math.ceil(penaltyCharge)
+    };
+};
+
+/** Due date as YYYY-MM-DD for comparing with getTodayString() (same idea as loan-calculations schedule). */
+const installmentDueYyyyMmDd = (dueRaw) => {
+    if (!dueRaw) return null;
+    const s = String(dueRaw).trim();
+    const part = s.includes('T') ? s.split('T')[0] : s.split(' ')[0];
+    return /^\d{4}-\d{2}-\d{2}$/.test(part) ? part : null;
+};
+
+/**
+ * Current balance / amt overdue from the same repayment schedule as the admin EMI modal
+ * (instalment_amount includes base + DPD interest + penalty + GST on penalty).
+ */
+const computeCibilDefaultAmountsFromLoanCalc = async (loanId) => {
+    if (typeof loanCalculationsRoute.computeLoanCalculationResponseData !== 'function') return null;
+    const data = await loanCalculationsRoute.computeLoanCalculationResponseData(loanId, {});
+    const schedule = data?.repayment?.schedule;
+    if (!Array.isArray(schedule) || schedule.length === 0) return null;
+    const todayStr = getTodayString();
+    let unpaidTotal = 0;
+    let overdueTotal = 0;
+    for (const inst of schedule) {
+        const st = String(inst.status || '').toLowerCase();
+        if (st === 'paid' || st === 'completed') continue;
+        const amt = parseFloat(inst.instalment_amount) || 0;
+        unpaidTotal += amt;
+        const dueS = installmentDueYyyyMmDd(inst.due_date);
+        if (dueS && dueS < todayStr) overdueTotal += amt;
+    }
+    return {
+        currentBalance: Math.round(unpaidTotal),
+        amtOverdue: Math.round(overdueTotal)
     };
 };
 
@@ -927,6 +984,18 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                  WHERE po_m.loan_id = la.id AND po_m.status = 'PAID'
                  AND po_m.payment_type IN ('emi_1st', 'loan_repayment', 'full_payment', 'pre-close')
                 ) as first_instalment_paid_at,
+                (SELECT po1.updated_at FROM payment_orders po1
+                 WHERE po1.loan_id = la.id AND po1.status = 'PAID'
+                 AND po1.payment_type IN ('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'loan_repayment', 'full_payment', 'pre-close')
+                 ORDER BY po1.updated_at ASC LIMIT 1) as cibil_ord_pay_1_at,
+                (SELECT po1.payment_type FROM payment_orders po1
+                 WHERE po1.loan_id = la.id AND po1.status = 'PAID'
+                 AND po1.payment_type IN ('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'loan_repayment', 'full_payment', 'pre-close')
+                 ORDER BY po1.updated_at ASC LIMIT 1) as cibil_ord_pay_1_type,
+                (SELECT po2.updated_at FROM payment_orders po2
+                 WHERE po2.loan_id = la.id AND po2.status = 'PAID'
+                 AND po2.payment_type IN ('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'loan_repayment', 'full_payment', 'pre-close')
+                 ORDER BY po2.updated_at ASC LIMIT 1 OFFSET 1) as cibil_ord_pay_2_at,
                 ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 ${CIBIL_CITY_SUBQUERY} as city,
@@ -1001,17 +1070,51 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
 
         const loans = await executeQuery(sql, params);
 
+        const periodEndYmd = from_date && to_date ? String(to_date).trim().substring(0, 10) : null;
+
         const rows = await Promise.all(loans.map(async (loan) => {
             const consumerName = `${loan.first_name} ${loan.last_name}`.trim();
             const dob = formatDateDDMMYYYY(loan.date_of_birth);
             const gender = getGenderCode(loan.gender);
             const stateCode = formatStateCodeForCibil(loan);
             const dateOpened = formatDateDDMMYYYY(loan.disbursed_at || loan.processed_at);
-            const isFullyCleared = loan.status === 'cleared';
+
+            const p1At = loan.cibil_ord_pay_1_at;
+            const p2At = loan.cibil_ord_pay_2_at;
+            const p1Type = String(loan.cibil_ord_pay_1_type || '');
             const firstPay = loan.first_instalment_paid_at;
-            const effectivePaymentDate = isFullyCleared
-                ? (loan.closed_date || firstPay || loan.cleared_at)
-                : (firstPay || loan.closed_date || loan.cleared_at);
+
+            let isFullyCleared;
+            let effectivePaymentDate;
+
+            if (periodEndYmd) {
+                const p1By = paidOnOrBefore(p1At, periodEndYmd);
+                const p2By = paidOnOrBefore(p2At, periodEndYmd);
+                const fullByFirstPay = p1By && ['full_payment', 'pre-close'].includes(p1Type);
+                // As-of period end: fully cleared only if closure-level payment or second instalment paid by to_date
+                isFullyCleared = fullByFirstPay || (p1By && p2By);
+                if (isFullyCleared) {
+                    const closedOk = loan.closed_date && paidOnOrBefore(loan.closed_date, periodEndYmd);
+                    effectivePaymentDate = (closedOk ? loan.closed_date : null)
+                        || (p2By ? p2At : null)
+                        || (p1By ? p1At : null)
+                        || loan.closed_date
+                        || loan.cleared_at;
+                } else {
+                    // EMI1 (or first slice) paid in period, later EMIs not yet paid as-of to_date → show outstanding next EMI
+                    effectivePaymentDate = (p1By ? p1At : null)
+                        || firstPay
+                        || p1At
+                        || loan.closed_date
+                        || loan.cleared_at;
+                }
+            } else {
+                isFullyCleared = loan.status === 'cleared';
+                effectivePaymentDate = isFullyCleared
+                    ? (loan.closed_date || firstPay || loan.cleared_at)
+                    : (firstPay || loan.closed_date || loan.cleared_at);
+            }
+
             const dateLastPayment = formatDateDDMMYYYY(effectivePaymentDate);
             const dateCleared = isFullyCleared ? formatDateDDMMYYYY(effectivePaymentDate) : '';
             const now = new Date();
@@ -1021,15 +1124,30 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
             let processingFee = parseFloat(loan.processing_fee) || 0;
             let gst = processingFee * 0.18;
 
-            // Current Balance: 0 for fully cleared loans; second EMI amount for EMI-1-paid active loans
+            // Current Balance: 0 when fully cleared as-of; else second EMI when first is paid as-of and second is not
             let currentBalance = 0;
             if (!isFullyCleared && loan.emi_schedule) {
                 try {
                     const schedule = typeof loan.emi_schedule === 'string' ? JSON.parse(loan.emi_schedule) : loan.emi_schedule;
                     const arr = Array.isArray(schedule) ? schedule : [];
-                    const emi2 = arr[1] && (arr[1].emi_amount != null ? arr[1].emi_amount : arr[1].amount);
-                    const emi2Val = parseFloat(emi2) || 0;
-                    if (emi2Val > 0) currentBalance = Math.round(emi2Val);
+                    let emi2Val = 0;
+                    if (arr[1]) {
+                        const emi2 = arr[1].emi_amount != null ? arr[1].emi_amount : arr[1].amount;
+                        emi2Val = parseFloat(emi2) || 0;
+                    }
+                    if (periodEndYmd) {
+                        const p1By = paidOnOrBefore(p1At, periodEndYmd);
+                        const p2By = paidOnOrBefore(p2At, periodEndYmd);
+                        if (p1By && !p2By && emi2Val > 0) {
+                            currentBalance = Math.round(emi2Val);
+                        } else if (!p1By && emi2Val > 0) {
+                            const emi1 = arr[0] && (arr[0].emi_amount != null ? arr[0].emi_amount : arr[0].amount);
+                            const emi1Val = parseFloat(emi1) || 0;
+                            currentBalance = Math.round(emi1Val + emi2Val);
+                        }
+                    } else if (emi2Val > 0) {
+                        currentBalance = Math.round(emi2Val);
+                    }
                 } catch (e) { }
             }
 
@@ -1243,7 +1361,7 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
 
         defaultLoans.sort((a, b) => b.calculated_dpd - a.calculated_dpd);
 
-        const rows = defaultLoans.map(loan => {
+        const rows = await Promise.all(defaultLoans.map(async (loan) => {
             const consumerName = `${loan.first_name} ${loan.last_name}`.trim();
             const dob = formatDateDDMMYYYY(loan.date_of_birth) || '01011970';
             const gender = getGenderCode(loan.gender);
@@ -1253,7 +1371,19 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
             const dateReported = formatDateDDMMYYYY(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
 
             let loanAmount = parseFloat(loan.loan_amount) || 0;
-            const { currentBalance, amtOverdue } = computeCibilDefaultAmounts(loan);
+            let currentBalance;
+            let amtOverdue;
+            try {
+                const fromCalc = await computeCibilDefaultAmountsFromLoanCalc(loan.loan_id);
+                if (fromCalc) {
+                    currentBalance = fromCalc.currentBalance;
+                    amtOverdue = fromCalc.amtOverdue;
+                } else {
+                    ({ currentBalance, amtOverdue } = computeCibilDefaultAmounts(loan));
+                }
+            } catch (e) {
+                ({ currentBalance, amtOverdue } = computeCibilDefaultAmounts(loan));
+            }
 
             const dpd = loan.calculated_dpd;
             const suitFiled = dpd >= 30 ? '01' : '';
@@ -1273,7 +1403,7 @@ router.get('/cibil/default', authenticateAdmin, async (req, res) => {
                 '', '', '', '', '',
                 '', '', '', ''
             ];
-        });
+        }));
 
         const csvContent = [CIBIL_HEADERS.map(escapeCSV).join(','), ...rows.map(row => row.map((val, i) => escapeCSV(val, CIBIL_FORCE_QUOTE_INDICES.includes(i))).join(','))].join('\n');
 
