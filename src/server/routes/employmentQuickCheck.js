@@ -252,7 +252,7 @@ router.post('/', requireAuth, async (req, res) => {
         const loanLimit = rangeConfig?.loan_limit ? parseFloat(rangeConfig.loan_limit) : parseFloat(eligible_loan_amount);
 
         // Check if user is currently on a new-user temporary hold before overriding status.
-        // New users get a 72-hour hold when they complete basic profile, and the employment
+        // New users get a 1000-hour hold when they complete basic profile, and the employment
         // quick check must NOT clear it — the hold should only expire naturally via middleware.
         const currentUserRows = await executeQuery(
           'SELECT status, hold_until_date, application_hold_reason FROM users WHERE id = ?',

@@ -3517,10 +3517,8 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
           // Check if user should be moved to cooling period after clearing this loan
           // Delegates to checkAndMarkCoolingPeriod which handles block_after_tier, premium, and max-cap rules
           try {
-            const { calculateCreditLimitFor2EMI, checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
-
-            const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
-            const cooled = await checkAndMarkCoolingPeriod(loan.user_id, loanIdInt, creditLimitData);
+            const { runCoolingPeriodCheckAfterLoanClear } = require('../utils/creditLimitCalculator');
+            const cooled = await runCoolingPeriodCheckAfterLoanClear(loan.user_id, loanIdInt);
             if (cooled) {
               console.log(`[UserProfile] User ${loan.user_id} moved to cooling period after clearing loan #${loanIdInt}`);
             }
@@ -3814,10 +3812,8 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
 
                 // Check if user should be moved to cooling period after clearing this loan
                 try {
-                  const { calculateCreditLimitFor2EMI, checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
-
-                  const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
-                  const cooled = await checkAndMarkCoolingPeriod(loan.user_id, loanIdInt, creditLimitData);
+                  const { runCoolingPeriodCheckAfterLoanClear } = require('../utils/creditLimitCalculator');
+                  const cooled = await runCoolingPeriodCheckAfterLoanClear(loan.user_id, loanIdInt);
                   if (cooled) {
                     console.log(`[UserProfile] User ${loan.user_id} moved to cooling period after clearing loan #${loanIdInt}`);
                   }

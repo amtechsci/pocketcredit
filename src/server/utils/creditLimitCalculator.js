@@ -784,6 +784,24 @@ async function checkAndMarkCoolingPeriod(userId, loanId = null, creditLimitData 
 }
 
 /**
+ * Run limit + cooling-period rules after a loan is marked cleared.
+ * Must be invoked from every code path that sets loan_applications.status = 'cleared'
+ * (webhooks, eNACH, admin, etc.); otherwise users can pass block_after_tier without on_hold.
+ * @param {number} userId
+ * @param {number|null} loanId - Cleared loan id (optional; used for premium-loan heuristics)
+ * @returns {Promise<boolean>} true if user was marked on_hold for cooling period
+ */
+async function runCoolingPeriodCheckAfterLoanClear(userId, loanId = null) {
+  try {
+    const creditLimitData = await calculateCreditLimitFor2EMI(userId);
+    return await checkAndMarkCoolingPeriod(userId, loanId, creditLimitData);
+  } catch (error) {
+    console.error(`[CreditLimit] runCoolingPeriodCheckAfterLoanClear user ${userId} loan ${loanId}:`, error);
+    return false;
+  }
+}
+
+/**
  * Auto-assign a credit limit rule to a user based on salary.
  * Assigns a matching auto_assign rule by salary.
  * If a user already has a rule, it will only reassign when the current rule is also auto_assign.
@@ -881,6 +899,7 @@ module.exports = {
   getMonthlyIncomeFromRange,
   adjustFirstTimeLoanAmount,
   checkAndMarkCoolingPeriod,
+  runCoolingPeriodCheckAfterLoanClear,
   autoAssignCreditLimitRule
 };
 

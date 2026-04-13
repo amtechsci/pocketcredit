@@ -83,11 +83,11 @@ const createUser = async (userData) => {
       console.warn('Could not fetch default loan plan, user will have no plan assigned:', planError.message);
     }
 
-    // All new users start with a 72-hour safety hold so they cannot apply for a
+    // All new users start with a 1000-hour safety hold so they cannot apply for a
     // loan immediately after registration, regardless of the order they complete
     // their profile steps.
     const holdUntil = new Date();
-    holdUntil.setHours(holdUntil.getHours() + 72);
+    holdUntil.setHours(holdUntil.getHours() + 1000);
 
     const query = `
       INSERT INTO users (
@@ -107,8 +107,8 @@ const createUser = async (userData) => {
       gender,
       marital_status,
       true, // phone_verified = true after OTP verification
-      'on_hold', // new users start on hold until the 72-hour safety check expires
-      'New account safety check: Your profile is under temporary review. You will be able to apply in 72 hours.',
+      'on_hold', // new users start on hold until the 1000-hour safety check expires
+      'New account safety check: Your profile is under temporary review. You will be able to apply in 1000 hours.',
       holdUntil,
       1, // profile_completion_step = 1 (Start with Step 1: Employment Quick Check)
       defaultCreditScore, // credit_score = default from config

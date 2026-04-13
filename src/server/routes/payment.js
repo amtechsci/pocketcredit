@@ -904,10 +904,8 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                                     
                                     // Check if user should be moved to cooling period after clearing this loan
                                     try {
-                                        const { calculateCreditLimitFor2EMI, checkAndMarkCoolingPeriod } = require('../utils/creditLimitCalculator');
-
-                                        const creditLimitData = await calculateCreditLimitFor2EMI(loan.user_id);
-                                        const cooled = await checkAndMarkCoolingPeriod(loan.user_id, loanId, creditLimitData);
+                                        const { runCoolingPeriodCheckAfterLoanClear } = require('../utils/creditLimitCalculator');
+                                        const cooled = await runCoolingPeriodCheckAfterLoanClear(loan.user_id, loanId);
                                         if (cooled) {
                                             console.log(`[Payment] User ${loan.user_id} moved to cooling period after clearing loan #${loanId}`);
                                         }
@@ -1833,6 +1831,16 @@ router.post('/webhook', async (req, res) => {
                                         console.error('❌ Error sending loan_cleared SMS (non-fatal):', smsError);
                                         // Don't fail - SMS failure shouldn't block loan clearance
                                     }
+
+                                    try {
+                                        const { runCoolingPeriodCheckAfterLoanClear } = require('../utils/creditLimitCalculator');
+                                        const cooled = await runCoolingPeriodCheckAfterLoanClear(paymentOrder.user_id, paymentOrder.loan_id);
+                                        if (cooled) {
+                                            console.log(`[Payment/Webhook] User ${paymentOrder.user_id} moved to cooling period after clearing loan #${paymentOrder.loan_id}`);
+                                        }
+                                    } catch (coolingPeriodError) {
+                                        console.error('❌ Error checking cooling period after loan clearance (non-fatal):', coolingPeriodError);
+                                    }
                                 } else {
                                     console.log(`ℹ️ Loan #${paymentOrder.loan_id} payment received but not cleared yet (${paymentType})`);
                                     
@@ -2333,6 +2341,16 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                                 } catch (smsError) {
                                                     console.error('❌ Error sending loan_cleared SMS (non-fatal):', smsError);
                                                     // Don't fail - SMS failure shouldn't block loan clearance
+                                                }
+
+                                                try {
+                                                    const { runCoolingPeriodCheckAfterLoanClear } = require('../utils/creditLimitCalculator');
+                                                    const cooled = await runCoolingPeriodCheckAfterLoanClear(paymentOrder.user_id, paymentOrder.loan_id);
+                                                    if (cooled) {
+                                                        console.log(`[Payment/OrderStatus] User ${paymentOrder.user_id} moved to cooling period after clearing loan #${paymentOrder.loan_id}`);
+                                                    }
+                                                } catch (coolingPeriodError) {
+                                                    console.error('❌ Error checking cooling period after loan clearance (non-fatal):', coolingPeriodError);
                                                 }
                                             } else {
                                                 console.log(`ℹ️ Loan #${paymentOrder.loan_id} payment received but not cleared yet (${paymentType})`);

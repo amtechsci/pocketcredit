@@ -88,6 +88,27 @@ const applyForLoan = async (req, res) => {
       }
     }
 
+    // If loan was cleared via a path that skipped cooling check, or DB was out of sync, fix before apply
+    try {
+      const { runCoolingPeriodCheckAfterLoanClear } = require('../utils/creditLimitCalculator');
+      const movedToCooling = await runCoolingPeriodCheckAfterLoanClear(userId, null);
+      if (movedToCooling) {
+        return res.status(403).json({
+          success: false,
+          status: 'error',
+          message: 'Your Profile is under cooling period. We will let you know once you are eligible.',
+          hold_status: {
+            is_on_hold: true,
+            hold_type: 'permanent',
+            hold_reason: 'Your Profile is under cooling period. We will let you know once you are eligible.',
+            can_reapply: false
+          }
+        });
+      }
+    } catch (syncErr) {
+      console.error('❌ Cooling period sync on loan apply (non-fatal):', syncErr);
+    }
+
     // Check if user's loan limit has reached cooling period threshold (>= ₹45,600)
     const userLoanLimit = parseFloat(user.loan_limit) || 0;
     if (userLoanLimit >= 45600) {

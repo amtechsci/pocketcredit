@@ -221,6 +221,15 @@ async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amoun
        WHERE id = ?`,
       [Number(loan.total_repayable) || 0, loanApplicationId]
     );
+    try {
+      const { runCoolingPeriodCheckAfterLoanClear } = require('../utils/creditLimitCalculator');
+      const cooled = await runCoolingPeriodCheckAfterLoanClear(loan.user_id, loanApplicationId);
+      if (cooled) {
+        console.log(`[eNACH] User ${loan.user_id} moved to cooling period after clearing loan #${loanApplicationId}`);
+      }
+    } catch (e) {
+      console.error('❌ Error checking cooling period after eNACH loan clearance (non-fatal):', e);
+    }
   }
 
   return { updated: true, emiNumber: targetIndex + 1, allPaid };
