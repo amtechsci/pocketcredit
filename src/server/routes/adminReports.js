@@ -871,6 +871,9 @@ const CIBIL_FORCE_QUOTE_INDICES = [1, 24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35
 /** PAID rows counted for CIBIL cleared-period / last-repayment anchors (matches instalment + closure types elsewhere in this file). */
 const CIBIL_PAID_REPAYMENT_TYPES_SQL = `('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'loan_repayment', 'full_payment', 'pre-close')`;
 
+/** Cleared-report activity: regular repayments plus settlement (user paid a reduced lump sum). */
+const CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL = `('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'loan_repayment', 'full_payment', 'pre-close', 'settlement')`;
+
 /** Total of first two EMI amounts from emi_schedule for CIBIL current balance at origination. */
 const sumEmi1And2FromSchedule = (loan) => {
     if (!loan?.emi_schedule) return 0;
@@ -946,16 +949,18 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
             const dateReported = formatDateDDMMYYYY(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
 
             const loanAmount = parseFloat(loan.loan_amount) || 0;
+            const disbursalAmount = parseFloat(loan.disbursal_amount) || 0;
             let processingFee = parseFloat(loan.processing_fee) || 0;
             let gst = processingFee * 0.18;
-            const emi12 = sumEmi1And2FromSchedule(loan);
             const totalRepayable = parseFloat(loan.total_repayable) || 0;
-            const currentBalance =
-                emi12 > 0
-                    ? Math.round(emi12)
-                    : totalRepayable > 0
-                      ? Math.round(totalRepayable)
-                      : Math.round(loanAmount);
+
+            // Current Balance = EMI1 + EMI2 total from schedule; always show full outstanding at disbursal, even if cleared later
+            const emi12 = sumEmi1And2FromSchedule(loan);
+            const currentBalance = emi12 > 0
+                ? Math.round(emi12)
+                : totalRepayable > 0
+                  ? Math.round(totalRepayable)
+                  : Math.round(loanAmount || disbursalAmount);
 
             return [
                 consumerName, dob, gender, loan.pan_number || '',
@@ -988,7 +993,7 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
 
 /**
  * GET /api/admin/reports/cibil/cleared
- * Generate CIBIL Cleared Report CSV - excludes settlements
+ * Generate CIBIL Cleared Report CSV — full closure, active servicing, and partial settlement (user paid less).
  */
 router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
     try {
@@ -1010,20 +1015,26 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 la.processed_penalty, la.status, la.plan_snapshot, la.emi_schedule,
                 (SELECT MIN(po_m.updated_at) FROM payment_orders po_m
                  WHERE po_m.loan_id = la.id AND po_m.status = 'PAID'
-                 AND po_m.payment_type IN ('emi_1st', 'loan_repayment', 'full_payment', 'pre-close')
+                 AND po_m.payment_type IN ${CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL}
                 ) as first_instalment_paid_at,
                 (SELECT po1.updated_at FROM payment_orders po1
                  WHERE po1.loan_id = la.id AND po1.status = 'PAID'
-                 AND po1.payment_type IN ('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'loan_repayment', 'full_payment', 'pre-close')
+                 AND po1.payment_type IN ${CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL}
                  ORDER BY po1.updated_at ASC LIMIT 1) as cibil_ord_pay_1_at,
                 (SELECT po1.payment_type FROM payment_orders po1
                  WHERE po1.loan_id = la.id AND po1.status = 'PAID'
-                 AND po1.payment_type IN ('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'loan_repayment', 'full_payment', 'pre-close')
+                 AND po1.payment_type IN ${CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL}
                  ORDER BY po1.updated_at ASC LIMIT 1) as cibil_ord_pay_1_type,
                 (SELECT po2.updated_at FROM payment_orders po2
                  WHERE po2.loan_id = la.id AND po2.status = 'PAID'
-                 AND po2.payment_type IN ('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'loan_repayment', 'full_payment', 'pre-close')
+                 AND po2.payment_type IN ${CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL}
                  ORDER BY po2.updated_at ASC LIMIT 1 OFFSET 1) as cibil_ord_pay_2_at,
+                (SELECT po_s.updated_at FROM payment_orders po_s
+                 WHERE po_s.loan_id = la.id AND po_s.payment_type = 'settlement' AND po_s.status = 'PAID'
+                 ORDER BY po_s.updated_at DESC LIMIT 1) as settlement_paid_at,
+                (SELECT po_s.amount FROM payment_orders po_s
+                 WHERE po_s.loan_id = la.id AND po_s.payment_type = 'settlement' AND po_s.status = 'PAID'
+                 ORDER BY po_s.updated_at DESC LIMIT 1) as settlement_order_amount,
                 ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 ${CIBIL_CITY_SUBQUERY} as city,
@@ -1033,73 +1044,28 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 ${CIBIL_COUNTRY_SUBQUERY} as country
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
-            WHERE (
-                (
-                    la.status = 'cleared'
-                    AND NOT EXISTS (
-                        SELECT 1 FROM payment_orders po 
-                        WHERE po.loan_id = la.id 
-                        AND po.payment_type = 'settlement' AND po.status = 'PAID'
-                    )
-                )
-                OR
-                (
-                    la.status = 'account_manager'
-                    AND NOT EXISTS (
-                        SELECT 1 FROM payment_orders po 
-                        WHERE po.loan_id = la.id 
-                        AND po.payment_type = 'settlement' AND po.status = 'PAID'
-                    )
-                    AND (
-                        EXISTS (
-                            SELECT 1 FROM payment_orders po 
-                            WHERE po.loan_id = la.id 
-                            AND po.payment_type = 'emi_1st' AND po.status = 'PAID'
-                        )
-                        OR (
-                            la.emi_schedule IS NOT NULL
-                            AND JSON_VALID(la.emi_schedule)
-                            AND LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(la.emi_schedule, '$[0].status')), '')) IN ('paid', 'completed')
-                            AND (
-                                JSON_EXTRACT(la.emi_schedule, '$[1]') IS NULL
-                                OR LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(la.emi_schedule, '$[1].status')), '')) NOT IN ('paid', 'completed')
-                            )
-                        )
-                        OR (
-                            EXISTS (
-                                SELECT 1 FROM payment_orders po 
-                                WHERE po.loan_id = la.id 
-                                AND po.payment_type = 'loan_repayment' AND po.status = 'PAID'
-                            )
-                            AND NOT EXISTS (
-                                SELECT 1 FROM payment_orders po2 
-                                WHERE po2.loan_id = la.id AND po2.status = 'PAID'
-                                AND po2.payment_type IN ('emi_2nd', 'emi_3rd', 'emi_4th', 'full_payment', 'pre-close', 'settlement')
-                            )
-                        )
-                    )
+            WHERE la.status IN ('cleared', 'account_manager', 'settled')
+            AND (
+                la.status IN ('cleared', 'settled')
+                OR EXISTS (
+                    SELECT 1 FROM payment_orders po 
+                    WHERE po.loan_id = la.id AND po.status = 'PAID'
+                    AND po.payment_type IN ${CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL}
                 )
             )
         `;
 
         const params = [];
         if (from_date && to_date) {
-            // Include if (a) first slice payment window matches, OR (b) closure / last qualifying repayment in range —
-            // so loans with EMI1 before the month but EMI2 + cleared in March (e.g. PLL498) still appear in March export.
+            // Month / range: any EMI / repayment / settlement PAID in range, or closure in range.
             sql += ` AND (
-                DATE(COALESCE(
-                    (SELECT MIN(po_m.updated_at) FROM payment_orders po_m
-                     WHERE po_m.loan_id = la.id AND po_m.status = 'PAID'
-                     AND po_m.payment_type IN ('emi_1st', 'loan_repayment', 'full_payment', 'pre-close')),
-                    la.closed_date,
-                    la.updated_at
-                )) BETWEEN ? AND ?
-                OR DATE(COALESCE(
-                    la.closed_date,
-                    (SELECT MAX(po_x.updated_at) FROM payment_orders po_x
-                     WHERE po_x.loan_id = la.id AND po_x.status = 'PAID'
-                     AND po_x.payment_type IN ${CIBIL_PAID_REPAYMENT_TYPES_SQL})
-                )) BETWEEN ? AND ?
+                EXISTS (
+                    SELECT 1 FROM payment_orders po_d
+                    WHERE po_d.loan_id = la.id AND po_d.status = 'PAID'
+                    AND po_d.payment_type IN ${CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL}
+                    AND DATE(po_d.updated_at) BETWEEN ? AND ?
+                )
+                OR (la.closed_date IS NOT NULL AND DATE(la.closed_date) BETWEEN ? AND ?)
             )`;
             params.push(from_date, to_date, from_date, to_date);
         }
@@ -1120,6 +1086,10 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
             const p2At = loan.cibil_ord_pay_2_at;
             const p1Type = String(loan.cibil_ord_pay_1_type || '');
             const firstPay = loan.first_instalment_paid_at;
+            const settlementPaidAt = loan.settlement_paid_at || null;
+            const settlementOrderAmount = parseFloat(loan.settlement_order_amount) || 0;
+            const hasSettlementPayment = settlementPaidAt != null && String(settlementPaidAt).trim() !== '';
+            const settledLike = loan.status === 'settled' || hasSettlementPayment;
 
             let isFullyCleared;
             let effectivePaymentDate;
@@ -1128,28 +1098,47 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 const p1By = paidOnOrBefore(p1At, periodEndYmd);
                 const p2By = paidOnOrBefore(p2At, periodEndYmd);
                 const fullByFirstPay = p1By && ['full_payment', 'pre-close'].includes(p1Type);
-                // As-of period end: fully cleared only if closure-level payment or second instalment paid by to_date
-                isFullyCleared = fullByFirstPay || (p1By && p2By);
-                if (isFullyCleared) {
-                    const closedOk = loan.closed_date && paidOnOrBefore(loan.closed_date, periodEndYmd);
-                    effectivePaymentDate = (closedOk ? loan.closed_date : null)
+                const stBy = paidOnOrBefore(settlementPaidAt, periodEndYmd);
+                // Partial settlement: never treat as fully cleared on this file.
+                if (settledLike) {
+                    isFullyCleared = false;
+                    effectivePaymentDate =
+                        (stBy ? settlementPaidAt : null)
                         || (p2By ? p2At : null)
                         || (p1By ? p1At : null)
-                        || loan.closed_date
-                        || loan.cleared_at;
-                } else {
-                    // EMI1 (or first slice) paid in period, later EMIs not yet paid as-of to_date → show outstanding next EMI
-                    effectivePaymentDate = (p1By ? p1At : null)
                         || firstPay
                         || p1At
                         || loan.closed_date
                         || loan.cleared_at;
+                } else {
+                    // As-of period end: fully cleared only if closure-level payment or second instalment paid by to_date
+                    isFullyCleared = fullByFirstPay || (p1By && p2By);
+                    if (isFullyCleared) {
+                        const closedOk = loan.closed_date && paidOnOrBefore(loan.closed_date, periodEndYmd);
+                        effectivePaymentDate = (closedOk ? loan.closed_date : null)
+                            || (p2By ? p2At : null)
+                            || (p1By ? p1At : null)
+                            || loan.closed_date
+                            || loan.cleared_at;
+                    } else {
+                        effectivePaymentDate = (p1By ? p1At : null)
+                            || firstPay
+                            || p1At
+                            || loan.closed_date
+                            || loan.cleared_at;
+                    }
                 }
             } else {
-                isFullyCleared = loan.status === 'cleared';
-                effectivePaymentDate = isFullyCleared
-                    ? (loan.closed_date || firstPay || loan.cleared_at)
-                    : (firstPay || loan.closed_date || loan.cleared_at);
+                if (settledLike) {
+                    isFullyCleared = false;
+                    effectivePaymentDate =
+                        settlementPaidAt || firstPay || p1At || loan.closed_date || loan.cleared_at;
+                } else {
+                    isFullyCleared = loan.status === 'cleared';
+                    effectivePaymentDate = isFullyCleared
+                        ? (loan.closed_date || firstPay || loan.cleared_at)
+                        : (firstPay || loan.closed_date || loan.cleared_at);
+                }
             }
 
             const dateLastPayment = formatDateDDMMYYYY(effectivePaymentDate);
@@ -1161,9 +1150,14 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
             let processingFee = parseFloat(loan.processing_fee) || 0;
             let gst = processingFee * 0.18;
 
-            // Current Balance: 0 when fully cleared as-of; else second EMI when first is paid as-of and second is not
+            // Current Balance: 0 when fully cleared; settlement with known amount = written-off residual
             let currentBalance = 0;
-            if (!isFullyCleared && loan.emi_schedule) {
+            if (settledLike && hasSettlementPayment && settlementOrderAmount > 0) {
+                const tr = parseFloat(loan.total_repayable) || 0;
+                currentBalance = tr > settlementOrderAmount
+                    ? Math.round(tr - settlementOrderAmount)
+                    : 0;
+            } else if (!isFullyCleared && loan.emi_schedule) {
                 try {
                     const schedule = typeof loan.emi_schedule === 'string' ? JSON.parse(loan.emi_schedule) : loan.emi_schedule;
                     const arr = Array.isArray(schedule) ? schedule : [];
