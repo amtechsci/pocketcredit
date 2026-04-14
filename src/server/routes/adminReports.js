@@ -868,11 +868,32 @@ const buildEmiBreakdownMap = (loanRow, fullCalc) => {
 /** CIBIL CSV column indices (0-based) to prefix with tab + quote so Excel keeps leading zeros: DOB, State, PIN, Address Category, dates, Account Type, Ownership, Asset Classification */
 const CIBIL_FORCE_QUOTE_INDICES = [1, 24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 53];
 
+/** PAID rows counted for CIBIL cleared-period / last-repayment anchors (matches instalment + closure types elsewhere in this file). */
+const CIBIL_PAID_REPAYMENT_TYPES_SQL = `('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'loan_repayment', 'full_payment', 'pre-close')`;
+
+/** Total of first two EMI amounts from emi_schedule for CIBIL current balance at origination. */
+const sumEmi1And2FromSchedule = (loan) => {
+    if (!loan?.emi_schedule) return 0;
+    try {
+        const schedule = typeof loan.emi_schedule === 'string' ? JSON.parse(loan.emi_schedule) : loan.emi_schedule;
+        const arr = Array.isArray(schedule) ? schedule : [];
+        let sum = 0;
+        for (let i = 0; i < Math.min(2, arr.length); i++) {
+            const e = arr[i];
+            const raw = e && (e.emi_amount != null ? e.emi_amount : e.amount);
+            sum += parseFloat(raw) || 0;
+        }
+        return sum;
+    } catch (e) {
+        return 0;
+    }
+};
+
 /**
  * GET /api/admin/reports/cibil/disbursal
  * Generate CIBIL Disbursal Report CSV
  * Every loan whose disbursement date falls in the selected range (cleared or active).
- * Current Balance is always 0 — disbursal file reports the facility opening, not live outstanding.
+ * Current Balance: sum of EMI 1 + EMI 2 from schedule (outstanding at opening for typical 2-EMI loans); fallback total_repayable then loan_amount.
  */
 router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
     try {
@@ -927,7 +948,14 @@ router.get('/cibil/disbursal', authenticateAdmin, async (req, res) => {
             const loanAmount = parseFloat(loan.loan_amount) || 0;
             let processingFee = parseFloat(loan.processing_fee) || 0;
             let gst = processingFee * 0.18;
-            const currentBalance = 0;
+            const emi12 = sumEmi1And2FromSchedule(loan);
+            const totalRepayable = parseFloat(loan.total_repayable) || 0;
+            const currentBalance =
+                emi12 > 0
+                    ? Math.round(emi12)
+                    : totalRepayable > 0
+                      ? Math.round(totalRepayable)
+                      : Math.round(loanAmount);
 
             return [
                 consumerName, dob, gender, loan.pan_number || '',
@@ -1056,15 +1084,24 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
 
         const params = [];
         if (from_date && to_date) {
-            // Prefer first repayment timestamp (emi_1st or loan_repayment etc.) so March EMI1 is not dropped when closed_date is wrong/late.
-            sql += ` AND DATE(COALESCE(
-                (SELECT MIN(po_m.updated_at) FROM payment_orders po_m
-                 WHERE po_m.loan_id = la.id AND po_m.status = 'PAID'
-                 AND po_m.payment_type IN ('emi_1st', 'loan_repayment', 'full_payment', 'pre-close')),
-                la.closed_date,
-                la.updated_at
-            )) BETWEEN ? AND ?`;
-            params.push(from_date, to_date);
+            // Include if (a) first slice payment window matches, OR (b) closure / last qualifying repayment in range —
+            // so loans with EMI1 before the month but EMI2 + cleared in March (e.g. PLL498) still appear in March export.
+            sql += ` AND (
+                DATE(COALESCE(
+                    (SELECT MIN(po_m.updated_at) FROM payment_orders po_m
+                     WHERE po_m.loan_id = la.id AND po_m.status = 'PAID'
+                     AND po_m.payment_type IN ('emi_1st', 'loan_repayment', 'full_payment', 'pre-close')),
+                    la.closed_date,
+                    la.updated_at
+                )) BETWEEN ? AND ?
+                OR DATE(COALESCE(
+                    la.closed_date,
+                    (SELECT MAX(po_x.updated_at) FROM payment_orders po_x
+                     WHERE po_x.loan_id = la.id AND po_x.status = 'PAID'
+                     AND po_x.payment_type IN ${CIBIL_PAID_REPAYMENT_TYPES_SQL})
+                )) BETWEEN ? AND ?
+            )`;
+            params.push(from_date, to_date, from_date, to_date);
         }
         sql += ` ORDER BY COALESCE(la.closed_date, la.updated_at) DESC`;
 
