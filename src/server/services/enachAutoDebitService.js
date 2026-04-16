@@ -42,16 +42,6 @@ function parseSchedule(emiSchedule) {
   }
 }
 
-function parsePlanSnapshot(planSnapshot) {
-  if (!planSnapshot) return null;
-  if (typeof planSnapshot === 'object') return planSnapshot;
-  try {
-    return JSON.parse(planSnapshot);
-  } catch (e) {
-    return null;
-  }
-}
-
 /**
  * Walks the EMI schedule and returns the FIRST unpaid EMI whose due date is
  * strictly before todayStr (i.e. DPD ≥ 1).  Only EMI 1 is returned even when
@@ -82,75 +72,19 @@ function getFirstOverdueEmi(schedule, todayStr) {
   return null;
 }
 
-// ─── Penalty calculation ──────────────────────────────────────────────────────
-
 /**
- * Replicates the same tier-based penalty logic used in loanCalculations.js.
- * Returns the total penalty amount (base + GST) for daysOverdue days past due.
+ * Returns the amount to present for this EMI.
  *
- * @param {number} emiPrincipal  - principal portion of the EMI
- * @param {number} daysOverdue   - how many days past the due date
- * @param {Array}  lateFeeStructure - array of tier objects from plan_snapshot
+ * `loanCalculations.js` persists `emi_amount` as `instalment_amount` = base EMI + penalty_total +
+ * DPD interest for overdue rows (see schedule map ~1060–1108). That matches the repayment page "Total".
+ * We must not add a second tier-penalty on top — that double-counted (~₹364) and inflated the Cashfree
+ * charge (e.g. ₹1,500.28 → ₹1,864.97 for loan 1188).
+ *
+ * `penalty` is always 0: components are not stored separately on `loan_applications.emi_schedule`.
  */
-function computeEmiPenalty(emiPrincipal, daysOverdue, lateFeeStructure) {
-  if (
-    !daysOverdue || daysOverdue <= 0 ||
-    !Array.isArray(lateFeeStructure) || lateFeeStructure.length === 0 ||
-    !emiPrincipal || emiPrincipal <= 0
-  ) {
-    return 0;
-  }
-
-  const sortedTiers = [...lateFeeStructure].sort((a, b) => {
-    const oA = a.tier_order !== undefined ? a.tier_order : (a.days_overdue_start || 0);
-    const oB = b.tier_order !== undefined ? b.tier_order : (b.days_overdue_start || 0);
-    return oA - oB;
-  });
-
-  let penaltyBase = 0;
-
-  for (const tier of sortedTiers) {
-    const startDay = tier.days_overdue_start || 0;
-    const endDay = (tier.days_overdue_end !== null && tier.days_overdue_end !== undefined)
-      ? tier.days_overdue_end : null;
-
-    if (daysOverdue < startDay) continue;
-
-    const feeValue = parseFloat(tier.fee_value || tier.penalty_percent || 0);
-    if (feeValue <= 0) continue;
-
-    let tierPenalty = 0;
-
-    if (startDay === endDay || (startDay === 1 && endDay === 1)) {
-      // One-time flat penalty on day startDay
-      tierPenalty = emiPrincipal * (feeValue / 100);
-    } else if (endDay === null) {
-      // Open-ended tier: accrues every day from startDay
-      const daysInTier = daysOverdue - startDay + 1;
-      tierPenalty = emiPrincipal * (feeValue / 100) * daysInTier;
-    } else {
-      // Bounded tier
-      const tierEndDay = Math.min(endDay, daysOverdue);
-      const daysInTier = Math.max(0, tierEndDay - startDay + 1);
-      tierPenalty = emiPrincipal * (feeValue / 100) * daysInTier;
-    }
-
-    penaltyBase += tierPenalty;
-  }
-
-  const gstPercent = lateFeeStructure[0]?.gst_percent || 18;
-  const penaltyGST = penaltyBase * (gstPercent / 100);
-  return Math.round((penaltyBase + penaltyGST) * 100) / 100;
-}
-
-/**
- * Returns the full outstanding amount to present for this EMI:
- *   base instalment amount  +  accrued penalty (based on DPD and late_fee_structure)
- */
-function computePresentationAmount(overdueEmi, daysOverdue, lateFeeStructure) {
-  const penalty = computeEmiPenalty(overdueEmi.emiPrincipal, daysOverdue, lateFeeStructure);
-  const total = Math.round((overdueEmi.baseAmount + penalty) * 100) / 100;
-  return { total, penalty };
+function computePresentationAmount(overdueEmi) {
+  const total = Math.round(overdueEmi.baseAmount * 100) / 100;
+  return { total, penalty: 0 };
 }
 
 // ─── DB schema setup & migration ─────────────────────────────────────────────
@@ -279,34 +213,13 @@ async function getEligibleLoansForToday(todayStr) {
     if (!overdueEmi) continue;
     if (!Number.isFinite(overdueEmi.baseAmount) || overdueEmi.baseAmount <= 0) continue;
 
-    // Resolve late_fee_structure: prefer loan column, then plan_snapshot
-    let lateFeeStructure = null;
-    try {
-      if (row.late_fee_structure) {
-        lateFeeStructure = typeof row.late_fee_structure === 'string'
-          ? JSON.parse(row.late_fee_structure)
-          : row.late_fee_structure;
-      } else {
-        const snapshot = parsePlanSnapshot(row.plan_snapshot);
-        if (snapshot && snapshot.late_fee_structure) {
-          lateFeeStructure = typeof snapshot.late_fee_structure === 'string'
-            ? JSON.parse(snapshot.late_fee_structure)
-            : snapshot.late_fee_structure;
-        }
-      }
-    } catch (_) {
-      lateFeeStructure = null;
-    }
-
     // Calculate DPD (days since EMI due date, using IST calendar dates)
     const daysOverdue = Math.ceil(
       (new Date(todayStr).getTime() - new Date(overdueEmi.dueDate).getTime()) / (1000 * 60 * 60 * 24)
     );
 
-    // Full outstanding = base instalment + accrued penalty
-    const { total: presentationAmount, penalty } = computePresentationAmount(
-      overdueEmi, daysOverdue, lateFeeStructure
-    );
+    // Amount = stored emi_amount (already full due per loanCalculations); see computePresentationAmount
+    const { total: presentationAmount, penalty } = computePresentationAmount(overdueEmi);
 
     result.push({
       ...row,
