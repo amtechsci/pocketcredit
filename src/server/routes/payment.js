@@ -1176,10 +1176,8 @@ router.post('/webhook', async (req, res) => {
                     } catch (recoveryErr) {
                         console.warn('[Payment Webhook] recovery_payment_links update:', recoveryErr.message);
                     }
-                }
-
-                // Check if this is an extension payment
-                if (paymentOrder.payment_type === 'extension_fee' && paymentOrder.extension_id) {
+                    console.log('[Payment Webhook] Recovery link payment: skipping loan/extension automation (close loan manually in admin).');
+                } else if (paymentOrder.payment_type === 'extension_fee' && paymentOrder.extension_id) {
                     console.log('✅ Extension payment successful, auto-approving extension:', {
                         extensionId: paymentOrder.extension_id,
                         orderId,
@@ -1875,8 +1873,10 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                         } catch (recoveryErr) {
                             console.warn('[Payment order-status] recovery_payment_links update:', recoveryErr.message);
                         }
+                        console.log('[Payment order-status] Recovery link: skipping loan/extension automation (manual loan close).');
                     }
 
+                    if (!paymentOrder.recovery_link_id) {
                     const paymentType = paymentOrder.payment_type || 'loan_repayment';
                     
                     // Handle loan repayments (pre-close, full_payment, EMI, or general repayment)
@@ -2237,6 +2237,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                         } else {
                             console.warn(`⚠️ Extension #${paymentOrder.extension_id} not found`);
                         }
+                    }
                     }
                 }
             } catch (processError) {
