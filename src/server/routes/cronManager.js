@@ -163,7 +163,7 @@ router.get('/logs', authenticateAdmin, async (req, res) => {
   try {
     const fs = require('fs').promises;
     const path = require('path');
-    const logDir = path.join(__dirname, '../../log');
+    const logDir = path.join(__dirname, '../log');
     
     // Get all log files
     const files = await fs.readdir(logDir);
@@ -211,7 +211,7 @@ router.get('/logs/:date', authenticateAdmin, async (req, res) => {
     const { date } = req.params;
     const fs = require('fs').promises;
     const path = require('path');
-    const logDir = path.join(__dirname, '../../log');
+    const logDir = path.join(__dirname, '../log');
     
     // Convert YYYY-MM-DD to YYYYMMDD
     const dateStr = date.replace(/-/g, '');
@@ -277,7 +277,7 @@ router.delete('/logs', authenticateAdmin, async (req, res) => {
     const { days, date } = req.query;
     const fs = require('fs').promises;
     const path = require('path');
-    const logDir = path.join(__dirname, '../../log');
+    const logDir = path.join(__dirname, '../log');
     
     let deletedFiles = [];
     

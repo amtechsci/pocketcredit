@@ -185,39 +185,54 @@ async function ensureAutoDebitRunsTable() {
   `);
 
   // ── Additive migrations for existing tables ──────────────────────────────
+  // All checks use information_schema so we never run an ALTER that will fail
+  // (avoids noisy "Duplicate column" / "Can't DROP" errors in the query log).
 
-  // Add presentation_date column if it was not in the original schema
-  try {
+  const colRows = await executeQuery(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'enach_auto_debit_runs'
+       AND COLUMN_NAME IN ('presentation_date', 'penalty_amount')`
+  );
+  const existingCols = new Set((colRows || []).map((r) => r.COLUMN_NAME));
+
+  if (!existingCols.has('presentation_date')) {
     await executeQuery(`
       ALTER TABLE enach_auto_debit_runs
       ADD COLUMN presentation_date DATE NOT NULL DEFAULT '2000-01-01'
     `);
-    console.log('[eNACH] Migration: added presentation_date column to enach_auto_debit_runs');
-  } catch (_) { /* column already exists */ }
+    console.log('[eNACH] Migration: added presentation_date column');
+  }
 
-  // Add penalty_amount column if missing
-  try {
+  if (!existingCols.has('penalty_amount')) {
     await executeQuery(`
       ALTER TABLE enach_auto_debit_runs
       ADD COLUMN penalty_amount DECIMAL(12,2) NOT NULL DEFAULT 0
     `);
-    console.log('[eNACH] Migration: added penalty_amount column to enach_auto_debit_runs');
-  } catch (_) { /* column already exists */ }
+    console.log('[eNACH] Migration: added penalty_amount column');
+  }
 
-  // Drop old unique key that was keyed on due_date (blocks per-day retries)
-  try {
+  const idxRows = await executeQuery(
+    `SELECT INDEX_NAME FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'enach_auto_debit_runs'
+       AND INDEX_NAME IN ('uq_loan_emi_due', 'uq_loan_emi_presentation')
+     GROUP BY INDEX_NAME`
+  );
+  const existingIdx = new Set((idxRows || []).map((r) => r.INDEX_NAME));
+
+  if (existingIdx.has('uq_loan_emi_due')) {
     await executeQuery(`ALTER TABLE enach_auto_debit_runs DROP INDEX uq_loan_emi_due`);
     console.log('[eNACH] Migration: dropped old uq_loan_emi_due index');
-  } catch (_) { /* index did not exist or already dropped */ }
+  }
 
-  // Add new unique key keyed on presentation_date (one attempt per EMI per calendar day)
-  try {
+  if (!existingIdx.has('uq_loan_emi_presentation')) {
     await executeQuery(`
       ALTER TABLE enach_auto_debit_runs
       ADD UNIQUE KEY uq_loan_emi_presentation (loan_application_id, emi_number, presentation_date)
     `);
     console.log('[eNACH] Migration: added uq_loan_emi_presentation index');
-  } catch (_) { /* index already exists */ }
+  }
 }
 
 // ─── Candidate selection ──────────────────────────────────────────────────────
