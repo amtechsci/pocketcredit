@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS recovery_payment_links (
   payment_type VARCHAR(32) NOT NULL,
   amount DECIMAL(12, 2) NOT NULL,
   status ENUM('pending', 'paid', 'expired', 'cancelled') NOT NULL DEFAULT 'pending',
-  created_by INT UNSIGNED NULL,
+  created_by VARCHAR(36) NULL COMMENT 'admins.id (UUID)',
   paid_at DATETIME NULL,
   last_order_id VARCHAR(191) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

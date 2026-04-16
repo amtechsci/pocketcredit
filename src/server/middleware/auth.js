@@ -58,9 +58,10 @@ const authenticateAdmin = async (req, res, next) => {
     }
 
     const admin = admins[0];
-    
+
     req.admin = {
-      id: admin.id,
+      // admins.id is VARCHAR(36) UUID in production — never coerce with Number()
+      id: admin.id == null ? null : String(admin.id),
       name: admin.name,
       email: admin.email,
       role: admin.role,

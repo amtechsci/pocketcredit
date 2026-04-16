@@ -5736,7 +5736,22 @@ function UserProfileDetail() {
                       </td>
                       <td className="px-3 py-3 text-sm capitalize">{row.status || '—'}</td>
                       <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">{row.created_at || '—'}</td>
-                      <td className="px-3 py-3 text-sm text-gray-700">{row.creator_name || '—'}</td>
+                      <td className="px-3 py-3 text-sm text-gray-700">
+                        {(() => {
+                          const cid = row.created_by ?? row.creator_id;
+                          const name = row.creator_name;
+                          const shortId =
+                            typeof cid === 'string' && cid.includes('-')
+                              ? `${cid.slice(0, 8)}…`
+                              : cid != null
+                                ? String(cid)
+                                : '';
+                          if (name && cid != null) return `${name} (${shortId})`;
+                          if (name) return name;
+                          if (cid != null) return String(cid);
+                          return '—';
+                        })()}
+                      </td>
                       <td className="px-3 py-3 text-sm">
                         <button
                           type="button"

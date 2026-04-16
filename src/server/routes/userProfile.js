@@ -19,6 +19,14 @@ const router = express.Router();
 
 const RECOVERY_PAYMENT_TYPES = ['pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'full_payment', 'loan_repayment'];
 
+/** admins.id is UUID string — do not use parseInt (e.g. 0487e207-... wrongly becomes 487). */
+function normalizeAdminCreatorId(val) {
+  if (val === undefined || val === null) return null;
+  if (typeof val === 'bigint') return String(val);
+  const s = String(val).trim();
+  return s || null;
+}
+
 /** Block profile mutations for Recovery Officer sub-admins (GET passes through). */
 function denyRecoveryOfficerWrite(req, res, next) {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
@@ -4066,19 +4074,23 @@ router.get('/:userId/recovery-payment-links', authenticateAdmin, denyRecoveryOff
         a.name AS creator_name
       FROM recovery_payment_links r
       INNER JOIN loan_applications la ON la.id = r.loan_application_id
-      LEFT JOIN admins a ON a.id = r.created_by
+      LEFT JOIN admins a ON a.id COLLATE utf8mb4_unicode_ci = r.created_by COLLATE utf8mb4_unicode_ci
       WHERE r.user_id = ?
       ORDER BY r.created_at DESC`,
       [userId]
     );
 
-    const safeRows = (rows || []).map((r) => ({
-      ...r,
-      id: Number(r.id),
-      loan_application_id: Number(r.loan_application_id),
-      amount: r.amount != null ? parseFloat(String(r.amount)) : null,
-      created_by: r.created_by != null ? Number(r.created_by) : null
-    }));
+    const safeRows = (rows || []).map((r) => {
+      const creatorId = r.created_by != null ? String(r.created_by) : null;
+      return {
+        ...r,
+        id: Number(r.id),
+        loan_application_id: Number(r.loan_application_id),
+        amount: r.amount != null ? parseFloat(String(r.amount)) : null,
+        created_by: creatorId,
+        creator_id: creatorId
+      };
+    });
 
     res.json({
       status: 'success',
@@ -4097,7 +4109,7 @@ router.post('/:userId/recovery-payment-links', authenticateAdmin, denyRecoveryOf
   try {
     await initializeDatabase();
     const { userId } = req.params;
-    const adminId = req.admin?.id;
+    const createdBySql = normalizeAdminCreatorId(req.admin?.id);
     const { loan_application_id, payment_type, amount } = req.body || {};
 
     const loanIdNum = parseInt(String(loan_application_id ?? '').trim(), 10);
@@ -4174,10 +4186,8 @@ router.post('/:userId/recovery-payment-links', authenticateAdmin, denyRecoveryOf
     }
 
     const publicSlug = uuidv4();
-    let createdBySql = null;
-    if (adminId !== undefined && adminId !== null && String(adminId).trim() !== '') {
-      const n = parseInt(String(adminId), 10);
-      createdBySql = Number.isFinite(n) && n > 0 ? n : null;
+    if (!createdBySql && req.admin) {
+      console.warn('[Recovery link] created_by not set; req.admin.id was:', req.admin?.id, typeof req.admin?.id);
     }
 
     await executeQuery(
@@ -4201,7 +4211,7 @@ router.post('/:userId/recovery-payment-links', authenticateAdmin, denyRecoveryOf
         a.name AS creator_name
       FROM recovery_payment_links r
       INNER JOIN loan_applications la ON la.id = r.loan_application_id
-      LEFT JOIN admins a ON a.id = r.created_by
+      LEFT JOIN admins a ON a.id COLLATE utf8mb4_unicode_ci = r.created_by COLLATE utf8mb4_unicode_ci
       WHERE r.public_slug = ?`,
       [publicSlug]
     );
@@ -4215,13 +4225,14 @@ router.post('/:userId/recovery-payment-links', authenticateAdmin, denyRecoveryOf
       });
     }
 
-    // Avoid JSON serialization errors (e.g. BigInt from mysql2 on some configs)
+    const cid = row.created_by != null ? String(row.created_by) : null;
     const safe = {
       ...row,
       id: Number(row.id),
       loan_application_id: Number(row.loan_application_id),
       amount: row.amount != null ? parseFloat(String(row.amount)) : null,
-      created_by: row.created_by != null ? Number(row.created_by) : null
+      created_by: cid,
+      creator_id: cid
     };
 
     res.json({
