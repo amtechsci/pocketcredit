@@ -66,16 +66,45 @@ async function registerJobs() {
     runOnInit: false // Don't run on server start
   });
 
-  // Auto eNACH due-date debit job
+  // ── Auto eNACH mandate presentation ──────────────────────────────────────
   // Controlled by ENACH_AUTO_DEBIT_ENABLED and ENACH_AUTO_DEBIT_DRY_RUN
-  cronManager.everyMinutes(30, 'auto-enach-due-date', async () => {
+  //
+  // Presentation rules:
+  //   • Eligibility : DPD ≥ 1 on an active loan with a valid mandate
+  //   • EMI order   : always present EMI 1 until cleared, then EMI 2 (Case 1 / Case 2)
+  //   • Amount      : full outstanding = base instalment + accrued penalty for that EMI
+  //   • Idempotency : one presentation attempt per EMI per IST calendar day
+  //
+  // Four scheduled windows (all IST / Asia/Kolkata):
+  //   1. Every day at 18:59  – catches DPD = 1 on due-date day + salary-date customers
+  //   2. 1st of month 04:00  – early morning window on 1st of month
+  //   3. 5th of month 04:00  – early morning window on 5th of month
+
+  // Window 1: daily at 18:59 IST
+  cronManager.daily('18:59', 'auto-enach-dpd-daily', async () => {
     await runAutoEnachDueDateJob();
   }, {
     timezone: 'Asia/Kolkata',
     runOnInit: false
   });
 
-  // Recheck pending eNACH charges and settle successful ones
+  // Window 2: 1st of every month at 04:00 IST
+  cronManager.monthly(1, '04:00', 'auto-enach-monthly-1st', async () => {
+    await runAutoEnachDueDateJob();
+  }, {
+    timezone: 'Asia/Kolkata',
+    runOnInit: false
+  });
+
+  // Window 3: 5th of every month at 04:00 IST
+  cronManager.monthly(5, '04:00', 'auto-enach-monthly-5th', async () => {
+    await runAutoEnachDueDateJob();
+  }, {
+    timezone: 'Asia/Kolkata',
+    runOnInit: false
+  });
+
+  // Recheck pending eNACH charges and settle successful ones (every 20 min)
   cronManager.everyMinutes(20, 'auto-enach-pending-recheck', async () => {
     await runAutoEnachPendingRecheckJob();
   }, {
