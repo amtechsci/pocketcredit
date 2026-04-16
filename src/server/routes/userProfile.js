@@ -4072,9 +4072,17 @@ router.get('/:userId/recovery-payment-links', authenticateAdmin, denyRecoveryOff
       [userId]
     );
 
+    const safeRows = (rows || []).map((r) => ({
+      ...r,
+      id: Number(r.id),
+      loan_application_id: Number(r.loan_application_id),
+      amount: r.amount != null ? parseFloat(String(r.amount)) : null,
+      created_by: r.created_by != null ? Number(r.created_by) : null
+    }));
+
     res.json({
       status: 'success',
-      data: rows
+      data: safeRows
     });
   } catch (error) {
     console.error('Get recovery payment links error:', error);
@@ -4092,10 +4100,27 @@ router.post('/:userId/recovery-payment-links', authenticateAdmin, denyRecoveryOf
     const adminId = req.admin?.id;
     const { loan_application_id, payment_type, amount } = req.body || {};
 
+    const loanIdNum = parseInt(String(loan_application_id ?? '').trim(), 10);
+    const profileUserIdNum = parseInt(String(userId ?? '').trim(), 10);
+
     if (!loan_application_id || !payment_type || amount === undefined || amount === null) {
       return res.status(400).json({
         status: 'error',
         message: 'loan_application_id, payment_type, and amount are required'
+      });
+    }
+
+    if (!Number.isFinite(loanIdNum) || loanIdNum <= 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Select a valid loan application'
+      });
+    }
+
+    if (!Number.isFinite(profileUserIdNum) || profileUserIdNum <= 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid user profile'
       });
     }
 
@@ -4108,18 +4133,18 @@ router.post('/:userId/recovery-payment-links', authenticateAdmin, denyRecoveryOf
 
     const loanRows = await executeQuery(
       `SELECT * FROM loan_applications WHERE id = ? AND user_id = ?`,
-      [loan_application_id, userId]
+      [loanIdNum, profileUserIdNum]
     );
 
     if (!loanRows || loanRows.length === 0) {
       return res.status(400).json({
         status: 'error',
-        message: 'Loan not found for this user'
+        message: 'Loan not found for this user. Pick a loan that belongs to this profile.'
       });
     }
 
     const loan = loanRows[0];
-    const amt = parseFloat(amount);
+    const amt = parseFloat(String(amount).replace(/,/g, ''));
     if (isNaN(amt) || amt <= 0) {
       return res.status(400).json({
         status: 'error',
@@ -4149,17 +4174,20 @@ router.post('/:userId/recovery-payment-links', authenticateAdmin, denyRecoveryOf
     }
 
     const publicSlug = uuidv4();
+    let createdBySql = null;
+    if (adminId !== undefined && adminId !== null && String(adminId).trim() !== '') {
+      const n = parseInt(String(adminId), 10);
+      createdBySql = Number.isFinite(n) && n > 0 ? n : null;
+    }
 
-    const insert = await executeQuery(
+    await executeQuery(
       `INSERT INTO recovery_payment_links (
         public_slug, user_id, loan_application_id, payment_type, amount, status, created_by, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, 'pending', ?, NOW(), NOW())`,
-      [publicSlug, userId, loan_application_id, payment_type, amt, adminId || null]
+      [publicSlug, profileUserIdNum, loanIdNum, payment_type, amt, createdBySql]
     );
 
-    const newId = insert.insertId;
-
-    const [created] = await executeQuery(
+    const createdRows = await executeQuery(
       `SELECT 
         r.id,
         r.public_slug,
@@ -4174,14 +4202,32 @@ router.post('/:userId/recovery-payment-links', authenticateAdmin, denyRecoveryOf
       FROM recovery_payment_links r
       INNER JOIN loan_applications la ON la.id = r.loan_application_id
       LEFT JOIN admins a ON a.id = r.created_by
-      WHERE r.id = ?`,
-      [newId]
+      WHERE r.public_slug = ?`,
+      [publicSlug]
     );
+
+    const row = Array.isArray(createdRows) && createdRows.length > 0 ? createdRows[0] : null;
+    if (!row) {
+      console.error('[Recovery link] Row missing after insert for slug', publicSlug);
+      return res.status(500).json({
+        status: 'error',
+        message: 'Link was created but could not be loaded. Refresh the list.'
+      });
+    }
+
+    // Avoid JSON serialization errors (e.g. BigInt from mysql2 on some configs)
+    const safe = {
+      ...row,
+      id: Number(row.id),
+      loan_application_id: Number(row.loan_application_id),
+      amount: row.amount != null ? parseFloat(String(row.amount)) : null,
+      created_by: row.created_by != null ? Number(row.created_by) : null
+    };
 
     res.json({
       status: 'success',
       message: 'Recovery payment link created',
-      data: created
+      data: safe
     });
   } catch (error) {
     console.error('Create recovery payment link error:', error);

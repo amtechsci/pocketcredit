@@ -5829,7 +5829,7 @@ function UserProfileDetail() {
                   setSubmittingRecoveryLink(true);
                   try {
                     const res = await adminApiService.createRecoveryPaymentLink(params.userId, {
-                      loan_application_id: recoveryForm.loan_application_id,
+                      loan_application_id: Number(recoveryForm.loan_application_id),
                       payment_type: recoveryForm.payment_type,
                       amount: amt
                     });
