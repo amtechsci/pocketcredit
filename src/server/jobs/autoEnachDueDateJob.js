@@ -25,10 +25,14 @@ async function runAutoEnachDueDateJob(options = {}) {
   }
 }
 
-async function runAutoEnachPendingRecheckJob() {
+/**
+ * @param {object} [options]
+ * @param {boolean} [options.forceRun] - When true bypasses ENACH_AUTO_DEBIT_ENABLED / DRY_RUN (admin manual trigger)
+ */
+async function runAutoEnachPendingRecheckJob(options = {}) {
   const start = Date.now();
   try {
-    const result = await recheckPendingAutoDebitCharges();
+    const result = await recheckPendingAutoDebitCharges(options);
     await cronLogger.info(`Auto eNACH pending recheck completed in ${Date.now() - start}ms`, result);
     return { success: true, ...result, duration: Date.now() - start };
   } catch (error) {

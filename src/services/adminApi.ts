@@ -2457,8 +2457,10 @@ class AdminApiService {
     return this.request('GET', `/cron/task/${taskName}`);
   }
 
-  async runCronTask(taskName: string): Promise<ApiResponse<any>> {
-    return this.request('POST', `/cron/task/${taskName}/run`);
+  async runCronTask(taskName: string, options?: { dryRun?: boolean }): Promise<ApiResponse<any>> {
+    const body =
+      options && typeof options.dryRun === 'boolean' ? { dryRun: options.dryRun } : undefined;
+    return this.request('POST', `/cron/task/${taskName}/run`, body);
   }
 
   async runEnachCron(dryRun: boolean): Promise<ApiResponse<any>> {

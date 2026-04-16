@@ -566,11 +566,11 @@ async function runDueDateAutoDebit({ forceDryRun = false, forceRun = false } = {
 
 // ─── Pending-charge recheck ───────────────────────────────────────────────────
 
-async function recheckPendingAutoDebitCharges() {
+async function recheckPendingAutoDebitCharges({ forceRun = false } = {}) {
   await initializeDatabase();
   await ensureAutoDebitRunsTable();
 
-  if (!AUTO_DEBIT_ENABLED || AUTO_DEBIT_DRY_RUN) {
+  if ((!AUTO_DEBIT_ENABLED || AUTO_DEBIT_DRY_RUN) && !forceRun) {
     return { enabled: AUTO_DEBIT_ENABLED, dryRun: AUTO_DEBIT_DRY_RUN, scanned: 0, success: 0, failed: 0, stillPending: 0 };
   }
 

@@ -68,13 +68,46 @@ router.get('/task/:name', authenticateAdmin, async (req, res) => {
   /**
    * POST /api/admin/cron/task/:name/run
    * Manually run a cron job
+   * Body (optional): { dryRun: boolean } — for eNACH debit tasks only, dry run without charging
+   *
+   * eNACH debit tasks bypass ENACH_AUTO_DEBIT_ENABLED when triggered from admin (same as /cron/enach/run).
    */
   router.post('/task/:name/run', authenticateAdmin, async (req, res) => {
     try {
       const { name } = req.params;
-      
+      const dryRun = req.body && req.body.dryRun === true;
+
+      const ENACH_DEBIT_TASKS = [
+        'auto-enach-dpd-daily',
+        'auto-enach-monthly-1st',
+        'auto-enach-monthly-5th'
+      ];
+
+      if (ENACH_DEBIT_TASKS.includes(name)) {
+        const { runAutoEnachDueDateJob } = require('../jobs/autoEnachDueDateJob');
+        const result = await runAutoEnachDueDateJob({
+          forceDryRun: dryRun,
+          forceRun: !dryRun
+        });
+        return res.json({
+          success: true,
+          message: `Task "${name}" completed`,
+          result
+        });
+      }
+
+      if (name === 'auto-enach-pending-recheck') {
+        const { runAutoEnachPendingRecheckJob } = require('../jobs/autoEnachDueDateJob');
+        const result = await runAutoEnachPendingRecheckJob({ forceRun: true });
+        return res.json({
+          success: true,
+          message: `Task "${name}" completed`,
+          result
+        });
+      }
+
       await cronManager.run(name);
-      
+
       res.json({
         success: true,
         message: `Task "${name}" executed successfully`

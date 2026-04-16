@@ -592,6 +592,13 @@ const EmailTestForm: React.FC<{
   );
 };
 
+/** Cron task names that call Cashfree eNACH — admin must pick Dry run vs Live */
+const ENACH_DEBIT_CRON_NAMES = new Set([
+  'auto-enach-dpd-daily',
+  'auto-enach-monthly-1st',
+  'auto-enach-monthly-5th',
+]);
+
 export function AdminSettings() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('fee-types');
@@ -605,6 +612,9 @@ export function AdminSettings() {
   const [deletingLogs, setDeletingLogs] = useState(false);
   const [enachRunResult, setEnachRunResult] = useState<any>(null);
   const [enachRunning, setEnachRunning] = useState(false);
+  /** eNACH debit crons: show Dry run / Live modal instead of immediate run */
+  const [cronEnachModalTask, setCronEnachModalTask] = useState<string | null>(null);
+  const [cronModalRunning, setCronModalRunning] = useState(false);
   const [showTestModal, setShowTestModal] = useState(false);
   const [testingConfig, setTestingConfig] = useState<ApiConfig | null>(null);
   const [userConfig, setUserConfig] = useState<UserConfigData | null>(null);
@@ -2269,17 +2279,44 @@ export function AdminSettings() {
     }
   };
 
-  const handleRunCronTask = async (taskName: string) => {
+  const handleRunCronTask = (taskName: string) => {
+    if (ENACH_DEBIT_CRON_NAMES.has(taskName)) {
+      setCronEnachModalTask(taskName);
+      return;
+    }
     if (!confirm(`Are you sure you want to run "${taskName}" now?`)) return;
-    
+    void executeCronTaskRun(taskName);
+  };
+
+  const executeCronTaskRun = async (taskName: string, dryRun?: boolean) => {
     try {
-      const response = await adminApiService.runCronTask(taskName);
+      const response = (await adminApiService.runCronTask(
+        taskName,
+        typeof dryRun === 'boolean' ? { dryRun } : undefined
+      )) as any;
       if (response.success) {
-        alert(response.message || 'Task executed successfully');
+        const r = response.result;
+        const summary =
+          r && typeof r === 'object'
+            ? `\n\nscanned: ${r.scanned ?? '—'}  attempted: ${r.attempted ?? '—'}  success: ${r.success ?? '—'}  skipped: ${r.skipped ?? '—'}`
+            : '';
+        alert((response.message || 'Task executed successfully') + summary);
         fetchCronStatus();
       }
     } catch (error: any) {
       alert(error.response?.data?.message || 'Failed to run task');
+    }
+  };
+
+  const handleCronEnachModalChoice = async (dryRun: boolean) => {
+    if (!cronEnachModalTask) return;
+    const name = cronEnachModalTask;
+    setCronModalRunning(true);
+    try {
+      await executeCronTaskRun(name, dryRun);
+    } finally {
+      setCronModalRunning(false);
+      setCronEnachModalTask(null);
     }
   };
 
@@ -4644,7 +4681,47 @@ export function AdminSettings() {
 
         {/* Cron Management Tab */}
         {activeTab === 'cron' && (
-          <div className="space-y-6">
+          <div className="space-y-6 relative">
+
+            {/* Modal: Dry run vs Live for eNACH debit crons */}
+            {cronEnachModalTask && (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
+                <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-2">Run eNACH job</h4>
+                  <p className="text-sm text-gray-600 mb-4">
+                    <span className="font-mono text-gray-800">{cronEnachModalTask}</span>
+                    <br />
+                    Choose <strong>Dry run</strong> to scan only (no Cashfree charge), or <strong>Run live</strong> for real mandate presentations.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-3 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setCronEnachModalTask(null)}
+                      disabled={cronModalRunning}
+                      className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCronEnachModalChoice(true)}
+                      disabled={cronModalRunning}
+                      className="px-4 py-2 bg-amber-500 text-white rounded-md hover:bg-amber-600 disabled:opacity-50"
+                    >
+                      {cronModalRunning ? 'Running…' : 'Dry run'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCronEnachModalChoice(false)}
+                      disabled={cronModalRunning}
+                      className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
+                    >
+                      {cronModalRunning ? 'Running…' : 'Run live'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* eNACH Manual Trigger Panel */}
             <div className="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
