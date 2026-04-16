@@ -438,15 +438,17 @@ async function updateRunById(runId, updates) {
  *   5. Charges the mandate for the full outstanding amount.
  *
  * @param {object} options
- * @param {boolean} [options.forceDryRun] - When true, overrides env and runs in dry-run mode
+ * @param {boolean} [options.forceDryRun] - When true, overrides env and runs in dry-run mode (no real charges)
+ * @param {boolean} [options.forceRun]    - When true, bypasses ENACH_AUTO_DEBIT_ENABLED=false (admin manual trigger)
  */
-async function runDueDateAutoDebit({ forceDryRun = false } = {}) {
+async function runDueDateAutoDebit({ forceDryRun = false, forceRun = false } = {}) {
   await initializeDatabase();
   await ensureAutoDebitRunsTable();
 
   const isDryRun = forceDryRun || AUTO_DEBIT_DRY_RUN;
 
-  if (!AUTO_DEBIT_ENABLED && !forceDryRun) {
+  // Scheduled cron respects the env flag; admin manual trigger (forceRun/forceDryRun) bypasses it
+  if (!AUTO_DEBIT_ENABLED && !forceDryRun && !forceRun) {
     return { enabled: false, dryRun: isDryRun, scanned: 0, attempted: 0, success: 0, pending: 0, failed: 0, skipped: 0 };
   }
 

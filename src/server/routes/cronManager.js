@@ -96,7 +96,8 @@ router.get('/task/:name', authenticateAdmin, async (req, res) => {
     try {
       const dryRun = req.body && req.body.dryRun === true;
       const { runAutoEnachDueDateJob } = require('../jobs/autoEnachDueDateJob');
-      const result = await runAutoEnachDueDateJob({ forceDryRun: dryRun });
+      // forceRun: true so admin live trigger works even when ENACH_AUTO_DEBIT_ENABLED=false
+      const result = await runAutoEnachDueDateJob({ forceDryRun: dryRun, forceRun: !dryRun });
       res.json({
         success: true,
         dryRun,

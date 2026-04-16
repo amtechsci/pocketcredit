@@ -7,6 +7,7 @@ const {
 /**
  * @param {object} [options]
  * @param {boolean} [options.forceDryRun] - When true runs in dry-run mode regardless of env
+ * @param {boolean} [options.forceRun]    - When true bypasses ENACH_AUTO_DEBIT_ENABLED=false
  */
 async function runAutoEnachDueDateJob(options = {}) {
   const start = Date.now();
