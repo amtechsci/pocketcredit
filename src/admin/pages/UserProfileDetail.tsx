@@ -37,7 +37,8 @@ import {
   Loader2,
   Camera,
   CheckCircle2,
-  Trash2
+  Trash2,
+  Link2
 } from 'lucide-react';
 import { useAdmin } from '../context/AdminContext';
 import { UANEmploymentInfo } from '../../components/pages/UANEmploymentInfo';
@@ -217,6 +218,16 @@ function UserProfileDetail() {
   const [loadingChargeHistory, setLoadingChargeHistory] = useState(false);
   const [recheckingChargeStatus, setRecheckingChargeStatus] = useState<{ [key: string]: boolean }>({});
 
+  const [recoveryPaymentLinks, setRecoveryPaymentLinks] = useState<any[]>([]);
+  const [loadingRecoveryLinks, setLoadingRecoveryLinks] = useState(false);
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [submittingRecoveryLink, setSubmittingRecoveryLink] = useState(false);
+  const [recoveryForm, setRecoveryForm] = useState({
+    loan_application_id: '',
+    payment_type: 'loan_repayment',
+    amount: ''
+  });
+
   // Credit limit rule assignment (for admin dropdown)
   const [creditLimitRulesList, setCreditLimitRulesList] = useState<Array<{ id: number; rule_name: string; rule_code: string | null }>>([]);
   const [updatingCreditLimitRule, setUpdatingCreditLimitRule] = useState(false);
@@ -247,8 +258,9 @@ function UserProfileDetail() {
     { id: 'login-data', label: 'Login Data', icon: Clock },
     { id: 'accounts', label: 'Accounts', icon: Wallet },
     { id: 'enach', label: 'E-NACH', icon: CreditCard },
+    { id: 'recovery', label: 'Recovery', icon: Link2 },
   ];
-  const debtAgencyHiddenTabIdsList = ['kyc', 'documents', 'bank', 'applied-loans', 'transactions', 'validation', 'credit-analytics', 'profile-comments', 'enach'];
+  const debtAgencyHiddenTabIdsList = ['kyc', 'documents', 'bank', 'applied-loans', 'transactions', 'validation', 'credit-analytics', 'profile-comments', 'enach', 'recovery'];
   // Follow-up user: only show documents, reference, follow-up, and statement-verification tabs
   const followUpUserAllowedTabIds = ['documents', 'reference', 'follow-up', 'statement-verification', 'notes'];
 
@@ -279,7 +291,7 @@ function UserProfileDetail() {
     };
     return stepMap[step] || step.charAt(0).toUpperCase() + step.slice(1).replace(/-/g, ' ');
   };
-  const recoveryOfficerAllowedTabIds = ['personal', 'kyc', 'statement-verification', 'reference', 'loans', 'notes', 'account-manager'];
+  const recoveryOfficerAllowedTabIds = ['personal', 'kyc', 'statement-verification', 'reference', 'loans', 'notes', 'account-manager', 'recovery'];
   const tabsFiltered = allTabsList.filter((tab) => {
     if (shouldHideTransactionTab && tab.id === 'transactions') return false;
     if (isDebtAgency && debtAgencyHiddenTabIdsList.includes(tab.id)) return false;
@@ -829,6 +841,27 @@ function UserProfileDetail() {
 
     fetchChargeHistory();
   }, [activeTab, params.userId]);
+
+  useEffect(() => {
+    const loadRecoveryLinks = async () => {
+      if (effectiveActiveTab !== 'recovery' || !params.userId) return;
+      try {
+        setLoadingRecoveryLinks(true);
+        const response = await adminApiService.getRecoveryPaymentLinks(params.userId);
+        if (response.status === 'success' && response.data) {
+          setRecoveryPaymentLinks(Array.isArray(response.data) ? response.data : []);
+        } else {
+          setRecoveryPaymentLinks([]);
+        }
+      } catch (e) {
+        console.error('Recovery links fetch error:', e);
+        setRecoveryPaymentLinks([]);
+      } finally {
+        setLoadingRecoveryLinks(false);
+      }
+    };
+    loadRecoveryLinks();
+  }, [activeTab, params.userId, effectiveActiveTab]);
 
   // Handler to recheck subscription status from Cashfree
   const handleRecheckStatus = async (subscriptionId: string) => {
@@ -5590,6 +5623,236 @@ function UserProfileDetail() {
                     Charge Amount
                   </>
                 )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  };
+
+  const recoverySiteBase =
+    (import.meta.env.VITE_PUBLIC_SITE_URL as string | undefined) ||
+    (import.meta.env.DEV ? (typeof window !== 'undefined' ? window.location.origin : '') : 'https://pocketcredit.in');
+
+  const renderRecoveryTab = () => {
+    const loans = getArray('loans');
+    const paymentTypeOptions: { value: string; label: string }[] = [
+      { value: 'loan_repayment', label: 'Loan repayment (partial / negotiated)' },
+      { value: 'pre-close', label: 'Pre-close' },
+      { value: 'full_payment', label: 'Full payment' },
+      { value: 'emi_1st', label: 'EMI 1' },
+      { value: 'emi_2nd', label: 'EMI 2' },
+      { value: 'emi_3rd', label: 'EMI 3' },
+      { value: 'emi_4th', label: 'EMI 4' }
+    ];
+
+    const labelForType = (t: string) => paymentTypeOptions.find((o) => o.value === t)?.label || t;
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 lg:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">Recovery payment links</h3>
+              <p className="text-sm text-gray-600 mt-1">
+                Create a payment link for this borrower. For pre-close, full payment, and EMIs, the amount must match the system-calculated value; use loan repayment for negotiated amounts.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!params.userId) return;
+                  setLoadingRecoveryLinks(true);
+                  try {
+                    const response = await adminApiService.getRecoveryPaymentLinks(params.userId);
+                    if (response.status === 'success' && response.data) {
+                      setRecoveryPaymentLinks(Array.isArray(response.data) ? response.data : []);
+                      toast.success('List refreshed');
+                    }
+                  } catch (err) {
+                    console.error(err);
+                    toast.error('Failed to refresh');
+                  } finally {
+                    setLoadingRecoveryLinks(false);
+                  }
+                }}
+                disabled={loadingRecoveryLinks}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${loadingRecoveryLinks ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setRecoveryForm({ loan_application_id: '', payment_type: 'loan_repayment', amount: '' });
+                  setShowRecoveryModal(true);
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                <Plus className="w-4 h-4" />
+                Create link
+              </button>
+            </div>
+          </div>
+
+          {loadingRecoveryLinks ? (
+            <div className="text-center py-12">
+              <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-4" />
+              <p className="text-gray-600">Loading recovery links...</p>
+            </div>
+          ) : recoveryPaymentLinks.length === 0 ? (
+            <div className="text-center py-12">
+              <Link2 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-600">No recovery links yet. Create one to share with the borrower.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Loan</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Creator</th>
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Link</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {recoveryPaymentLinks.map((row: any) => (
+                    <tr key={row.id} className="hover:bg-gray-50">
+                      <td className="px-3 py-3 text-sm text-gray-900">{row.id}</td>
+                      <td className="px-3 py-3 text-sm text-gray-900">
+                        {row.application_number || `Loan #${row.loan_application_id}`}
+                      </td>
+                      <td className="px-3 py-3 text-sm text-gray-800">{labelForType(row.payment_type)}</td>
+                      <td className="px-3 py-3 text-sm text-gray-900">
+                        ₹{parseFloat(row.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className="px-3 py-3 text-sm capitalize">{row.status || '—'}</td>
+                      <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">{row.created_at || '—'}</td>
+                      <td className="px-3 py-3 text-sm text-gray-700">{row.creator_name || '—'}</td>
+                      <td className="px-3 py-3 text-sm">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const url = `${recoverySiteBase}/recovery/${row.public_slug}`;
+                            navigator.clipboard.writeText(url).then(
+                              () => toast.success('Link copied'),
+                              () => toast.error('Could not copy')
+                            );
+                          }}
+                          className="text-blue-600 hover:text-blue-800 font-medium"
+                        >
+                          Copy link
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <Dialog open={showRecoveryModal} onOpenChange={setShowRecoveryModal}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Create recovery payment link</DialogTitle>
+              <DialogDescription>
+                Choose loan, transaction type, and amount. Pre-close / full payment / EMI amounts must match backend calculation.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Related loan</label>
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  value={recoveryForm.loan_application_id}
+                  onChange={(e) => setRecoveryForm((f) => ({ ...f, loan_application_id: e.target.value }))}
+                >
+                  <option value="">Select loan</option>
+                  {loans.map((loan: any) => (
+                    <option key={loan.id} value={String(loan.id)}>
+                      {loan.application_number || `Loan #${loan.id}`} — {loan.status}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Transaction type</label>
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  value={recoveryForm.payment_type}
+                  onChange={(e) => setRecoveryForm((f) => ({ ...f, payment_type: e.target.value }))}
+                >
+                  {paymentTypeOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  value={recoveryForm.amount}
+                  onChange={(e) => setRecoveryForm((f) => ({ ...f, amount: e.target.value }))}
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setShowRecoveryModal(false)} disabled={submittingRecoveryLink}>
+                Cancel
+              </Button>
+              <Button
+                onClick={async () => {
+                  if (!params.userId || !recoveryForm.loan_application_id) {
+                    toast.error('Select a loan');
+                    return;
+                  }
+                  const amt = parseFloat(recoveryForm.amount);
+                  if (isNaN(amt) || amt <= 0) {
+                    toast.error('Enter a valid amount');
+                    return;
+                  }
+                  setSubmittingRecoveryLink(true);
+                  try {
+                    const res = await adminApiService.createRecoveryPaymentLink(params.userId, {
+                      loan_application_id: recoveryForm.loan_application_id,
+                      payment_type: recoveryForm.payment_type,
+                      amount: amt
+                    });
+                    if (res.status === 'success') {
+                      toast.success(res.message || 'Link created');
+                      setShowRecoveryModal(false);
+                      const refresh = await adminApiService.getRecoveryPaymentLinks(params.userId);
+                      if (refresh.status === 'success' && refresh.data) {
+                        setRecoveryPaymentLinks(Array.isArray(refresh.data) ? refresh.data : []);
+                      }
+                    } else {
+                      toast.error(res.message || 'Failed to create link');
+                    }
+                  } catch (err: any) {
+                    toast.error(err.response?.data?.message || err.message || 'Failed to create link');
+                  } finally {
+                    setSubmittingRecoveryLink(false);
+                  }
+                }}
+                disabled={submittingRecoveryLink}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {submittingRecoveryLink ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create'}
               </Button>
             </div>
           </DialogContent>
@@ -12585,6 +12848,7 @@ function UserProfileDetail() {
         {effectiveActiveTab === 'login-data' && renderLoginDataTab()}
         {effectiveActiveTab === 'accounts' && renderAccountsTab()}
         {effectiveActiveTab === 'enach' && renderEnachTab()}
+        {effectiveActiveTab === 'recovery' && renderRecoveryTab()}
         {effectiveActiveTab === 'applied-loans' && renderAppliedLoansTab()}
         {effectiveActiveTab === 'loans' && renderLoansTab()}
         {effectiveActiveTab === 'transactions' && renderTransactionsTab()}

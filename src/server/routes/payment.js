@@ -8,6 +8,7 @@ const router = express.Router();
 const { executeQuery } = require('../config/database');
 const cashfreePayment = require('../services/cashfreePayment');
 const { authenticateToken } = require('../middleware/auth');
+const { calculatePaymentAmount } = require('../utils/paymentAmount');
 
 /**
  * Extract UTR/reference from payment object. Prefers actual UTR fields; avoids using
@@ -300,222 +301,8 @@ async function generateAndSendNOCEmail(loanId) {
 /**
  * POST /api/payment/create-order
  * Create a payment order for loan repayment
+ * (Amount calculation: ../utils/paymentAmount.calculatePaymentAmount)
  */
-/**
- * Calculate payment amount based on paymentType and loan data
- * Backend authority - determines correct amount from loan calculation
- * @param {Object} loan - Loan data
- * @param {string} paymentType - Payment type: 'pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'full_payment'
- * @returns {Promise<number>} Calculated payment amount
- */
-async function calculatePaymentAmount(loan, paymentType) {
-  const { getLoanCalculation } = require('../utils/loanCalculations');
-  const { calculateOutstandingBalance, calculateExtensionFees } = require('../utils/extensionCalculations');
-  
-  try {
-    // Get loan calculation (includes repayment schedule for multi-EMI loans)
-    // getLoanCalculation returns { success: true, loanId, status, ...calculation }
-    const calculation = await getLoanCalculation(loan.id);
-    
-    if (!calculation) {
-      throw new Error('Failed to get loan calculation');
-    }
-    
-    // getLoanCalculation returns object with success: true and calculation data
-    // Use calculation directly as it already has all the data we need
-    const calculationData = calculation;
-    
-    // Determine amount based on paymentType
-    if (paymentType === 'pre-close') {
-      // Pre-close: Principal + Interest Till Today + Pre-close Fee (10% of principal) + GST on Pre-close Fee (18%)
-      // NOTE: Pre-close does NOT include post service fees - those are waived on pre-close
-      // NOTE: Pre-close does NOT include penalty - penalty is waived on pre-close
-      // Use principal from calculation API (same source as frontend) for consistency
-      const principal = parseFloat(calculationData.principal || loan.processed_amount || loan.sanctioned_amount || loan.loan_amount || loan.principal_amount || 0);
-      
-      // Get interest till today from calculation API (main source of truth)
-      const interestTillToday = calculationData.interest?.interestTillToday || 0;
-      
-      // Pre-close fee: 10% of principal
-      const preCloseFeePercent = 10;
-      const preCloseFee = Math.round((principal * preCloseFeePercent) / 100 * 100) / 100;
-      
-      // GST on pre-close fee: 18% of pre-close fee
-      const preCloseFeeGST = Math.round(preCloseFee * 0.18 * 100) / 100;
-      
-      // Pre-close amount = Principal + Interest Till Today + Pre-close Fee + GST on Pre-close Fee
-      // Penalty is NOT included in pre-close (waived)
-      const precloseAmount = principal + interestTillToday + preCloseFee + preCloseFeeGST;
-      
-      console.log(`💰 Pre-close calculation: Principal (₹${principal}) + Interest Till Today (₹${interestTillToday}) + Pre-close Fee (₹${preCloseFee}) + GST on Pre-close Fee (₹${preCloseFeeGST}) = ₹${precloseAmount}`);
-      
-      return precloseAmount;
-    } else if (paymentType === 'full_payment') {
-      // Full payment: Total repayable + penalty (if overdue)
-      const totalRepayable = calculationData.total?.repayable || calculationData.total_repayable || 0;
-      const penaltyTotal = calculationData.penalty?.penalty_total || 0;
-      
-      const fullPaymentAmount = totalRepayable + penaltyTotal;
-      console.log(`💰 Full payment calculation: Total Repayable (₹${totalRepayable}) + Penalty (₹${penaltyTotal}) = ₹${fullPaymentAmount}`);
-      
-      return fullPaymentAmount;
-    } else if (paymentType && paymentType.startsWith('emi_')) {
-      // EMI payment: Get amount from repayment schedule
-      const emiNumber = parseInt(paymentType.replace('emi_', '').replace('st', '').replace('nd', '').replace('rd', '').replace('th', ''));
-      
-      if (isNaN(emiNumber) || emiNumber < 1) {
-        throw new Error(`Invalid EMI number in paymentType: ${paymentType}`);
-      }
-      
-      // Get repayment schedule
-      const schedule = calculationData.repayment?.schedule || [];
-      
-      if (schedule.length === 0) {
-        // Fallback 1: Try to get EMI amount from loan's emi_schedule JSON column
-        // NOTE: emi_schedule is stored as JSON in loan_applications table, not a separate table
-        try {
-          const { executeQuery } = require('../config/database');
-          
-          // Get emi_schedule JSON from loan_applications table
-          const loanRecords = await executeQuery(
-            `SELECT emi_schedule 
-             FROM loan_applications 
-             WHERE id = ? 
-             LIMIT 1`,
-            [loan.id]
-          );
-          
-          if (loanRecords && loanRecords.length > 0 && loanRecords[0].emi_schedule) {
-            let emiScheduleData = loanRecords[0].emi_schedule;
-            
-            // Parse JSON if it's a string
-            if (typeof emiScheduleData === 'string') {
-              try {
-                emiScheduleData = JSON.parse(emiScheduleData);
-              } catch (parseError) {
-                console.warn(`⚠️ Could not parse emi_schedule JSON: ${parseError.message}`);
-                emiScheduleData = null;
-              }
-            }
-            
-            if (emiScheduleData && Array.isArray(emiScheduleData)) {
-              // Find the EMI by number (emi_number or instalment_no)
-              const emiRecord = emiScheduleData.find(
-                (e) => (e.emi_number === emiNumber || e.instalment_no === emiNumber)
-              );
-              
-              if (emiRecord && emiRecord.emi_amount) {
-                const emiAmount = parseFloat(emiRecord.emi_amount);
-                if (emiAmount > 0) {
-                  console.log(`💰 EMI ${emiNumber} calculation (from loan_applications.emi_schedule JSON): ₹${emiAmount}`);
-                  // NOTE: This amount may not include current penalty if EMI became overdue later
-                  // The repayment schedule from getLoanCalculation is more accurate
-                  return emiAmount;
-                }
-              }
-            }
-          }
-        } catch (dbError) {
-          console.warn(`⚠️ Could not fetch EMI from loan_applications.emi_schedule: ${dbError.message}`);
-        }
-        
-        // Fallback 2: Calculate from loan amount + fees
-        const emiCount = parseInt(loan.plan_snapshot ? (typeof loan.plan_snapshot === 'string' ? JSON.parse(loan.plan_snapshot) : loan.plan_snapshot).emi_count : 1) || 1;
-        const processedAmount = parseFloat(loan.processed_amount || loan.loan_amount || 0);
-        
-        if (processedAmount > 0) {
-          // Get fees from calculation data
-          const postServiceFee = calculationData.fees?.post_service_fee || calculationData.post_service_fee || 0;
-          const postServiceFeeGST = calculationData.fees?.post_service_fee_gst || calculationData.post_service_fee_gst || 0;
-          const totalFees = postServiceFee + postServiceFeeGST;
-          
-          // Calculate interest (rough estimate: principal * rate * days / 100)
-          // For first EMI, use 30 days as estimate
-          const interestRatePerDay = parseFloat(loan.interest_percent_per_day || 0.001);
-          const estimatedInterest = processedAmount * interestRatePerDay * 30;
-          
-          // EMI = (Principal + Interest + Fees) / EMI Count
-          const totalAmount = processedAmount + estimatedInterest + totalFees;
-          const emiAmount = totalAmount / emiCount;
-          
-          console.log(`💰 EMI ${emiNumber} calculation (fallback from loan amount): Principal (₹${processedAmount}) + Interest (₹${estimatedInterest}) + Fees (₹${totalFees}) / ${emiCount} = ₹${emiAmount}`);
-          
-          if (emiAmount > 0) {
-            return emiAmount;
-          }
-        }
-        
-        // Fallback 3: Use total repayable divided by EMI count (last resort)
-        const totalRepayable = calculationData.total?.repayable || calculationData.total_repayable || 0;
-        const emiAmount = totalRepayable / emiCount;
-        console.log(`💰 EMI ${emiNumber} calculation (fallback from total repayable): Total (₹${totalRepayable}) / ${emiCount} = ₹${emiAmount}`);
-        
-        // Validate the calculated amount is valid
-        if (emiAmount <= 0 || isNaN(emiAmount)) {
-          throw new Error(`Cannot calculate EMI ${emiNumber} amount: totalRepayable (₹${totalRepayable}) is invalid or emiCount (${emiCount}) is invalid`);
-        }
-        
-        return emiAmount;
-      }
-      
-      // Find the specific EMI in schedule
-      const emi = schedule.find(e => e.emi_number === emiNumber || e.instalment_no === emiNumber);
-      
-      if (!emi) {
-        throw new Error(`EMI ${emiNumber} not found in repayment schedule`);
-      }
-      
-      // EMI amount includes principal + interest + post service fee + GST + penalty (if overdue)
-      // PRIORITY: Use instalment_amount if available (includes penalty for overdue EMIs)
-      // FALLBACK: Calculate from components (principal + interest + fees + penalty)
-      let emiAmount = emi.instalment_amount;
-      
-      if (!emiAmount || emiAmount <= 0) {
-        // Calculate from components
-        const principal = emi.principal || 0;
-        const interest = emi.interest || 0;
-        const postServiceFee = emi.post_service_fee || 0;
-        const gstOnPostServiceFee = emi.gst_on_post_service_fee || 0;
-        const penaltyTotal = emi.penalty_total || emi.penalty || 0;
-        const dpdInterestOnTotalPrincipal = parseFloat(emi.dpd_interest_on_total_principal || emi.dpd_interest || 0) || 0;
-        
-        emiAmount = principal + interest + postServiceFee + gstOnPostServiceFee + penaltyTotal + dpdInterestOnTotalPrincipal;
-      }
-      
-      // CRITICAL: If EMI is overdue, ensure penalty is included
-      // Check if penalty_total exists in the EMI data (from dynamic calculation)
-      const penaltyTotal = emi.penalty_total || emi.penalty || 0;
-      
-      const dpdInterestOnTotalPrincipal = parseFloat(emi.dpd_interest_on_total_principal || emi.dpd_interest || 0) || 0;
-
-      // If instalment_amount doesn't include penalty but penalty exists, add it
-      if (penaltyTotal > 0) {
-        const baseAmount = (emi.principal || 0) + (emi.interest || 0) + (emi.post_service_fee || 0) + (emi.gst_on_post_service_fee || 0) + dpdInterestOnTotalPrincipal;
-        // Only add penalty if it's not already included in instalment_amount
-        // We check by comparing: if instalment_amount ≈ baseAmount, then penalty is missing
-        const tolerance = 0.01; // 1 paise tolerance
-        if (Math.abs(emiAmount - baseAmount) < tolerance) {
-          // Penalty is not included, add it
-          emiAmount = emiAmount + penaltyTotal;
-          console.log(`💰 EMI ${emiNumber}: Adding penalty (₹${penaltyTotal}) to base amount (₹${baseAmount}) = ₹${emiAmount}`);
-        }
-      }
-      
-      console.log(`💰 EMI ${emiNumber} calculation: ₹${emiAmount} (Principal: ₹${emi.principal || 0}, Interest: ₹${emi.interest || 0}, Fee: ₹${emi.post_service_fee || 0}, GST: ₹${emi.gst_on_post_service_fee || 0}, Penalty: ₹${penaltyTotal}, DPD int. on total principal: ₹${dpdInterestOnTotalPrincipal})`);
-      
-      return emiAmount;
-    } else {
-      // Default: use total repayable
-      const totalRepayable = calculationData.total?.repayable || calculationData.total_repayable || 0;
-      console.log(`💰 Default payment calculation: Total Repayable = ₹${totalRepayable}`);
-      return totalRepayable;
-    }
-  } catch (error) {
-    console.error('❌ Error calculating payment amount:', error);
-    throw error;
-  }
-}
-
 router.post('/create-order', authenticateToken, async (req, res) => {
     let orderId = null; // Initialize to avoid scope issues in error handling
     
@@ -1372,11 +1159,25 @@ router.post('/webhook', async (req, res) => {
         // If payment succeeded, process based on payment type
         if (orderStatus === 'PAID') {
             const [paymentOrder] = await executeQuery(
-                'SELECT loan_id, extension_id, payment_type, user_id, amount FROM payment_orders WHERE order_id = ?',
+                'SELECT loan_id, extension_id, payment_type, user_id, amount, recovery_link_id FROM payment_orders WHERE order_id = ?',
                 [orderId]
             );
 
             if (paymentOrder) {
+                if (paymentOrder.recovery_link_id) {
+                    try {
+                        await executeQuery(
+                            `UPDATE recovery_payment_links 
+                             SET status = 'paid', paid_at = NOW(), updated_at = NOW() 
+                             WHERE id = ? AND status = 'pending'`,
+                            [paymentOrder.recovery_link_id]
+                        );
+                        console.log(`✅ Recovery payment link ${paymentOrder.recovery_link_id} marked paid`);
+                    } catch (recoveryErr) {
+                        console.warn('[Payment Webhook] recovery_payment_links update:', recoveryErr.message);
+                    }
+                }
+
                 // Check if this is an extension payment
                 if (paymentOrder.payment_type === 'extension_fee' && paymentOrder.extension_id) {
                     console.log('✅ Extension payment successful, auto-approving extension:', {
@@ -2057,11 +1858,25 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
             // This will handle cases where payment is PAID but loan/extension wasn't processed
             try {
                 const [paymentOrder] = await executeQuery(
-                    'SELECT loan_id, extension_id, payment_type, amount, user_id FROM payment_orders WHERE order_id = ?',
+                    'SELECT loan_id, extension_id, payment_type, amount, user_id, recovery_link_id FROM payment_orders WHERE order_id = ?',
                     [orderId]
                 );
 
                 if (paymentOrder) {
+                    if (paymentOrder.recovery_link_id) {
+                        try {
+                            await executeQuery(
+                                `UPDATE recovery_payment_links 
+                                 SET status = 'paid', paid_at = NOW(), updated_at = NOW() 
+                                 WHERE id = ? AND status = 'pending'`,
+                                [paymentOrder.recovery_link_id]
+                            );
+                            console.log(`✅ Recovery payment link ${paymentOrder.recovery_link_id} marked paid (order-status)`);
+                        } catch (recoveryErr) {
+                            console.warn('[Payment order-status] recovery_payment_links update:', recoveryErr.message);
+                        }
+                    }
+
                     const paymentType = paymentOrder.payment_type || 'loan_repayment';
                     
                     // Handle loan repayments (pre-close, full_payment, EMI, or general repayment)

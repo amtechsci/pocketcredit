@@ -331,6 +331,10 @@ app.use('/api/clickwrap', clickWrapWebhookRoutes);  // Webhooks on /api/clickwra
 const paymentRoutes = require('./routes/payment');
 app.use('/api/payment', paymentRoutes);
 
+// Public recovery payment links (slug-based; no JWT)
+const recoveryPaymentRoutes = require('./routes/recoveryPayment');
+app.use('/api/recovery-payment', recoveryPaymentRoutes);
+
 
 
 // Digitap API routes

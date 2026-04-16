@@ -19,9 +19,10 @@ export const PaymentReturnPage = () => {
 
   const orderId = searchParams.get('orderId');
   const paymentStatusParam = searchParams.get('status');
+  const isRecoveryOrder = Boolean(orderId && orderId.startsWith('RCY_'));
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isRecoveryOrder && !isAuthenticated) {
       navigate('/login');
       return;
     }
@@ -43,18 +44,26 @@ export const PaymentReturnPage = () => {
       // Fetch order status from backend
       fetchOrderStatus();
     }
-  }, [orderId, paymentStatusParam, isAuthenticated, navigate]);
+  }, [orderId, paymentStatusParam, isAuthenticated, navigate, isRecoveryOrder]);
 
   const fetchOrderStatus = async () => {
     if (!orderId) return;
 
     try {
       setLoading(true);
-      const response = await apiService.getPaymentOrderStatus(orderId);
+      let response: { success?: boolean; data?: any };
+
+      if (isRecoveryOrder) {
+        const res = await fetch(`/api/recovery-payment/order-status/${encodeURIComponent(orderId)}`);
+        const json = await res.json();
+        response = json;
+      } else {
+        response = await apiService.getPaymentOrderStatus(orderId);
+      }
 
       if (response.success && response.data) {
         setOrderDetails(response.data);
-        
+
         // Determine status
         const status = response.data.status || response.data.cashfreeStatus?.order_status;
         if (status === 'PAID' || status === 'paid') {
@@ -81,7 +90,7 @@ export const PaymentReturnPage = () => {
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
-        <DashboardHeader userName={user?.first_name || 'User'} />
+        <DashboardHeader userName={isRecoveryOrder ? 'Customer' : user?.first_name || 'User'} />
         <div className="container mx-auto px-4 py-8 max-w-2xl">
           <Card>
             <CardContent className="p-8 text-center">
@@ -96,7 +105,7 @@ export const PaymentReturnPage = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
-      <DashboardHeader userName={user?.first_name || 'User'} />
+      <DashboardHeader userName={isRecoveryOrder ? 'Customer' : user?.first_name || 'User'} />
       <div className="container mx-auto px-4 py-8 max-w-2xl">
         <Card className="shadow-xl">
           <CardContent className="p-8">

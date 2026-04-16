@@ -487,6 +487,17 @@ class AdminApiService {
     return this.request('PUT', `/user-profile/${userId}/transactions/${transactionId}`, { reference_number: referenceNumber });
   }
 
+  async getRecoveryPaymentLinks(userId: string): Promise<ApiResponse<any>> {
+    return this.request('GET', `/user-profile/${userId}/recovery-payment-links`);
+  }
+
+  async createRecoveryPaymentLink(
+    userId: string,
+    body: { loan_application_id: number | string; payment_type: string; amount: number }
+  ): Promise<ApiResponse<any>> {
+    return this.request('POST', `/user-profile/${userId}/recovery-payment-links`, body);
+  }
+
   // Follow-ups Management
   async getUserFollowUps(userId: string): Promise<ApiResponse<any>> {
     return this.request('GET', `/user-profile/${userId}/follow-ups`);

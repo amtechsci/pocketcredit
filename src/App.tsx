@@ -36,6 +36,7 @@ import { ApplicationUnderReviewPage } from './components/pages/ApplicationUnderR
 import { PostDisbursalFlowPage } from './components/pages/PostDisbursalFlowPage';
 import { RepaymentSchedulePage } from './components/pages/RepaymentSchedulePage';
 import { PaymentReturnPage } from './components/pages/PaymentReturnPage';
+import { RecoveryPaymentPage } from './components/pages/RecoveryPaymentPage';
 import { EnachCompletionPage } from './components/pages/EnachCompletionPage';
 import { AccountAggregatorFlow } from './components/pages/AccountAggregatorFlow';
 import { CreditScorePage } from './components/pages/CreditScorePage';
@@ -548,15 +549,9 @@ function AppContent() {
           )
         } />
 
-        <Route path="/payment/return" element={
-          isAuthenticated ? (
-            <DashboardLayout>
-              <PaymentReturnPage />
-            </DashboardLayout>
-          ) : (
-            <Navigate to="/auth" replace />
-          )
-        } />
+        <Route path="/payment/return" element={<PaymentReturnPage />} />
+
+        <Route path="/recovery/:publicSlug" element={<RecoveryPaymentPage />} />
 
         <Route path="/enach-completion" element={
           isAuthenticated ? (

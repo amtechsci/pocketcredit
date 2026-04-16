@@ -12,8 +12,12 @@ const axios = require('axios');
 // Import server-side HTML generators (no Puppeteer browser navigation needed!)
 const { generateKFSHTML } = require('../utils/kfsHtmlGenerator');
 const { generateLoanAgreementHTML } = require('../utils/loanAgreementHtmlGenerator');
+const { calculatePaymentAmount } = require('../utils/paymentAmount');
+const { v4: uuidv4 } = require('uuid');
 
 const router = express.Router();
+
+const RECOVERY_PAYMENT_TYPES = ['pre-close', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'full_payment', 'loan_repayment'];
 
 /** Block profile mutations for Recovery Officer sub-admins (GET passes through). */
 function denyRecoveryOfficerWrite(req, res, next) {
@@ -21,6 +25,10 @@ function denyRecoveryOfficerWrite(req, res, next) {
   if (req.admin?.role === 'sub_admin' && req.admin?.sub_admin_category === 'recovery_officer') {
     // Special Exception: Allow adding follow-ups specifically for the Account Manager module
     if (req.method === 'POST' && req.path.includes('/follow-ups') && req.body?.type === 'account_manager') {
+      return next();
+    }
+    // Recovery payment links (collections)
+    if (req.path.includes('/recovery-payment-links')) {
       return next();
     }
     return res.status(403).json({
@@ -4031,6 +4039,156 @@ router.get('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite,
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch transactions'
+    });
+  }
+});
+
+// Recovery payment links (admin-generated pay links for borrowers)
+router.get('/:userId/recovery-payment-links', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+
+    const rows = await executeQuery(
+      `SELECT 
+        r.id,
+        r.public_slug,
+        r.user_id,
+        r.loan_application_id,
+        r.payment_type,
+        r.amount,
+        r.status,
+        r.created_by,
+        DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+        DATE_FORMAT(r.paid_at, '%Y-%m-%d %H:%i:%s') as paid_at,
+        r.last_order_id,
+        la.application_number,
+        a.name AS creator_name
+      FROM recovery_payment_links r
+      INNER JOIN loan_applications la ON la.id = r.loan_application_id
+      LEFT JOIN admins a ON a.id = r.created_by
+      WHERE r.user_id = ?
+      ORDER BY r.created_at DESC`,
+      [userId]
+    );
+
+    res.json({
+      status: 'success',
+      data: rows
+    });
+  } catch (error) {
+    console.error('Get recovery payment links error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch recovery payment links'
+    });
+  }
+});
+
+router.post('/:userId/recovery-payment-links', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId } = req.params;
+    const adminId = req.admin?.id;
+    const { loan_application_id, payment_type, amount } = req.body || {};
+
+    if (!loan_application_id || !payment_type || amount === undefined || amount === null) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'loan_application_id, payment_type, and amount are required'
+      });
+    }
+
+    if (!RECOVERY_PAYMENT_TYPES.includes(payment_type)) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Invalid payment_type. Allowed: ${RECOVERY_PAYMENT_TYPES.join(', ')}`
+      });
+    }
+
+    const loanRows = await executeQuery(
+      `SELECT * FROM loan_applications WHERE id = ? AND user_id = ?`,
+      [loan_application_id, userId]
+    );
+
+    if (!loanRows || loanRows.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Loan not found for this user'
+      });
+    }
+
+    const loan = loanRows[0];
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt <= 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Amount must be a positive number'
+      });
+    }
+
+    if (payment_type === 'loan_repayment') {
+      // Ad-hoc / negotiated partial payment — admin amount is authoritative
+    } else {
+      let calculated;
+      try {
+        calculated = await calculatePaymentAmount(loan, payment_type);
+      } catch (calcErr) {
+        console.error('[Recovery link] calculatePaymentAmount:', calcErr);
+        return res.status(400).json({
+          status: 'error',
+          message: calcErr.message || 'Could not validate amount for this payment type'
+        });
+      }
+      if (Math.abs(amt - calculated) > 0.01) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Amount must match calculated value ₹${Number(calculated).toFixed(2)} for ${payment_type}. Adjust the amount or choose "loan repayment (partial / negotiated)".`
+        });
+      }
+    }
+
+    const publicSlug = uuidv4();
+
+    const insert = await executeQuery(
+      `INSERT INTO recovery_payment_links (
+        public_slug, user_id, loan_application_id, payment_type, amount, status, created_by, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, NOW(), NOW())`,
+      [publicSlug, userId, loan_application_id, payment_type, amt, adminId || null]
+    );
+
+    const newId = insert.insertId;
+
+    const [created] = await executeQuery(
+      `SELECT 
+        r.id,
+        r.public_slug,
+        r.loan_application_id,
+        r.payment_type,
+        r.amount,
+        r.status,
+        r.created_by,
+        DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+        la.application_number,
+        a.name AS creator_name
+      FROM recovery_payment_links r
+      INNER JOIN loan_applications la ON la.id = r.loan_application_id
+      LEFT JOIN admins a ON a.id = r.created_by
+      WHERE r.id = ?`,
+      [newId]
+    );
+
+    res.json({
+      status: 'success',
+      message: 'Recovery payment link created',
+      data: created
+    });
+  } catch (error) {
+    console.error('Create recovery payment link error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to create recovery payment link',
+      error: error.message
     });
   }
 });
